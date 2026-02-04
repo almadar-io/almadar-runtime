@@ -3,32 +3,64 @@
   "version": "1.0.0",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./OrbitalServerRuntime": "./src/OrbitalServerRuntime.ts",
-    "./ServerBridge": "./src/ServerBridge.ts"
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./OrbitalServerRuntime": {
+      "import": "./dist/OrbitalServerRuntime.js",
+      "types": "./dist/OrbitalServerRuntime.d.ts"
+    },
+    "./ServerBridge": {
+      "import": "./dist/ServerBridge.js",
+      "types": "./dist/ServerBridge.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsup",
+    "build:watch": "tsup --watch",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@almadar/server": "workspace:*",
     "@almadar/evaluator": "workspace:*",
     "@almadar/core": "workspace:*",
-    "@faker-js/faker": "^9.3.0",
-    "express": "^4.21.0"
+    "@faker-js/faker": "^9.3.0"
+  },
+  "peerDependencies": {
+    "express": "^4.0.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^20.0.0",
+    "express": "^4.21.0",
+    "tsup": "^8.0.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
   },
-  "peerDependencies": {
-    "express": "^4.0.0"
-  }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/almadar-io/almadar.git",
+    "directory": "packages/almadar-runtime"
+  },
+  "license": "MIT",
+  "keywords": [
+    "almadar",
+    "runtime",
+    "orbital",
+    "interpreter"
+  ]
 }
