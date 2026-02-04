@@ -7,9 +7,8 @@
  * @packageDocumentation
  */
 
-import type { OrbitalSchema } from "../types/schema.js";
-import type { Orbital } from "../types/orbital.js";
-import { OrbitalSchemaSchema } from "../types/schema.js";
+import type { OrbitalSchema, Orbital } from "@almadar/core";
+import { OrbitalSchemaSchema } from "@almadar/core";
 import type {
   SchemaLoader,
   LoadedSchema,

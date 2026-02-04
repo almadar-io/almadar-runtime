@@ -11,9 +11,8 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import type { Orbital } from "../types/orbital.js";
-import type { OrbitalSchema } from "../types/schema.js";
-import { OrbitalSchemaSchema } from "../types/schema.js";
+import type { Orbital, OrbitalSchema } from "@almadar/core";
+import { OrbitalSchemaSchema } from "@almadar/core";
 
 // ============================================================================
 // Types

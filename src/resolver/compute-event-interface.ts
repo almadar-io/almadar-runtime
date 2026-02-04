@@ -20,8 +20,8 @@ import type {
     ComputedEventListener,
     EventSource,
     EventPayloadField,
-} from '../types/index.js';
-import { isInlineTrait, getTraitName } from '../types/trait.js';
+} from '@almadar/core';
+import { isInlineTrait, getTraitName } from '@almadar/core';
 import { namespaceEvent } from '../utils/event-namespace.js';
 
 // ============================================================================
