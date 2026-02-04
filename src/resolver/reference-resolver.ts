@@ -21,6 +21,7 @@ import type {
   Trait,
   TraitRef,
   OrbitalSchema,
+  UseDeclaration,
 } from "@almadar/core";
 import {
   isEntityReference,
@@ -40,12 +41,6 @@ import type {
   SchemaLoader,
   ImportChainLike,
 } from "../loader/schema-loader.js";
-
-// UseDeclaration type (not exported from @almadar/core, define locally)
-type UseDeclaration = {
-  path: string;
-  alias?: string;
-};
 
 // ============================================================================
 // Types

@@ -8,11 +8,11 @@
  * @packageDocumentation
  */
 
-import type { OrbitalSchema } from '../types/schema.js';
-import type { SExpr } from '../types/expression.js';
-import type { EntityRef, PageRef } from '../types/orbital.js';
-import { isEntityReference, isPageReferenceString, isPageReferenceObject } from '../types/orbital.js';
 import type {
+  OrbitalSchema,
+  SExpr,
+  EntityRef,
+  PageRef,
   ResolvedIR,
   ResolvedEntity,
   ResolvedTrait,
@@ -25,8 +25,13 @@ import type {
   ResolvedTraitTick,
   ResolvedTraitListener,
   TransitionFrom,
-} from '../types/ir.js';
-import { inferTsType } from '../types/ir.js';
+} from '@almadar/core';
+import {
+  isEntityReference,
+  isPageReferenceString,
+  isPageReferenceObject,
+  inferTsType,
+} from '@almadar/core';
 
 // ============================================================================
 // Cache
