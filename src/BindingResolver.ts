@@ -1,0 +1,230 @@
+/**
+ * BindingResolver - Platform-Agnostic Binding Resolution
+ *
+ * Resolves binding references like @entity.field, @payload.value, @state
+ * in props and values. Works on both client and server.
+ *
+ * Uses the shared S-expression evaluator for actual resolution.
+ *
+ * @packageDocumentation
+ */
+
+import {
+    evaluate,
+    resolveBinding,
+    createMinimalContext,
+    type EvaluationContext,
+} from '@almadar/evaluator';
+import type { BindingContext } from './types.js';
+
+// Re-export for convenience
+export { createMinimalContext, type EvaluationContext };
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/**
+ * Known S-expression operators for detecting embedded expressions
+ */
+const OPERATORS = new Set([
+    // Comparison
+    '=', '!=', '<', '>', '<=', '>=',
+    // Logic
+    'and', 'or', 'not', 'if',
+    // Math
+    '+', '-', '*', '/', '%',
+    // Array
+    'count', 'first', 'last', 'map', 'filter', 'find', 'some', 'every', 'reduce',
+    // String
+    'concat', 'upper', 'lower', 'trim', 'substring', 'split', 'join', 'str',
+    // Effects
+    'set', 'emit', 'navigate', 'persist', 'notify', 'render-ui', 'render', 'spawn', 'despawn',
+    'call-service', 'do', 'when', 'increment', 'decrement', 'log',
+]);
+
+// ============================================================================
+// Main Functions
+// ============================================================================
+
+/**
+ * Interpolate binding references in props.
+ *
+ * @param props - Props object with potential binding references
+ * @param ctx - Evaluation context with bindings
+ * @returns New props object with resolved values
+ *
+ * @example
+ * ```ts
+ * const ctx = createContextFromBindings({ name: 'Project Alpha', count: 42 });
+ * const props = {
+ *   title: '@entity.name',
+ *   total: ['+', '@entity.count', 10],
+ * };
+ * const result = interpolateProps(props, ctx);
+ * // { title: 'Project Alpha', total: 52 }
+ * ```
+ */
+export function interpolateProps(
+    props: Record<string, unknown>,
+    ctx: EvaluationContext
+): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(props)) {
+        result[key] = interpolateValue(value, ctx);
+    }
+    return result;
+}
+
+/**
+ * Interpolate a single value.
+ */
+export function interpolateValue(value: unknown, ctx: EvaluationContext): unknown {
+    if (value === null || value === undefined) {
+        return value;
+    }
+
+    if (typeof value === 'string') {
+        return interpolateString(value, ctx);
+    }
+
+    if (Array.isArray(value)) {
+        return interpolateArray(value, ctx);
+    }
+
+    if (typeof value === 'object') {
+        return interpolateProps(value as Record<string, unknown>, ctx);
+    }
+
+    return value;
+}
+
+// ============================================================================
+// String Interpolation
+// ============================================================================
+
+/**
+ * Interpolate a string value.
+ */
+function interpolateString(value: string, ctx: EvaluationContext): unknown {
+    // Pure binding - resolve directly
+    if (value.startsWith('@') && isPureBinding(value)) {
+        return resolveBinding(value, ctx);
+    }
+
+    // Embedded bindings
+    if (value.includes('@')) {
+        return interpolateEmbeddedBindings(value, ctx);
+    }
+
+    return value;
+}
+
+/**
+ * Check if a string is a pure binding (no embedded text).
+ */
+function isPureBinding(value: string): boolean {
+    return /^@[\w]+(?:\.[\w]+)*$/.test(value);
+}
+
+/**
+ * Interpolate embedded bindings in a string.
+ */
+function interpolateEmbeddedBindings(value: string, ctx: EvaluationContext): string {
+    return value.replace(/@[\w]+(?:\.[\w]+)*/g, (match) => {
+        const resolved = resolveBinding(match, ctx);
+        return resolved !== undefined ? String(resolved) : match;
+    });
+}
+
+// ============================================================================
+// Array Interpolation
+// ============================================================================
+
+/**
+ * Interpolate an array value.
+ */
+function interpolateArray(value: unknown[], ctx: EvaluationContext): unknown {
+    if (value.length === 0) {
+        return [];
+    }
+
+    if (isSExpression(value)) {
+        return evaluate(value as Parameters<typeof evaluate>[0], ctx);
+    }
+
+    return value.map((item) => interpolateValue(item, ctx));
+}
+
+/**
+ * Check if an array is an S-expression.
+ */
+function isSExpression(value: unknown[]): boolean {
+    if (value.length === 0) return false;
+
+    const first = value[0];
+    if (typeof first !== 'string') return false;
+
+    if (OPERATORS.has(first)) return true;
+    if (first.includes('/')) return true;
+    if (first === 'lambda' || first === 'let') return true;
+
+    return false;
+}
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+/**
+ * Check if a value contains any binding references.
+ */
+export function containsBindings(value: unknown): boolean {
+    if (typeof value === 'string') {
+        return value.includes('@');
+    }
+
+    if (Array.isArray(value)) {
+        return value.some(containsBindings);
+    }
+
+    if (value !== null && typeof value === 'object') {
+        return Object.values(value as Record<string, unknown>).some(containsBindings);
+    }
+
+    return false;
+}
+
+/**
+ * Extract all binding references from a value.
+ */
+export function extractBindings(value: unknown): string[] {
+    const bindings: string[] = [];
+
+    function collect(v: unknown): void {
+        if (typeof v === 'string') {
+            const matches = v.match(/@[\w]+(?:\.[\w]+)*/g);
+            if (matches) {
+                bindings.push(...matches);
+            }
+        } else if (Array.isArray(v)) {
+            v.forEach(collect);
+        } else if (v !== null && typeof v === 'object') {
+            Object.values(v as Record<string, unknown>).forEach(collect);
+        }
+    }
+
+    collect(value);
+    return [...new Set(bindings)];
+}
+
+/**
+ * Create an EvaluationContext from a BindingContext.
+ */
+export function createContextFromBindings(bindings: BindingContext): EvaluationContext {
+    return createMinimalContext(
+        bindings.entity || {},
+        bindings.payload || {},
+        bindings.state || 'idle'
+    );
+}
