@@ -152,6 +152,8 @@ export interface EffectHandlers {
             filter?: unknown;
             limit?: number;
             offset?: number;
+            /** Relation fields to include (populate) in the response */
+            include?: string[];
         }
     ) => Promise<Record<string, unknown> | Record<string, unknown>[] | null>;
 

@@ -191,6 +191,7 @@ export class EffectExecutor {
                         filter?: unknown;
                         limit?: number;
                         offset?: number;
+                        include?: string[];
                     } | undefined;
                     await this.handlers.fetch(entityType, options);
                 } else {

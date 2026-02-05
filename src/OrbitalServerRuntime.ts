@@ -1110,14 +1110,20 @@ export class OrbitalServerRuntime {
 
       fetch: async (fetchEntityType, options) => {
         try {
+          let result: Record<string, unknown> | Record<string, unknown>[] | null = null;
+
           if (options?.id) {
-            // Single entity fetch - wrap in array for consistent data structure
+            // Single entity fetch
             const entity = await this.persistence.getById(fetchEntityType, options.id);
             if (entity) {
+              // Populate relations if include specified
+              if (options?.include && options.include.length > 0) {
+                await this.populateRelations([entity], fetchEntityType, options.include);
+              }
               // Always store as array for consistent access via FetchedDataContext
               fetchedData[fetchEntityType] = [entity];
+              result = entity;
             }
-            return entity;
           } else {
             // Collection fetch
             let entities = await this.persistence.list(fetchEntityType);
@@ -1133,9 +1139,16 @@ export class OrbitalServerRuntime {
               entities = entities.slice(0, options.limit);
             }
 
+            // Populate relations if include specified
+            if (options?.include && options.include.length > 0) {
+              await this.populateRelations(entities, fetchEntityType, options.include);
+            }
+
             fetchedData[fetchEntityType] = entities;
-            return entities;
+            result = entities;
           }
+
+          return result;
         } catch (error) {
           console.error(`[OrbitalRuntime] Fetch error for ${fetchEntityType}:`, error);
           return null;
@@ -1195,6 +1208,116 @@ export class OrbitalServerRuntime {
     });
 
     await executor.executeAll(effects);
+  }
+
+  // ==========================================================================
+  // Relation Population
+  // ==========================================================================
+
+  /**
+   * Populate relation fields on entities
+   *
+   * For each field in `include`, find the relation field configuration and
+   * fetch the related entity, attaching it to the parent entity.
+   *
+   * @param entities - Entities to populate
+   * @param entityType - Entity type name
+   * @param include - Relation field names to populate
+   */
+  private async populateRelations(
+    entities: Record<string, unknown>[],
+    entityType: string,
+    include: string[],
+  ): Promise<void> {
+    // Find the orbital that owns this entity type
+    let entityFields: Array<{ name: string; type: string; relation?: { entity: string; cardinality?: string } }> | undefined;
+
+    for (const [, registered] of this.orbitals) {
+      if (registered.schema.entity.name === entityType) {
+        entityFields = registered.schema.entity.fields;
+        break;
+      }
+    }
+
+    if (!entityFields) {
+      if (this.config.debug) {
+        console.warn(`[OrbitalRuntime] No entity definition found for ${entityType}`);
+      }
+      return;
+    }
+
+    // Process each include field
+    for (const includeField of include) {
+      // Find the relation field (check both "fieldName" and "fieldNameId" patterns)
+      const relationField = entityFields.find(f => {
+        if (f.type !== 'relation') return false;
+        // Match "company" against "company" or "companyId"
+        return f.name === includeField ||
+               f.name === `${includeField}Id` ||
+               f.name.replace(/Id$/, '') === includeField;
+      });
+
+      if (!relationField?.relation?.entity) {
+        if (this.config.debug) {
+          console.warn(`[OrbitalRuntime] No relation field found for '${includeField}' on ${entityType}`);
+        }
+        continue;
+      }
+
+      const foreignKeyField = relationField.name;
+      const relatedEntityType = relationField.relation.entity;
+      const cardinality = relationField.relation.cardinality || 'one';
+
+      // Collect all foreign key IDs to batch fetch
+      const foreignKeyIds = new Set<string>();
+      for (const entity of entities) {
+        const fkValue = entity[foreignKeyField];
+        if (fkValue && typeof fkValue === 'string') {
+          foreignKeyIds.add(fkValue);
+        }
+      }
+
+      if (foreignKeyIds.size === 0) continue;
+
+      // Fetch all related entities (ideally this would be a batch query)
+      const relatedEntities = new Map<string, Record<string, unknown>>();
+      for (const fkId of foreignKeyIds) {
+        try {
+          const related = await this.persistence.getById(relatedEntityType, fkId);
+          if (related) {
+            relatedEntities.set(fkId, related);
+          }
+        } catch (error) {
+          if (this.config.debug) {
+            console.error(`[OrbitalRuntime] Error fetching related ${relatedEntityType}:`, error);
+          }
+        }
+      }
+
+      // Attach related entities to parent entities
+      // Use the base name without "Id" suffix for the populated field
+      const populatedFieldName = includeField.endsWith('Id')
+        ? includeField.slice(0, -2)
+        : includeField;
+
+      for (const entity of entities) {
+        const fkValue = entity[foreignKeyField] as string;
+        if (fkValue && relatedEntities.has(fkValue)) {
+          if (cardinality === 'one') {
+            entity[populatedFieldName] = relatedEntities.get(fkValue);
+          } else {
+            // For many relations, we'd need a different approach
+            // (reverse lookup from the related entity's foreign key)
+            // For now, just set to array with single item
+            entity[populatedFieldName] = [relatedEntities.get(fkValue)];
+          }
+        }
+      }
+
+      if (this.config.debug) {
+        console.log(`[OrbitalRuntime] Populated '${populatedFieldName}' on ${entities.length} ${entityType} entities`);
+      }
+    }
   }
 
   // ==========================================================================
