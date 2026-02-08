@@ -25,6 +25,8 @@ export interface EntityField {
 export interface EntitySchema {
   name: string;
   fields: EntityField[];
+  /** Pre-authored instance data from the schema (used instead of faker generation) */
+  seedData?: Record<string, unknown>[];
 }
 
 export interface MockPersistenceConfig {
@@ -91,13 +93,43 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
 
   /**
    * Register an entity schema and seed mock data.
+   * If the schema has seedData, those instances are used directly.
+   * Otherwise, random mock data is generated with faker.
    */
   registerEntity(schema: EntitySchema, seedCount?: number): void {
     const normalized = schema.name.toLowerCase();
     this.schemas.set(normalized, schema);
 
-    const count = seedCount ?? this.config.defaultSeedCount ?? 6;
-    this.seed(schema.name, schema.fields, count);
+    if (schema.seedData && schema.seedData.length > 0) {
+      // Seed with actual pre-authored instances
+      this.seedFromInstances(schema.name, schema.seedData);
+    } else {
+      const count = seedCount ?? this.config.defaultSeedCount ?? 6;
+      this.seed(schema.name, schema.fields, count);
+    }
+  }
+
+  /**
+   * Seed an entity with pre-authored instance data.
+   */
+  seedFromInstances(entityName: string, instances: Record<string, unknown>[]): void {
+    const store = this.getStore(entityName);
+
+    if (this.config.debug) {
+      console.log(`[MockPersistence] Seeding ${instances.length} ${entityName} from schema instances...`);
+    }
+
+    for (const instance of instances) {
+      const id = (instance.id as string) || this.nextId(entityName);
+      const now = new Date().toISOString();
+      const item: Record<string, unknown> = {
+        ...instance,
+        id,
+        createdAt: instance.createdAt as string || now,
+        updatedAt: now,
+      };
+      store.set(id, item);
+    }
   }
 
   /**

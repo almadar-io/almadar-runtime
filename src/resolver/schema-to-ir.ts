@@ -108,6 +108,7 @@ function resolveEntities(schema: OrbitalSchema): Map<string, ResolvedEntity> {
       // Derive runtime/singleton from persistence field
       const isRuntime = entity.persistence === 'runtime';
       const isSingleton = entity.persistence === 'singleton';
+      const entityInstances = (entity as any).instances as Record<string, unknown>[] | undefined;
       entityMap.set(entity.name, {
         name: entity.name,
         description: entity.description,
@@ -117,6 +118,8 @@ function resolveEntities(schema: OrbitalSchema): Map<string, ResolvedEntity> {
         usedByPages: [],
         runtime: isRuntime,
         singleton: isSingleton,
+        hasInstances: (entityInstances?.length ?? 0) > 0,
+        instances: entityInstances,
         defaults: {}, // defaults are part of instances, not entity definition
       });
     }
