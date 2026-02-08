@@ -279,7 +279,8 @@ class InMemoryPersistence implements PersistenceAdapter {
     entityType: string,
     data: Record<string, unknown>,
   ): Promise<{ id: string }> {
-    const id = `${entityType}-${++this.idCounter}`;
+    // Use provided ID if it exists, otherwise generate one
+    const id = (data.id as string) || `${entityType}-${++this.idCounter}`;
     if (!this.data.has(entityType)) {
       this.data.set(entityType, new Map());
     }
@@ -390,9 +391,31 @@ export class OrbitalServerRuntime {
    *
    * For explicit preprocessing control, use `registerWithPreprocess()`.
    */
-  register(schema: RuntimeOrbitalSchema): void {
+  async register(schema: RuntimeOrbitalSchema): Promise<void> {
     if (this.config.debug) {
       console.log(`[OrbitalRuntime] Registering schema: ${schema.name}`);
+    }
+
+    // Register all orbitals (await to ensure instance seeding completes)
+    for (const orbital of schema.orbitals) {
+      await this.registerOrbitalAsync(orbital);
+    }
+
+    // Set up cross-orbital event listeners
+    this.setupEventListeners();
+
+    // Set up scheduled ticks
+    this.setupTicks();
+  }
+
+  /**
+   * Register an OrbitalSchema synchronously (for backward compatibility).
+   * Note: This version doesn't wait for instance seeding to complete.
+   * Use async register() for guaranteed instance seeding.
+   */
+  registerSync(schema: RuntimeOrbitalSchema): void {
+    if (this.config.debug) {
+      console.log(`[OrbitalRuntime] Registering schema (sync): ${schema.name}`);
     }
 
     for (const orbital of schema.orbitals) {
@@ -544,7 +567,7 @@ export class OrbitalServerRuntime {
   /**
    * Register a single orbital
    */
-  private registerOrbital(orbital: RuntimeOrbital): void {
+  private async registerOrbitalAsync(orbital: RuntimeOrbital): Promise<void> {
     // Convert traits to TraitDefinition - handle both flat and stateMachine structures
     const traitDefs: TraitDefinition[] = orbital.traits.map((t) => {
       // Support both: t.states (flat) and t.stateMachine.states (OrbitalSchema structure)
@@ -568,11 +591,36 @@ export class OrbitalServerRuntime {
       entityData: new Map(),
     });
 
-    // Auto-seed mock data for the entity in mock mode
-    console.log(`[OrbitalRuntime] Checking mock seed: mode=${this.config.mode}, isMockAdapter=${this.persistence instanceof MockPersistenceAdapter}`);
-    if (this.config.mode === 'mock' && this.persistence instanceof MockPersistenceAdapter) {
-      const entity = orbital.entity;
-      console.log(`[OrbitalRuntime] Entity:`, entity?.name, 'fields:', entity?.fields?.length);
+    const entity = orbital.entity;
+    
+    // Seed entity instances from schema if they exist
+    if (entity?.name && (entity as any).instances && Array.isArray((entity as any).instances)) {
+      const instances = (entity as any).instances as Array<Record<string, unknown>>;
+      if (instances.length > 0) {
+        console.log(`[OrbitalRuntime] Seeding ${instances.length} instances for ${entity.name} from schema`);
+        
+        // Seed each instance (await to ensure they're created)
+        const results = await Promise.all(
+          instances.map(async (instance) => {
+            try {
+              const result = await this.persistence.create(entity.name, instance);
+              console.log(`[OrbitalRuntime] Seeded instance: ${instance.id || 'no-id'}`);
+              return result;
+            } catch (err) {
+              console.error(`[OrbitalRuntime] Failed to seed instance ${instance.id}:`, err);
+              return null;
+            }
+          })
+        );
+        
+        const successCount = results.filter(r => r !== null).length;
+        console.log(`[OrbitalRuntime] Seeded ${successCount}/${instances.length} ${entity.name} instances from schema`);
+      }
+    } else if (this.config.mode === 'mock' && this.persistence instanceof MockPersistenceAdapter) {
+      // Fall back to mock data generation if no instances defined
+      if (this.config.debug) {
+        console.log(`[OrbitalRuntime] No instances in schema, generating mock data for ${entity?.name}`);
+      }
       if (entity?.name && entity.fields) {
         const fields = entity.fields.map((f: { name: string; type: string; required?: boolean; values?: string[]; default?: unknown }) => ({
           name: f.name,
@@ -582,10 +630,10 @@ export class OrbitalServerRuntime {
           default: f.default,
         }));
         this.persistence.registerEntity({ name: entity.name, fields });
-        console.log(`[OrbitalRuntime] Seeded mock data for entity: ${entity.name}, count: ${this.persistence.count(entity.name)}`);
+        if (this.config.debug) {
+          console.log(`[OrbitalRuntime] Seeded mock data for entity: ${entity.name}, count: ${this.persistence.count(entity.name)}`);
+        }
       }
-    } else {
-      console.log(`[OrbitalRuntime] Mock seeding SKIPPED`);
     }
 
     if (this.config.debug) {
@@ -593,6 +641,17 @@ export class OrbitalServerRuntime {
         `[OrbitalRuntime] Registered orbital: ${orbital.name} with ${orbital.traits.length} trait(s)`,
       );
     }
+  }
+
+  /**
+   * Register a single orbital (sync wrapper for backward compatibility)
+   */
+  private registerOrbital(orbital: RuntimeOrbital): void {
+    // Create a synchronous version by using a promise that we don't await
+    // For truly async registration, use the async register() method
+    this.registerOrbitalAsync(orbital).catch((err) => {
+      console.error(`[OrbitalRuntime] Failed to register orbital:`, err);
+    });
   }
 
   /**
