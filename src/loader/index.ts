@@ -28,17 +28,12 @@ export {
   getDefaultLoaderStrategy,
 } from "./schema-loader.js";
 
-// FileSystem Loader (Node.js)
-export {
-  ExternalOrbitalLoader,
-  ImportChain,
-  LoaderCache,
-  createLoader,
-  parseImportPath,
-  type LoaderOptions,
+// FileSystem Loader (Node.js) - Types only to avoid bundling 'fs' in browser
+export type {
+  LoaderOptions,
   // Re-export for backwards compatibility
-  type LoadedOrbital as FSLoadedOrbital,
-  type LoadedSchema as FSLoadedSchema,
+  LoadedOrbital as FSLoadedOrbital,
+  LoadedSchema as FSLoadedSchema,
 } from "./external-loader.js";
 
 // HTTP Loader (Browser)

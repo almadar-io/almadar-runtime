@@ -32,10 +32,8 @@ import {
   parsePageRef,
   parseImportedTraitRef,
 } from "@almadar/core";
-import {
-  ExternalOrbitalLoader,
-  ImportChain,
-  type LoaderOptions,
+import type {
+  LoaderOptions,
 } from "../loader/external-loader.js";
 import type {
   SchemaLoader,
@@ -172,11 +170,24 @@ export class ReferenceResolver {
   private options: ResolveOptions;
   private localTraits: Map<string, Trait>;
 
+  private loaderInitialized = false;
+
   constructor(options: ResolveOptions) {
     this.options = options;
-    // Use provided loader or create default ExternalOrbitalLoader
-    this.loader = options.loader ?? new ExternalOrbitalLoader(options);
+    // Use provided loader; filesystem loader will be created lazily if needed
+    this.loader = options.loader as SchemaLoader;
     this.localTraits = options.localTraits ?? new Map();
+  }
+
+  private async ensureLoader(): Promise<void> {
+    if (this.loader || this.loaderInitialized) return;
+    this.loaderInitialized = true;
+    try {
+      const { ExternalOrbitalLoader } = await import("../loader/external-loader.js");
+      this.loader = new ExternalOrbitalLoader(this.options);
+    } catch {
+      // Filesystem loader not available (browser environment)
+    }
   }
 
   /**
@@ -189,7 +200,7 @@ export class ReferenceResolver {
   ): Promise<ResolveResult<ResolvedOrbital>> {
     const errors: string[] = [];
     const warnings: string[] = [];
-    const importChain = chain ?? new ImportChain();
+    const importChain = chain ?? { push: () => null, pop: () => {}, clone() { return this; } } as ImportChainLike;
 
     // Step 1: Resolve imports
     const importsResult = await this.resolveImports(
@@ -273,6 +284,11 @@ export class ReferenceResolver {
       }
 
       // Load the orbital
+      await this.ensureLoader();
+      if (!this.loader) {
+        errors.push(`No loader available to resolve import: ${use.from}`);
+        continue;
+      }
       const loadResult = await this.loader.loadOrbital(
         use.from,
         undefined,
@@ -743,7 +759,7 @@ export class ReferenceResolver {
    * Clear loader cache.
    */
   clearCache(): void {
-    this.loader.clearCache();
+    this.loader?.clearCache();
   }
 }
 

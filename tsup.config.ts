@@ -10,7 +10,7 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  splitting: false,
+  splitting: true,
   treeshake: true,
-  external: ['express'],
+  external: ['express', 'fs', 'path'],
 });
