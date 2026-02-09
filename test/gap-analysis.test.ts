@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const schemaPath = join(__dirname, '../../../projects/trait-wars/trait-wars.orb');
+const schemaPath = join(__dirname, 'fixtures/trait-wars.orb');
 const traitWarsSchema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
 
 describe('Runtime Gap Analysis: trait-wars.orb', () => {

@@ -1,0 +1,1331 @@
+{
+  "name": "TraitWars",
+  "version": "3.0.0",
+  "description": "Trait Wars - Canvas-based tactical strategy using composed game patterns",
+  "_metadata": {
+    "version": 2,
+    "createdAt": 1738666800000,
+    "updatedAt": 1738886929000,
+    "source": "manual"
+  },
+  "orbitals": [
+    {
+      "name": "TacticalBattle",
+      "description": "Isometric tactical battle with phase-based turns, canvas rendering, and combat UI overlays",
+      "visual_prompt": "Scene: Isometric tactical battlefield. Style: 'Illuminated Manuscript Futurism'. Terrain: Ancient parchment-colored tiles with gold geometric borders. Atmosphere: Strategic warfare on sacred ground.",
+      "theme": {
+        "name": "trait-wars-dark",
+        "tokens": {
+          "colors": {
+            "primary": "#ef4444",
+            "accent": "#f97316",
+            "background": "#0f172a",
+            "foreground": "#f8fafc",
+            "surface": "#1e293b",
+            "muted": "#64748b"
+          },
+          "typography": {
+            "font-family": "'Press Start 2P', monospace"
+          }
+        }
+      },
+      "entity": {
+        "name": "Unit",
+        "persistence": "runtime",
+        "collection": "units",
+        "fields": [
+          { "name": "id", "type": "string", "required": true, "primaryKey": true },
+          { "name": "name", "type": "string", "required": true },
+          { "name": "characterType", "type": "enum", "values": ["knight", "mage", "assassin", "archer", "healer", "boss", "innocent", "orphan", "caregiver", "hero", "explorer", "rebel", "lover", "creator", "jester", "sage", "magician", "ruler"], "required": true },
+          { "name": "team", "type": "enum", "values": ["player", "enemy", "ally", "neutral"], "required": true },
+          { "name": "health", "type": "number", "required": true },
+          { "name": "maxHealth", "type": "number", "required": true },
+          { "name": "attack", "type": "number", "required": true },
+          { "name": "defense", "type": "number", "required": true },
+          { "name": "movement", "type": "number", "required": true },
+          { "name": "positionX", "type": "number", "required": true },
+          { "name": "positionY", "type": "number", "required": true },
+          { "name": "traitState", "type": "string" },
+          { "name": "mana", "type": "number" },
+          { "name": "turnsEnraged", "type": "number", "default": 0 },
+          { "name": "damageBonus", "type": "number", "default": 1 },
+          { "name": "shieldIntegrity", "type": "number", "default": 100 },
+          { "name": "recoveryTurns", "type": "number", "default": 0 },
+          { "name": "restTurns", "type": "number", "default": 0 },
+          { "name": "shieldTarget", "type": "string" },
+          { "name": "deployedHeroId", "type": "string" },
+          { "name": "sessionId", "type": "string" }
+        ],
+        "instances": [
+          { "id": "player-knight", "name": "Sir Roland", "characterType": "hero", "team": "player", "health": 100, "maxHealth": 100, "attack": 18, "defense": 12, "movement": 2, "positionX": 1, "positionY": 2, "traitState": "calm" },
+          { "id": "player-mage", "name": "Archmage Lyra", "characterType": "magician", "team": "player", "health": 65, "maxHealth": 65, "attack": 22, "defense": 5, "movement": 1, "positionX": 1, "positionY": 4, "traitState": "channeling", "mana": 80 },
+          { "id": "player-healer", "name": "Sister Vael", "characterType": "caregiver", "team": "player", "health": 55, "maxHealth": 55, "attack": 8, "defense": 8, "movement": 2, "positionX": 0, "positionY": 3, "traitState": "idle" },
+          { "id": "enemy-warrior", "name": "Dark Knight", "characterType": "knight", "team": "enemy", "health": 90, "maxHealth": 90, "attack": 16, "defense": 14, "movement": 2, "positionX": 7, "positionY": 2, "traitState": "idle" },
+          { "id": "enemy-mage", "name": "Shadow Mage", "characterType": "mage", "team": "enemy", "health": 55, "maxHealth": 55, "attack": 24, "defense": 4, "movement": 1, "positionX": 7, "positionY": 4, "traitState": "channeling", "mana": 60 },
+          { "id": "enemy-assassin", "name": "Venom Blade", "characterType": "assassin", "team": "enemy", "health": 50, "maxHealth": 50, "attack": 20, "defense": 6, "movement": 3, "positionX": 6, "positionY": 3, "traitState": "idle" }
+        ]
+      },
+      "traits": [
+        {
+          "name": "BattlePhaseController",
+          "category": "interaction",
+          "linkedEntity": "Unit",
+          "listens": [
+            { "event": "HERO_SELECTED", "from": "HeroBrowser" },
+            { "event": "SHIELD_BREAK", "from": "GuardianBehavior" }
+          ],
+          "stateMachine": {
+            "states": [
+              { "name": "observation", "isInitial": true },
+              { "name": "selection" },
+              { "name": "movement" },
+              { "name": "action" },
+              { "name": "enemyTurn" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "SELECT_UNIT", "name": "Select Unit", "payload": [{ "name": "unitId", "type": "string", "required": true }] },
+              { "key": "MOVE", "name": "Move Unit" },
+              { "key": "ATTACK", "name": "Attack", "payload": [{ "name": "damage", "type": "number", "required": true }, { "name": "targetX", "type": "number", "required": true }, { "name": "targetY", "type": "number", "required": true }] },
+              { "key": "END_TURN", "name": "End Turn" },
+              { "key": "ENEMY_COMPLETE", "name": "Enemy Complete" },
+              { "key": "BATTLE_END", "name": "Battle End" },
+              { "key": "BATTLE_WON", "name": "Battle Won" },
+              { "key": "DEPLOY_HERO", "name": "Deploy Hero", "payload": [{ "name": "heroId", "type": "string", "required": true }, { "name": "name", "type": "string", "required": true }, { "name": "characterType", "type": "string", "required": true }, { "name": "attack", "type": "number", "required": true }, { "name": "defense", "type": "number", "required": true }, { "name": "health", "type": "number", "required": true }] },
+              { "key": "HERO_SELECTED", "name": "Hero Selected", "payload": [{ "name": "heroId", "type": "string", "required": true }] },
+              { "key": "SHIELD_BREAK", "name": "Shield Break", "payload": [{ "name": "unitId", "type": "string", "required": true }] }
+            ],
+            "transitions": [
+              {
+                "from": "observation",
+                "to": "observation",
+                "event": "INIT",
+                "effects": [
+                  ["fetch", "Unit"],
+                  ["render-ui", "main", {
+                    "type": "game-isometric-canvas",
+                    "entity": "@entity",
+                    "scale": 0.6,
+                    "onTileClick": "SELECT_UNIT"
+                  }],
+                  ["render-ui", "sidebar", {
+                    "type": "game-combat-log",
+                    "events": [],
+                    "maxVisible": 50
+                  }],
+                  ["render-ui", "hud-bottom", {
+                    "type": "game-trait-viewer",
+                    "trait": "@entity.traitState",
+                    "showTransitions": true
+                  }]
+                ]
+              },
+              {
+                "from": "observation",
+                "to": "selection",
+                "event": "SELECT_UNIT",
+                "effects": [
+                  ["render-ui", "hud-bottom", {
+                    "type": "game-trait-viewer",
+                    "trait": "@entity.traitState",
+                    "showTransitions": true
+                  }]
+                ]
+              },
+              {
+                "from": "selection",
+                "to": "movement",
+                "event": "SELECT_UNIT"
+              },
+              {
+                "from": "movement",
+                "to": "action",
+                "event": "MOVE",
+                "effects": [
+                  ["persist", "update", "Unit", "@payload"]
+                ]
+              },
+              {
+                "from": "action",
+                "to": "observation",
+                "event": "ATTACK",
+                "effects": [
+                  ["persist", "update", "Unit", "@payload"],
+                  ["render-ui", "overlay", {
+                    "type": "game-damage-popup",
+                    "amount": "@payload.damage",
+                    "damageType": "physical",
+                    "x": "@payload.targetX",
+                    "y": "@payload.targetY"
+                  }]
+                ]
+              },
+              { "from": "action", "to": "observation", "event": "END_TURN" },
+              { "from": "observation", "to": "enemyTurn", "event": "END_TURN" },
+              { "from": "enemyTurn", "to": "observation", "event": "ENEMY_COMPLETE" },
+              {
+                "from": "observation",
+                "to": "observation",
+                "event": "HERO_SELECTED",
+                "effects": [
+                  ["set", "@entity.deployedHeroId", "@payload.heroId"]
+                ]
+              },
+              {
+                "from": "observation",
+                "to": "observation",
+                "event": "SHIELD_BREAK",
+                "effects": [
+                  ["fetch", "Unit"]
+                ]
+              },
+              {
+                "from": "observation",
+                "to": "observation",
+                "event": "BATTLE_END",
+                "effects": [
+                  ["persist", "update", "Unit", "@payload"],
+                  ["navigate", "/world"]
+                ]
+              },
+              {
+                "from": "observation",
+                "to": "observation",
+                "event": "BATTLE_WON",
+                "effects": [
+                  ["persist", "update", "Unit", "@payload"],
+                  ["navigate", "/world"]
+                ]
+              },
+              {
+                "from": "observation",
+                "to": "observation",
+                "event": "DEPLOY_HERO",
+                "effects": [
+                  ["persist", "create", "Unit", {
+                    "id": "@payload.heroId",
+                    "name": "@payload.name",
+                    "characterType": "@payload.characterType",
+                    "team": "player",
+                    "health": "@payload.health",
+                    "maxHealth": "@payload.health",
+                    "attack": "@payload.attack",
+                    "defense": "@payload.defense",
+                    "movement": 2,
+                    "positionX": 0,
+                    "positionY": 0,
+                    "deployedHeroId": "@payload.heroId"
+                  }]
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "BerserkerBehavior",
+          "category": "lifecycle",
+          "linkedEntity": "Unit",
+          "stateMachine": {
+            "states": [
+              { "name": "calm", "isInitial": true },
+              { "name": "enraged" },
+              { "name": "exhausted" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "TAKE_DAMAGE", "name": "Take Damage", "payload": [{ "name": "amount", "type": "number", "required": true }] },
+              { "key": "ATTACK", "name": "Attack" },
+              { "key": "REST", "name": "Rest" },
+              { "key": "TICK", "name": "Tick" }
+            ],
+            "transitions": [
+              { "from": "calm", "to": "calm", "event": "INIT" },
+              { "from": "calm", "to": "enraged", "event": "TAKE_DAMAGE", "guard": [">=", "@payload.amount", 10], "effects": [["set", "@entity.attack", ["+", "@entity.attack", 5]], ["persist", "update", "Unit", "@entity"]] },
+              { "from": "enraged", "to": "enraged", "event": "ATTACK", "effects": [["set", "@entity.damageBonus", 1.5], ["persist", "update", "Unit", "@entity"], ["render-ui", "overlay", { "type": "canvas-effect", "actionType": "melee", "x": "@entity.positionX", "y": "@entity.positionY", "intensity": 1.5 }]] },
+              { "from": "enraged", "to": "exhausted", "event": "TICK", "guard": [">=", "@entity.turnsEnraged", 3] },
+              { "from": "exhausted", "to": "calm", "event": "REST" },
+              { "from": "exhausted", "to": "calm", "event": "TICK", "guard": [">=", "@entity.restTurns", 2] }
+            ]
+          }
+        },
+        {
+          "name": "SpellweaverBehavior",
+          "category": "lifecycle",
+          "linkedEntity": "Unit",
+          "stateMachine": {
+            "states": [
+              { "name": "channeling", "isInitial": true },
+              { "name": "casting" },
+              { "name": "recovering" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "CHANNEL", "name": "Channel" },
+              { "key": "CAST_SPELL", "name": "Cast Spell" },
+              { "key": "SPELL_COMPLETE", "name": "Spell Complete" },
+              { "key": "TICK", "name": "Tick" }
+            ],
+            "transitions": [
+              { "from": "channeling", "to": "channeling", "event": "INIT" },
+              { "from": "channeling", "to": "casting", "event": "CAST_SPELL", "guard": [">=", "@entity.mana", 20], "effects": [["set", "@entity.mana", ["-", "@entity.mana", 20]], ["persist", "update", "Unit", "@entity"], ["render-ui", "overlay", { "type": "canvas-effect", "actionType": "magic", "x": "@entity.positionX", "y": "@entity.positionY" }]] },
+              { "from": "casting", "to": "recovering", "event": "SPELL_COMPLETE" },
+              { "from": "recovering", "to": "channeling", "event": "TICK", "guard": [">=", "@entity.recoveryTurns", 2] },
+              { "from": "channeling", "to": "channeling", "event": "CHANNEL", "effects": [["set", "@entity.mana", ["+", "@entity.mana", 10]], ["persist", "update", "Unit", "@entity"]] }
+            ]
+          }
+        },
+        {
+          "name": "GuardianBehavior",
+          "category": "lifecycle",
+          "linkedEntity": "Unit",
+          "emits": [
+            { "event": "SHIELD_BREAK", "scope": "external", "payload": [{ "name": "unitId", "type": "string", "required": true, "description": "The ID of the unit whose shield was broken" }] }
+          ],
+          "stateMachine": {
+            "states": [
+              { "name": "defending", "isInitial": true },
+              { "name": "shielding" },
+              { "name": "recovering" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "SHIELD_ALLY", "name": "Shield Ally", "payload": [{ "name": "allyId", "type": "string", "required": true }] },
+              { "key": "TAKE_DAMAGE", "name": "Take Damage" },
+              { "key": "SHIELD_BREAK", "name": "Shield Break" },
+              { "key": "TICK", "name": "Tick" }
+            ],
+            "transitions": [
+              { "from": "defending", "to": "defending", "event": "INIT" },
+              { "from": "defending", "to": "shielding", "event": "SHIELD_ALLY", "effects": [["set", "@entity.shieldTarget", "@payload.allyId"], ["persist", "update", "Unit", "@entity"], ["render-ui", "overlay", { "type": "canvas-effect", "actionType": "shield", "x": "@entity.positionX", "y": "@entity.positionY" }]] },
+              { "from": "shielding", "to": "shielding", "event": "TAKE_DAMAGE", "guard": ["<", "@entity.shieldIntegrity", 0], "effects": [["emit", "SHIELD_BREAK"], ["persist", "update", "Unit", "@entity"]] },
+              { "from": "shielding", "to": "recovering", "event": "SHIELD_BREAK" },
+              { "from": "recovering", "to": "defending", "event": "TICK", "guard": [">=", "@entity.recoveryTurns", 1] }
+            ]
+          }
+        },
+        {
+          "name": "TrustBehavior",
+          "category": "lifecycle",
+          "linkedEntity": "Unit",
+          "stateMachine": {
+            "states": [
+              { "name": "idle", "isInitial": true },
+              { "name": "believing" },
+              { "name": "inspiring" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "HOPE", "name": "Hope" },
+              { "key": "SHINE", "name": "Shine" },
+              { "key": "RESET", "name": "Reset" }
+            ],
+            "transitions": [
+              { "from": "idle", "to": "idle", "event": "INIT" },
+              { "from": "idle", "to": "believing", "event": "HOPE" },
+              { "from": "believing", "to": "inspiring", "event": "SHINE" },
+              { "from": "inspiring", "to": "idle", "event": "RESET" }
+            ]
+          }
+        },
+        {
+          "name": "EndureBehavior",
+          "category": "lifecycle",
+          "linkedEntity": "Unit",
+          "stateMachine": {
+            "states": [
+              { "name": "idle", "isInitial": true },
+              { "name": "scavenging" },
+              { "name": "adapting" },
+              { "name": "surviving" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "FIND_SCRAP", "name": "Find Scrap" },
+              { "key": "INTEGRATE", "name": "Integrate" },
+              { "key": "WITHSTAND", "name": "Withstand" },
+              { "key": "REST", "name": "Rest" }
+            ],
+            "transitions": [
+              { "from": "idle", "to": "idle", "event": "INIT" },
+              { "from": "idle", "to": "scavenging", "event": "FIND_SCRAP" },
+              { "from": "scavenging", "to": "adapting", "event": "INTEGRATE" },
+              { "from": "adapting", "to": "surviving", "event": "WITHSTAND" },
+              { "from": "surviving", "to": "idle", "event": "REST" }
+            ]
+          }
+        },
+        {
+          "name": "MendBehavior",
+          "category": "lifecycle",
+          "linkedEntity": "Unit",
+          "stateMachine": {
+            "states": [
+              { "name": "idle", "isInitial": true },
+              { "name": "scanning" },
+              { "name": "diagnosing" },
+              { "name": "healing" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "START_SCAN", "name": "Start Scan" },
+              { "key": "DIAGNOSE", "name": "Diagnose" },
+              { "key": "ACTIVATE_HEAL", "name": "Activate Heal" },
+              { "key": "COMPLETE", "name": "Complete" }
+            ],
+            "transitions": [
+              { "from": "idle", "to": "idle", "event": "INIT" },
+              { "from": "idle", "to": "scanning", "event": "START_SCAN" },
+              { "from": "scanning", "to": "diagnosing", "event": "DIAGNOSE" },
+              { "from": "diagnosing", "to": "healing", "event": "ACTIVATE_HEAL", "effects": [["render-ui", "overlay", { "type": "canvas-effect", "actionType": "heal", "x": "@entity.positionX", "y": "@entity.positionY" }]] },
+              { "from": "healing", "to": "idle", "event": "COMPLETE" }
+            ]
+          }
+        },
+        {
+          "name": "DefendBehavior",
+          "category": "lifecycle",
+          "linkedEntity": "Unit",
+          "stateMachine": {
+            "states": [
+              { "name": "idle", "isInitial": true },
+              { "name": "shielding" },
+              { "name": "countering" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "SUMMON_SHIELD", "name": "Summon Shield" },
+              { "key": "ABSORB_IMPACT", "name": "Absorb Impact" },
+              { "key": "LOWER_SHIELD", "name": "Lower Shield" }
+            ],
+            "transitions": [
+              { "from": "idle", "to": "idle", "event": "INIT" },
+              { "from": "idle", "to": "shielding", "event": "SUMMON_SHIELD" },
+              { "from": "shielding", "to": "countering", "event": "ABSORB_IMPACT", "effects": [["render-ui", "overlay", { "type": "canvas-effect", "actionType": "shield", "x": "@entity.positionX", "y": "@entity.positionY" }]] },
+              { "from": "countering", "to": "idle", "event": "LOWER_SHIELD" }
+            ]
+          }
+        },
+        {
+          "name": "DisruptBehavior",
+          "category": "lifecycle",
+          "linkedEntity": "Unit",
+          "stateMachine": {
+            "states": [
+              { "name": "idle", "isInitial": true },
+              { "name": "infiltrating" },
+              { "name": "overloading" },
+              { "name": "breaking" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "CONNECT", "name": "Connect" },
+              { "key": "INJECT", "name": "Inject" },
+              { "key": "SHATTER", "name": "Shatter" },
+              { "key": "DISCONNECT", "name": "Disconnect" }
+            ],
+            "transitions": [
+              { "from": "idle", "to": "idle", "event": "INIT" },
+              { "from": "idle", "to": "infiltrating", "event": "CONNECT" },
+              { "from": "infiltrating", "to": "overloading", "event": "INJECT" },
+              { "from": "overloading", "to": "breaking", "event": "SHATTER", "effects": [["render-ui", "overlay", { "type": "canvas-effect", "actionType": "debuff", "x": "@entity.positionX", "y": "@entity.positionY", "intensity": 2 }]] },
+              { "from": "breaking", "to": "idle", "event": "DISCONNECT" }
+            ]
+          }
+        },
+        {
+          "name": "CommandBehavior",
+          "category": "lifecycle",
+          "linkedEntity": "Unit",
+          "stateMachine": {
+            "states": [
+              { "name": "idle", "isInitial": true },
+              { "name": "assessing" },
+              { "name": "directing" },
+              { "name": "coordinating" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "TACTICAL_VIEW", "name": "Tactical View" },
+              { "key": "ISSUE_ORDER", "name": "Issue Order" },
+              { "key": "SYNC_SQUAD", "name": "Sync Squad" },
+              { "key": "STAND_DOWN", "name": "Stand Down" }
+            ],
+            "transitions": [
+              { "from": "idle", "to": "idle", "event": "INIT" },
+              { "from": "idle", "to": "assessing", "event": "TACTICAL_VIEW" },
+              { "from": "assessing", "to": "directing", "event": "ISSUE_ORDER" },
+              { "from": "directing", "to": "coordinating", "event": "SYNC_SQUAD", "effects": [["render-ui", "overlay", { "type": "canvas-effect", "actionType": "buff", "x": "@entity.positionX", "y": "@entity.positionY" }]] },
+              { "from": "coordinating", "to": "idle", "event": "STAND_DOWN" }
+            ]
+          }
+        }
+      ],
+      "pages": [
+        {
+          "name": "BattlefieldPage",
+          "path": "/battle/:enemyId",
+          "viewType": "list",
+          "primaryEntity": "Unit",
+          "isInitial": true,
+          "traits": [
+            { "ref": "BattlePhaseController" },
+            { "ref": "BerserkerBehavior" },
+            { "ref": "SpellweaverBehavior" },
+            { "ref": "GuardianBehavior" },
+            { "ref": "TrustBehavior" },
+            { "ref": "EndureBehavior" },
+            { "ref": "MendBehavior" },
+            { "ref": "DefendBehavior" },
+            { "ref": "DisruptBehavior" },
+            { "ref": "CommandBehavior" }
+          ]
+        }
+      ],
+      "domainContext": {
+        "category": "game",
+        "vocabulary": {
+          "item": "Unit",
+          "create": "Spawn Unit",
+          "delete": "Defeat Unit",
+          "view": "Select Unit"
+        },
+        "requestFragment": "Canvas-based isometric tactical combat with trait-driven unit behaviors, combat log, and real-time trait state visualization"
+      }
+    },
+    {
+      "name": "StrategicCastle",
+      "description": "Canvas-based castle management with isometric courtyard, buildings, garrison, and recruitment",
+      "visual_prompt": "Scene: Isometric castle courtyard with buildings and garrison. Style: 'Illuminated Manuscript Futurism'. Layout: Stone courtyard with walls, towers, and functional buildings. Atmosphere: Medieval stronghold management.",
+      "entity": {
+        "name": "Building",
+        "persistence": "persistent",
+        "collection": "buildings",
+        "fields": [
+          { "name": "id", "type": "string", "required": true, "primaryKey": true },
+          { "name": "name", "type": "string", "required": true },
+          { "name": "buildingType", "type": "enum", "values": ["townHall", "barracks", "stable", "workshop", "market", "temple", "tower", "wall"], "required": true },
+          { "name": "level", "type": "number", "required": true },
+          { "name": "maxLevel", "type": "number", "default": 5 },
+          { "name": "positionX", "type": "number", "required": true },
+          { "name": "positionY", "type": "number", "required": true },
+          { "name": "isConstructing", "type": "boolean", "default": false },
+          { "name": "turnsRemaining", "type": "number", "default": 0 },
+          { "name": "goldCost", "type": "number", "default": 0 },
+          { "name": "resonanceCost", "type": "number", "default": 0 },
+          { "name": "ownerId", "type": "string" },
+          { "name": "sessionId", "type": "string" }
+        ],
+        "instances": [
+          { "id": "barracks-1", "name": "Barracks", "buildingType": "barracks", "level": 1, "maxLevel": 5, "positionX": 2, "positionY": 1, "goldCost": 200, "resonanceCost": 0 },
+          { "id": "library-1", "name": "Arcane Library", "buildingType": "temple", "level": 1, "maxLevel": 5, "positionX": 4, "positionY": 1, "goldCost": 350, "resonanceCost": 50 },
+          { "id": "forge-1", "name": "Forge", "buildingType": "workshop", "level": 1, "maxLevel": 5, "positionX": 2, "positionY": 4, "goldCost": 300, "resonanceCost": 0 },
+          { "id": "market-1", "name": "Marketplace", "buildingType": "market", "level": 1, "maxLevel": 5, "positionX": 4, "positionY": 4, "goldCost": 150, "resonanceCost": 0 },
+          { "id": "portal-1", "name": "Resonance Portal", "buildingType": "tower", "level": 1, "maxLevel": 3, "positionX": 3, "positionY": 6, "goldCost": 500, "resonanceCost": 100 }
+        ]
+      },
+      "traits": [
+        {
+          "name": "CastleManagement",
+          "category": "interaction",
+          "linkedEntity": "Building",
+          "listens": [
+            { "event": "TURN_CHANGED", "from": "SessionManager" }
+          ],
+          "emits": [
+            { "event": "SPEND_GOLD", "scope": "external", "payload": [{ "name": "amount", "type": "number", "required": true }, { "name": "reason", "type": "string", "required": true }] }
+          ],
+          "stateMachine": {
+            "states": [
+              { "name": "overview", "isInitial": true },
+              { "name": "buildingDetail" },
+              { "name": "recruiting" },
+              { "name": "upgrading" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "SELECT_BUILDING", "name": "Select Building", "payload": [{ "name": "buildingId", "type": "string", "required": true }, { "name": "buildingName", "type": "string" }, { "name": "buildingType", "type": "string" }, { "name": "level", "type": "number" }] },
+              { "key": "OPEN_RECRUIT", "name": "Open Recruitment", "payload": [{ "name": "unitId", "type": "string" }, { "name": "unitName", "type": "string" }, { "name": "unitType", "type": "string" }, { "name": "attack", "type": "number" }, { "name": "defense", "type": "number" }, { "name": "health", "type": "number" }, { "name": "goldCost", "type": "number" }, { "name": "available", "type": "number" }] },
+              { "key": "RECRUIT_UNIT", "name": "Recruit Unit", "payload": [{ "name": "goldCost", "type": "number", "required": true }] },
+              { "key": "UPGRADE_BUILDING", "name": "Upgrade Building" },
+              { "key": "BACK", "name": "Back to Overview" },
+              { "key": "EXIT_CASTLE", "name": "Exit Castle" },
+              { "key": "TURN_CHANGED", "name": "Turn Changed", "payload": [{ "name": "activePlayerId", "type": "string", "required": true }, { "name": "turn", "type": "number", "required": true }] }
+            ],
+            "transitions": [
+              {
+                "from": "overview",
+                "to": "overview",
+                "event": "INIT",
+                "effects": [
+                  ["fetch", "Building", { "ownerId": "@user.id" }],
+                  ["render-ui", "main", {
+                    "type": "game-isometric-canvas",
+                    "entity": "@entity",
+                    "scale": 0.6,
+                    "onTileClick": "SELECT_BUILDING"
+                  }],
+                  ["render-ui", "hud-top", {
+                    "type": "game-resource-bar",
+                    "resources": ["gold", "resonance", "salvage"],
+                    "compact": false
+                  }]
+                ]
+              },
+              {
+                "from": "overview",
+                "to": "buildingDetail",
+                "event": "SELECT_BUILDING",
+                "effects": [
+                  ["render-ui", "sidebar", {
+                    "type": "game-building-slot",
+                    "buildingType": "@payload.buildingType",
+                    "name": "@payload.buildingName",
+                    "level": "@payload.level",
+                    "maxLevel": 5,
+                    "isSelected": true,
+                    "onClick": "UPGRADE_BUILDING"
+                  }]
+                ]
+              },
+              {
+                "from": "buildingDetail",
+                "to": "recruiting",
+                "event": "OPEN_RECRUIT",
+                "effects": [
+                  ["render-ui", "sidebar", {
+                    "type": "game-recruit-card",
+                    "id": "@payload.unitId",
+                    "name": "@payload.unitName",
+                    "unitType": "@payload.unitType",
+                    "tier": 1,
+                    "attack": "@payload.attack",
+                    "defense": "@payload.defense",
+                    "health": "@payload.health",
+                    "goldCost": "@payload.goldCost",
+                    "available": "@payload.available",
+                    "onRecruit": "RECRUIT_UNIT"
+                  }]
+                ]
+              },
+              {
+                "from": "recruiting",
+                "to": "overview",
+                "event": "RECRUIT_UNIT",
+                "effects": [
+                  ["emit", "SPEND_GOLD", { "amount": "@payload.goldCost", "reason": "recruitment" }],
+                  ["persist", "create", "Unit", "@payload"]
+                ]
+              },
+              {
+                "from": "buildingDetail",
+                "to": "upgrading",
+                "event": "UPGRADE_BUILDING",
+                "effects": [
+                  ["emit", "SPEND_GOLD", { "amount": "@entity.goldCost", "reason": "upgrade" }],
+                  ["set", "@entity.level", ["+", "@entity.level", 1]],
+                  ["persist", "update", "Building", "@entity"]
+                ]
+              },
+              {
+                "from": "upgrading",
+                "to": "overview",
+                "event": "BACK"
+              },
+              {
+                "from": "buildingDetail",
+                "to": "overview",
+                "event": "BACK"
+              },
+              {
+                "from": "overview",
+                "to": "overview",
+                "event": "EXIT_CASTLE",
+                "effects": [
+                  ["navigate", "/world"]
+                ]
+              },
+              {
+                "from": "overview",
+                "to": "overview",
+                "event": "TURN_CHANGED",
+                "effects": [
+                  ["fetch", "Building", { "ownerId": "@user.id" }]
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "pages": [
+        {
+          "name": "CastlePage",
+          "path": "/castle/:id",
+          "viewType": "detail",
+          "primaryEntity": "Building",
+          "traits": [{ "ref": "CastleManagement" }]
+        }
+      ],
+      "domainContext": {
+        "category": "game",
+        "vocabulary": {
+          "item": "Building",
+          "create": "Construct Building",
+          "view": "Inspect Building"
+        },
+        "requestFragment": "Canvas isometric castle courtyard with building management, unit recruitment, and resource tracking"
+      }
+    },
+    {
+      "name": "WorldMap",
+      "description": "Strategic world map with isometric canvas rendering, hero movement, resource nodes, and castle encounters",
+      "visual_prompt": "Scene: Strategic world map with varied terrain. Style: 'Illuminated Manuscript Futurism'. Terrain: Forests, mountains, plains, and water in isometric view. Atmosphere: Grand campaign adventure.",
+      "entity": {
+        "name": "MapHex",
+        "persistence": "persistent",
+        "collection": "hexes",
+        "fields": [
+          { "name": "id", "type": "string", "required": true, "primaryKey": true },
+          { "name": "x", "type": "number", "required": true },
+          { "name": "y", "type": "number", "required": true },
+          { "name": "terrainType", "type": "enum", "values": ["grass", "forest", "mountain", "water", "desert", "snow", "swamp"], "required": true },
+          { "name": "featureType", "type": "enum", "values": ["none", "goldMine", "resonanceCrystal", "traitCache", "salvageYard", "portal", "castle", "ruins", "camp"], "default": "none" },
+          { "name": "ownerId", "type": "string" },
+          { "name": "sessionId", "type": "string" },
+          { "name": "isExplored", "type": "boolean", "default": false },
+          { "name": "movementCost", "type": "number", "default": 1 }
+        ],
+        "instances": [
+          { "id": "hex-0-0", "x": 0, "y": 0, "terrainType": "grass", "featureType": "castle", "isExplored": true, "movementCost": 1 },
+          { "id": "hex-1-0", "x": 1, "y": 0, "terrainType": "grass", "featureType": "none", "isExplored": true, "movementCost": 1 },
+          { "id": "hex-2-0", "x": 2, "y": 0, "terrainType": "forest", "featureType": "none", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-3-0", "x": 3, "y": 0, "terrainType": "mountain", "featureType": "none", "isExplored": false, "movementCost": 3 },
+          { "id": "hex-4-0", "x": 4, "y": 0, "terrainType": "mountain", "featureType": "goldMine", "isExplored": false, "movementCost": 3 },
+          { "id": "hex-5-0", "x": 5, "y": 0, "terrainType": "grass", "featureType": "none", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-6-0", "x": 6, "y": 0, "terrainType": "desert", "featureType": "ruins", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-0-1", "x": 0, "y": 1, "terrainType": "grass", "featureType": "none", "isExplored": true, "movementCost": 1 },
+          { "id": "hex-1-1", "x": 1, "y": 1, "terrainType": "grass", "featureType": "goldMine", "isExplored": true, "movementCost": 1 },
+          { "id": "hex-2-1", "x": 2, "y": 1, "terrainType": "forest", "featureType": "traitCache", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-3-1", "x": 3, "y": 1, "terrainType": "grass", "featureType": "none", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-4-1", "x": 4, "y": 1, "terrainType": "water", "featureType": "none", "isExplored": false, "movementCost": 99 },
+          { "id": "hex-5-1", "x": 5, "y": 1, "terrainType": "grass", "featureType": "camp", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-6-1", "x": 6, "y": 1, "terrainType": "desert", "featureType": "none", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-0-2", "x": 0, "y": 2, "terrainType": "grass", "featureType": "none", "isExplored": true, "movementCost": 1 },
+          { "id": "hex-1-2", "x": 1, "y": 2, "terrainType": "forest", "featureType": "none", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-2-2", "x": 2, "y": 2, "terrainType": "forest", "featureType": "salvageYard", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-3-2", "x": 3, "y": 2, "terrainType": "swamp", "featureType": "none", "isExplored": false, "movementCost": 3 },
+          { "id": "hex-4-2", "x": 4, "y": 2, "terrainType": "water", "featureType": "none", "isExplored": false, "movementCost": 99 },
+          { "id": "hex-5-2", "x": 5, "y": 2, "terrainType": "grass", "featureType": "none", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-6-2", "x": 6, "y": 2, "terrainType": "snow", "featureType": "resonanceCrystal", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-0-3", "x": 0, "y": 3, "terrainType": "grass", "featureType": "none", "isExplored": true, "movementCost": 1 },
+          { "id": "hex-1-3", "x": 1, "y": 3, "terrainType": "grass", "featureType": "none", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-2-3", "x": 2, "y": 3, "terrainType": "grass", "featureType": "none", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-3-3", "x": 3, "y": 3, "terrainType": "grass", "featureType": "portal", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-4-3", "x": 4, "y": 3, "terrainType": "grass", "featureType": "none", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-5-3", "x": 5, "y": 3, "terrainType": "mountain", "featureType": "none", "isExplored": false, "movementCost": 3 },
+          { "id": "hex-6-3", "x": 6, "y": 3, "terrainType": "snow", "featureType": "none", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-0-4", "x": 0, "y": 4, "terrainType": "forest", "featureType": "none", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-1-4", "x": 1, "y": 4, "terrainType": "forest", "featureType": "none", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-2-4", "x": 2, "y": 4, "terrainType": "grass", "featureType": "camp", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-3-4", "x": 3, "y": 4, "terrainType": "grass", "featureType": "none", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-4-4", "x": 4, "y": 4, "terrainType": "desert", "featureType": "none", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-5-4", "x": 5, "y": 4, "terrainType": "desert", "featureType": "salvageYard", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-6-4", "x": 6, "y": 4, "terrainType": "snow", "featureType": "castle", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-0-5", "x": 0, "y": 5, "terrainType": "grass", "featureType": "none", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-1-5", "x": 1, "y": 5, "terrainType": "swamp", "featureType": "none", "isExplored": false, "movementCost": 3 },
+          { "id": "hex-2-5", "x": 2, "y": 5, "terrainType": "swamp", "featureType": "traitCache", "isExplored": false, "movementCost": 3 },
+          { "id": "hex-3-5", "x": 3, "y": 5, "terrainType": "grass", "featureType": "none", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-4-5", "x": 4, "y": 5, "terrainType": "desert", "featureType": "none", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-5-5", "x": 5, "y": 5, "terrainType": "mountain", "featureType": "goldMine", "isExplored": false, "movementCost": 3 },
+          { "id": "hex-6-5", "x": 6, "y": 5, "terrainType": "snow", "featureType": "none", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-0-6", "x": 0, "y": 6, "terrainType": "grass", "featureType": "none", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-1-6", "x": 1, "y": 6, "terrainType": "grass", "featureType": "resonanceCrystal", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-2-6", "x": 2, "y": 6, "terrainType": "forest", "featureType": "none", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-3-6", "x": 3, "y": 6, "terrainType": "grass", "featureType": "none", "isExplored": false, "movementCost": 1 },
+          { "id": "hex-4-6", "x": 4, "y": 6, "terrainType": "desert", "featureType": "ruins", "isExplored": false, "movementCost": 2 },
+          { "id": "hex-5-6", "x": 5, "y": 6, "terrainType": "mountain", "featureType": "none", "isExplored": false, "movementCost": 3 },
+          { "id": "hex-6-6", "x": 6, "y": 6, "terrainType": "snow", "featureType": "portal", "isExplored": false, "movementCost": 2 }
+        ]
+      },
+      "traits": [
+        {
+          "name": "WorldExploration",
+          "category": "interaction",
+          "linkedEntity": "MapHex",
+          "listens": [
+            { "event": "TURN_CHANGED", "from": "SessionManager" }
+          ],
+          "stateMachine": {
+            "states": [
+              { "name": "exploring", "isInitial": true },
+              { "name": "heroSelected" },
+              { "name": "heroMoving" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "SELECT_HERO", "name": "Select Hero" },
+              { "key": "MOVE_HERO", "name": "Move Hero" },
+              { "key": "COLLECT_RESOURCE", "name": "Collect Resource" },
+              { "key": "ENTER_CASTLE", "name": "Enter Castle", "payload": [{ "name": "castleId", "type": "string", "required": true }] },
+              { "key": "BATTLE_ENCOUNTER", "name": "Battle Encounter", "payload": [{ "name": "enemyId", "type": "string", "required": true }] },
+              { "key": "END_TURN", "name": "End Turn" },
+              { "key": "BACK", "name": "Deselect" },
+              { "key": "TURN_CHANGED", "name": "Turn Changed", "payload": [{ "name": "activePlayerId", "type": "string", "required": true }, { "name": "turn", "type": "number", "required": true }] }
+            ],
+            "transitions": [
+              {
+                "from": "exploring",
+                "to": "exploring",
+                "event": "INIT",
+                "effects": [
+                  ["fetch", "MapHex"],
+                  ["render-ui", "main", {
+                    "type": "game-isometric-canvas",
+                    "entity": "@entity",
+                    "scale": 0.4,
+                    "onTileClick": "SELECT_HERO"
+                  }],
+                  ["render-ui", "hud-top", {
+                    "type": "game-resource-bar",
+                    "resources": ["gold", "resonance", "salvage", "traitShards"],
+                    "compact": false
+                  }]
+                ]
+              },
+              {
+                "from": "exploring",
+                "to": "heroSelected",
+                "event": "SELECT_HERO"
+              },
+              {
+                "from": "heroSelected",
+                "to": "heroMoving",
+                "event": "MOVE_HERO"
+              },
+              {
+                "from": "heroMoving",
+                "to": "exploring",
+                "event": "COLLECT_RESOURCE",
+                "effects": [
+                  ["persist", "update", "MapHex", "@entity"]
+                ]
+              },
+              {
+                "from": "heroMoving",
+                "to": "exploring",
+                "event": "BATTLE_ENCOUNTER",
+                "effects": [
+                  ["navigate", "/battle", { "enemyId": "@payload.enemyId" }]
+                ]
+              },
+              {
+                "from": "heroMoving",
+                "to": "exploring",
+                "event": "ENTER_CASTLE",
+                "effects": [
+                  ["navigate", "/castle", { "id": "@payload.castleId" }]
+                ]
+              },
+              {
+                "from": "heroSelected",
+                "to": "exploring",
+                "event": "BACK"
+              },
+              {
+                "from": "exploring",
+                "to": "exploring",
+                "event": "END_TURN"
+              },
+              {
+                "from": "exploring",
+                "to": "exploring",
+                "event": "TURN_CHANGED",
+                "effects": [
+                  ["fetch", "MapHex"]
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "pages": [
+        {
+          "name": "WorldMapPage",
+          "path": "/world",
+          "viewType": "list",
+          "primaryEntity": "MapHex",
+          "traits": [{ "ref": "WorldExploration" }]
+        }
+      ],
+      "domainContext": {
+        "category": "game",
+        "vocabulary": {
+          "item": "Hex",
+          "create": "Reveal Hex",
+          "view": "Explore Hex"
+        },
+        "requestFragment": "Canvas isometric world map with hero movement, resource collection, castle entry, and battle encounters"
+      }
+    },
+    {
+      "name": "HeroManagement",
+      "description": "Hero profiles with stats, trait slot management, and level progression using composed atom/molecule patterns",
+      "visual_prompt": "Scene: Hero selection screen. Style: 'Illuminated Manuscript Futurism'. Layout: Ornate gold-framed portraits with trait icons. Atmosphere: Legendary commanders.",
+      "entity": {
+        "name": "Hero",
+        "persistence": "persistent",
+        "collection": "heroes",
+        "fields": [
+          { "name": "id", "type": "string", "required": true, "primaryKey": true },
+          { "name": "name", "type": "string", "required": true },
+          { "name": "archetype", "type": "enum", "values": ["innocent", "orphan", "caregiver", "hero", "explorer", "rebel", "lover", "creator", "jester", "sage", "magician", "ruler"], "required": true },
+          { "name": "level", "type": "number", "required": true },
+          { "name": "xp", "type": "number", "default": 0 },
+          { "name": "xpToNextLevel", "type": "number", "default": 100 },
+          { "name": "health", "type": "number", "required": true },
+          { "name": "maxHealth", "type": "number", "required": true },
+          { "name": "attack", "type": "number", "required": true },
+          { "name": "defense", "type": "number", "required": true },
+          { "name": "speed", "type": "number", "default": 3 },
+          { "name": "leadership", "type": "number", "default": 1 },
+          { "name": "traitSlots", "type": "number", "default": 3 },
+          { "name": "portraitUrl", "type": "string" },
+          { "name": "biography", "type": "string" },
+          { "name": "ownerId", "type": "string" },
+          { "name": "sessionId", "type": "string" }
+        ],
+        "instances": [
+          { "id": "hero-valor", "name": "Commander Valor", "archetype": "hero", "level": 3, "xp": 45, "xpToNextLevel": 150, "health": 120, "maxHealth": 120, "attack": 20, "defense": 15, "speed": 4, "leadership": 3, "traitSlots": 3, "biography": "A seasoned warrior who leads by example. His shield has deflected a thousand blows." },
+          { "id": "hero-lumis", "name": "Lumis the Wise", "archetype": "sage", "level": 4, "xp": 80, "xpToNextLevel": 200, "health": 75, "maxHealth": 75, "attack": 28, "defense": 8, "speed": 2, "leadership": 2, "traitSlots": 4, "biography": "An ancient spellweaver whose knowledge of the arcane arts is matched only by their patience." },
+          { "id": "hero-scrap", "name": "Scrap the Survivor", "archetype": "orphan", "level": 2, "xp": 20, "xpToNextLevel": 100, "health": 90, "maxHealth": 90, "attack": 14, "defense": 18, "speed": 3, "leadership": 1, "traitSlots": 3, "biography": "Found in the wreckage of a forgotten battlefield, Scrap endures where others fall." }
+        ]
+      },
+      "traits": [
+        {
+          "name": "HeroBrowser",
+          "category": "interaction",
+          "linkedEntity": "Hero",
+          "emits": [
+            { "event": "HERO_SELECTED", "scope": "external", "payload": [{ "name": "heroId", "type": "string", "required": true }] }
+          ],
+          "stateMachine": {
+            "states": [
+              { "name": "browsing", "isInitial": true },
+              { "name": "viewing" },
+              { "name": "equipping" }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "SELECT", "name": "Select Hero", "payload": [{ "name": "heroId", "type": "string", "required": true }] },
+              { "key": "EQUIP_TRAIT", "name": "Equip Trait" },
+              { "key": "REMOVE_TRAIT", "name": "Remove Trait" },
+              { "key": "LEVEL_UP", "name": "Level Up" },
+              { "key": "JOIN_BATTLE", "name": "Join Battle", "payload": [{ "name": "heroId", "type": "string", "required": true }] },
+              { "key": "BACK", "name": "Back to List" }
+            ],
+            "transitions": [
+              {
+                "from": "browsing",
+                "to": "browsing",
+                "event": "INIT",
+                "effects": [
+                  ["fetch", "Hero", { "ownerId": "@user.id" }],
+                  ["render-ui", "main", {
+                    "type": "entity-cards",
+                    "entity": "Hero",
+                    "columns": 4,
+                    "itemActions": [
+                      { "label": "Select", "event": "SELECT" },
+                      { "label": "Deploy", "event": "JOIN_BATTLE" }
+                    ]
+                  }]
+                ]
+              },
+              {
+                "from": "browsing",
+                "to": "viewing",
+                "event": "SELECT",
+                "effects": [
+                  ["emit", "HERO_SELECTED", { "heroId": "@payload.heroId" }],
+                  ["render-ui", "main", {
+                    "type": "game-hero-profile",
+                    "hero": "@payload.heroId",
+                    "onEquipTrait": "EQUIP_TRAIT",
+                    "onRemoveTrait": "REMOVE_TRAIT"
+                  }],
+                  ["render-ui", "sidebar", {
+                    "type": "game-trait-slot",
+                    "slotIndex": 0,
+                    "trait": "@entity.traitState",
+                    "onEquip": "EQUIP_TRAIT",
+                    "onRemove": "REMOVE_TRAIT"
+                  }],
+                  ["render-ui", "hud-top", {
+                    "type": "game-resource-bar",
+                    "resources": ["health", "attack", "defense", "speed", "leadership"],
+                    "compact": true
+                  }]
+                ]
+              },
+              {
+                "from": "viewing",
+                "to": "equipping",
+                "event": "EQUIP_TRAIT"
+              },
+              {
+                "from": "equipping",
+                "to": "viewing",
+                "event": "EQUIP_TRAIT"
+              },
+              {
+                "from": "viewing",
+                "to": "viewing",
+                "event": "REMOVE_TRAIT"
+              },
+              {
+                "from": "viewing",
+                "to": "viewing",
+                "event": "LEVEL_UP",
+                "guard": [">=", "@entity.xp", "@entity.xpToNextLevel"],
+                "effects": [
+                  ["set", "@entity.level", ["+", "@entity.level", 1]],
+                  ["set", "@entity.xp", ["-", "@entity.xp", "@entity.xpToNextLevel"]],
+                  ["persist", "update", "Hero", "@entity"]
+                ]
+              },
+              {
+                "from": "viewing",
+                "to": "browsing",
+                "event": "JOIN_BATTLE",
+                "effects": [
+                  ["navigate", "/battle", { "heroId": "@payload.heroId" }]
+                ]
+              },
+              { "from": "viewing", "to": "browsing", "event": "BACK" }
+            ]
+          }
+        }
+      ],
+      "pages": [
+        {
+          "name": "HeroListPage",
+          "path": "/heroes",
+          "viewType": "list",
+          "primaryEntity": "Hero",
+          "traits": [{ "ref": "HeroBrowser" }]
+        },
+        {
+          "name": "HeroDetailPage",
+          "path": "/hero/:id",
+          "viewType": "detail",
+          "primaryEntity": "Hero",
+          "traits": [{ "ref": "HeroBrowser" }]
+        }
+      ],
+      "domainContext": {
+        "category": "game",
+        "vocabulary": {
+          "item": "Hero",
+          "create": "Recruit Hero",
+          "view": "Inspect Hero"
+        },
+        "requestFragment": "Hero profiles with avatar display, trait slot management, stat bars, and level progression"
+      }
+    },
+    {
+      "name": "Economy",
+      "description": "Player resource management — gold, resonance, salvage, and trait caches",
+      "visual_prompt": "Scene: Resource treasury overview. Style: 'Illuminated Manuscript Futurism'. Layout: Resource counters with income/expense tracking. Atmosphere: Strategic resource planning.",
+      "entity": {
+        "name": "PlayerResources",
+        "persistence": "persistent",
+        "collection": "playerResources",
+        "fields": [
+          { "name": "id", "type": "string", "required": true, "primaryKey": true },
+          { "name": "gold", "type": "number", "required": true, "default": 500 },
+          { "name": "resonance", "type": "number", "required": true, "default": 50 },
+          { "name": "salvage", "type": "number", "required": true, "default": 0 },
+          { "name": "traitShards", "type": "number", "required": true, "default": 0 },
+          { "name": "incomePerTurn", "type": "number", "default": 100 },
+          { "name": "ownerId", "type": "string" },
+          { "name": "sessionId", "type": "string" }
+        ],
+        "instances": [
+          { "id": "player-resources-default", "gold": 500, "resonance": 50, "salvage": 0, "traitShards": 0, "incomePerTurn": 100 }
+        ]
+      },
+      "traits": [
+        {
+          "name": "ResourceManager",
+          "category": "interaction",
+          "linkedEntity": "PlayerResources",
+          "listens": [
+            { "event": "SPEND_GOLD", "from": "CastleManagement" }
+          ],
+          "stateMachine": {
+            "states": [
+              { "name": "active", "isInitial": true }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "GAIN_RESOURCE", "name": "Gain Resource", "payload": [
+                { "name": "resourceType", "type": "string", "required": true },
+                { "name": "amount", "type": "number", "required": true }
+              ]},
+              { "key": "SPEND_RESOURCE", "name": "Spend Resource", "payload": [
+                { "name": "resourceType", "type": "string", "required": true },
+                { "name": "amount", "type": "number", "required": true }
+              ]},
+              { "key": "GAIN_BATTLE_REWARD", "name": "Gain Battle Reward", "payload": [
+                { "name": "gold", "type": "number" },
+                { "name": "resonance", "type": "number" },
+                { "name": "salvage", "type": "number" },
+                { "name": "traitShards", "type": "number" }
+              ]},
+              { "key": "SPEND_GOLD", "name": "Spend Gold", "payload": [
+                { "name": "amount", "type": "number", "required": true },
+                { "name": "reason", "type": "string", "required": true }
+              ]}
+            ],
+            "transitions": [
+              {
+                "from": "active",
+                "to": "active",
+                "event": "INIT",
+                "effects": [
+                  ["fetch", "PlayerResources", { "ownerId": "@user.id" }],
+                  ["render-ui", "hud-top", {
+                    "type": "game-resource-bar",
+                    "resources": ["gold", "resonance", "salvage", "traitShards"],
+                    "compact": true
+                  }]
+                ]
+              },
+              {
+                "from": "active",
+                "to": "active",
+                "event": "GAIN_RESOURCE",
+                "effects": [
+                  ["set", "@entity.gold", ["+", "@entity.gold", "@payload.amount"]],
+                  ["persist", "update", "PlayerResources", "@entity"]
+                ]
+              },
+              {
+                "from": "active",
+                "to": "active",
+                "event": "SPEND_RESOURCE",
+                "guard": [">=", "@entity.gold", "@payload.amount"],
+                "effects": [
+                  ["set", "@entity.gold", ["-", "@entity.gold", "@payload.amount"]],
+                  ["persist", "update", "PlayerResources", "@entity"]
+                ]
+              },
+              {
+                "from": "active",
+                "to": "active",
+                "event": "SPEND_GOLD",
+                "guard": [">=", "@entity.gold", "@payload.amount"],
+                "effects": [
+                  ["set", "@entity.gold", ["-", "@entity.gold", "@payload.amount"]],
+                  ["persist", "update", "PlayerResources", "@entity"]
+                ]
+              },
+              {
+                "from": "active",
+                "to": "active",
+                "event": "GAIN_BATTLE_REWARD",
+                "effects": [
+                  ["set", "@entity.gold", ["+", "@entity.gold", "@payload.gold"]],
+                  ["set", "@entity.resonance", ["+", "@entity.resonance", "@payload.resonance"]],
+                  ["set", "@entity.salvage", ["+", "@entity.salvage", "@payload.salvage"]],
+                  ["set", "@entity.traitShards", ["+", "@entity.traitShards", "@payload.traitShards"]],
+                  ["persist", "update", "PlayerResources", "@entity"]
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "pages": [
+        {
+          "name": "ResourcesPage",
+          "path": "/resources",
+          "viewType": "detail",
+          "primaryEntity": "PlayerResources",
+          "traits": [{ "ref": "ResourceManager" }]
+        }
+      ],
+      "domainContext": {
+        "category": "game",
+        "vocabulary": {
+          "item": "Resource",
+          "view": "View Treasury"
+        },
+        "requestFragment": "Resource management with income tracking, expenditure guards, and battle rewards",
+        "notes": "AI opponent logic is implemented externally via the runtime's effect executor and is NOT modeled as an orbital trait — enemy turn resolution, targeting, and difficulty scaling live in the game client code."
+      }
+    },
+    {
+      "name": "Lobby",
+      "description": "Multiplayer session management — matchmaking, mode selection (PvP / Co-op), and turn coordination across all orbitals",
+      "entity": {
+        "name": "GameSession",
+        "persistence": "persistent",
+        "collection": "gameSessions",
+        "fields": [
+          { "name": "id", "type": "string", "required": true, "primaryKey": true },
+          { "name": "player1Id", "type": "string", "required": true },
+          { "name": "player2Id", "type": "string" },
+          { "name": "status", "type": "enum", "values": ["waiting", "ready", "inProgress", "completed"], "required": true },
+          { "name": "mode", "type": "enum", "values": ["pvp", "coop"], "required": true },
+          { "name": "currentTurn", "type": "number", "default": 1 },
+          { "name": "activePlayerId", "type": "string" },
+          { "name": "winnerId", "type": "string" },
+          { "name": "createdAt", "type": "number" }
+        ],
+        "instances": []
+      },
+      "traits": [
+        {
+          "name": "SessionManager",
+          "category": "interaction",
+          "linkedEntity": "GameSession",
+          "emits": [
+            { "event": "TURN_CHANGED", "scope": "external", "payload": [{ "name": "activePlayerId", "type": "string", "required": true }, { "name": "turn", "type": "number", "required": true }] }
+          ],
+          "stateMachine": {
+            "states": [
+              { "name": "idle", "isInitial": true },
+              { "name": "waiting" },
+              { "name": "inProgress" },
+              { "name": "completed", "isTerminal": true }
+            ],
+            "events": [
+              { "key": "INIT", "name": "Initialize" },
+              { "key": "CREATE_SESSION", "name": "Create Session", "payload": [
+                { "name": "mode", "type": "string", "required": true }
+              ]},
+              { "key": "JOIN_SESSION", "name": "Join Session", "payload": [
+                { "name": "sessionId", "type": "string", "required": true }
+              ]},
+              { "key": "START_GAME", "name": "Start Game" },
+              { "key": "END_TURN", "name": "End Turn" },
+              { "key": "END_GAME", "name": "End Game", "payload": [
+                { "name": "winnerId", "type": "string", "required": true }
+              ]}
+            ],
+            "transitions": [
+              {
+                "from": "idle",
+                "to": "idle",
+                "event": "INIT",
+                "effects": [
+                  ["fetch", "GameSession"],
+                  ["render-ui", "main", {
+                    "type": "entity-cards",
+                    "entity": "GameSession",
+                    "columns": 2,
+                    "itemActions": [
+                      { "label": "Join", "event": "JOIN_SESSION" }
+                    ]
+                  }]
+                ]
+              },
+              {
+                "from": "idle",
+                "to": "waiting",
+                "event": "CREATE_SESSION",
+                "effects": [
+                  ["persist", "create", "GameSession", {
+                    "player1Id": "@user.id",
+                    "status": "waiting",
+                    "mode": "@payload.mode",
+                    "currentTurn": 1,
+                    "activePlayerId": "@user.id"
+                  }],
+                  ["render-ui", "main", {
+                    "type": "entity-cards",
+                    "entity": "GameSession",
+                    "columns": 1,
+                    "itemActions": [
+                      { "label": "Start", "event": "START_GAME" }
+                    ]
+                  }]
+                ]
+              },
+              {
+                "from": "waiting",
+                "to": "inProgress",
+                "event": "JOIN_SESSION",
+                "effects": [
+                  ["set", "@entity.player2Id", "@user.id"],
+                  ["set", "@entity.status", "ready"],
+                  ["persist", "update", "GameSession", "@entity"]
+                ]
+              },
+              {
+                "from": "inProgress",
+                "to": "inProgress",
+                "event": "START_GAME",
+                "guard": ["==", "@entity.status", "ready"],
+                "effects": [
+                  ["set", "@entity.status", "inProgress"],
+                  ["persist", "update", "GameSession", "@entity"],
+                  ["navigate", "/world"]
+                ]
+              },
+              {
+                "from": "inProgress",
+                "to": "inProgress",
+                "event": "END_TURN",
+                "guard": ["==", "@entity.activePlayerId", "@user.id"],
+                "effects": [
+                  ["set", "@entity.currentTurn", ["+", "@entity.currentTurn", 1]],
+                  ["set", "@entity.activePlayerId", ["if", ["==", "@entity.activePlayerId", "@entity.player1Id"], "@entity.player2Id", "@entity.player1Id"]],
+                  ["persist", "update", "GameSession", "@entity"],
+                  ["emit", "TURN_CHANGED", { "activePlayerId": "@entity.activePlayerId", "turn": "@entity.currentTurn" }]
+                ]
+              },
+              {
+                "from": "inProgress",
+                "to": "completed",
+                "event": "END_GAME",
+                "effects": [
+                  ["set", "@entity.status", "completed"],
+                  ["set", "@entity.winnerId", "@payload.winnerId"],
+                  ["persist", "update", "GameSession", "@entity"],
+                  ["render-ui", "main", {
+                    "type": "entity-cards",
+                    "entity": "GameSession",
+                    "columns": 1,
+                    "itemActions": [
+                      { "label": "Return to Lobby", "event": "INIT" }
+                    ]
+                  }]
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "pages": [
+        {
+          "name": "LobbyPage",
+          "path": "/lobby",
+          "viewType": "list",
+          "primaryEntity": "GameSession",
+          "traits": [{ "ref": "SessionManager" }]
+        }
+      ],
+      "domainContext": {
+        "category": "game",
+        "vocabulary": {
+          "item": "Session",
+          "create": "Create Game",
+          "view": "View Lobby"
+        },
+        "requestFragment": "Multiplayer lobby with session creation, matchmaking, and turn coordination for PvP and Co-op modes",
+        "notes": "Realtime sync between players (WebSocket/Firebase Realtime) is implemented externally via the runtime. The .orb schema defines the session state machine and turn logic; the runtime handles real-time event propagation. PvP perspective-based team mapping and ally unit styling (green borders for player 2) are also handled in the canvas renderer, not in the schema."
+      }
+    }
+  ]
+}
