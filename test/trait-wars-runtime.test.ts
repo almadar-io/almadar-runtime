@@ -19,12 +19,9 @@ const traitWarsSchema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
 describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
   describe('COMP-GAP-01: Pattern Support', () => {
-    it('should register schema with game patterns without errors', () => {
+    it('should register schema with game patterns without errors', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-
-      expect(() => {
-        runtime.register(traitWarsSchema);
-      }).not.toThrow();
+      await runtime.register(traitWarsSchema);
 
       const orbitals = runtime.listOrbitals();
       expect(orbitals.length).toBe(6);
@@ -32,7 +29,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should return game patterns in render-ui client effects', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const result = await runtime.processOrbitalEvent('TacticalBattle', {
         event: 'INIT',
@@ -67,7 +64,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should preserve all pattern properties including onTileClick', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const result = await runtime.processOrbitalEvent('TacticalBattle', {
         event: 'INIT',
@@ -87,12 +84,9 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
   });
 
   describe('COMP-GAP-02: listens Support', () => {
-    it('should register event listeners for traits with listens', () => {
+    it('should register event listeners for traits with listens', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-
-      expect(() => {
-        runtime.register(traitWarsSchema);
-      }).not.toThrow();
+      await runtime.register(traitWarsSchema);
 
       const orbitals = runtime.listOrbitals();
       expect(orbitals.length).toBeGreaterThan(0);
@@ -100,7 +94,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should trigger listener when event is emitted', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const emitResult = await runtime.processOrbitalEvent('HeroManagement', {
         event: 'SELECT',
@@ -119,7 +113,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should handle SHIELD_BREAK emission from GuardianBehavior', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const result = await runtime.processOrbitalEvent('TacticalBattle', {
         event: 'TAKE_DAMAGE',
@@ -134,7 +128,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
   describe('COMP-GAP-03: Effect Execution', () => {
     it('should execute set effects', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const result = await runtime.processOrbitalEvent('TacticalBattle', {
         event: 'HERO_SELECTED',
@@ -157,7 +151,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should execute emit effects', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const result = await runtime.processOrbitalEvent('HeroManagement', {
         event: 'SELECT',
@@ -175,7 +169,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should execute persist effects', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       await runtime.processOrbitalEvent('TacticalBattle', {
         event: 'INIT',
@@ -203,7 +197,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should execute persist create with complex payload bindings', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       await runtime.processOrbitalEvent('TacticalBattle', {
         event: 'INIT',
@@ -242,7 +236,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
         debug: false,
         mode: 'real',
       });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const persistence = (runtime as any).persistence as {
@@ -263,7 +257,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
         debug: false,
         mode: 'real',
       });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const persistence = (runtime as any).persistence as {
@@ -283,7 +277,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
         debug: false,
         mode: 'real',
       });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const persistence = (runtime as any).persistence as {
@@ -302,7 +296,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
         debug: false,
         mode: 'real',
       });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const persistence = (runtime as any).persistence as {
@@ -322,7 +316,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
         debug: false,
         mode: 'real',
       });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const persistence = (runtime as any).persistence as {
@@ -341,7 +335,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
   describe('COMP-GAP-07: Guard Evaluation', () => {
     it('should block transitions when guards fail', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       await runtime.processOrbitalEvent('Economy', {
         event: 'INIT',
@@ -359,7 +353,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should allow transitions when guards pass', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       await runtime.processOrbitalEvent('Economy', {
         event: 'INIT',
@@ -379,7 +373,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should evaluate guards with @entity bindings', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       await runtime.processOrbitalEvent('TacticalBattle', {
         event: 'INIT',
@@ -397,7 +391,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should evaluate complex guards with @user bindings', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       await runtime.processOrbitalEvent('Lobby', {
         event: 'CREATE_SESSION',
@@ -419,7 +413,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should evaluate guards with @payload bindings', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const result = await runtime.processOrbitalEvent('HeroManagement', {
         event: 'LEVEL_UP',
@@ -434,7 +428,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
   describe('COMP-GAP-09: User Context', () => {
     it('should accept user context in requests', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const result = await runtime.processOrbitalEvent('StrategicCastle', {
         event: 'INIT',
@@ -449,7 +443,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should use @user bindings in fetch filters', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const result = await runtime.processOrbitalEvent('StrategicCastle', {
         event: 'INIT',
@@ -466,7 +460,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
   describe('COMP-GAP-05: Navigation', () => {
     it('should return navigate as client effect', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       await runtime.processOrbitalEvent('TacticalBattle', {
         event: 'INIT',
@@ -492,7 +486,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should include params in navigate effects', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const result = await runtime.processOrbitalEvent('WorldMap', {
         event: 'BATTLE_ENCOUNTER',
@@ -508,7 +502,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
   describe('BONUS: fetch Effect Support', () => {
     it('should execute fetch effects and return data', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const result = await runtime.processOrbitalEvent('TacticalBattle', {
         event: 'INIT',
@@ -527,7 +521,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
   describe('BONUS: Binding Resolution', () => {
     it('should resolve @payload bindings in persist create', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       await runtime.processOrbitalEvent('TacticalBattle', {
         event: 'INIT',
@@ -560,7 +554,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
     it('should resolve @entity bindings in set effects', async () => {
       const runtime = new OrbitalServerRuntime({ debug: false });
-      runtime.register(traitWarsSchema);
+      await runtime.register(traitWarsSchema);
 
       const result = await runtime.processOrbitalEvent('StrategicCastle', {
         event: 'UPGRADE_BUILDING',
