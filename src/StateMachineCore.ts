@@ -73,6 +73,7 @@ export function findTransition(
  * Normalize event key - strip UI: prefix if present.
  */
 export function normalizeEventKey(eventKey: string): string {
+    if (!eventKey) return '';
     return eventKey.startsWith('UI:') ? eventKey.slice(3) : eventKey;
 }
 
