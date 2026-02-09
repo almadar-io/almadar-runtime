@@ -38,9 +38,11 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
       expect(result.success).toBeTruthy();
       expect(result.clientEffects).toBeDefined();
 
-      const gamePatterns = result.clientEffects.filter((e: any) =>
-        Array.isArray(e) && e[0] === 'render-ui' && e[2]?.type?.startsWith('game-')
-      );
+      const effects = result.clientEffects!;
+      const gamePatterns = effects.filter((e: unknown) => {
+        const arr = e as unknown[];
+        return Array.isArray(arr) && arr[0] === 'render-ui' && (arr[2] as Record<string, string>)?.type?.startsWith('game-');
+      });
 
       expect(gamePatterns.length).toBeGreaterThan(0);
     });
@@ -52,8 +54,8 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
       await runtime.register(traitWarsSchema);
 
       try {
-        const battleOrbital = traitWarsSchema.orbitals.find((o: any) => o.name === 'TacticalBattle');
-        const controller = battleOrbital.traits.find((t: any) => t.name === 'BattlePhaseController');
+        const battleOrbital = traitWarsSchema.orbitals.find((o: Record<string, unknown>) => o.name === 'TacticalBattle');
+        const controller = battleOrbital.traits.find((t: Record<string, unknown>) => t.name === 'BattlePhaseController');
 
         expect(controller.listens).toBeDefined();
         expect(controller.listens.length).toBe(2);
@@ -73,9 +75,9 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
         });
 
         expect(result.emittedEvents).toBeDefined();
-        const heroEvent = result.emittedEvents.find((e: any) => e.event === 'HERO_SELECTED');
+        const heroEvent = result.emittedEvents.find((e) => e.event === 'HERO_SELECTED');
         expect(heroEvent).toBeDefined();
-        expect(heroEvent.payload.heroId).toBe('hero-valor');
+        expect((heroEvent!.payload as Record<string, unknown>).heroId).toBe('hero-valor');
       } finally {
         runtime.unregisterAll();
       }
@@ -102,7 +104,7 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
       });
 
       expect(result.success).toBeTruthy();
-      const persistEffects = result.effectResults?.filter((e: any) => e.effect === 'persist');
+      const persistEffects = result.effectResults?.filter((e) => e.effect === 'persist');
       expect(persistEffects && persistEffects.length).toBeGreaterThan(0);
     });
 
@@ -124,13 +126,13 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
         },
       });
 
-      const createEffect = result.effectResults?.find((e: any) =>
+      const createEffect = result.effectResults?.find((e) =>
         e.effect === 'persist' && e.action === 'create'
       );
 
       expect(createEffect).toBeDefined();
-      expect(createEffect.data.id).toBe('binding-test');
-      expect(createEffect.data.name).toBe('Binding Test Hero');
+      expect(createEffect!.data!.id).toBe('binding-test');
+      expect(createEffect!.data!.name).toBe('Binding Test Hero');
     });
   });
 
@@ -142,18 +144,21 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
       });
       await runtime.register(traitWarsSchema);
 
-      const persistence = (runtime as any).persistence;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const persistence = (runtime as any).persistence as {
+        list: (type: string) => Promise<Record<string, unknown>[]>;
+      };
 
       const units = await persistence.list('Unit');
 
-      const sirRoland = units.find((u: any) => u.id === 'player-knight');
-      const archmage = units.find((u: any) => u.id === 'player-mage');
+      const sirRoland = units.find((u) => u.id === 'player-knight');
+      const archmage = units.find((u) => u.id === 'player-mage');
 
       expect(units.length).toBe(6);
       expect(sirRoland).toBeDefined();
-      expect(sirRoland.name).toBe('Sir Roland');
+      expect(sirRoland!.name).toBe('Sir Roland');
       expect(archmage).toBeDefined();
-      expect(archmage.name).toBe('Archmage Lyra');
+      expect(archmage!.name).toBe('Archmage Lyra');
     });
 
     it('⚠️ Mock mode generates random data instead of using instances', async () => {
@@ -163,7 +168,10 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
       });
       await runtime.register(traitWarsSchema);
 
-      const persistence = (runtime as any).persistence;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const persistence = (runtime as any).persistence as {
+        list: (type: string) => Promise<Record<string, unknown>[]>;
+      };
       const units = await persistence.list('Unit');
 
       expect(units.length).toBe(6);
@@ -221,12 +229,13 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
         payload: {},
       });
 
-      const navigateEffects = result.clientEffects?.filter((e: any) =>
-        Array.isArray(e) && e[0] === 'navigate'
-      );
+      const navigateEffects = result.clientEffects?.filter((e: unknown) => {
+        const arr = e as unknown[];
+        return Array.isArray(arr) && arr[0] === 'navigate';
+      });
 
       expect(navigateEffects && navigateEffects.length).toBeGreaterThan(0);
-      expect(navigateEffects[0][1]).toBe('/world');
+      expect((navigateEffects![0] as unknown[])[1]).toBe('/world');
     });
   });
 
@@ -257,9 +266,9 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
 
       expect(result.success).toBeTruthy();
       expect(result.data).toBeDefined();
-      expect(result.data.Unit).toBeDefined();
+      expect(result.data!.Unit).toBeDefined();
 
-      const units = result.data.Unit as any[];
+      const units = result.data!.Unit as Record<string, unknown>[];
       expect(units.length).toBeGreaterThan(0);
     });
   });
