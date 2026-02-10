@@ -116,7 +116,12 @@ export class EffectExecutor {
         }
 
         const { operator, args } = parsed;
-        const resolvedArgs = resolveArgs(args, this.bindings);
+
+        // Compound operators ('do', 'when') contain nested effects as arguments.
+        // Skip resolveArgs for these — each nested effect will be resolved
+        // individually when this.execute() recurses into it via dispatch().
+        const isCompound = operator === 'do' || operator === 'when';
+        const resolvedArgs = isCompound ? args : resolveArgs(args, this.bindings);
 
         if (this.debug) {
             console.log('[EffectExecutor] Executing:', operator, resolvedArgs);
@@ -284,8 +289,10 @@ export class EffectExecutor {
 
             case 'when': {
                 // Conditional effect: ['when', condition, thenEffect, elseEffect?]
-                // Condition should already be resolved by binding resolution
-                const condition = args[0];
+                // Only the condition needs binding resolution — then/else are
+                // nested effects that will be resolved when execute() recurses.
+                const ctx = createContextFromBindings(this.bindings);
+                const condition = interpolateValue(args[0], ctx);
                 const thenEffect = args[1];
                 const elseEffect = args[2];
 

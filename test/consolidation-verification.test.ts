@@ -407,10 +407,7 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         expect(calls.notify).toHaveLength(1);
     });
 
-    // NOTE: `do` and `when` compound operators are a pre-existing EffectExecutor
-    // limitation — `resolveArgs` recursively resolves nested arrays, destructuring
-    // inner effect tuples. Builder code uses `executeAll` (flat lists), not these.
-    it.skip('handles compound do effects (known: resolveArgs destructures nested arrays)', async () => {
+    it('handles compound do effects', async () => {
         const { handlers, calls } = createMockHandlers();
         const executor = new EffectExecutor({
             handlers,
@@ -431,7 +428,7 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         expect(calls.notify).toHaveLength(1);
     });
 
-    it.skip('handles conditional when effects — truthy (known compound limitation)', async () => {
+    it('handles conditional when effects (truthy)', async () => {
         const { handlers, calls } = createMockHandlers();
         const executor = new EffectExecutor({
             handlers,
@@ -453,7 +450,7 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         expect(calls.notify[0][0]).toBe('Admin access granted');
     });
 
-    it.skip('handles conditional when effects — falsy (known compound limitation)', async () => {
+    it('handles conditional when effects (falsy)', async () => {
         const { handlers, calls } = createMockHandlers();
         const executor = new EffectExecutor({
             handlers,
