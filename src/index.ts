@@ -60,6 +60,14 @@ export {
   type EffectExecutorOptions,
 } from "./EffectExecutor.js";
 
+// Client Effect Handlers Factory
+export {
+  createClientEffectHandlers,
+  type CreateClientEffectHandlersOptions,
+  type ClientEventBus,
+  type SlotSetter,
+} from "./ClientEffectHandlers.js";
+
 // Re-export types for server modules (for type-only imports in client code)
 export type {
   RuntimeOrbitalSchema,
