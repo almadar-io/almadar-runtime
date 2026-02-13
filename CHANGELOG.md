@@ -1,5 +1,12 @@
 # @almadar/runtime
 
+## 1.2.0
+
+### Patch Changes
+
+- Updated dependencies
+  - @almadar/server@1.2.0
+
 ## 1.0.1
 
 ### Patch Changes
