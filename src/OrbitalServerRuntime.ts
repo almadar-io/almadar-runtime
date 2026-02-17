@@ -569,7 +569,7 @@ export class OrbitalServerRuntime {
    */
   private async registerOrbitalAsync(orbital: RuntimeOrbital): Promise<void> {
     // Convert traits to TraitDefinition - handle both flat and stateMachine structures
-    const traitDefs: TraitDefinition[] = orbital.traits.map((t) => {
+    const traitDefs: TraitDefinition[] = (orbital.traits || []).map((t) => {
       // Support both: t.states (flat) and t.stateMachine.states (OrbitalSchema structure)
       const stateMachine = (t as { stateMachine?: { states?: unknown[]; transitions?: unknown[] } }).stateMachine;
       const states = t.states || stateMachine?.states || [];
