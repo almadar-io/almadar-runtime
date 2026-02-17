@@ -638,7 +638,7 @@ export class OrbitalServerRuntime {
 
     if (this.config.debug) {
       console.log(
-        `[OrbitalRuntime] Registered orbital: ${orbital.name} with ${orbital.traits.length} trait(s)`,
+        `[OrbitalRuntime] Registered orbital: ${orbital.name} with ${(orbital.traits || []).length} trait(s)`,
       );
     }
   }
