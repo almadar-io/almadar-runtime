@@ -206,7 +206,7 @@ export async function preprocessSchema(
       // Resolved entity (always inline now)
       entity: resolvedOrbital.entity,
       // Resolved traits (inline definitions)
-      traits: resolvedOrbital.traits.map((rt) => {
+      traits: (resolvedOrbital.traits || []).map((rt) => {
         // If it has config or linkedEntity, wrap in reference object
         if (rt.config || rt.linkedEntity) {
           return {

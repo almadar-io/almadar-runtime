@@ -666,7 +666,7 @@ export class OrbitalServerRuntime {
 
     // For each orbital's traits with `listens`
     for (const [orbitalName, registered] of this.orbitals) {
-      for (const trait of registered.schema.traits) {
+      for (const trait of registered.schema.traits || []) {
         if (!trait.listens) continue;
 
         for (const listener of trait.listens) {
@@ -717,7 +717,7 @@ export class OrbitalServerRuntime {
 
     // For each orbital's traits with `ticks`
     for (const [orbitalName, registered] of this.orbitals) {
-      for (const trait of registered.schema.traits) {
+      for (const trait of registered.schema.traits || []) {
         if (!trait.ticks || trait.ticks.length === 0) continue;
 
         for (const tick of trait.ticks) {
@@ -1402,8 +1402,8 @@ export class OrbitalServerRuntime {
       const orbitals = Array.from(this.orbitals.entries()).map(
         ([name, reg]) => ({
           name,
-          entity: reg.schema.entity.name,
-          traits: reg.schema.traits.map((t) => t.name),
+          entity: reg.schema.entity?.name,
+          traits: (reg.schema.traits || []).map((t) => t.name),
         }),
       );
       res.json({ success: true, orbitals });
@@ -1428,11 +1428,11 @@ export class OrbitalServerRuntime {
         orbital: {
           name: orbitalName,
           entity: registered.schema.entity,
-          traits: registered.schema.traits.map((t) => ({
+          traits: (registered.schema.traits || []).map((t) => ({
             name: t.name,
             currentState: states[t.name],
-            states: t.states.map((s) => s.name),
-            events: [...new Set(t.transitions.map((tr) => tr.event))],
+            states: (t.states || []).map((s) => s.name),
+            events: [...new Set((t.transitions || []).map((tr) => tr.event))],
           })),
         },
       });
