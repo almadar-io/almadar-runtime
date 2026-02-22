@@ -31,19 +31,38 @@ import type { IEventBus, RuntimeEvent, EventListener, Unsubscribe } from './type
 export class EventBus implements IEventBus {
     private listeners: Map<string, Set<EventListener>> = new Map();
     private debug: boolean;
+    /** Maximum recursion depth before circuit breaker activates (RCG-05) */
+    private maxDepth: number;
+    /** Current emission depth for circular loop detection */
+    private depth: number = 0;
 
-    constructor(options: { debug?: boolean } = {}) {
+    constructor(options: { debug?: boolean; maxDepth?: number } = {}) {
         this.debug = options.debug ?? false;
+        this.maxDepth = options.maxDepth ?? 10;
     }
 
     /**
-     * Emit an event to all registered listeners
+     * Emit an event to all registered listeners.
+     *
+     * Includes circuit breaker (RCG-05): if emit is called recursively
+     * beyond `maxDepth`, the event is dropped and an error is logged.
+     * This prevents infinite loops from circular emit/listen chains.
      */
     emit(
         type: string,
         payload?: Record<string, unknown>,
         source?: RuntimeEvent['source']
     ): void {
+        // RCG-05: Circuit breaker for circular event loops
+        if (this.depth >= this.maxDepth) {
+            console.error(
+                `[EventBus] Circular event loop detected: "${type}" at depth ${this.depth}. ` +
+                `Event dropped to prevent infinite recursion. ` +
+                `Increase maxDepth (currently ${this.maxDepth}) if this is intentional.`
+            );
+            return;
+        }
+
         const event: RuntimeEvent = {
             type,
             payload,
@@ -56,36 +75,41 @@ export class EventBus implements IEventBus {
 
         if (this.debug) {
             if (listenerCount > 0) {
-                console.log(`[EventBus] Emit: ${type} → ${listenerCount} listener(s)`, payload);
+                console.log(`[EventBus] Emit: ${type} → ${listenerCount} listener(s) (depth: ${this.depth})`, payload);
             } else {
                 console.warn(`[EventBus] Emit: ${type} (NO LISTENERS)`, payload);
             }
         }
 
-        if (listeners) {
-            // Copy to avoid mutation during iteration
-            const listenersCopy = Array.from(listeners);
-            for (const listener of listenersCopy) {
-                try {
-                    listener(event);
-                } catch (error) {
-                    console.error(`[EventBus] Error in listener for '${type}':`, error);
-                }
-            }
-        }
-
-        // Wildcard listeners receive all events
-        if (type !== '*') {
-            const wildcardListeners = this.listeners.get('*');
-            if (wildcardListeners) {
-                for (const listener of Array.from(wildcardListeners)) {
+        this.depth++;
+        try {
+            if (listeners) {
+                // Copy to avoid mutation during iteration
+                const listenersCopy = Array.from(listeners);
+                for (const listener of listenersCopy) {
                     try {
                         listener(event);
                     } catch (error) {
-                        console.error(`[EventBus] Error in wildcard listener:`, error);
+                        console.error(`[EventBus] Error in listener for '${type}':`, error);
                     }
                 }
             }
+
+            // Wildcard listeners receive all events
+            if (type !== '*') {
+                const wildcardListeners = this.listeners.get('*');
+                if (wildcardListeners) {
+                    for (const listener of Array.from(wildcardListeners)) {
+                        try {
+                            listener(event);
+                        } catch (error) {
+                            console.error(`[EventBus] Error in wildcard listener:`, error);
+                        }
+                    }
+                }
+            }
+        } finally {
+            this.depth--;
         }
     }
 

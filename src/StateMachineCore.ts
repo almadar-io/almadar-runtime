@@ -13,6 +13,8 @@ import type {
     TraitDefinition,
     TransitionResult,
     BindingContext,
+    RuntimeConfig,
+    TransitionObserver,
 } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import { evaluateGuard } from '@almadar/evaluator';
@@ -95,6 +97,16 @@ export interface ProcessEventOptions {
     payload?: Record<string, unknown>;
     /** Entity data for binding resolution */
     entityData?: Record<string, unknown>;
+    /**
+     * Guard evaluation error handling mode. (RCG-02)
+     * - "permissive": Guard errors allow the transition (default, backwards-compatible)
+     * - "strict": Guard errors block the transition
+     */
+    guardMode?: "strict" | "permissive";
+    /**
+     * When true, log warnings when bindings resolve to undefined. (RCG-01)
+     */
+    strictBindings?: boolean;
 }
 
 /**
@@ -127,7 +139,11 @@ export interface ProcessEventOptions {
  * ```
  */
 export function processEvent(options: ProcessEventOptions): TransitionResult {
-    const { traitState, trait, eventKey, payload, entityData } = options;
+    const {
+        traitState, trait, eventKey, payload, entityData,
+        guardMode = 'permissive',
+        strictBindings = false,
+    } = options;
     const normalizedEvent = normalizeEventKey(eventKey);
 
     // Find transition from current state
@@ -148,7 +164,7 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
             entity: entityData,
             payload,
             state: traitState.currentState,
-        });
+        }, strictBindings);
 
         try {
             const guardPasses = evaluateGuard(
@@ -170,7 +186,27 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
                 };
             }
         } catch (error) {
-            // On error, allow transition (fail-open for better UX)
+            if (guardMode === 'strict') {
+                // RCG-02: In strict mode, guard errors block the transition
+                console.error(
+                    `[StateMachineCore] Guard error blocks transition ` +
+                    `${traitState.currentState}→${transition.to} (${normalizedEvent}):`,
+                    error
+                );
+                return {
+                    executed: false,
+                    newState: traitState.currentState,
+                    previousState: traitState.currentState,
+                    effects: [],
+                    transition: {
+                        from: traitState.currentState,
+                        to: transition.to,
+                        event: normalizedEvent,
+                    },
+                    guardResult: false,
+                };
+            }
+            // Permissive mode: allow transition despite guard error (original behavior)
             console.error('[StateMachineCore] Guard evaluation error:', error);
         }
     }
@@ -214,11 +250,28 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
 export class StateMachineManager {
     private traits: Map<string, TraitDefinition> = new Map();
     private states: Map<string, TraitState> = new Map();
+    private config: RuntimeConfig;
+    private observer?: TransitionObserver;
 
-    constructor(traits: TraitDefinition[] = []) {
+    constructor(
+        traits: TraitDefinition[] = [],
+        config: RuntimeConfig = {},
+        observer?: TransitionObserver
+    ) {
+        this.config = config;
+        this.observer = observer;
         for (const trait of traits) {
             this.addTrait(trait);
         }
+    }
+
+    /**
+     * Set the transition observer for runtime verification.
+     * Wire this to `verificationRegistry.recordTransition()` to enable
+     * automatic verification tracking.
+     */
+    setObserver(observer: TransitionObserver): void {
+        this.observer = observer;
     }
 
     /**
@@ -284,6 +337,8 @@ export class StateMachineManager {
                 eventKey,
                 payload,
                 entityData,
+                guardMode: this.config.guardMode,
+                strictBindings: this.config.strictBindings,
             });
 
             if (result.executed) {
@@ -297,6 +352,19 @@ export class StateMachineManager {
                 });
 
                 results.push({ traitName, result });
+
+                // Notify observer (for verificationRegistry wiring)
+                if (this.observer && result.transition) {
+                    this.observer.onTransition({
+                        traitName,
+                        from: result.transition.from,
+                        to: result.transition.to,
+                        event: result.transition.event,
+                        guardResult: result.guardResult,
+                        // Effects will be traced when executed — placeholder here
+                        effects: [],
+                    });
+                }
             }
         }
 

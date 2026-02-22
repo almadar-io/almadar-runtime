@@ -104,6 +104,11 @@ export interface TraitDefinition {
         event: string;
         guard?: unknown;
         effects?: unknown[];
+        /** Compensating transition when effects fail (RCG-04) */
+        onEffectError?: {
+            to: string;
+            effects?: unknown[];
+        };
     }>;
     /** Cross-trait event listeners (optional) */
     listens?: Array<{
@@ -228,3 +233,113 @@ export interface EffectContext {
     /** Entity ID (if available) */
     entityId?: string;
 }
+
+// ============================================================================
+// Effect Result Types (RCG-04)
+// ============================================================================
+
+/**
+ * Result of executing a single effect, with status tracking.
+ */
+export interface EffectResult {
+    /** Effect operator (e.g., "persist", "render-ui") */
+    type: string;
+    /** Effect arguments */
+    args: unknown[];
+    /** Whether the effect executed successfully */
+    status: "executed" | "failed" | "skipped";
+    /** Error message if failed */
+    error?: string;
+    /** Execution duration in milliseconds */
+    durationMs?: number;
+}
+
+// ============================================================================
+// Runtime Configuration (RCG-01, RCG-02, RCG-05)
+// ============================================================================
+
+/**
+ * Runtime configuration for strictness and safety modes.
+ *
+ * These options control how the runtime handles edge cases:
+ * - `strictBindings`: Log warnings when bindings resolve to undefined (RCG-01)
+ * - `guardMode`: Control whether guard errors block or allow transitions (RCG-02)
+ * - `maxEventDepth`: Prevent infinite event loops (RCG-05)
+ */
+export interface RuntimeConfig {
+    /**
+     * When true, log warnings when bindings like @entity.field resolve to undefined.
+     * Helps detect typos and missing fields early. (RCG-01)
+     * @default false
+     */
+    strictBindings?: boolean;
+
+    /**
+     * Guard evaluation error handling mode. (RCG-02)
+     * - "permissive": Guard errors allow the transition (current default behavior)
+     * - "strict": Guard errors block the transition
+     * @default "permissive"
+     */
+    guardMode?: "strict" | "permissive";
+
+    /**
+     * Maximum event emission depth before triggering circuit breaker. (RCG-05)
+     * Prevents infinite loops from circular emit/listen chains.
+     * @default 10
+     */
+    maxEventDepth?: number;
+}
+
+// ============================================================================
+// Handler Manifest Types (RCG-03)
+// ============================================================================
+
+/**
+ * Execution context for handler manifest validation.
+ * Defines which effect handlers should be available in each environment.
+ */
+export type ExecutionEnvironment = "client" | "server" | "test" | "ssr";
+
+// ============================================================================
+// Transition Observer Types (Verification Registry Wiring)
+// ============================================================================
+
+/**
+ * Observer interface for recording transition and effect traces.
+ * Implement this to wire in the verificationRegistry or other monitoring tools.
+ *
+ * The runtime calls these hooks automatically when transitions execute and
+ * effects complete, enabling runtime verification without tight coupling.
+ */
+export interface TransitionObserver {
+    /**
+     * Called after a transition is processed (whether or not it executed).
+     */
+    onTransition(trace: {
+        traitName: string;
+        from: string;
+        to: string;
+        event: string;
+        guardResult?: boolean;
+        effects: Array<{
+            type: string;
+            args: unknown[];
+            status: "executed" | "failed" | "skipped";
+            error?: string;
+            durationMs?: number;
+        }>;
+    }): void;
+}
+
+/**
+ * Maps execution environments to their available effect handlers.
+ */
+export const HANDLER_MANIFEST: Record<ExecutionEnvironment, string[]> = {
+    client: ["render-ui", "render", "navigate", "notify", "emit", "set", "log"],
+    server: ["persist", "fetch", "call-service", "emit", "set", "spawn", "despawn", "log"],
+    test: [
+        "render-ui", "render", "navigate", "notify", "emit", "set",
+        "persist", "fetch", "call-service", "spawn", "despawn", "log",
+    ],
+    ssr: ["render-ui", "render", "fetch", "emit", "set", "log"],
+};

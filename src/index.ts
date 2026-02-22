@@ -26,7 +26,14 @@ export type {
   BindingContext,
   Effect,
   EffectContext,
+  EffectResult,
+  RuntimeConfig,
+  ExecutionEnvironment,
+  TransitionObserver,
 } from "./types.js";
+
+// Constants
+export { HANDLER_MANIFEST } from "./types.js";
 
 // EventBus
 export { EventBus } from "./EventBus.js";
@@ -86,6 +93,13 @@ export type {
   EntitySchema,
   MockPersistenceConfig,
 } from "./MockPersistenceAdapter.js";
+
+// Payload Validation (RCG-10)
+export {
+  validatePayloadShapes,
+  buildEmitsFromTraits,
+  type PayloadMismatch,
+} from "./PayloadValidator.js";
 
 // Uses Integration (for `uses` system)
 export {

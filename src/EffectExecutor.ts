@@ -7,7 +7,14 @@
  * @packageDocumentation
  */
 
-import type { EffectHandlers, Effect, EffectContext } from './types.js';
+import type {
+    EffectHandlers,
+    Effect,
+    EffectContext,
+    EffectResult,
+    ExecutionEnvironment,
+} from './types.js';
+import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import type { BindingContext } from './types.js';
 
@@ -27,6 +34,8 @@ export interface EffectExecutorOptions {
     context: EffectContext;
     /** Enable debug logging */
     debug?: boolean;
+    /** When true, log warnings when bindings resolve to undefined (RCG-01) */
+    strictBindings?: boolean;
 }
 
 // ============================================================================
@@ -54,9 +63,10 @@ function parseEffect(effect: unknown): { operator: string; args: unknown[] } | n
  */
 function resolveArgs(
     args: unknown[],
-    bindings: BindingContext
+    bindings: BindingContext,
+    strictBindings?: boolean
 ): unknown[] {
-    const ctx = createContextFromBindings(bindings);
+    const ctx = createContextFromBindings(bindings, strictBindings);
     return args.map((arg) => interpolateValue(arg, ctx));
 }
 
@@ -95,12 +105,90 @@ export class EffectExecutor {
     private bindings: BindingContext;
     private context: EffectContext;
     private debug: boolean;
+    private strictBindings: boolean;
 
     constructor(options: EffectExecutorOptions) {
         this.handlers = options.handlers;
         this.bindings = options.bindings;
         this.context = options.context;
         this.debug = options.debug ?? false;
+        this.strictBindings = options.strictBindings ?? false;
+    }
+
+    // ==========================================================================
+    // Handler Manifest Validation (RCG-03)
+    // ==========================================================================
+
+    /**
+     * Validate that all effect types used in a schema have handlers registered.
+     * Call this at runtime startup to catch missing handler setup immediately.
+     *
+     * @param usedEffectTypes - Effect operator names used in the loaded schemas
+     * @param environment - Execution environment for context-aware error messages
+     * @returns Array of missing handler errors (empty if all handlers are available)
+     *
+     * @example
+     * ```ts
+     * const missing = EffectExecutor.validateHandlers(
+     *   ['persist', 'render-ui', 'fetch'],
+     *   executor.getRegisteredHandlers(),
+     *   'client'
+     * );
+     * if (missing.length > 0) {
+     *   console.error('Missing handlers:', missing);
+     * }
+     * ```
+     */
+    static validateHandlers(
+        usedEffectTypes: string[],
+        registeredHandlers: string[],
+        environment?: ExecutionEnvironment
+    ): string[] {
+        const errors: string[] = [];
+        const expectedHandlers = environment
+            ? HANDLER_MANIFEST[environment]
+            : undefined;
+
+        for (const effectType of usedEffectTypes) {
+            if (!registeredHandlers.includes(effectType)) {
+                let message = `Effect "${effectType}" is used in schema but no handler is registered.`;
+                if (expectedHandlers && !expectedHandlers.includes(effectType)) {
+                    message += ` Effect "${effectType}" is not expected in "${environment}" environment.`;
+                }
+                errors.push(message);
+            }
+        }
+
+        return errors;
+    }
+
+    /**
+     * Get list of effect operators that have handlers registered.
+     */
+    getRegisteredHandlers(): string[] {
+        const registered: string[] = [];
+        const handlerMap: Record<string, unknown> = {
+            'emit': this.handlers.emit,
+            'persist': this.handlers.persist,
+            'set': this.handlers.set,
+            'call-service': this.handlers.callService,
+            'fetch': this.handlers.fetch,
+            'spawn': this.handlers.spawn,
+            'despawn': this.handlers.despawn,
+            'render-ui': this.handlers.renderUI,
+            'render': this.handlers.renderUI,
+            'navigate': this.handlers.navigate,
+            'notify': this.handlers.notify,
+            'log': this.handlers.log,
+        };
+        for (const [name, handler] of Object.entries(handlerMap)) {
+            if (handler) {
+                registered.push(name);
+            }
+        }
+        // Compound operators are always available
+        registered.push('do', 'when');
+        return registered;
     }
 
     /**
@@ -121,7 +209,7 @@ export class EffectExecutor {
         // Skip resolveArgs for these — each nested effect will be resolved
         // individually when this.execute() recurses into it via dispatch().
         const isCompound = operator === 'do' || operator === 'when';
-        const resolvedArgs = isCompound ? args : resolveArgs(args, this.bindings);
+        const resolvedArgs = isCompound ? args : resolveArgs(args, this.bindings, this.strictBindings);
 
         if (this.debug) {
             console.log('[EffectExecutor] Executing:', operator, resolvedArgs);
@@ -149,6 +237,64 @@ export class EffectExecutor {
      */
     async executeParallel(effects: unknown[]): Promise<void> {
         await Promise.all(effects.map((effect) => this.execute(effect)));
+    }
+
+    // ==========================================================================
+    // Effect Execution with Results (RCG-04)
+    // ==========================================================================
+
+    /**
+     * Execute effects and return detailed results for each.
+     * Enables compensating transitions by reporting which effects failed.
+     *
+     * Unlike `executeAll`, this method does NOT throw on effect errors.
+     * Instead, it captures errors in the returned `EffectResult[]` array.
+     */
+    async executeWithResults(effects: unknown[]): Promise<EffectResult[]> {
+        const results: EffectResult[] = [];
+
+        for (const effect of effects) {
+            const parsed = parseEffect(effect);
+            if (!parsed) {
+                results.push({
+                    type: 'unknown',
+                    args: [],
+                    status: 'skipped',
+                    error: 'Invalid effect format',
+                });
+                continue;
+            }
+
+            const start = Date.now();
+            const { operator, args: rawArgs } = parsed;
+            const isCompound = operator === 'do' || operator === 'when';
+            const resolvedArgs = isCompound
+                ? rawArgs
+                : resolveArgs(rawArgs, this.bindings, this.strictBindings);
+
+            try {
+                await this.dispatch(operator, resolvedArgs);
+                results.push({
+                    type: operator,
+                    args: resolvedArgs,
+                    status: 'executed',
+                    durationMs: Date.now() - start,
+                });
+            } catch (error) {
+                const errorMessage = error instanceof Error
+                    ? error.message
+                    : String(error);
+                results.push({
+                    type: operator,
+                    args: resolvedArgs,
+                    status: 'failed',
+                    error: errorMessage,
+                    durationMs: Date.now() - start,
+                });
+            }
+        }
+
+        return results;
     }
 
     // ==========================================================================

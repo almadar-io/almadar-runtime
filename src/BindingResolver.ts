@@ -220,11 +220,21 @@ export function extractBindings(value: unknown): string[] {
 
 /**
  * Create an EvaluationContext from a BindingContext.
+ *
+ * @param bindings - Binding context with entity, payload, state data
+ * @param strictBindings - When true, log warnings for undefined binding paths (RCG-01)
  */
-export function createContextFromBindings(bindings: BindingContext): EvaluationContext {
-    return createMinimalContext(
+export function createContextFromBindings(
+    bindings: BindingContext,
+    strictBindings?: boolean
+): EvaluationContext {
+    const ctx = createMinimalContext(
         bindings.entity || {},
         bindings.payload || {},
         bindings.state || 'idle'
     );
+    if (strictBindings) {
+        ctx.strictBindings = true;
+    }
+    return ctx;
 }
