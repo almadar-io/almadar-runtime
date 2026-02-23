@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "1.2.3",
+  "version": "2.0.0",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -35,8 +35,8 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@almadar/evaluator": "workspace:*",
-    "@almadar/core": "workspace:*",
+    "@almadar/evaluator": ">=2.0.0",
+    "@almadar/core": ">=2.0.0",
     "@faker-js/faker": "^9.3.0"
   },
   "peerDependencies": {
@@ -52,8 +52,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/almadar-io/almadar.git",
-    "directory": "packages/almadar-runtime"
+    "url": "https://github.com/almadar-io/almadar-runtime.git"
   },
   "license": "MIT",
   "keywords": [
