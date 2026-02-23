@@ -52,7 +52,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/almadar-io/almadar-runtime.git"
+    "url": "https://github.com/almadar-io/almadar.git",
+    "directory": "docs/packages/runtime"
   },
   "license": "MIT",
   "keywords": [
@@ -60,5 +61,6 @@
     "runtime",
     "orbital",
     "interpreter"
-  ]
+  ],
+  "homepage": "https://github.com/almadar-io/almadar#readme"
 }
