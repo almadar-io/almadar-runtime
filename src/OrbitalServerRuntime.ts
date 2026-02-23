@@ -90,6 +90,8 @@ export interface RuntimeOrbital {
   entity: {
     name: string;
     fields?: Array<{ name: string; type: string }>;
+    /** Pre-defined entity instances to seed on registration */
+    instances?: Array<Record<string, unknown>>;
   };
   traits: RuntimeTrait[];
 }
@@ -594,8 +596,8 @@ export class OrbitalServerRuntime {
     const entity = orbital.entity;
     
     // Seed entity instances from schema if they exist
-    if (entity?.name && (entity as any).instances && Array.isArray((entity as any).instances)) {
-      const instances = (entity as any).instances as Array<Record<string, unknown>>;
+    if (entity?.name && entity.instances && Array.isArray(entity.instances)) {
+      const instances = entity.instances;
       if (instances.length > 0) {
         console.log(`[OrbitalRuntime] Seeding ${instances.length} instances for ${entity.name} from schema`);
         
@@ -1086,6 +1088,96 @@ export class OrbitalServerRuntime {
       },
 
       persist: async (action, targetEntityType, data) => {
+        // ----------------------------------------------------------------
+        // Batch mode: ["persist", "batch", [...operations]]
+        // Each operation: ["create", "collection", {...data}],
+        //                 ["update", "collection", "id", {...data}],
+        //                 ["delete", "collection", "id"]
+        // ----------------------------------------------------------------
+        if (action === 'batch') {
+          const operations = (data as Record<string, unknown> | undefined)?.operations as unknown[] | undefined;
+          if (!Array.isArray(operations) || operations.length === 0) {
+            effectResults.push({
+              effect: 'persist',
+              action: 'batch',
+              success: false,
+              error: 'Batch requires a non-empty operations array',
+            });
+            return;
+          }
+
+          const batchResults: Array<Record<string, unknown>> = [];
+          // Track completed ops for rollback on failure (best-effort)
+          const completed: Array<{ action: string; entityType: string; id?: string }> = [];
+          let batchFailed = false;
+          let batchError = '';
+
+          for (const op of operations) {
+            if (!Array.isArray(op) || op.length < 2) {
+              batchFailed = true;
+              batchError = `Invalid batch operation format: ${JSON.stringify(op)}`;
+              break;
+            }
+
+            const [opAction, opEntityType, ...opRest] = op as [string, string, ...unknown[]];
+
+            try {
+              switch (opAction) {
+                case 'create': {
+                  const createData = (opRest[0] as Record<string, unknown>) || {};
+                  const { id: newId } = await this.persistence.create(opEntityType, createData);
+                  batchResults.push({ action: 'create', entityType: opEntityType, id: newId, ...createData });
+                  completed.push({ action: 'create', entityType: opEntityType, id: newId });
+                  break;
+                }
+                case 'update': {
+                  const updateId = opRest[0] as string;
+                  const updateData = (opRest[1] as Record<string, unknown>) || {};
+                  await this.persistence.update(opEntityType, updateId, updateData);
+                  const updated = await this.persistence.getById(opEntityType, updateId);
+                  batchResults.push({ action: 'update', entityType: opEntityType, id: updateId, ...(updated || updateData) });
+                  completed.push({ action: 'update', entityType: opEntityType, id: updateId });
+                  break;
+                }
+                case 'delete': {
+                  const deleteId = opRest[0] as string;
+                  // Snapshot before delete for potential rollback info
+                  await this.persistence.delete(opEntityType, deleteId);
+                  batchResults.push({ action: 'delete', entityType: opEntityType, id: deleteId, deleted: true });
+                  completed.push({ action: 'delete', entityType: opEntityType, id: deleteId });
+                  break;
+                }
+                default:
+                  batchFailed = true;
+                  batchError = `Unknown batch operation action: ${opAction}`;
+                  break;
+              }
+            } catch (err) {
+              batchFailed = true;
+              batchError = `Batch operation [${opAction}, ${opEntityType}] failed: ${err instanceof Error ? err.message : String(err)}`;
+              break;
+            }
+
+            if (batchFailed) break;
+          }
+
+          effectResults.push({
+            effect: 'persist',
+            action: 'batch',
+            data: {
+              operations: batchResults,
+              completedCount: completed.length,
+              totalCount: operations.length,
+            },
+            success: !batchFailed,
+            ...(batchFailed ? { error: batchError } : {}),
+          });
+          return;
+        }
+
+        // ----------------------------------------------------------------
+        // Single operation mode: create / update / delete
+        // ----------------------------------------------------------------
         const type = targetEntityType || entityType;
         let resultData: Record<string, unknown> | undefined;
 

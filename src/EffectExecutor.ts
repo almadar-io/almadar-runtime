@@ -319,10 +319,19 @@ export class EffectExecutor {
             }
 
             case 'persist': {
-                const action = args[0] as 'create' | 'update' | 'delete';
-                const entityType = args[1] as string;
-                const data = args[2] as Record<string, unknown> | undefined;
-                await this.handlers.persist(action, entityType, data);
+                const action = args[0] as 'create' | 'update' | 'delete' | 'batch';
+                if (action === 'batch') {
+                    // Batch mode: ["persist", "batch", [...operations]]
+                    // Each operation: ["create", "collection", {...}],
+                    //                 ["update", "collection", "id", {...}],
+                    //                 ["delete", "collection", "id"]
+                    const operations = args[1] as unknown[];
+                    await this.handlers.persist('batch', '', { operations } as Record<string, unknown>);
+                } else {
+                    const entityType = args[1] as string;
+                    const data = args[2] as Record<string, unknown> | undefined;
+                    await this.handlers.persist(action, entityType, data);
+                }
                 break;
             }
 

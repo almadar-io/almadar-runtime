@@ -132,9 +132,9 @@ export interface EffectHandlers {
     /** Emit an event to the event bus */
     emit: (event: string, payload?: Record<string, unknown>) => void;
 
-    /** Persist data (create/update/delete) */
+    /** Persist data (create/update/delete/batch) */
     persist: (
-        action: 'create' | 'update' | 'delete',
+        action: 'create' | 'update' | 'delete' | 'batch',
         entityType: string,
         data?: Record<string, unknown>
     ) => Promise<void>;
