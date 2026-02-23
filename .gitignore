@@ -1,6 +1,9 @@
 # Turbo
 .turbo/
 
+# Build output
+dist/
+
 # Node
 node_modules/
 *.log
