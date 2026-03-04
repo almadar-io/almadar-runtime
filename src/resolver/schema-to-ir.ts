@@ -66,7 +66,7 @@ function resolveField(field: EntityField & Record<string, unknown>): ResolvedFie
     type: field.type || 'string',
     tsType: inferTsType(field.type || 'string'),
     description: field.description,
-    default: field.default,
+    default: field.default as string | undefined,
     required: field.required ?? false,
     validation: field.validation || (enumValues ? { enum: enumValues } : undefined),
     values: enumValues,
@@ -116,7 +116,7 @@ function resolveEntities(schema: OrbitalSchema): Map<string, ResolvedEntity> {
         name: entity.name,
         description: entity.description,
         collection: entity.collection || entity.name.toLowerCase() + 's',
-        fields: (entity.fields || []).map(resolveField),
+        fields: (entity.fields || []).map(f => resolveField(f as EntityField & Record<string, unknown>)),
         usedByTraits: [],
         usedByPages: [],
         runtime: isRuntime,
@@ -191,7 +191,7 @@ function resolveTrait(trait: any, source: 'schema' | 'library' | 'inline'): Reso
     })),
     dataEntities: (trait.dataEntities || []).map((de: any) => ({
       name: de.name,
-      fields: (de.fields || []).map(resolveField),
+      fields: (de.fields || []).map((f: unknown) => resolveField(f as EntityField & Record<string, unknown>)),
       runtime: de.runtime ?? false,
       singleton: de.singleton ?? false,
     })),
@@ -214,7 +214,7 @@ function resolveTraits(schema: OrbitalSchema): Map<string, ResolvedTrait> {
 
     for (const trait of orbitalTraits) {
       // Skip trait references (they have 'ref')
-      if (typeof trait === 'string' || trait.ref) continue;
+      if (typeof trait === 'string' || 'ref' in trait) continue;
 
       // This is an inline trait definition
       if (!trait.name || traitMap.has(trait.name)) continue;
@@ -368,8 +368,8 @@ function resolvePages(
         name: pageName,
         path: pagePath || `/${pageName.toLowerCase()}`,
         featureName: orbitalName,
-        viewType: typeof pageRef === 'object' && !('ref' in pageRef) ? (pageRef as Page).viewType : undefined,
-        layout: typeof pageRef === 'object' ? (pageRef as Record<string, unknown>).layout as string | undefined : undefined,
+        viewType: typeof pageRef === 'object' && !('ref' in pageRef) ? (pageRef as Page).viewType as ("create" | "list" | "detail" | "edit" | "dashboard" | undefined) : undefined,
+        layout: typeof pageRef === 'object' ? (pageRef as unknown as Record<string, unknown>).layout as string | undefined : undefined,
         sections: [], // Trait-driven: no static sections
         traits: traitBindings,
         entityBindings: [],
