@@ -49,7 +49,10 @@
     "express": "^4.21.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "eslint": "10.0.0",
+    "@typescript-eslint/parser": "8.56.0",
+    "@almadar/eslint-plugin": ">=2.3.0"
   },
   "repository": {
     "type": "git",

@@ -25,6 +25,9 @@ import type {
   ResolvedTraitTick,
   ResolvedTraitListener,
   TransitionFrom,
+  EntityField,
+  Page,
+  Orbital,
 } from '@almadar/core';
 import {
   isEntityReference,
@@ -54,9 +57,9 @@ export function clearSchemaCache(): void {
 // Field Resolution
 // ============================================================================
 
-function resolveField(field: any): ResolvedField {
+function resolveField(field: EntityField & Record<string, unknown>): ResolvedField {
   // Collect enum values from all possible locations
-  const enumValues = field.enumValues || field.values || field.options || field.validation?.enum;
+  const enumValues = (field.enumValues as string[] | undefined) || field.values || (field.options as string[] | undefined) || (field.validation as Record<string, unknown> | undefined)?.enum as string[] | undefined;
 
   return {
     name: field.name,
@@ -83,7 +86,7 @@ function resolveEntities(schema: OrbitalSchema): Map<string, ResolvedEntity> {
     // Skip orbital references (they have 'ref' instead of 'entity')
     if ('ref' in orbital && !('entity' in orbital)) continue;
 
-    const entityRef = (orbital as any).entity as EntityRef | undefined;
+    const entityRef = (orbital as Orbital).entity as EntityRef | undefined;
     if (!entityRef) continue;
 
     // Handle EntityRef: can be inline Entity object OR string reference
@@ -108,7 +111,7 @@ function resolveEntities(schema: OrbitalSchema): Map<string, ResolvedEntity> {
       // Derive runtime/singleton from persistence field
       const isRuntime = entity.persistence === 'runtime';
       const isSingleton = entity.persistence === 'singleton';
-      const entityInstances = (entity as any).instances as Record<string, unknown>[] | undefined;
+      const entityInstances = entity.instances;
       entityMap.set(entity.name, {
         name: entity.name,
         description: entity.description,
@@ -207,8 +210,7 @@ function resolveTraits(schema: OrbitalSchema): Map<string, ResolvedTrait> {
   for (const orbital of schema.orbitals || []) {
     if ('ref' in orbital && !('traits' in orbital)) continue;
 
-    const orbitalDef = orbital as any;
-    const orbitalTraits = orbitalDef.traits || [];
+    const orbitalTraits = (orbital as Orbital).traits || [];
 
     for (const trait of orbitalTraits) {
       // Skip trait references (they have 'ref')
@@ -333,12 +335,12 @@ function resolvePages(
     // Skip orbital references
     if ('ref' in orbital && !('pages' in orbital)) continue;
 
-    const orbitalDef = orbital as any;
-    const orbitalName = orbitalDef.name;
+    const orbitalTyped = orbital as Orbital;
+    const orbitalName = orbitalTyped.name;
     // Handle EntityRef: can be string or inline entity
-    const orbitalEntity = getEntityNameFromRef(orbitalDef.entity);
+    const orbitalEntity = getEntityNameFromRef(orbitalTyped.entity);
 
-    for (const pageRef of orbitalDef.pages || []) {
+    for (const pageRef of orbitalTyped.pages || []) {
       // Handle PageRef: can be string, object reference, or inline page
       const pageInfo = getPageInfoFromRef(pageRef as PageRef);
       if (!pageInfo) continue;
@@ -366,8 +368,8 @@ function resolvePages(
         name: pageName,
         path: pagePath || `/${pageName.toLowerCase()}`,
         featureName: orbitalName,
-        viewType: (pageRef as any).viewType,
-        layout: (pageRef as any).layout,
+        viewType: typeof pageRef === 'object' && !('ref' in pageRef) ? (pageRef as Page).viewType : undefined,
+        layout: typeof pageRef === 'object' ? (pageRef as Record<string, unknown>).layout as string | undefined : undefined,
         sections: [], // Trait-driven: no static sections
         traits: traitBindings,
         entityBindings: [],
