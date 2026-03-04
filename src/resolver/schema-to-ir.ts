@@ -67,10 +67,10 @@ function resolveField(field: EntityField): ResolvedField {
     name: field.name,
     type: field.type || 'string',
     tsType: inferTsType(field.type || 'string'),
-    description: field.description,
+    description: extra.description as string | undefined,
     default: field.default as string | undefined,
     required: field.required ?? false,
-    validation: field.validation || (enumValues ? { enum: enumValues } : undefined),
+    validation: extra.validation || (enumValues ? { enum: enumValues } : undefined),
     values: enumValues,
     enumValues: enumValues, // Also provide enumValues for compatibility
     relation: field.relation,
