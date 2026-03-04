@@ -57,9 +57,11 @@ export function clearSchemaCache(): void {
 // Field Resolution
 // ============================================================================
 
-function resolveField(field: EntityField & Record<string, unknown>): ResolvedField {
+function resolveField(field: EntityField): ResolvedField {
+  // Use a local extra variable for accessing non-EntityField properties
+  const extra = field as unknown as Record<string, unknown>;
   // Collect enum values from all possible locations
-  const enumValues = (field.enumValues as string[] | undefined) || field.values || (field.options as string[] | undefined) || (field.validation as Record<string, unknown> | undefined)?.enum as string[] | undefined;
+  const enumValues = (extra.enumValues as string[] | undefined) || (extra.values as string[] | undefined) || (extra.options as string[] | undefined) || (extra.validation as Record<string, unknown> | undefined)?.enum as string[] | undefined;
 
   return {
     name: field.name,
@@ -116,7 +118,7 @@ function resolveEntities(schema: OrbitalSchema): Map<string, ResolvedEntity> {
         name: entity.name,
         description: entity.description,
         collection: entity.collection || entity.name.toLowerCase() + 's',
-        fields: (entity.fields || []).map(f => resolveField(f as EntityField & Record<string, unknown>)),
+        fields: (entity.fields || []).map(resolveField),
         usedByTraits: [],
         usedByPages: [],
         runtime: isRuntime,
@@ -191,7 +193,7 @@ function resolveTrait(trait: any, source: 'schema' | 'library' | 'inline'): Reso
     })),
     dataEntities: (trait.dataEntities || []).map((de: any) => ({
       name: de.name,
-      fields: (de.fields || []).map((f: unknown) => resolveField(f as EntityField & Record<string, unknown>)),
+      fields: (de.fields || []).map((f: unknown) => resolveField(f as EntityField)),
       runtime: de.runtime ?? false,
       singleton: de.singleton ?? false,
     })),
