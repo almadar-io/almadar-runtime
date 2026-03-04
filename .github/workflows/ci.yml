@@ -47,8 +47,7 @@ jobs:
       - name: Validate service schema
         run: |
           if ls service/*.orb 2>/dev/null | grep -q .; then
-            npm install -g @almadar/cli
-            orbital validate service/*.orb
+            npx @almadar/cli validate service/*.orb
           else
             echo "No service schemas found, skipping"
           fi
