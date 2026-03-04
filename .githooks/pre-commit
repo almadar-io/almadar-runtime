@@ -3,9 +3,13 @@
 #
 # Two contexts:
 #   Standalone repo: run `pnpm install` to fully regenerate the lockfile.
-#   Inside monorepo:  copy project into /tmp isolation and run `pnpm update`
+#   Inside monorepo:  copy project into /tmp isolation and run `pnpm install`
 #                     there (monorepo workspace absorbs pnpm commands in-place,
 #                     preventing standalone lockfile updates).
+#
+# NOTE: use `pnpm install` not `pnpm update` — install preserves specifiers
+# from package.json exactly, while update rewrites them to pinned versions,
+# causing a specifier mismatch that fails CI frozen-lockfile checks.
 
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 
@@ -27,12 +31,11 @@ if [ "$IN_WORKSPACE" -eq 1 ]; then
   trap 'rm -rf "$TMPDIR"' EXIT
 
   cp package.json "$TMPDIR/"
-  cp pnpm-lock.yaml "$TMPDIR/"
 
   echo "Updating pnpm-lock.yaml in isolation..."
   (
     cd "$TMPDIR" || exit 1
-    pnpm update --ignore-scripts > /dev/null 2>&1
+    pnpm install --ignore-scripts > /dev/null 2>&1
   )
 
   if [ $? -eq 0 ]; then
@@ -40,7 +43,7 @@ if [ "$IN_WORKSPACE" -eq 1 ]; then
     git add pnpm-lock.yaml
     echo "Updated pnpm-lock.yaml"
   else
-    echo "Warning: pnpm update failed in isolation — lockfile may be outdated"
+    echo "Warning: pnpm install failed in isolation — lockfile may be outdated"
   fi
 else
   # Standalone: let pnpm regenerate the lockfile properly
