@@ -41,12 +41,14 @@ jobs:
 
   validate-service:
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('service/*.orb') != '' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install orbital CLI
-        run: npm install -g @almadar/cli
-
       - name: Validate service schema
-        run: orbital validate service/*.orb
+        run: |
+          if ls service/*.orb 2>/dev/null | grep -q .; then
+            npm install -g @almadar/cli
+            orbital validate service/*.orb
+          else
+            echo "No service schemas found, skipping"
+          fi
