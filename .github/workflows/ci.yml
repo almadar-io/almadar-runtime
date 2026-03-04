@@ -41,7 +41,7 @@ jobs:
 
   validate-service:
     runs-on: ubuntu-latest
-    if: hashFiles('service/*.orb') != ''
+    if: ${{ hashFiles('service/*.orb') != '' }}
     steps:
       - uses: actions/checkout@v4
 
