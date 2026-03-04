@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Pre-commit hook — ensures pnpm-lock.yaml is up to date with package.json.
+#
+# Two contexts:
+#   Standalone repo: run `pnpm install` to fully regenerate the lockfile.
+#   Inside monorepo:  copy project into /tmp isolation and run `pnpm update`
+#                     there (monorepo workspace absorbs pnpm commands in-place,
+#                     preventing standalone lockfile updates).
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# Only act when a package.json is staged and a lockfile exists
+echo "$STAGED" | grep -q 'package\.json$' || exit 0
+[ -f pnpm-lock.yaml ] || exit 0
+
+# ── Detect monorepo parent ─────────────────────────────────────────────────
+IN_WORKSPACE=0
+CHECK_DIR=$(dirname "$(pwd)")
+while [ "$CHECK_DIR" != "/" ]; do
+  [ -f "$CHECK_DIR/pnpm-workspace.yaml" ] && { IN_WORKSPACE=1; break; }
+  CHECK_DIR=$(dirname "$CHECK_DIR")
+done
+
+if [ "$IN_WORKSPACE" -eq 1 ]; then
+  # Inside monorepo: use /tmp isolation so pnpm treats it as standalone
+  TMPDIR=$(mktemp -d)
+  trap 'rm -rf "$TMPDIR"' EXIT
+
+  cp package.json "$TMPDIR/"
+  cp pnpm-lock.yaml "$TMPDIR/"
+
+  echo "Updating pnpm-lock.yaml in isolation..."
+  (
+    cd "$TMPDIR" || exit 1
+    pnpm update --ignore-scripts > /dev/null 2>&1
+  )
+
+  if [ $? -eq 0 ]; then
+    cp "$TMPDIR/pnpm-lock.yaml" pnpm-lock.yaml
+    git add pnpm-lock.yaml
+    echo "Updated pnpm-lock.yaml"
+  else
+    echo "Warning: pnpm update failed in isolation — lockfile may be outdated"
+  fi
+else
+  # Standalone: let pnpm regenerate the lockfile properly
+  pnpm install --frozen-lockfile > /dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    echo "pnpm-lock.yaml is out of sync — running pnpm install to fix..."
+    pnpm install --ignore-scripts
+    git add pnpm-lock.yaml
+    echo "Staged updated pnpm-lock.yaml"
+  fi
+fi
+
+exit 0

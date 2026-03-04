@@ -32,7 +32,8 @@
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest --run",
-    "prepublishOnly": "pnpm run build"
+    "prepublishOnly": "pnpm run build",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
     "@almadar/evaluator": ">=2.0.0",
