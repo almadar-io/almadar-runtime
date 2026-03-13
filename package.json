@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@almadar/evaluator": ">=2.0.0",
+    "@almadar/operators": ">=2.0.0",
     "@almadar/core": ">=2.0.0",
     "@faker-js/faker": "^9.3.0"
   },

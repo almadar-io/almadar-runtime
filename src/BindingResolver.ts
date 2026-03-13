@@ -15,35 +15,11 @@ import {
     createMinimalContext,
     type EvaluationContext,
 } from '@almadar/evaluator';
+import { isKnownOperator } from '@almadar/operators';
 import type { BindingContext } from './types.js';
 
 // Re-export for convenience
 export { createMinimalContext, type EvaluationContext };
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-/**
- * Known S-expression operators for detecting embedded expressions
- */
-const OPERATORS = new Set([
-    // Comparison
-    '=', '!=', '<', '>', '<=', '>=',
-    // Logic
-    'and', 'or', 'not', 'if',
-    // Math
-    '+', '-', '*', '/', '%',
-    'round', 'floor', 'ceil', 'abs', 'min', 'max', 'clamp',
-    // Array
-    'count', 'sum', 'first', 'last', 'nth', 'map', 'filter', 'find', 'some', 'every', 'reduce',
-    'includes', 'empty',
-    // String
-    'concat', 'upper', 'lower', 'trim', 'substring', 'split', 'join', 'str', 'matches',
-    // Effects
-    'set', 'emit', 'navigate', 'persist', 'notify', 'render-ui', 'render', 'spawn', 'despawn',
-    'call-service', 'do', 'when', 'increment', 'decrement', 'log',
-]);
 
 // ============================================================================
 // Main Functions
@@ -167,7 +143,7 @@ function isSExpression(value: unknown[]): boolean {
     const first = value[0];
     if (typeof first !== 'string') return false;
 
-    if (OPERATORS.has(first)) return true;
+    if (isKnownOperator(first)) return true;
     if (first.includes('/')) return true;
     if (first === 'lambda' || first === 'let') return true;
 
