@@ -34,10 +34,12 @@ const OPERATORS = new Set([
     'and', 'or', 'not', 'if',
     // Math
     '+', '-', '*', '/', '%',
+    'round', 'floor', 'ceil', 'abs', 'min', 'max', 'clamp',
     // Array
-    'count', 'first', 'last', 'map', 'filter', 'find', 'some', 'every', 'reduce',
+    'count', 'sum', 'first', 'last', 'nth', 'map', 'filter', 'find', 'some', 'every', 'reduce',
+    'includes', 'empty',
     // String
-    'concat', 'upper', 'lower', 'trim', 'substring', 'split', 'join', 'str',
+    'concat', 'upper', 'lower', 'trim', 'substring', 'split', 'join', 'str', 'matches',
     // Effects
     'set', 'emit', 'navigate', 'persist', 'notify', 'render-ui', 'render', 'spawn', 'despawn',
     'call-service', 'do', 'when', 'increment', 'decrement', 'log',
