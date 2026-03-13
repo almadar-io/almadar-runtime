@@ -16,7 +16,7 @@ importers:
         version: 2.4.0
       '@almadar/operators':
         specifier: '>=2.0.0'
-        version: 2.0.3
+        version: 2.0.4
       '@faker-js/faker':
         specifier: ^9.3.0
         version: 9.9.0
@@ -62,8 +62,8 @@ packages:
   '@almadar/evaluator@2.4.0':
     resolution: {integrity: sha512-2ycMP7T1UuXCbSVyO30EMgfbi4Q+0CuRIg6uE+e7QJ0DR26jeNFAG6kq86eDiEXzQJWzZygKfUxtTYqE4p2T1A==}
 
-  '@almadar/operators@2.0.3':
-    resolution: {integrity: sha512-T8xGMaPMxTCJRlEzrwsu8+ChNIwNK6znhP3L2RRm99fz/h6RN8pqhWRihwFr6ccAjj5MxGW2U5v5iwvfLa+SXA==}
+  '@almadar/operators@2.0.4':
+    resolution: {integrity: sha512-0OdzBS57+Zv6z/vcUQFPIgl89ZApJb1GSl3rMtLHRgk55laKa4kxDQZ7tvpL77MNZVl4GKYVbA4RANWbVK0Efw==}
 
   '@almadar/patterns@2.6.2':
     resolution: {integrity: sha512-DWz817Je4dLNuIyAHFZlC/Wpn76jzjeBczs+ie5dpwXKum63g4iU4KfT8ps08l/iDqpLkr2yYG5BLBLa5wUWSQ==}
@@ -1507,7 +1507,7 @@ snapshots:
 
   '@almadar/core@2.2.0':
     dependencies:
-      '@almadar/operators': 2.0.3
+      '@almadar/operators': 2.0.4
       '@almadar/patterns': 2.6.2
       zod: 3.25.76
 
@@ -1519,9 +1519,9 @@ snapshots:
   '@almadar/evaluator@2.4.0':
     dependencies:
       '@almadar/core': 2.2.0
-      '@almadar/operators': 2.0.3
+      '@almadar/operators': 2.0.4
 
-  '@almadar/operators@2.0.3': {}
+  '@almadar/operators@2.0.4': {}
 
   '@almadar/patterns@2.6.2': {}
 

@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -8,16 +8,19 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
     },
     "./OrbitalServerRuntime": {
+      "types": "./dist/OrbitalServerRuntime.d.ts",
       "import": "./dist/OrbitalServerRuntime.js",
-      "types": "./dist/OrbitalServerRuntime.d.ts"
+      "require": "./dist/OrbitalServerRuntime.js"
     },
     "./ServerBridge": {
+      "types": "./dist/ServerBridge.d.ts",
       "import": "./dist/ServerBridge.js",
-      "types": "./dist/ServerBridge.d.ts"
+      "require": "./dist/ServerBridge.js"
     }
   },
   "files": [
