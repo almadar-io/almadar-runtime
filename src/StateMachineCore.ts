@@ -247,11 +247,22 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
  * const cartState = manager.getState('Cart');
  * ```
  */
+/** Entry in a per-trait event queue. */
+export interface QueuedEvent {
+    eventKey: string;
+    payload?: Record<string, unknown>;
+    entityData?: Record<string, unknown>;
+}
+
 export class StateMachineManager {
     private traits: Map<string, TraitDefinition> = new Map();
     private states: Map<string, TraitState> = new Map();
     private config: RuntimeConfig;
     private observer?: TransitionObserver;
+
+    // Actor-model per-trait queues
+    private queues: Map<string, QueuedEvent[]> = new Map();
+    private processing: Set<string> = new Set();
 
     constructor(
         traits: TraitDefinition[] = [],
@@ -369,6 +380,110 @@ export class StateMachineManager {
         }
 
         return results;
+    }
+
+    // ========================================================================
+    // Actor-Model Queue API (opt-in, does not affect sendEvent)
+    // ========================================================================
+
+    /**
+     * Enqueue an event into every trait's per-trait queue.
+     *
+     * Events are not processed immediately. Call `drainQueue()` for each
+     * trait to process them sequentially (actor-model guarantee: one event
+     * at a time per trait, effects fully awaited before the next event).
+     */
+    enqueueEvent(
+        eventKey: string,
+        payload?: Record<string, unknown>,
+        entityData?: Record<string, unknown>
+    ): void {
+        for (const [traitName] of this.traits) {
+            const queue = this.queues.get(traitName) ?? [];
+            queue.push({ eventKey, payload, entityData });
+            this.queues.set(traitName, queue);
+        }
+    }
+
+    /**
+     * Drain a single trait's event queue, processing events sequentially.
+     *
+     * This is the core actor loop: each event is fully processed (including
+     * awaiting all effects) before the next event is dequeued. If the queue
+     * is already being drained for this trait, this call is a no-op (the
+     * running drain will pick up newly enqueued events).
+     *
+     * @param traitName - Which trait's queue to drain
+     * @param executeEffects - Async callback to run effects for a successful transition
+     */
+    async drainQueue(
+        traitName: string,
+        executeEffects: (
+            traitName: string,
+            result: TransitionResult,
+            payload?: Record<string, unknown>
+        ) => Promise<void>
+    ): Promise<void> {
+        if (this.processing.has(traitName)) return;
+        this.processing.add(traitName);
+
+        const queue = this.queues.get(traitName) ?? [];
+        while (queue.length > 0) {
+            const entry = queue.shift()!;
+            const trait = this.traits.get(traitName);
+            const traitState = this.states.get(traitName);
+            if (!trait || !traitState) continue;
+
+            const result = processEvent({
+                traitState,
+                trait,
+                eventKey: entry.eventKey,
+                payload: entry.payload,
+                entityData: entry.entityData,
+                guardMode: this.config.guardMode,
+                strictBindings: this.config.strictBindings,
+            });
+
+            if (result.executed) {
+                this.states.set(traitName, {
+                    ...traitState,
+                    currentState: result.newState,
+                    previousState: result.previousState,
+                    lastEvent: normalizeEventKey(entry.eventKey),
+                    context: { ...traitState.context, ...entry.payload },
+                });
+
+                if (this.observer && result.transition) {
+                    this.observer.onTransition({
+                        traitName,
+                        from: result.transition.from,
+                        to: result.transition.to,
+                        event: result.transition.event,
+                        guardResult: result.guardResult,
+                        effects: [],
+                    });
+                }
+
+                // Await effects before processing the next event in this trait's queue
+                await executeEffects(traitName, result, entry.payload);
+            }
+        }
+
+        this.processing.delete(traitName);
+    }
+
+    /**
+     * Check whether a trait's queue is currently being drained.
+     */
+    isProcessing(traitName: string): boolean {
+        return this.processing.has(traitName);
+    }
+
+    /**
+     * Get the number of pending events in a trait's queue.
+     */
+    getQueueLength(traitName: string): number {
+        return this.queues.get(traitName)?.length ?? 0;
     }
 
     /**
