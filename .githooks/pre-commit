@@ -11,6 +11,19 @@
 # from package.json exactly, while update rewrites them to pinned versions,
 # causing a specifier mismatch that fails CI frozen-lockfile checks.
 
+
+# ── Block workspace: protocol in dependencies ─────────────────────────────
+# Packages are independent npm packages. workspace: refs break CI publish.
+if grep -qE '"workspace:' package.json 2>/dev/null; then
+  echo "ERROR: package.json contains workspace: protocol dependencies."
+  echo "Packages must use version ranges (e.g., ">=2.0.0"), not workspace:*"
+  echo ""
+  grep --color=always 'workspace:' package.json
+  echo ""
+  echo "Fix: replace workspace:^ with a version range like ">=X.Y.Z""
+  exit 1
+fi
+
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 
 # Only act when a package.json is staged and a lockfile exists
