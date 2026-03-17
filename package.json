@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "2.0.7",
+  "version": "2.1.0",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -27,6 +27,7 @@
     "dist"
   ],
   "publishConfig": {
+    "registry": "https://registry.npmjs.org",
     "access": "public"
   },
   "scripts": {
@@ -39,9 +40,9 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
-    "@almadar/evaluator": ">=2.0.0",
-    "@almadar/operators": ">=2.0.0",
-    "@almadar/core": ">=2.0.0",
+    "@almadar/evaluator": ">=2.5.0",
+    "@almadar/operators": ">=2.1.0",
+    "@almadar/core": ">=2.6.0",
     "@faker-js/faker": "^9.3.0"
   },
   "peerDependencies": {
@@ -56,7 +57,7 @@
     "vitest": "^2.1.0",
     "eslint": "10.0.0",
     "@typescript-eslint/parser": "8.56.0",
-    "@almadar/eslint-plugin": ">=2.3.0"
+    "@almadar/eslint-plugin": ">=2.5.0"
   },
   "repository": {
     "type": "git",
