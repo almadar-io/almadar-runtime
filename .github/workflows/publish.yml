@@ -1,4 +1,4 @@
-name: Publish to npm + GitHub Packages
+name: Publish to npm
 
 on:
   push:
@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
 
     steps:
       - uses: actions/checkout@v4
@@ -28,17 +27,9 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Publish to npm
-        continue-on-error: true
+      - name: Publish
         run: |
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
           pnpm publish --access public --no-git-checks
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish to GitHub Packages
-        run: |
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" > ~/.npmrc
-          pnpm publish --no-git-checks --registry https://npm.pkg.github.com
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
