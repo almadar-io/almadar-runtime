@@ -40,9 +40,9 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
-    "@almadar/evaluator": ">=2.5.0",
-    "@almadar/operators": ">=2.1.0",
-    "@almadar/core": ">=2.6.0",
+    "@almadar/evaluator": ">=2.0.0",
+    "@almadar/operators": ">=2.0.0",
+    "@almadar/core": ">=2.0.0",
     "@faker-js/faker": "^9.3.0"
   },
   "peerDependencies": {
@@ -61,7 +61,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/almadar-io/almadar.git",
+    "url": "https://github.com/almadar-io/almadar-runtime.git",
     "directory": "docs/packages/runtime"
   },
   "license": "MIT",
