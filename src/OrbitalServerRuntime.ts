@@ -1182,6 +1182,11 @@ export class OrbitalServerRuntime {
         let resultData: Record<string, unknown> | undefined;
 
         try {
+          // Validate relation cardinality before create/update
+          if (action === 'create' || action === 'update') {
+            this.validateRelationCardinality(type, data || {});
+          }
+
           switch (action) {
             case "create": {
               const { id } = await this.persistence.create(type, data || {});
@@ -1200,6 +1205,8 @@ export class OrbitalServerRuntime {
             case "delete":
               if (data?.id || entityId) {
                 const deleteId = (data?.id as string) || entityId!;
+                // Enforce onDelete relation rules before deleting
+                await this.enforceOnDeleteRules(type, deleteId);
                 await this.persistence.delete(type, deleteId);
                 resultData = { id: deleteId, deleted: true };
               }
@@ -1375,11 +1382,140 @@ export class OrbitalServerRuntime {
    * @param entityType - Entity type name
    * @param include - Relation field names to populate
    */
+  /**
+   * Validate that relation field values match their declared cardinality.
+   * Called before create/update to ensure data integrity.
+   */
+  private validateRelationCardinality(
+    entityType: string,
+    data: Record<string, unknown>,
+  ): void {
+    // Find the entity schema
+    for (const [, registered] of this.orbitals) {
+      if (registered.schema.entity.name !== entityType) continue;
+
+      for (const field of registered.schema.entity.fields) {
+        if (field.type !== 'relation') continue;
+        const value = data[field.name];
+        if (value === undefined || value === null) continue;
+
+        const cardinality = field.relation?.cardinality || 'one';
+
+        if (cardinality === 'one' || cardinality === 'many-to-one') {
+          // Single cardinality: value must be a string, not an array
+          if (Array.isArray(value)) {
+            throw new Error(
+              `Cardinality violation: ${entityType}.${field.name} has cardinality '${cardinality}' but received an array. Expected a single string ID.`
+            );
+          }
+        } else if (cardinality === 'many' || cardinality === 'many-to-many' || cardinality === 'one-to-many') {
+          // Many cardinality: value must be an array of strings
+          if (typeof value === 'string') {
+            // Auto-correct: wrap single string in array (permissive)
+            data[field.name] = [value];
+          } else if (Array.isArray(value)) {
+            // Validate all elements are strings
+            const nonStrings = value.filter((v: unknown) => typeof v !== 'string');
+            if (nonStrings.length > 0) {
+              throw new Error(
+                `Cardinality violation: ${entityType}.${field.name} has cardinality '${cardinality}' but array contains non-string values.`
+              );
+            }
+          }
+        }
+      }
+      break;
+    }
+  }
+
+  /**
+   * Enforce onDelete rules for relation fields pointing to the entity being deleted.
+   * Scans all registered entities for relation fields targeting the given entity type,
+   * finds records referencing the ID being deleted, and applies cascade/nullify/restrict.
+   */
+  private async enforceOnDeleteRules(
+    entityType: string,
+    deletedId: string,
+  ): Promise<void> {
+    for (const [, registered] of this.orbitals) {
+      const schema = registered.schema;
+      const fields = schema.entity.fields;
+
+      for (const field of fields) {
+        if (field.type !== 'relation') continue;
+        if (field.relation?.entity !== entityType) continue;
+
+        const onDelete = field.relation.onDelete || 'restrict';
+        const referringEntityType = schema.entity.name;
+
+        // Find all records in the referring entity that reference the deleted ID
+        const allRecords = await this.persistence.list(referringEntityType);
+        const affectedRecords = allRecords.filter(record => {
+          const fkValue = record[field.name];
+          if (typeof fkValue === 'string') return fkValue === deletedId;
+          if (Array.isArray(fkValue)) return fkValue.includes(deletedId);
+          return false;
+        });
+
+        if (affectedRecords.length === 0) continue;
+
+        switch (onDelete) {
+          case 'restrict':
+            throw new Error(
+              `Cannot delete ${entityType} ${deletedId}: ${affectedRecords.length} ${referringEntityType} record(s) reference it via ${field.name}. Rule: restrict.`
+            );
+
+          case 'cascade':
+            for (const record of affectedRecords) {
+              const recordId = record.id as string;
+              if (recordId) {
+                await this.persistence.delete(referringEntityType, recordId);
+              }
+            }
+            if (this.config.debug) {
+              console.log(`[OrbitalRuntime] Cascade deleted ${affectedRecords.length} ${referringEntityType} records`);
+            }
+            break;
+
+          case 'nullify':
+            for (const record of affectedRecords) {
+              const recordId = record.id as string;
+              if (recordId) {
+                const update: Record<string, unknown> = {};
+                const fkValue = record[field.name];
+                if (Array.isArray(fkValue)) {
+                  update[field.name] = fkValue.filter((id: unknown) => id !== deletedId);
+                } else {
+                  update[field.name] = null;
+                }
+                await this.persistence.update(referringEntityType, recordId, update);
+              }
+            }
+            if (this.config.debug) {
+              console.log(`[OrbitalRuntime] Nullified ${field.name} on ${affectedRecords.length} ${referringEntityType} records`);
+            }
+            break;
+        }
+      }
+    }
+  }
+
   private async populateRelations(
     entities: Record<string, unknown>[],
     entityType: string,
     include: string[],
+    depth: number = 0,
+    visited: Set<string> = new Set(),
   ): Promise<void> {
+    // Circular reference protection: stop if depth exceeded or entity type already visited
+    const maxDepth = 2;
+    if (depth >= maxDepth || visited.has(entityType)) {
+      if (this.config.debug) {
+        console.log(`[OrbitalRuntime] Skipping populateRelations for ${entityType}: depth=${depth}, visited=${visited.has(entityType)}`);
+      }
+      return;
+    }
+    visited.add(entityType);
     // Find the orbital that owns this entity type
     let entityFields: Array<{ name: string; type: string; relation?: { entity: string; cardinality?: string } }> | undefined;
 
@@ -1420,17 +1556,24 @@ export class OrbitalServerRuntime {
       const cardinality = relationField.relation.cardinality || 'one';
 
       // Collect all foreign key IDs to batch fetch
+      // Handles both single ID (string) and array of IDs (string[]) for many cardinalities
       const foreignKeyIds = new Set<string>();
       for (const entity of entities) {
         const fkValue = entity[foreignKeyField];
         if (fkValue && typeof fkValue === 'string') {
           foreignKeyIds.add(fkValue);
+        } else if (Array.isArray(fkValue)) {
+          for (const id of fkValue) {
+            if (id && typeof id === 'string') {
+              foreignKeyIds.add(id);
+            }
+          }
         }
       }
 
       if (foreignKeyIds.size === 0) continue;
 
-      // Fetch all related entities (ideally this would be a batch query)
+      // Batch fetch all related entities
       const relatedEntities = new Map<string, Record<string, unknown>>();
       for (const fkId of foreignKeyIds) {
         try {
@@ -1452,14 +1595,21 @@ export class OrbitalServerRuntime {
         : includeField;
 
       for (const entity of entities) {
-        const fkValue = entity[foreignKeyField] as string;
-        if (fkValue && relatedEntities.has(fkValue)) {
-          if (cardinality === 'one') {
+        const fkValue = entity[foreignKeyField];
+        if (cardinality === 'one' || cardinality === 'many-to-one') {
+          // Single FK: attach the related object directly
+          if (typeof fkValue === 'string' && relatedEntities.has(fkValue)) {
             entity[populatedFieldName] = relatedEntities.get(fkValue);
-          } else {
-            // For many relations, we'd need a different approach
-            // (reverse lookup from the related entity's foreign key)
-            // For now, just set to array with single item
+          }
+        } else {
+          // Many cardinality: FK is an array of IDs, resolve each to the full object
+          if (Array.isArray(fkValue)) {
+            entity[populatedFieldName] = fkValue
+              .filter((id): id is string => typeof id === 'string')
+              .map(id => relatedEntities.get(id))
+              .filter(Boolean);
+          } else if (typeof fkValue === 'string' && relatedEntities.has(fkValue)) {
+            // Fallback: single ID with many cardinality, wrap in array
             entity[populatedFieldName] = [relatedEntities.get(fkValue)];
           }
         }
