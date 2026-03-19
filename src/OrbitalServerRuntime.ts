@@ -89,7 +89,7 @@ export interface RuntimeOrbital {
   name: string;
   entity: {
     name: string;
-    fields?: Array<{ name: string; type: string }>;
+    fields?: Array<{ name: string; type: string; relation?: { entity?: string; cardinality?: string; onDelete?: string } }>;
     /** Pre-defined entity instances to seed on registration */
     instances?: Array<Record<string, unknown>>;
   };
@@ -1394,7 +1394,7 @@ export class OrbitalServerRuntime {
     for (const [, registered] of this.orbitals) {
       if (registered.schema.entity.name !== entityType) continue;
 
-      for (const field of registered.schema.entity.fields) {
+      for (const field of registered.schema.entity.fields ?? []) {
         if (field.type !== 'relation') continue;
         const value = data[field.name];
         if (value === undefined || value === null) continue;
@@ -1439,7 +1439,7 @@ export class OrbitalServerRuntime {
   ): Promise<void> {
     for (const [, registered] of this.orbitals) {
       const schema = registered.schema;
-      const fields = schema.entity.fields;
+      const fields = schema.entity.fields ?? [];
 
       for (const field of fields) {
         if (field.type !== 'relation') continue;
@@ -1517,7 +1517,7 @@ export class OrbitalServerRuntime {
     }
     visited.add(entityType);
     // Find the orbital that owns this entity type
-    let entityFields: Array<{ name: string; type: string; relation?: { entity: string; cardinality?: string } }> | undefined;
+    let entityFields: Array<{ name: string; type: string; relation?: { entity?: string; cardinality?: string; onDelete?: string } }> | undefined;
 
     for (const [, registered] of this.orbitals) {
       if (registered.schema.entity.name === entityType) {
