@@ -459,6 +459,74 @@ export class EffectExecutor {
                 break;
             }
 
+            // OS trigger operators (server-side only)
+            case 'os/watch-files': {
+                if (this.handlers.osWatchFiles) {
+                    const glob = args[0] as string;
+                    const options = args[1] as Record<string, unknown> | undefined;
+                    this.handlers.osWatchFiles(glob, options ?? {});
+                } else {
+                    this.logUnsupported('os/watch-files');
+                }
+                break;
+            }
+            case 'os/watch-process': {
+                if (this.handlers.osWatchProcess) {
+                    this.handlers.osWatchProcess(args[0] as string, args[1] as string | undefined);
+                } else {
+                    this.logUnsupported('os/watch-process');
+                }
+                break;
+            }
+            case 'os/watch-port': {
+                if (this.handlers.osWatchPort) {
+                    this.handlers.osWatchPort(args[0] as number, (args[1] as string) ?? 'tcp');
+                } else {
+                    this.logUnsupported('os/watch-port');
+                }
+                break;
+            }
+            case 'os/watch-http': {
+                if (this.handlers.osWatchHttp) {
+                    this.handlers.osWatchHttp(args[0] as string, args[1] as string | undefined);
+                } else {
+                    this.logUnsupported('os/watch-http');
+                }
+                break;
+            }
+            case 'os/watch-cron': {
+                if (this.handlers.osWatchCron) {
+                    this.handlers.osWatchCron(args[0] as string);
+                } else {
+                    this.logUnsupported('os/watch-cron');
+                }
+                break;
+            }
+            case 'os/watch-signal': {
+                if (this.handlers.osWatchSignal) {
+                    this.handlers.osWatchSignal(args[0] as string);
+                } else {
+                    this.logUnsupported('os/watch-signal');
+                }
+                break;
+            }
+            case 'os/watch-env': {
+                if (this.handlers.osWatchEnv) {
+                    this.handlers.osWatchEnv(args[0] as string);
+                } else {
+                    this.logUnsupported('os/watch-env');
+                }
+                break;
+            }
+            case 'os/debounce': {
+                if (this.handlers.osDebounce) {
+                    this.handlers.osDebounce(args[0] as number, args[1] as string);
+                } else {
+                    this.logUnsupported('os/debounce');
+                }
+                break;
+            }
+
             default: {
                 if (this.debug) {
                     console.warn('[EffectExecutor] Unknown operator:', operator);

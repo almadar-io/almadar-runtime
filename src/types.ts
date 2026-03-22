@@ -186,6 +186,24 @@ export interface EffectHandlers {
 
     /** Log a message */
     log?: (message: string, level?: 'log' | 'warn' | 'error', data?: unknown) => void;
+
+    // OS trigger handlers (server-side only)
+    /** Watch file system for changes matching glob pattern */
+    osWatchFiles?: (glob: string, options: Record<string, unknown>) => void;
+    /** Monitor a process by name */
+    osWatchProcess?: (name: string, subcommand?: string) => void;
+    /** Monitor a port for open/close */
+    osWatchPort?: (port: number, protocol: string) => void;
+    /** Intercept HTTP responses matching pattern */
+    osWatchHttp?: (urlPattern: string, method?: string) => void;
+    /** Register a cron schedule */
+    osWatchCron?: (expression: string) => void;
+    /** Register an OS signal handler */
+    osWatchSignal?: (signal: string) => void;
+    /** Watch an environment variable for changes */
+    osWatchEnv?: (variable: string) => void;
+    /** Configure debounce for an OS event type */
+    osDebounce?: (ms: number, eventType: string) => void;
 }
 
 // ============================================================================
@@ -336,7 +354,7 @@ export interface TransitionObserver {
  */
 export const HANDLER_MANIFEST: Record<ExecutionEnvironment, string[]> = {
     client: ["render-ui", "render", "navigate", "notify", "emit", "set", "log"],
-    server: ["persist", "fetch", "call-service", "emit", "set", "spawn", "despawn", "log"],
+    server: ["persist", "fetch", "call-service", "emit", "set", "spawn", "despawn", "log", "os/watch-files", "os/watch-process", "os/watch-port", "os/watch-http", "os/watch-cron", "os/watch-signal", "os/watch-env", "os/debounce"],
     test: [
         "render-ui", "render", "navigate", "notify", "emit", "set",
         "persist", "fetch", "call-service", "spawn", "despawn", "log",
