@@ -69,7 +69,7 @@
     "url": "https://github.com/almadar-io/almadar-runtime.git",
     "directory": "docs/packages/runtime"
   },
-  "license": "MIT",
+  "license": "BSL-1.1",
   "keywords": [
     "almadar",
     "runtime",

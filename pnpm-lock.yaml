@@ -13,7 +13,7 @@ importers:
         version: 2.6.2
       '@almadar/evaluator':
         specifier: '>=2.0.0'
-        version: 2.5.2
+        version: 2.5.3
       '@almadar/operators':
         specifier: '>=2.0.0'
         version: 2.1.2
@@ -59,8 +59,8 @@ packages:
     peerDependencies:
       eslint: '>=8.0.0'
 
-  '@almadar/evaluator@2.5.2':
-    resolution: {integrity: sha512-uyzrLw8vNjzv1GnVfSvIswY8fOf4S+qEBxQjbUW2jFypaxkNTRuD0AodC7uv+laiCNOI1bvSUkE2zzGjrusqKA==}
+  '@almadar/evaluator@2.5.3':
+    resolution: {integrity: sha512-VYZS93LeRUjQXi83014p0uXy6662Dh09A2enXEoRdvZ8U2SzTLpr52oyj7jFQu9n7uIldOuvivqG1IfomYVrrw==}
 
   '@almadar/operators@2.1.2':
     resolution: {integrity: sha512-4jQjz02nC+pUiMA1W25GLpLKg4k22+z59wBmqKOiGJ0zPE713TnMuYpSFrW8gKgeBsXpm99nEjAVTSqo9IW5bQ==}
@@ -1516,7 +1516,7 @@ snapshots:
       eslint: 10.0.0
       jsonc-eslint-parser: 3.1.0
 
-  '@almadar/evaluator@2.5.2':
+  '@almadar/evaluator@2.5.3':
     dependencies:
       '@almadar/core': 2.6.2
       '@almadar/operators': 2.1.2
