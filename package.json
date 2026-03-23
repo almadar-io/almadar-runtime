@@ -21,6 +21,11 @@
       "types": "./dist/ServerBridge.d.ts",
       "import": "./dist/ServerBridge.js",
       "require": "./dist/ServerBridge.js"
+    },
+    "./createOsHandlers": {
+      "types": "./dist/createOsHandlers.d.ts",
+      "import": "./dist/createOsHandlers.js",
+      "require": "./dist/createOsHandlers.js"
     }
   },
   "files": [

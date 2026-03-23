@@ -88,6 +88,8 @@ export type {
 
 export type { ServerBridgeConfig, ServerBridgeState } from "./ServerBridge.js";
 
+export type { OsHandlerContext, OsHandlerResult } from "./createOsHandlers.js";
+
 export type {
   EntityField,
   EntitySchema,

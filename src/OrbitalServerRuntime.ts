@@ -70,6 +70,7 @@ import {
   type SchemaLoader,
   createUnifiedLoader,
 } from "./loader/index.js";
+import { createOsHandlers, type OsHandlerResult } from "./createOsHandlers.js";
 
 // ============================================================================
 // Types
@@ -347,6 +348,7 @@ export class OrbitalServerRuntime {
   private preprocessedCache = new Map<string, PreprocessedSchema>();
   private entitySharingMap: EntitySharingMap = {};
   private eventNamespaceMap: EventNamespaceMap = {};
+  private osHandlers: OsHandlerResult | null = null;
 
   constructor(config: OrbitalServerRuntimeConfig = {}) {
     this.config = {
@@ -379,6 +381,16 @@ export class OrbitalServerRuntime {
     } else {
       this.persistence = config.persistence || new InMemoryPersistence();
     }
+
+    // Auto-wire OS handlers (server-side only)
+    this.osHandlers = createOsHandlers({
+      emitEvent: (type, payload) => this.eventBus.emit(type, payload),
+    });
+    // Merge OS handlers under user-provided handlers (user can override)
+    this.config.effectHandlers = {
+      ...this.osHandlers.handlers,
+      ...this.config.effectHandlers,
+    };
   }
 
   // ==========================================================================
@@ -922,6 +934,12 @@ export class OrbitalServerRuntime {
 
     this.orbitals.clear();
     this.eventBus.clear();
+
+    // Clean up OS handlers (close file watchers, intervals, signal listeners)
+    if (this.osHandlers) {
+      this.osHandlers.cleanup();
+      this.osHandlers = null;
+    }
   }
 
   // ==========================================================================
