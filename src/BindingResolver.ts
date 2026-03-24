@@ -214,5 +214,12 @@ export function createContextFromBindings(
     if (strictBindings) {
         ctx.strictBindings = true;
     }
+    // Copy named entity bindings (e.g., @SpriteEntity) into singletons
+    // so resolveBinding can resolve @EntityName.field
+    for (const [key, value] of Object.entries(bindings)) {
+        if (key !== 'entity' && key !== 'payload' && key !== 'state' && key !== 'config' && key !== 'user' && value != null) {
+            ctx.singletons.set(key, value as Record<string, unknown>);
+        }
+    }
     return ctx;
 }

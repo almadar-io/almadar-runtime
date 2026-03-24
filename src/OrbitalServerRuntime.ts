@@ -1073,6 +1073,9 @@ export class OrbitalServerRuntime {
   ): Promise<void> {
     const entityType = registered.schema.entity.name;
 
+    // Forward ref for bindings - assigned after construction, used by fetch handler
+    let bindingsRef: BindingContext | null = null;
+
     const handlers: EffectHandlers = {
       emit: (event, eventPayload) => {
         if (this.config.debug) {
@@ -1324,6 +1327,19 @@ export class OrbitalServerRuntime {
             result = entities;
           }
 
+          // Sync fetched data into bindings so @EntityName.field resolves
+          // in subsequent render-ui effects
+          if (bindingsRef && result) {
+            const records = Array.isArray(result) ? result : [result];
+            if (records.length > 0) {
+              const merged = Object.assign([...records], records[0]);
+              (bindingsRef as Record<string, unknown>)[fetchEntityType] = merged;
+              if (fetchEntityType === entityType) {
+                bindingsRef.entity = merged;
+              }
+            }
+          }
+
           return result;
         } catch (error) {
           console.error(`[OrbitalRuntime] Fetch error for ${fetchEntityType}:`, error);
@@ -1362,12 +1378,30 @@ export class OrbitalServerRuntime {
     };
 
     const state = registered.manager.getState(traitName);
+    // Build binding context with @entity AND @EntityName aliases.
+    // @entity is the standard binding root. @EntityName (e.g., @SpriteEntity)
+    // is used by some behaviors for explicit entity references in render-ui patterns.
+    // The compiled app resolves @EntityName at compile time; the interpreter
+    // needs it in the runtime binding context.
+    //
+    // NOTE: fetchedData is populated by fetch effects DURING execution.
+    // The syncFetchedBindings() helper is called from the fetch handler
+    // to update bindings after each fetch, so render-ui effects that
+    // run after fetch see the correct @EntityName.field values.
     const bindings: BindingContext = {
       entity: entityData,
       payload,
       state: state?.currentState || "unknown",
       user, // @user bindings from Firebase auth
     };
+
+    // Add initial named entity binding
+    if (entityType) {
+      (bindings as Record<string, unknown>)[entityType] = entityData;
+    }
+
+    // Wire forward ref so fetch handler can update bindings
+    bindingsRef = bindings;
 
     const context: EffectContext = {
       traitName,
