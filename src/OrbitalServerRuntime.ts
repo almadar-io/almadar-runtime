@@ -50,7 +50,7 @@ import {
   interpolateProps,
   createContextFromBindings,
 } from "./BindingResolver.js";
-import { evaluateGuard } from "@almadar/evaluator";
+import { evaluate, evaluateGuard } from "@almadar/evaluator";
 import type {
   TraitDefinition,
   TraitState,
@@ -181,10 +181,10 @@ export interface OrbitalEventResponse {
  */
 export interface EffectResult {
   /** Effect type that was executed */
-  effect: 'persist' | 'call-service' | 'set';
+  effect: 'persist' | 'call-service' | 'set' | 'ref' | 'deref' | 'swap' | 'atomic';
   /** Action performed (e.g., 'create', 'update', 'delete' for persist) */
   action?: string;
-  /** Entity type affected (for persist/set) */
+  /** Entity type affected (for persist/set/ref/deref/swap) */
   entityType?: string;
   /** Result data from the effect */
   data?: Record<string, unknown>;
@@ -719,88 +719,6 @@ export class OrbitalServerRuntime {
           this.listenerCleanups.push(cleanup);
         }
       }
-
-      // Synthetic DATA_CHANGED listeners: re-fetch when a sibling trait persists
-      this.setupSyntheticDataChangedListeners(orbitalName, registered);
-    }
-  }
-
-  /**
-   * For each trait that fetches an entity type, register a listener for
-   * `{EntityType}:DATA_CHANGED` that triggers a re-fetch via INIT.
-   * This mirrors what the compiler's synthetic phase does for compiled apps.
-   */
-  private setupSyntheticDataChangedListeners(
-    orbitalName: string,
-    registered: { schema: { traits?: Array<{ name: string; listens?: Array<{ event: string }>; stateMachine?: Record<string, unknown>; linkedEntity?: string }> }; manager: unknown },
-  ): void {
-    const traits = registered.schema.traits || [];
-
-    // Collect entity types mutated by any trait (persist/set effects)
-    const mutatedEntities = new Set<string>();
-    for (const trait of traits) {
-      const sm = trait.stateMachine as Record<string, unknown> | undefined;
-      const transitions = (sm?.transitions ?? []) as Array<{ effects?: unknown[] }>;
-      for (const trans of transitions) {
-        for (const eff of trans.effects ?? []) {
-          if (!Array.isArray(eff)) continue;
-          const effType = eff[0] as string;
-          if (effType === 'persist' && typeof eff[2] === 'string') {
-            mutatedEntities.add(eff[2]);
-          } else if (effType === 'set' && typeof eff[1] === 'string') {
-            const target = eff[1] as string;
-            if (target.startsWith('@') && !target.startsWith('@state.') && !target.startsWith('@payload.')) {
-              const entityName = target.split('.')[0].slice(1);
-              if (entityName && entityName !== 'entity') {
-                mutatedEntities.add(entityName);
-              } else if (trait.linkedEntity) {
-                mutatedEntities.add(trait.linkedEntity);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    if (mutatedEntities.size === 0) return;
-
-    // For each trait that fetches, add implicit DATA_CHANGED listener
-    for (const trait of traits) {
-      const sm = trait.stateMachine as Record<string, unknown> | undefined;
-      const transitions = (sm?.transitions ?? []) as Array<{ effects?: unknown[] }>;
-
-      // Collect entity types this trait fetches
-      const fetchedEntities = new Set<string>();
-      for (const trans of transitions) {
-        for (const eff of trans.effects ?? []) {
-          if (!Array.isArray(eff)) continue;
-          if (eff[0] === 'fetch' && typeof eff[1] === 'string') {
-            fetchedEntities.add(eff[1]);
-          }
-        }
-      }
-
-      for (const entityType of fetchedEntities) {
-        if (!mutatedEntities.has(entityType)) continue;
-        const eventName = `${entityType}:DATA_CHANGED`;
-
-        // Skip if already listening
-        if (trait.listens?.some(l => l.event === eventName)) continue;
-
-        const cleanup = this.eventBus.on(eventName, async () => {
-          if (this.config.debug) {
-            console.log(
-              `[OrbitalRuntime] ${orbitalName}.${trait.name} re-fetching ${entityType} (DATA_CHANGED)`,
-            );
-          }
-          // Re-process INIT to re-fetch and re-render
-          await this.processOrbitalEvent(orbitalName, {
-            event: 'INIT',
-            payload: {},
-          });
-        });
-        this.listenerCleanups.push(cleanup);
-      }
     }
   }
 
@@ -1106,47 +1024,33 @@ export class OrbitalServerRuntime {
       }
     }
 
-    // Auto-refetch after persist: re-fetch entity types that were mutated,
-    // then re-execute INIT render-ui effects so clientEffects have fresh data.
+    // After all effects execute, auto-fetch entity types that have ref effects and were mutated
     const persistedTypes = new Set<string>();
     for (const er of effectResults) {
-      if (er.effect === 'persist' && er.success && er.entityType) {
-        persistedTypes.add(er.entityType as string);
-      } else if (er.effect === 'set' && er.success && er.entityType) {
+      if ((er.effect === 'persist' || er.effect === 'set' || er.effect === 'swap') && er.success && er.entityType) {
         persistedTypes.add(er.entityType as string);
       }
     }
-    if (persistedTypes.size > 0) {
-      for (const entityType of persistedTypes) {
-        try {
-          const fresh = await this.persistence.list(entityType);
-          fetchedData[entityType] = fresh;
-        } catch {
-          // Ignore re-fetch errors
+    // Scan traits for ref effects to know which entity types are ref'd
+    const refTypes = new Set<string>();
+    for (const trait of registered.schema.traits || []) {
+      const sm = (trait as { stateMachine?: Record<string, unknown> }).stateMachine;
+      const transitions = (sm?.transitions ?? trait.transitions ?? []) as Array<{ effects?: unknown[] }>;
+      for (const trans of transitions) {
+        for (const eff of trans.effects ?? []) {
+          if (Array.isArray(eff) && eff[0] === 'ref' && typeof eff[1] === 'string') {
+            refTypes.add(eff[1]);
+          }
         }
       }
-      // Re-process INIT to re-render with fresh data
-      // This produces updated clientEffects (render-ui) using the fresh fetchedData
-      const initResults = registered.manager.sendEvent('INIT', {}, {});
-      const initFiltered = activeTraits && activeTraits.length > 0
-        ? initResults.filter(({ traitName }) => activeTraits.includes(traitName))
-        : initResults;
-      for (const { traitName, result: initResult } of initFiltered) {
-        if (initResult.effects.length > 0) {
-          await this.executeEffects(
-            registered,
-            traitName,
-            initResult.effects as Effect[],
-            {},
-            entityData,
-            entityId,
-            emittedEvents,
-            fetchedData,
-            clientEffects,
-            effectResults,
-            user,
-          );
-        }
+    }
+    // Only re-fetch entity types that were both mutated AND have ref subscribers
+    for (const mutatedEntityType of persistedTypes) {
+      if (refTypes.has(mutatedEntityType)) {
+        try {
+          const fresh = await this.persistence.list(mutatedEntityType);
+          fetchedData[mutatedEntityType] = fresh;
+        } catch { /* ignore */ }
       }
     }
 
@@ -1199,8 +1103,9 @@ export class OrbitalServerRuntime {
   ): Promise<void> {
     const entityType = registered.schema.entity.name;
 
-    // Forward ref for bindings - assigned after construction, used by fetch handler
+    // Forward refs - assigned after construction, used by fetch/atomic handlers
     let bindingsRef: BindingContext | null = null;
+    let contextRef: EffectContext | null = null;
 
     const handlers: EffectHandlers = {
       emit: (event, eventPayload) => {
@@ -1221,11 +1126,6 @@ export class OrbitalServerRuntime {
               entityType,
               data: { id, field, value },
               success: true,
-            });
-            // Implicit emit: entity data changed after set
-            handlers.emit(`${entityType}:DATA_CHANGED`, {
-              action: 'set',
-              entityType,
             });
           } catch (err) {
             effectResults.push({
@@ -1324,16 +1224,6 @@ export class OrbitalServerRuntime {
             success: !batchFailed,
             ...(batchFailed ? { error: batchError } : {}),
           });
-          // Implicit emit: entity data changed after batch persist
-          if (!batchFailed) {
-            const affectedTypes = new Set(completed.map(op => op.entityType));
-            for (const affectedType of affectedTypes) {
-              handlers.emit(`${affectedType}:DATA_CHANGED`, {
-                action: 'batch',
-                entityType: affectedType,
-              });
-            }
-          }
           return;
         }
 
@@ -1381,11 +1271,6 @@ export class OrbitalServerRuntime {
             entityType: type,
             data: resultData,
             success: true,
-          });
-          // Implicit emit: entity data changed after persist
-          handlers.emit(`${type}:DATA_CHANGED`, {
-            action,
-            entityType: type,
           });
         } catch (err) {
           effectResults.push({
@@ -1493,6 +1378,181 @@ export class OrbitalServerRuntime {
         }
       },
 
+      // Resource operators: ref, deref, swap, watch, atomic
+
+      ref: async (refEntityType, options) => {
+        // ref is identical to fetch on the server: query persistence, populate fetchedData
+        try {
+          return await handlers.fetch!(refEntityType, options);
+        } catch (error) {
+          console.error(`[OrbitalRuntime] ref error for ${refEntityType}:`, error);
+          return null;
+        }
+      },
+
+      deref: async (derefEntityType, options) => {
+        // deref is identical to fetch on the server: one-shot read
+        try {
+          let result: Record<string, unknown> | Record<string, unknown>[] | null = null;
+
+          if (options?.id) {
+            const entity = await this.persistence.getById(derefEntityType, options.id);
+            if (entity) {
+              fetchedData[derefEntityType] = [entity];
+              result = entity;
+            }
+          } else {
+            const entities = await this.persistence.list(derefEntityType);
+            fetchedData[derefEntityType] = entities;
+            result = entities;
+          }
+
+          // Sync into bindings like fetch does
+          if (bindingsRef && result) {
+            const records = Array.isArray(result) ? result : [result];
+            if (records.length > 0) {
+              const merged = Object.assign([...records], records[0]);
+              (bindingsRef as Record<string, unknown>)[derefEntityType] = merged;
+              if (derefEntityType === entityType) {
+                bindingsRef.entity = merged;
+              }
+            }
+          }
+
+          effectResults.push({
+            effect: 'deref',
+            entityType: derefEntityType,
+            success: true,
+          });
+
+          return result;
+        } catch (error) {
+          effectResults.push({
+            effect: 'deref',
+            entityType: derefEntityType,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return null;
+        }
+      },
+
+      swap: async (swapEntityType, swapEntityId, transform) => {
+        // Read-modify-write: read entity, apply transform S-expression, write back
+        try {
+          const current = await this.persistence.getById(swapEntityType, swapEntityId);
+          if (!current) {
+            effectResults.push({
+              effect: 'swap',
+              entityType: swapEntityType,
+              success: false,
+              error: `Entity ${swapEntityType}/${swapEntityId} not found`,
+            });
+            return null;
+          }
+
+          // Evaluate the transform S-expression with @current binding
+          const ctx = createContextFromBindings({
+            current,
+            entity: entityData,
+            payload,
+          });
+
+          let newData: Record<string, unknown>;
+          if (Array.isArray(transform)) {
+            // S-expression transform: evaluate with @current bound to the entity
+            const result = evaluate(
+              transform as Parameters<typeof evaluate>[0],
+              ctx,
+            );
+            // The result should be a record (the transformed entity)
+            if (result && typeof result === 'object' && !Array.isArray(result)) {
+              newData = result as Record<string, unknown>;
+            } else {
+              // If transform returned a non-object, treat it as a partial update
+              newData = current;
+            }
+          } else if (typeof transform === 'object' && transform !== null) {
+            // Plain object merge: simple field updates
+            newData = { ...current, ...(transform as Record<string, unknown>) };
+          } else {
+            effectResults.push({
+              effect: 'swap',
+              entityType: swapEntityType,
+              success: false,
+              error: 'swap! transform must be an S-expression or object',
+            });
+            return null;
+          }
+
+          // Write back (without version check for now, full OCC in future pass)
+          await this.persistence.update(swapEntityType, swapEntityId, newData);
+
+          effectResults.push({
+            effect: 'swap',
+            entityType: swapEntityType,
+            data: { id: swapEntityId, ...newData },
+            success: true,
+          });
+
+          return newData;
+        } catch (error) {
+          effectResults.push({
+            effect: 'swap',
+            entityType: swapEntityType,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return null;
+        }
+      },
+
+      watch: (_watchEntityType, _watchOptions) => {
+        // Watch is a no-op on server. Client subscribes to real-time updates.
+        if (this.config.debug) {
+          console.log(`[OrbitalRuntime] watch is a no-op on server: ${_watchEntityType}`);
+        }
+      },
+
+      atomic: async (atomicEffects) => {
+        // Execute inner effects sequentially. If any fails, mark all as failed.
+        // Full transaction/rollback support is a future enhancement.
+        let atomicFailed = false;
+        let atomicError = '';
+
+        const atomicExecutor = new EffectExecutor({
+          handlers,
+          bindings: bindingsRef ?? {},
+          context: contextRef ?? { traitName, state: 'unknown', transition: 'unknown' },
+          debug: this.config.debug,
+        });
+
+        for (const innerEffect of atomicEffects) {
+          if (atomicFailed) break;
+          try {
+            await atomicExecutor.execute(innerEffect);
+          } catch (err) {
+            atomicFailed = true;
+            atomicError = err instanceof Error ? err.message : String(err);
+          }
+        }
+
+        if (atomicFailed) {
+          // Mark the atomic block as failed
+          effectResults.push({
+            effect: 'atomic',
+            success: false,
+            error: `Atomic block failed: ${atomicError}`,
+          });
+        } else {
+          effectResults.push({
+            effect: 'atomic',
+            success: true,
+            data: { innerCount: atomicEffects.length },
+          });
+        }
+      },
+
       // Client-side effects - collect for forwarding to client
       renderUI: (slot, pattern, props, priority) => {
         clientEffects.push(['render-ui', slot, pattern, props, priority]);
@@ -1546,7 +1606,7 @@ export class OrbitalServerRuntime {
       (bindings as Record<string, unknown>)[entityType] = entityData;
     }
 
-    // Wire forward ref so fetch handler can update bindings
+    // Wire forward refs so fetch/atomic handlers can access bindings and context
     bindingsRef = bindings;
 
     const context: EffectContext = {
@@ -1555,6 +1615,7 @@ export class OrbitalServerRuntime {
       transition: "unknown",
       entityId,
     };
+    contextRef = context;
 
     const executor = new EffectExecutor({
       handlers,

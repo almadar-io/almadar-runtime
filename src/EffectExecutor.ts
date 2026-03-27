@@ -180,6 +180,11 @@ export class EffectExecutor {
             'navigate': this.handlers.navigate,
             'notify': this.handlers.notify,
             'log': this.handlers.log,
+            'ref': this.handlers.ref,
+            'deref': this.handlers.deref,
+            'swap!': this.handlers.swap,
+            'watch': this.handlers.watch,
+            'atomic': this.handlers.atomic,
         };
         for (const [name, handler] of Object.entries(handlerMap)) {
             if (handler) {
@@ -356,6 +361,98 @@ export class EffectExecutor {
                     await this.handlers.fetch(entityType, options);
                 } else {
                     this.logUnsupported('fetch');
+                }
+                break;
+            }
+
+            // === Resource Operators ===
+
+            case 'ref': {
+                if (this.handlers.ref) {
+                    const refEntityType = args[0] as string;
+                    const refOptions = args[1] as {
+                        id?: string;
+                        filter?: unknown;
+                        limit?: number;
+                        offset?: number;
+                        include?: string[];
+                    } | undefined;
+                    await this.handlers.ref(refEntityType, refOptions);
+                } else if (this.handlers.fetch) {
+                    // Fallback: ref delegates to fetch on server
+                    const refEntityType = args[0] as string;
+                    const refOptions = args[1] as {
+                        id?: string;
+                        filter?: unknown;
+                        limit?: number;
+                        offset?: number;
+                        include?: string[];
+                    } | undefined;
+                    await this.handlers.fetch(refEntityType, refOptions);
+                } else {
+                    this.logUnsupported('ref');
+                }
+                break;
+            }
+
+            case 'deref': {
+                if (this.handlers.deref) {
+                    const derefEntityType = args[0] as string;
+                    const derefOptions = args[1] as {
+                        id?: string;
+                        filter?: unknown;
+                    } | undefined;
+                    await this.handlers.deref(derefEntityType, derefOptions);
+                } else if (this.handlers.fetch) {
+                    // Fallback: deref delegates to fetch on server
+                    const derefEntityType = args[0] as string;
+                    const derefOptions = args[1] as {
+                        id?: string;
+                        filter?: unknown;
+                    } | undefined;
+                    await this.handlers.fetch(derefEntityType, derefOptions);
+                } else {
+                    this.logUnsupported('deref');
+                }
+                break;
+            }
+
+            case 'swap!': {
+                if (this.handlers.swap) {
+                    const swapEntityType = args[0] as string;
+                    const swapEntityId = args[1] as string;
+                    const swapTransform = args[2];
+                    await this.handlers.swap(swapEntityType, swapEntityId, swapTransform);
+                } else {
+                    this.logUnsupported('swap!');
+                }
+                break;
+            }
+
+            case 'watch': {
+                if (this.handlers.watch) {
+                    const watchEntityType = args[0] as string;
+                    const watchOptions = args[1] as Record<string, unknown> | undefined;
+                    this.handlers.watch(watchEntityType, watchOptions);
+                } else {
+                    // Watch is a no-op on server - just log in debug mode
+                    if (this.debug) {
+                        console.log('[EffectExecutor] watch is a no-op on server:', args[0]);
+                    }
+                }
+                break;
+            }
+
+            case 'atomic': {
+                if (this.handlers.atomic) {
+                    const atomicEffects = args as unknown[];
+                    await this.handlers.atomic(atomicEffects);
+                } else {
+                    // Fallback: execute inner effects sequentially
+                    const atomicEffects = args as unknown[];
+                    for (const inner of atomicEffects) {
+                        await this.execute(inner);
+                    }
                 }
                 break;
             }

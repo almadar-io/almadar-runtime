@@ -43,8 +43,6 @@ export interface CreateClientEffectHandlersOptions {
     navigate?: (path: string, params?: Record<string, unknown>) => void;
     /** Notify function for notification effects */
     notify?: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;
-    /** Entity enrichment: inject linkedEntity into entity-aware patterns */
-    enrichPattern?: (pattern: unknown) => unknown;
 }
 
 // ============================================================================
@@ -73,7 +71,7 @@ export interface CreateClientEffectHandlersOptions {
 export function createClientEffectHandlers(
     options: CreateClientEffectHandlersOptions
 ): EffectHandlers {
-    const { eventBus, slotSetter, navigate, notify, enrichPattern } = options;
+    const { eventBus, slotSetter, navigate, notify } = options;
 
     return {
         emit: (event: string, payload?: Record<string, unknown>) => {
@@ -99,8 +97,7 @@ export function createClientEffectHandlers(
                 slotSetter.clearSlot(slot);
                 return;
             }
-            const enriched = enrichPattern ? enrichPattern(pattern) : pattern;
-            slotSetter.addPattern(slot, enriched, props);
+            slotSetter.addPattern(slot, pattern, props);
         },
 
         navigate: navigate ?? ((path: string) => {

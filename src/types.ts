@@ -187,6 +187,47 @@ export interface EffectHandlers {
     /** Log a message */
     log?: (message: string, level?: 'log' | 'warn' | 'error', data?: unknown) => void;
 
+    // Resource operators (ref/deref/swap!/watch/atomic)
+
+    /** Ref: declarative data subscription (server: same as fetch) */
+    ref?: (
+        entityType: string,
+        options?: {
+            id?: string;
+            filter?: unknown;
+            limit?: number;
+            offset?: number;
+            include?: string[];
+        }
+    ) => Promise<Record<string, unknown> | Record<string, unknown>[] | null>;
+
+    /** Deref: one-shot data read (server: same as fetch) */
+    deref?: (
+        entityType: string,
+        options?: {
+            id?: string;
+            filter?: unknown;
+        }
+    ) => Promise<Record<string, unknown> | Record<string, unknown>[] | null>;
+
+    /** Swap!: atomic read-modify-write on an entity */
+    swap?: (
+        entityType: string,
+        entityId: string,
+        transform: unknown,
+    ) => Promise<Record<string, unknown> | null>;
+
+    /** Watch: client-side reactive subscription (no-op on server) */
+    watch?: (
+        entityType: string,
+        options?: Record<string, unknown>,
+    ) => void;
+
+    /** Atomic: execute inner effects as a transaction */
+    atomic?: (
+        effects: unknown[],
+    ) => Promise<void>;
+
     // OS trigger handlers (server-side only)
     /** Watch file system for changes matching glob pattern */
     osWatchFiles?: (glob: string, options: Record<string, unknown>) => void;
@@ -353,11 +394,12 @@ export interface TransitionObserver {
  * Maps execution environments to their available effect handlers.
  */
 export const HANDLER_MANIFEST: Record<ExecutionEnvironment, string[]> = {
-    client: ["render-ui", "render", "navigate", "notify", "emit", "set", "log"],
-    server: ["persist", "fetch", "call-service", "emit", "set", "spawn", "despawn", "log", "os/watch-files", "os/watch-process", "os/watch-port", "os/watch-http", "os/watch-cron", "os/watch-signal", "os/watch-env", "os/debounce"],
+    client: ["render-ui", "render", "navigate", "notify", "emit", "set", "log", "ref", "deref", "watch"],
+    server: ["persist", "fetch", "call-service", "emit", "set", "spawn", "despawn", "log", "ref", "deref", "swap!", "atomic", "os/watch-files", "os/watch-process", "os/watch-port", "os/watch-http", "os/watch-cron", "os/watch-signal", "os/watch-env", "os/debounce"],
     test: [
         "render-ui", "render", "navigate", "notify", "emit", "set",
         "persist", "fetch", "call-service", "spawn", "despawn", "log",
+        "ref", "deref", "swap!", "watch", "atomic",
     ],
-    ssr: ["render-ui", "render", "fetch", "emit", "set", "log"],
+    ssr: ["render-ui", "render", "fetch", "emit", "set", "log", "ref", "deref"],
 };
