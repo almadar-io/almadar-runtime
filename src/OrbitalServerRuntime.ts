@@ -719,6 +719,88 @@ export class OrbitalServerRuntime {
           this.listenerCleanups.push(cleanup);
         }
       }
+
+      // Synthetic DATA_CHANGED listeners: re-fetch when a sibling trait persists
+      this.setupSyntheticDataChangedListeners(orbitalName, registered);
+    }
+  }
+
+  /**
+   * For each trait that fetches an entity type, register a listener for
+   * `{EntityType}:DATA_CHANGED` that triggers a re-fetch via INIT.
+   * This mirrors what the compiler's synthetic phase does for compiled apps.
+   */
+  private setupSyntheticDataChangedListeners(
+    orbitalName: string,
+    registered: { schema: { traits?: Array<{ name: string; listens?: Array<{ event: string }>; stateMachine?: Record<string, unknown>; linkedEntity?: string }> }; manager: unknown },
+  ): void {
+    const traits = registered.schema.traits || [];
+
+    // Collect entity types mutated by any trait (persist/set effects)
+    const mutatedEntities = new Set<string>();
+    for (const trait of traits) {
+      const sm = trait.stateMachine as Record<string, unknown> | undefined;
+      const transitions = (sm?.transitions ?? []) as Array<{ effects?: unknown[] }>;
+      for (const trans of transitions) {
+        for (const eff of trans.effects ?? []) {
+          if (!Array.isArray(eff)) continue;
+          const effType = eff[0] as string;
+          if (effType === 'persist' && typeof eff[2] === 'string') {
+            mutatedEntities.add(eff[2]);
+          } else if (effType === 'set' && typeof eff[1] === 'string') {
+            const target = eff[1] as string;
+            if (target.startsWith('@') && !target.startsWith('@state.') && !target.startsWith('@payload.')) {
+              const entityName = target.split('.')[0].slice(1);
+              if (entityName && entityName !== 'entity') {
+                mutatedEntities.add(entityName);
+              } else if (trait.linkedEntity) {
+                mutatedEntities.add(trait.linkedEntity);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (mutatedEntities.size === 0) return;
+
+    // For each trait that fetches, add implicit DATA_CHANGED listener
+    for (const trait of traits) {
+      const sm = trait.stateMachine as Record<string, unknown> | undefined;
+      const transitions = (sm?.transitions ?? []) as Array<{ effects?: unknown[] }>;
+
+      // Collect entity types this trait fetches
+      const fetchedEntities = new Set<string>();
+      for (const trans of transitions) {
+        for (const eff of trans.effects ?? []) {
+          if (!Array.isArray(eff)) continue;
+          if (eff[0] === 'fetch' && typeof eff[1] === 'string') {
+            fetchedEntities.add(eff[1]);
+          }
+        }
+      }
+
+      for (const entityType of fetchedEntities) {
+        if (!mutatedEntities.has(entityType)) continue;
+        const eventName = `${entityType}:DATA_CHANGED`;
+
+        // Skip if already listening
+        if (trait.listens?.some(l => l.event === eventName)) continue;
+
+        const cleanup = this.eventBus.on(eventName, async () => {
+          if (this.config.debug) {
+            console.log(
+              `[OrbitalRuntime] ${orbitalName}.${trait.name} re-fetching ${entityType} (DATA_CHANGED)`,
+            );
+          }
+          // Re-process INIT to re-fetch and re-render
+          await this.processOrbitalEvent(orbitalName, {
+            event: 'INIT',
+            payload: {},
+          });
+        });
+        this.listenerCleanups.push(cleanup);
+      }
     }
   }
 
@@ -1024,6 +1106,50 @@ export class OrbitalServerRuntime {
       }
     }
 
+    // Auto-refetch after persist: re-fetch entity types that were mutated,
+    // then re-execute INIT render-ui effects so clientEffects have fresh data.
+    const persistedTypes = new Set<string>();
+    for (const er of effectResults) {
+      if (er.effect === 'persist' && er.success && er.entityType) {
+        persistedTypes.add(er.entityType as string);
+      } else if (er.effect === 'set' && er.success && er.entityType) {
+        persistedTypes.add(er.entityType as string);
+      }
+    }
+    if (persistedTypes.size > 0) {
+      for (const entityType of persistedTypes) {
+        try {
+          const fresh = await this.persistence.list(entityType);
+          fetchedData[entityType] = fresh;
+        } catch {
+          // Ignore re-fetch errors
+        }
+      }
+      // Re-process INIT to re-render with fresh data
+      // This produces updated clientEffects (render-ui) using the fresh fetchedData
+      const initResults = registered.manager.sendEvent('INIT', {}, {});
+      const initFiltered = activeTraits && activeTraits.length > 0
+        ? initResults.filter(({ traitName }) => activeTraits.includes(traitName))
+        : initResults;
+      for (const { traitName, result: initResult } of initFiltered) {
+        if (initResult.effects.length > 0) {
+          await this.executeEffects(
+            registered,
+            traitName,
+            initResult.effects as Effect[],
+            {},
+            entityData,
+            entityId,
+            emittedEvents,
+            fetchedData,
+            clientEffects,
+            effectResults,
+            user,
+          );
+        }
+      }
+    }
+
     // Build current states
     const states: Record<string, string> = {};
     for (const [name, state] of registered.manager.getAllStates()) {
@@ -1095,6 +1221,11 @@ export class OrbitalServerRuntime {
               entityType,
               data: { id, field, value },
               success: true,
+            });
+            // Implicit emit: entity data changed after set
+            handlers.emit(`${entityType}:DATA_CHANGED`, {
+              action: 'set',
+              entityType,
             });
           } catch (err) {
             effectResults.push({
@@ -1193,6 +1324,16 @@ export class OrbitalServerRuntime {
             success: !batchFailed,
             ...(batchFailed ? { error: batchError } : {}),
           });
+          // Implicit emit: entity data changed after batch persist
+          if (!batchFailed) {
+            const affectedTypes = new Set(completed.map(op => op.entityType));
+            for (const affectedType of affectedTypes) {
+              handlers.emit(`${affectedType}:DATA_CHANGED`, {
+                action: 'batch',
+                entityType: affectedType,
+              });
+            }
+          }
           return;
         }
 
@@ -1240,6 +1381,11 @@ export class OrbitalServerRuntime {
             entityType: type,
             data: resultData,
             success: true,
+          });
+          // Implicit emit: entity data changed after persist
+          handlers.emit(`${type}:DATA_CHANGED`, {
+            action,
+            entityType: type,
           });
         } catch (err) {
           effectResults.push({
