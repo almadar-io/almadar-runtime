@@ -351,13 +351,18 @@ export class EffectExecutor {
             case 'fetch': {
                 if (this.handlers.fetch) {
                     const entityType = args[0] as string;
-                    const options = args[1] as {
-                        id?: string;
-                        filter?: unknown;
-                        limit?: number;
-                        offset?: number;
-                        include?: string[];
-                    } | undefined;
+                    const rawOpt = args[1];
+                    // Support both shorthand ['fetch', 'Entity', 'id-value']
+                    // and full options ['fetch', 'Entity', { id: 'id-value' }]
+                    const options = typeof rawOpt === 'string'
+                        ? { id: rawOpt }
+                        : rawOpt as {
+                            id?: string;
+                            filter?: unknown;
+                            limit?: number;
+                            offset?: number;
+                            include?: string[];
+                        } | undefined;
                     await this.handlers.fetch(entityType, options);
                 } else {
                     this.logUnsupported('fetch');
@@ -368,26 +373,20 @@ export class EffectExecutor {
             // === Resource Operators ===
 
             case 'ref': {
-                if (this.handlers.ref) {
-                    const refEntityType = args[0] as string;
-                    const refOptions = args[1] as {
+                const refEntityType = args[0] as string;
+                const rawRefOpt = args[1];
+                const refOptions = typeof rawRefOpt === 'string'
+                    ? { id: rawRefOpt }
+                    : rawRefOpt as {
                         id?: string;
                         filter?: unknown;
                         limit?: number;
                         offset?: number;
                         include?: string[];
                     } | undefined;
+                if (this.handlers.ref) {
                     await this.handlers.ref(refEntityType, refOptions);
                 } else if (this.handlers.fetch) {
-                    // Fallback: ref delegates to fetch on server
-                    const refEntityType = args[0] as string;
-                    const refOptions = args[1] as {
-                        id?: string;
-                        filter?: unknown;
-                        limit?: number;
-                        offset?: number;
-                        include?: string[];
-                    } | undefined;
                     await this.handlers.fetch(refEntityType, refOptions);
                 } else {
                     this.logUnsupported('ref');
@@ -396,20 +395,17 @@ export class EffectExecutor {
             }
 
             case 'deref': {
-                if (this.handlers.deref) {
-                    const derefEntityType = args[0] as string;
-                    const derefOptions = args[1] as {
+                const derefEntityType = args[0] as string;
+                const rawDerefOpt = args[1];
+                const derefOptions = typeof rawDerefOpt === 'string'
+                    ? { id: rawDerefOpt }
+                    : rawDerefOpt as {
                         id?: string;
                         filter?: unknown;
                     } | undefined;
+                if (this.handlers.deref) {
                     await this.handlers.deref(derefEntityType, derefOptions);
                 } else if (this.handlers.fetch) {
-                    // Fallback: deref delegates to fetch on server
-                    const derefEntityType = args[0] as string;
-                    const derefOptions = args[1] as {
-                        id?: string;
-                        filter?: unknown;
-                    } | undefined;
                     await this.handlers.fetch(derefEntityType, derefOptions);
                 } else {
                     this.logUnsupported('deref');
