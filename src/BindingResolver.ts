@@ -17,6 +17,9 @@ import {
 } from '@almadar/evaluator';
 import { isKnownOperator } from '@almadar/operators';
 import type { BindingContext } from './types.js';
+import { createLogger } from './logger.js';
+
+const bindLog = createLogger('almadar:runtime:bindings');
 
 // Re-export for convenience
 export { createMinimalContext, type EvaluationContext };
@@ -87,7 +90,9 @@ export function interpolateValue(value: unknown, ctx: EvaluationContext): unknow
 function interpolateString(value: string, ctx: EvaluationContext): unknown {
     // Pure binding - resolve directly
     if (value.startsWith('@') && isPureBinding(value)) {
-        return resolveBinding(value, ctx);
+        const resolved = resolveBinding(value, ctx);
+        bindLog.debug('resolve', { binding: value, resolvedType: typeof resolved });
+        return resolved;
     }
 
     // Embedded bindings

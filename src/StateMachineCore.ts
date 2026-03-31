@@ -18,6 +18,9 @@ import type {
 } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import { evaluateGuard } from '@almadar/evaluator';
+import { createLogger } from './logger.js';
+
+const smLog = createLogger('almadar:runtime:sm');
 
 // ============================================================================
 // Core Functions
@@ -150,6 +153,7 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
     const transition = findTransition(trait, traitState.currentState, normalizedEvent);
 
     if (!transition) {
+        smLog.debug('noTransition', { trait: trait.name, event: normalizedEvent, currentState: traitState.currentState });
         return {
             executed: false,
             newState: traitState.currentState,
@@ -157,6 +161,8 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
             effects: [],
         };
     }
+
+    smLog.debug('processEvent', { trait: trait.name, event: normalizedEvent, currentState: traitState.currentState, to: transition.to });
 
     // Evaluate guard if present
     if (transition.guard) {
@@ -171,6 +177,7 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
                 transition.guard as Parameters<typeof evaluateGuard>[0],
                 ctx
             );
+            smLog.debug('guard:evaluate', { trait: trait.name, event: normalizedEvent, guardResult: guardPasses });
             if (!guardPasses) {
                 return {
                     executed: false,

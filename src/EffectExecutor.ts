@@ -17,6 +17,9 @@ import type {
 import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import type { BindingContext } from './types.js';
+import { createLogger } from './logger.js';
+
+const effectLog = createLogger('almadar:runtime:effects');
 
 // ============================================================================
 // Types
@@ -216,13 +219,17 @@ export class EffectExecutor {
         const isCompound = operator === 'do' || operator === 'when';
         const resolvedArgs = isCompound ? args : resolveArgs(args, this.bindings, this.strictBindings);
 
+        effectLog.debug('execute', { operator, argCount: resolvedArgs.length, context: this.context.traitName });
+
         if (this.debug) {
             console.log('[EffectExecutor] Executing:', operator, resolvedArgs);
         }
 
         try {
             await this.dispatch(operator, resolvedArgs);
+            effectLog.debug('execute:result', { operator, success: true });
         } catch (error) {
+            effectLog.warn('execute:error', { operator, error: error instanceof Error ? error.message : String(error) });
             console.error('[EffectExecutor] Error executing effect:', operator, error);
             throw error;
         }
