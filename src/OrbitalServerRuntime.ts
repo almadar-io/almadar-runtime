@@ -46,6 +46,8 @@ import {
   createInitialTraitState,
 } from "./StateMachineCore.js";
 import { EffectExecutor } from "./EffectExecutor.js";
+import { LocalPersistenceAdapter } from "./LocalPersistenceAdapter.js";
+export { LocalPersistenceAdapter } from "./LocalPersistenceAdapter.js";
 import {
   interpolateProps,
   createContextFromBindings,
@@ -60,6 +62,7 @@ import type {
   Effect,
   EntityRow,
   EventPayload,
+  EvaluationContextExtensions,
 } from "./types.js";
 import type {
   FieldValue,
@@ -214,6 +217,17 @@ export interface OrbitalServerRuntimeConfig {
    * Default: true
    */
   namespaceEvents?: boolean;
+  /**
+   * Root directory for `persistence: "local"` entities.
+   * Default: ~/.orb/data/
+   */
+  localStorageRoot?: string;
+  /**
+   * Additional fields to spread onto every EvaluationContext.
+   * Use this to inject module contexts (e.g., { agent: AgentContext }).
+   * The evaluator dispatches agent/* operators to ctx.agent.
+   */
+  contextExtensions?: EvaluationContextExtensions;
 }
 
 /**
@@ -319,6 +333,7 @@ export class OrbitalServerRuntime {
   private entitySharingMap: EntitySharingMap = {};
   private eventNamespaceMap: EventNamespaceMap = {};
   private osHandlers: OsHandlerResult | null = null;
+  private localPersistence: PersistenceAdapter | null = null;
 
   constructor(config: OrbitalServerRuntimeConfig = {}) {
     this.config = {
@@ -350,6 +365,11 @@ export class OrbitalServerRuntime {
       }
     } else {
       this.persistence = config.persistence || new InMemoryPersistence();
+    }
+
+    // Initialize local persistence adapter for persistence: "local" entities
+    if (config.localStorageRoot) {
+      this.localPersistence = new LocalPersistenceAdapter(config.localStorageRoot);
     }
 
     // Auto-wire OS handlers (server-side only)
@@ -567,7 +587,9 @@ export class OrbitalServerRuntime {
       };
     });
 
-    const manager = new StateMachineManager(traitDefs);
+    const manager = new StateMachineManager(traitDefs, {
+      contextExtensions: this.config.contextExtensions,
+    });
 
     const entityRef = orbital.entity;
     const entity: Entity = typeof entityRef === 'string'
@@ -827,7 +849,7 @@ export class OrbitalServerRuntime {
               state:
                 registered.manager.getState(traitName)?.currentState ||
                 "unknown",
-            });
+            }, false, this.config.contextExtensions);
 
             const guardPasses = evaluateGuard(
               tick.guard as Parameters<typeof evaluateGuard>[0],
@@ -1430,7 +1452,7 @@ export class OrbitalServerRuntime {
             current,
             entity: entityData,
             payload,
-          });
+          }, false, this.config.contextExtensions);
 
           let newData: EntityRow;
           if (Array.isArray(transform)) {
@@ -1499,6 +1521,7 @@ export class OrbitalServerRuntime {
           bindings: bindingsRef ?? {},
           context: contextRef ?? { traitName, state: 'unknown', transition: 'unknown' },
           debug: this.config.debug,
+          contextExtensions: this.config.contextExtensions,
         });
 
         for (const innerEffect of atomicEffects) {
@@ -1596,6 +1619,7 @@ export class OrbitalServerRuntime {
       bindings,
       context,
       debug: this.config.debug,
+      contextExtensions: this.config.contextExtensions,
     });
 
     await executor.executeAll(effects);

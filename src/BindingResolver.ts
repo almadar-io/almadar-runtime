@@ -16,7 +16,7 @@ import {
     type EvaluationContext,
 } from '@almadar/evaluator';
 import { isKnownOperator } from '@almadar/operators';
-import type { BindingContext, EntityRow, PatternProps } from './types.js';
+import type { BindingContext, EntityRow, PatternProps, EvaluationContextExtensions } from './types.js';
 import { createLogger } from './logger.js';
 
 const bindLog = createLogger('almadar:runtime:bindings');
@@ -206,10 +206,12 @@ export function extractBindings(value: unknown): string[] {
  *
  * @param bindings - Binding context with entity, payload, state data
  * @param strictBindings - When true, log warnings for undefined binding paths (RCG-01)
+ * @param contextExtensions - Optional fields to spread onto the context (e.g., { agent: AgentContext })
  */
 export function createContextFromBindings(
     bindings: BindingContext,
-    strictBindings?: boolean
+    strictBindings?: boolean,
+    contextExtensions?: EvaluationContextExtensions,
 ): EvaluationContext {
     const ctx = createMinimalContext(
         bindings.entity || {},
@@ -225,6 +227,11 @@ export function createContextFromBindings(
         if (key !== 'entity' && key !== 'payload' && key !== 'state' && key !== 'config' && key !== 'user' && value != null) {
             ctx.singletons.set(key, value as EntityRow);
         }
+    }
+    // Spread context extensions (e.g., agent: AgentContext) onto the evaluation context.
+    // This is how ctx.agent gets populated for agent/* operator dispatch.
+    if (contextExtensions) {
+        Object.assign(ctx, contextExtensions);
     }
     return ctx;
 }

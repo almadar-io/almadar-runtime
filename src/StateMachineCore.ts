@@ -18,6 +18,7 @@ import type {
     EntityRow,
     EventPayload,
     ConfigContext,
+    EvaluationContextExtensions,
 } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import { evaluateGuard } from '@almadar/evaluator';
@@ -113,6 +114,11 @@ export interface ProcessEventOptions {
      * When true, log warnings when bindings resolve to undefined. (RCG-01)
      */
     strictBindings?: boolean;
+    /**
+     * Additional fields to spread onto EvaluationContext for guard evaluation.
+     * Used to inject module contexts (e.g., { agent: AgentContext }).
+     */
+    contextExtensions?: EvaluationContextExtensions;
 }
 
 /**
@@ -149,6 +155,7 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
         traitState, trait, eventKey, payload, entityData,
         guardMode = 'permissive',
         strictBindings = false,
+        contextExtensions,
     } = options;
     const normalizedEvent = normalizeEventKey(eventKey);
 
@@ -173,7 +180,7 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
             entity: entityData,
             payload,
             state: traitState.currentState,
-        }, strictBindings);
+        }, strictBindings, contextExtensions);
 
         try {
             const guardPasses = evaluateGuard(
@@ -360,6 +367,7 @@ export class StateMachineManager {
                 entityData,
                 guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,
+                contextExtensions: this.config.contextExtensions,
             });
 
             if (result.executed) {
@@ -452,6 +460,7 @@ export class StateMachineManager {
                 entityData: entry.entityData,
                 guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,
+                contextExtensions: this.config.contextExtensions,
             });
 
             if (result.executed) {

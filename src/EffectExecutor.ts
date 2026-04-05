@@ -16,7 +16,7 @@ import type {
 } from './types.js';
 import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
-import type { BindingContext, EntityRow, EventPayload, ServiceParams, PatternProps } from './types.js';
+import type { BindingContext, EntityRow, EventPayload, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
 import { createLogger } from './logger.js';
 
 const effectLog = createLogger('almadar:runtime:effects');
@@ -39,6 +39,8 @@ export interface EffectExecutorOptions {
     debug?: boolean;
     /** When true, log warnings when bindings resolve to undefined (RCG-01) */
     strictBindings?: boolean;
+    /** Additional fields to spread onto EvaluationContext (e.g., { agent: AgentContext }) */
+    contextExtensions?: EvaluationContextExtensions;
 }
 
 // ============================================================================
@@ -67,9 +69,10 @@ function parseEffect(effect: unknown): { operator: string; args: unknown[] } | n
 function resolveArgs(
     args: unknown[],
     bindings: BindingContext,
-    strictBindings?: boolean
+    strictBindings?: boolean,
+    contextExtensions?: EvaluationContextExtensions,
 ): unknown[] {
-    const ctx = createContextFromBindings(bindings, strictBindings);
+    const ctx = createContextFromBindings(bindings, strictBindings, contextExtensions);
     return args.map((arg) => interpolateValue(arg, ctx));
 }
 
@@ -109,6 +112,7 @@ export class EffectExecutor {
     private context: EffectContext;
     private debug: boolean;
     private strictBindings: boolean;
+    private contextExtensions?: EvaluationContextExtensions;
 
     constructor(options: EffectExecutorOptions) {
         this.handlers = options.handlers;
@@ -116,6 +120,7 @@ export class EffectExecutor {
         this.context = options.context;
         this.debug = options.debug ?? false;
         this.strictBindings = options.strictBindings ?? false;
+        this.contextExtensions = options.contextExtensions;
     }
 
     // ==========================================================================
@@ -217,7 +222,7 @@ export class EffectExecutor {
         // Skip resolveArgs for these — each nested effect will be resolved
         // individually when this.execute() recurses into it via dispatch().
         const isCompound = operator === 'do' || operator === 'when';
-        const resolvedArgs = isCompound ? args : resolveArgs(args, this.bindings, this.strictBindings);
+        const resolvedArgs = isCompound ? args : resolveArgs(args, this.bindings, this.strictBindings, this.contextExtensions);
 
         effectLog.debug('execute', { operator, argCount: resolvedArgs.length, context: this.context.traitName });
 
@@ -282,7 +287,7 @@ export class EffectExecutor {
             const isCompound = operator === 'do' || operator === 'when';
             const resolvedArgs = isCompound
                 ? rawArgs
-                : resolveArgs(rawArgs, this.bindings, this.strictBindings);
+                : resolveArgs(rawArgs, this.bindings, this.strictBindings, this.contextExtensions);
 
             try {
                 await this.dispatch(operator, resolvedArgs);
@@ -546,7 +551,7 @@ export class EffectExecutor {
                 // Conditional effect: ['when', condition, thenEffect, elseEffect?]
                 // Only the condition needs binding resolution — then/else are
                 // nested effects that will be resolved when execute() recurses.
-                const ctx = createContextFromBindings(this.bindings);
+                const ctx = createContextFromBindings(this.bindings, false, this.contextExtensions);
                 const condition = interpolateValue(args[0], ctx);
                 const thenEffect = args[1];
                 const elseEffect = args[2];

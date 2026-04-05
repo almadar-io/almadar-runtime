@@ -11,6 +11,7 @@ import type {
     EventPayload,
     ServiceParams,
     ResolvedPatternProps,
+    AgentContext,
 } from '@almadar/core';
 
 // ============================================================================
@@ -366,6 +367,22 @@ export interface RuntimeConfig {
      * @default 10
      */
     maxEventDepth?: number;
+
+    /**
+     * Additional fields to spread onto every EvaluationContext.
+     * Used to inject module contexts (e.g., { agent: AgentContext }).
+     * The evaluator dispatches agent/* operators to ctx.agent.
+     */
+    contextExtensions?: EvaluationContextExtensions;
+}
+
+/**
+ * Typed extensions that get spread onto every EvaluationContext.
+ * Each field here corresponds to an optional field on EvaluationContext.
+ */
+export interface EvaluationContextExtensions {
+    /** Agent context for agent/* operators (memory, LLM, tools, session) */
+    agent?: AgentContext;
 }
 
 // ============================================================================
