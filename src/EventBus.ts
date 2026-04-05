@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import type { IEventBus, RuntimeEvent, EventListener, Unsubscribe } from './types.js';
+import type { IEventBus, RuntimeEvent, EventListener, Unsubscribe, EventPayload } from './types.js';
 
 /**
  * EventBus - Simple pub/sub event bus
@@ -50,7 +50,7 @@ export class EventBus implements IEventBus {
      */
     emit(
         type: string,
-        payload?: Record<string, unknown>,
+        payload?: EventPayload,
         source?: RuntimeEvent['source']
     ): void {
         // RCG-05: Circuit breaker for circular event loops

@@ -10,6 +10,9 @@
 
 type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
+/** Structured log data payload */
+type LogData = { [key: string]: string | number | boolean | null | undefined | LogData | LogData[] };
+
 const LEVEL_PRIORITY: Record<LogLevel, number> = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
 
 const ENV: Record<string, string | undefined> = typeof process !== 'undefined' && process.env ? process.env : {};
@@ -33,16 +36,16 @@ function matchesNamespace(namespace: string): boolean {
 }
 
 export interface Logger {
-  debug: (msg: string, data?: Record<string, unknown>) => void;
-  info: (msg: string, data?: Record<string, unknown>) => void;
-  warn: (msg: string, data?: Record<string, unknown>) => void;
-  error: (msg: string, data?: Record<string, unknown>) => void;
+  debug: (msg: string, data?: LogData) => void;
+  info: (msg: string, data?: LogData) => void;
+  warn: (msg: string, data?: LogData) => void;
+  error: (msg: string, data?: LogData) => void;
 }
 
 export function createLogger(namespace: string): Logger {
   const nsAllowed = matchesNamespace(namespace);
 
-  const log = (level: LogLevel, message: string, data?: Record<string, unknown>) => {
+  const log = (level: LogLevel, message: string, data?: LogData) => {
     if (LEVEL_PRIORITY[level] < MIN_PRIORITY) return;
     if (level === 'DEBUG' && !nsAllowed) return;
 
@@ -57,9 +60,9 @@ export function createLogger(namespace: string): Logger {
   };
 
   return {
-    debug: (msg: string, data?: Record<string, unknown>) => log('DEBUG', msg, data),
-    info:  (msg: string, data?: Record<string, unknown>) => log('INFO', msg, data),
-    warn:  (msg: string, data?: Record<string, unknown>) => log('WARN', msg, data),
-    error: (msg: string, data?: Record<string, unknown>) => log('ERROR', msg, data),
+    debug: (msg: string, data?: LogData) => log('DEBUG', msg, data),
+    info:  (msg: string, data?: LogData) => log('INFO', msg, data),
+    warn:  (msg: string, data?: LogData) => log('WARN', msg, data),
+    error: (msg: string, data?: LogData) => log('ERROR', msg, data),
   };
 }

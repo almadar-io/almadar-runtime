@@ -115,7 +115,7 @@ export interface ResolvedTrait {
   linkedEntity?: string;
 
   /** Configuration overrides */
-  config?: Record<string, unknown>;
+  config?: { [key: string]: string | number | boolean | null };
 }
 
 /**
@@ -442,7 +442,7 @@ export class ReferenceResolver {
 
     // Case 2: Reference object { ref: "...", config: {...} }
     if (typeof traitRef !== "string" && "ref" in traitRef) {
-      const refObj = traitRef as { ref: string; config?: Record<string, unknown>; linkedEntity?: string };
+      const refObj = traitRef as { ref: string; config?: { [key: string]: string | number | boolean | null }; linkedEntity?: string };
       return this.resolveTraitRefString(refObj.ref, imports, refObj.config, refObj.linkedEntity);
     }
 
@@ -463,7 +463,7 @@ export class ReferenceResolver {
   private resolveTraitRefString(
     ref: string,
     imports: ResolvedImports,
-    config?: Record<string, unknown>,
+    config?: { [key: string]: string | number | boolean | null },
     linkedEntity?: string
   ): ResolveResult<ResolvedTrait> {
     // Check if it's an imported trait reference: "Alias.traits.TraitName"

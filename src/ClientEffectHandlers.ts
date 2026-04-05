@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import type { EffectHandlers } from './types.js';
+import type { EffectHandlers, EventPayload, PatternProps } from './types.js';
 
 // ============================================================================
 // Types
@@ -17,7 +17,7 @@ import type { EffectHandlers } from './types.js';
  * Minimal event bus interface required by the factory.
  */
 export interface ClientEventBus {
-    emit: (type: string, payload?: Record<string, unknown>) => void;
+    emit: (type: string, payload?: EventPayload) => void;
 }
 
 /**
@@ -26,7 +26,7 @@ export interface ClientEventBus {
  */
 export interface SlotSetter {
     /** Accumulate a pattern into the pending slot map */
-    addPattern: (slot: string, pattern: unknown, props?: Record<string, unknown>) => void;
+    addPattern: (slot: string, pattern: unknown, props?: PatternProps) => void;
     /** Mark a slot for clearing */
     clearSlot: (slot: string) => void;
 }
@@ -40,7 +40,7 @@ export interface CreateClientEffectHandlersOptions {
     /** Slot setter for render-ui effects */
     slotSetter: SlotSetter;
     /** Navigate function for navigate effects */
-    navigate?: (path: string, params?: Record<string, unknown>) => void;
+    navigate?: (path: string, params?: { [key: string]: string }) => void;
     /** Notify function for notification effects */
     notify?: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;
 }
@@ -74,7 +74,7 @@ export function createClientEffectHandlers(
     const { eventBus, slotSetter, navigate, notify } = options;
 
     return {
-        emit: (event: string, payload?: Record<string, unknown>) => {
+        emit: (event: string, payload?: EventPayload) => {
             const prefixedEvent = event.startsWith('UI:') ? event : `UI:${event}`;
             eventBus.emit(prefixedEvent, { payload });
         },
@@ -92,7 +92,7 @@ export function createClientEffectHandlers(
             return {};
         },
 
-        renderUI: (slot: string, pattern: unknown, props?: Record<string, unknown>) => {
+        renderUI: (slot: string, pattern: unknown, props?: PatternProps) => {
             if (pattern === null) {
                 slotSetter.clearSlot(slot);
                 return;

@@ -16,7 +16,7 @@ import type {
 } from './types.js';
 import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
-import type { BindingContext } from './types.js';
+import type { BindingContext, EntityRow, EventPayload, ServiceParams, PatternProps } from './types.js';
 import { createLogger } from './logger.js';
 
 const effectLog = createLogger('almadar:runtime:effects');
@@ -170,7 +170,7 @@ export class EffectExecutor {
      */
     getRegisteredHandlers(): string[] {
         const registered: string[] = [];
-        const handlerMap: Record<string, unknown> = {
+        const handlerMap: { [op: string]: ((...args: never[]) => unknown) | undefined } = {
             'emit': this.handlers.emit,
             'persist': this.handlers.persist,
             'set': this.handlers.set,
@@ -319,7 +319,7 @@ export class EffectExecutor {
 
             case 'emit': {
                 const event = args[0] as string;
-                const payload = args[1] as Record<string, unknown> | undefined;
+                const payload = args[1] as EventPayload | undefined;
                 this.handlers.emit(event, payload);
                 break;
             }
@@ -338,10 +338,10 @@ export class EffectExecutor {
                     //                 ["update", "collection", "id", {...}],
                     //                 ["delete", "collection", "id"]
                     const operations = args[1] as unknown[];
-                    await this.handlers.persist('batch', '', { operations } as Record<string, unknown>);
+                    await this.handlers.persist('batch', '', { operations } as EntityRow);
                 } else {
                     const entityType = args[1] as string;
-                    const data = args[2] as Record<string, unknown> | undefined;
+                    const data = args[2] as EntityRow | undefined;
                     await this.handlers.persist(action, entityType, data);
                 }
                 break;
@@ -350,7 +350,7 @@ export class EffectExecutor {
             case 'call-service': {
                 const service = args[0] as string;
                 const action = args[1] as string;
-                const params = args[2] as Record<string, unknown> | undefined;
+                const params = args[2] as ServiceParams | undefined;
                 await this.handlers.callService(service, action, params);
                 break;
             }
@@ -435,7 +435,7 @@ export class EffectExecutor {
             case 'watch': {
                 if (this.handlers.watch) {
                     const watchEntityType = args[0] as string;
-                    const watchOptions = args[1] as Record<string, unknown> | undefined;
+                    const watchOptions = args[1] as { id?: string; filter?: unknown; limit?: number } | undefined;
                     this.handlers.watch(watchEntityType, watchOptions);
                 } else {
                     // Watch is a no-op on server - just log in debug mode
@@ -463,7 +463,7 @@ export class EffectExecutor {
             case 'spawn': {
                 if (this.handlers.spawn) {
                     const entityType = args[0] as string;
-                    const props = args[1] as Record<string, unknown> | undefined;
+                    const props = args[1] as EntityRow | undefined;
                     this.handlers.spawn(entityType, props);
                 } else {
                     this.logUnsupported('spawn');
@@ -500,7 +500,7 @@ export class EffectExecutor {
                 if (this.handlers.renderUI) {
                     const slot = args[0] as string;
                     const pattern = args[1];
-                    const props = args[2] as Record<string, unknown> | undefined;
+                    const props = args[2] as PatternProps | undefined;
                     const priority = args[3] as number | undefined;
                     this.handlers.renderUI(slot, pattern, props, priority);
                 } else {
@@ -512,7 +512,7 @@ export class EffectExecutor {
             case 'navigate': {
                 if (this.handlers.navigate) {
                     const path = args[0] as string;
-                    const params = args[1] as Record<string, unknown> | undefined;
+                    const params = args[1] as { [key: string]: string } | undefined;
                     this.handlers.navigate(path, params);
                 } else {
                     this.logUnsupported('navigate');
@@ -563,7 +563,7 @@ export class EffectExecutor {
             case 'os/watch-files': {
                 if (this.handlers.osWatchFiles) {
                     const glob = args[0] as string;
-                    const options = args[1] as Record<string, unknown> | undefined;
+                    const options = args[1] as { recursive?: boolean; debounce?: number } | undefined;
                     this.handlers.osWatchFiles(glob, options ?? {});
                 } else {
                     this.logUnsupported('os/watch-files');

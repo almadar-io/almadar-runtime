@@ -16,7 +16,7 @@ import {
     type EvaluationContext,
 } from '@almadar/evaluator';
 import { isKnownOperator } from '@almadar/operators';
-import type { BindingContext } from './types.js';
+import type { BindingContext, EntityRow, PatternProps } from './types.js';
 import { createLogger } from './logger.js';
 
 const bindLog = createLogger('almadar:runtime:bindings');
@@ -47,12 +47,12 @@ export { createMinimalContext, type EvaluationContext };
  * ```
  */
 export function interpolateProps(
-    props: Record<string, unknown>,
+    props: PatternProps,
     ctx: EvaluationContext
-): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
+): PatternProps {
+    const result: PatternProps = {};
     for (const [key, value] of Object.entries(props)) {
-        result[key] = interpolateValue(value, ctx);
+        result[key] = interpolateValue(value, ctx) as PatternProps[string];
     }
     return result;
 }
@@ -74,7 +74,7 @@ export function interpolateValue(value: unknown, ctx: EvaluationContext): unknow
     }
 
     if (typeof value === 'object') {
-        return interpolateProps(value as Record<string, unknown>, ctx);
+        return interpolateProps(value as PatternProps, ctx);
     }
 
     return value;
@@ -172,7 +172,7 @@ export function containsBindings(value: unknown): boolean {
     }
 
     if (value !== null && typeof value === 'object') {
-        return Object.values(value as Record<string, unknown>).some(containsBindings);
+        return Object.values(value as PatternProps).some(containsBindings);
     }
 
     return false;
@@ -193,7 +193,7 @@ export function extractBindings(value: unknown): string[] {
         } else if (Array.isArray(v)) {
             v.forEach(collect);
         } else if (v !== null && typeof v === 'object') {
-            Object.values(v as Record<string, unknown>).forEach(collect);
+            Object.values(v as PatternProps).forEach(collect);
         }
     }
 
@@ -223,7 +223,7 @@ export function createContextFromBindings(
     // so resolveBinding can resolve @EntityName.field
     for (const [key, value] of Object.entries(bindings)) {
         if (key !== 'entity' && key !== 'payload' && key !== 'state' && key !== 'config' && key !== 'user' && value != null) {
-            ctx.singletons.set(key, value as Record<string, unknown>);
+            ctx.singletons.set(key, value as EntityRow);
         }
     }
     return ctx;

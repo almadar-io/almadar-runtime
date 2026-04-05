@@ -58,6 +58,8 @@ import type {
   BindingContext,
   EffectContext,
   Effect,
+  EntityRow,
+  EventPayload,
 } from "./types.js";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
@@ -92,7 +94,7 @@ export interface RuntimeOrbital {
     name: string;
     fields?: Array<{ name: string; type: string; relation?: { entity?: string; cardinality?: string; onDelete?: string } }>;
     /** Pre-defined entity instances to seed on registration */
-    instances?: Array<Record<string, unknown>>;
+    instances?: Array<EntityRow>;
   };
   traits: RuntimeTrait[];
 }
@@ -126,7 +128,7 @@ export interface RuntimeTrait {
   listens?: Array<{
     event: string;
     triggers: string;
-    payloadMapping?: Record<string, unknown>;
+    payloadMapping?: EventPayload;
   }>;
   emits?: string[];
   /** Scheduled ticks for this trait */
@@ -139,7 +141,7 @@ export interface RuntimeTrait {
 interface RegisteredOrbital {
   schema: RuntimeOrbital;
   manager: StateMachineManager;
-  entityData: Map<string, Record<string, unknown>>; // entityId -> data
+  entityData: Map<string, EntityRow>; // entityId -> data
 }
 
 /**
@@ -147,7 +149,7 @@ interface RegisteredOrbital {
  */
 export interface OrbitalEventRequest {
   event: string;
-  payload?: Record<string, unknown>;
+  payload?: EventPayload;
   entityId?: string;
   /** User context for @user bindings (from Firebase auth) */
   user?: {
@@ -167,7 +169,7 @@ export interface OrbitalEventResponse {
   states: Record<string, string>;
   emittedEvents: Array<{ event: string; payload?: unknown }>;
   /** Entity data fetched by `fetch` effects - keyed by entity type */
-  data?: Record<string, Record<string, unknown> | Record<string, unknown>[]>;
+  data?: { [entityType: string]: EntityRow | EntityRow[] };
   /** Client-side effects to execute (render-ui, navigate, notify) */
   clientEffects?: Array<unknown>;
   /** Results from server-side effects (persist, call-service, set) */
@@ -187,7 +189,7 @@ export interface EffectResult {
   /** Entity type affected (for persist/set/ref/deref/swap) */
   entityType?: string;
   /** Result data from the effect */
-  data?: Record<string, unknown>;
+  data?: EntityRow;
   /** Whether the effect succeeded */
   success: boolean;
   /** Error message if failed */
@@ -252,19 +254,19 @@ export interface OrbitalServerRuntimeConfig {
 export interface PersistenceAdapter {
   create(
     entityType: string,
-    data: Record<string, unknown>,
+    data: EntityRow,
   ): Promise<{ id: string }>;
   update(
     entityType: string,
     id: string,
-    data: Record<string, unknown>,
+    data: EntityRow,
   ): Promise<void>;
   delete(entityType: string, id: string): Promise<void>;
   getById(
     entityType: string,
     id: string,
-  ): Promise<Record<string, unknown> | null>;
-  list(entityType: string): Promise<Array<Record<string, unknown>>>;
+  ): Promise<EntityRow | null>;
+  list(entityType: string): Promise<Array<EntityRow>>;
 }
 
 // ============================================================================
@@ -275,12 +277,12 @@ export interface PersistenceAdapter {
  * Simple in-memory persistence for development/testing
  */
 class InMemoryPersistence implements PersistenceAdapter {
-  private data = new Map<string, Map<string, Record<string, unknown>>>();
+  private data = new Map<string, Map<string, EntityRow>>();
   private idCounter = 0;
 
   async create(
     entityType: string,
-    data: Record<string, unknown>,
+    data: EntityRow,
   ): Promise<{ id: string }> {
     // Use provided ID if it exists, otherwise generate one
     const id = (data.id as string) || `${entityType}-${++this.idCounter}`;
@@ -294,7 +296,7 @@ class InMemoryPersistence implements PersistenceAdapter {
   async update(
     entityType: string,
     id: string,
-    data: Record<string, unknown>,
+    data: EntityRow,
   ): Promise<void> {
     const collection = this.data.get(entityType);
     if (collection?.has(id)) {
@@ -310,11 +312,11 @@ class InMemoryPersistence implements PersistenceAdapter {
   async getById(
     entityType: string,
     id: string,
-  ): Promise<Record<string, unknown> | null> {
+  ): Promise<EntityRow | null> {
     return this.data.get(entityType)?.get(id) || null;
   }
 
-  async list(entityType: string): Promise<Array<Record<string, unknown>>> {
+  async list(entityType: string): Promise<Array<EntityRow>> {
     const collection = this.data.get(entityType);
     return collection ? Array.from(collection.values()) : [];
   }
@@ -506,7 +508,7 @@ export class OrbitalServerRuntime {
       if (this.config.debug) {
         console.log(`[OrbitalRuntime] Using cached preprocessed schema: ${schema.name}`);
       }
-      this.register(cached.schema as unknown as RuntimeOrbitalSchema);
+      this.register(cached.schema as RuntimeOrbitalSchema);
       this.entitySharingMap = { ...this.entitySharingMap, ...cached.entitySharing };
       this.eventNamespaceMap = { ...this.eventNamespaceMap, ...cached.eventNamespaces };
       return {
@@ -522,7 +524,7 @@ export class OrbitalServerRuntime {
     }
 
     // Preprocess schema
-    const result = await preprocessSchema(schema as unknown as import("@almadar/core").OrbitalSchema, {
+    const result = await preprocessSchema(schema as import("@almadar/core").OrbitalSchema, {
       basePath: this.config.loaderConfig?.basePath || '.',
       stdLibPath: this.config.loaderConfig?.stdLibPath,
       scopedPaths: this.config.loaderConfig?.scopedPaths,
@@ -545,7 +547,7 @@ export class OrbitalServerRuntime {
     this.eventNamespaceMap = { ...this.eventNamespaceMap, ...result.data.eventNamespaces };
 
     // Register the preprocessed schema
-    this.register(result.data.schema as unknown as RuntimeOrbitalSchema);
+    this.register(result.data.schema as RuntimeOrbitalSchema);
 
     return {
       success: true,
@@ -700,11 +702,11 @@ export class OrbitalServerRuntime {
               )) {
                 if (typeof expr === "string" && expr.startsWith("@payload.")) {
                   const field = expr.slice("@payload.".length);
-                  (mappedPayload as Record<string, unknown>)[key] = (
-                    event.payload as Record<string, unknown>
+                  (mappedPayload as EventPayload)[key] = (
+                    event.payload as EventPayload
                   )[field];
                 } else {
-                  (mappedPayload as Record<string, unknown>)[key] = expr;
+                  (mappedPayload as EventPayload)[key] = expr as string;
                 }
               }
             }
@@ -712,7 +714,7 @@ export class OrbitalServerRuntime {
             // Trigger the mapped event
             await this.processOrbitalEvent(orbitalName, {
               event: listener.triggers,
-              payload: mappedPayload as Record<string, unknown>,
+              payload: mappedPayload as EventPayload,
             });
           });
 
@@ -878,7 +880,7 @@ export class OrbitalServerRuntime {
 
         // Execute effects for this entity
         if (tick.effects && tick.effects.length > 0) {
-          const fetchedData: Record<string, Record<string, unknown> | Record<string, unknown>[]> = {};
+          const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
           const clientEffects: Array<unknown> = [];
           const tickEffectResults: EffectResult[] = [];
           await this.executeEffects(
@@ -967,22 +969,22 @@ export class OrbitalServerRuntime {
     const { event, payload, entityId, user } = request;
     const emittedEvents: Array<{ event: string; payload?: unknown }> = [];
     // Collect data fetched by `fetch` effects
-    const fetchedData: Record<string, Record<string, unknown> | Record<string, unknown>[]> = {};
+    const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
     // Collect client-side effects (render-ui, navigate, notify)
     const clientEffects: Array<unknown> = [];
     // Collect server-side effect results (persist, call-service, set)
     const effectResults: EffectResult[] = [];
 
     // Extract active traits filter from payload (sent by client for page-specific execution)
-    const activeTraits = (payload as Record<string, unknown> | undefined)?._activeTraits as string[] | undefined;
+    const activeTraits = (payload as EventPayload | undefined)?._activeTraits as string[] | undefined;
     // Remove _activeTraits from payload before processing (internal use only)
     const cleanPayload = payload ? { ...payload } : undefined;
     if (cleanPayload) {
-      delete (cleanPayload as Record<string, unknown>)._activeTraits;
+      delete (cleanPayload as EventPayload & { _activeTraits?: unknown })._activeTraits;
     }
 
     // Get entity data if entityId provided
-    let entityData: Record<string, unknown> = {};
+    let entityData: EntityRow = {};
     if (entityId) {
       const stored = await this.persistence.getById(
         registered.schema.entity.name,
@@ -1034,7 +1036,7 @@ export class OrbitalServerRuntime {
     // Scan traits for ref effects to know which entity types are ref'd
     const refTypes = new Set<string>();
     for (const trait of registered.schema.traits || []) {
-      const sm = (trait as { stateMachine?: Record<string, unknown> }).stateMachine;
+      const sm = (trait as { stateMachine?: { transitions?: Array<{ effects?: unknown[] }> } }).stateMachine;
       const transitions = (sm?.transitions ?? trait.transitions ?? []) as Array<{ effects?: unknown[] }>;
       for (const trans of transitions) {
         for (const eff of trans.effects ?? []) {
@@ -1092,11 +1094,11 @@ export class OrbitalServerRuntime {
     registered: RegisteredOrbital,
     traitName: string,
     effects: Effect[],
-    payload: Record<string, unknown> | undefined,
-    entityData: Record<string, unknown>,
+    payload: EventPayload | undefined,
+    entityData: EntityRow,
     entityId: string | undefined,
     emittedEvents: Array<{ event: string; payload?: unknown }>,
-    fetchedData: Record<string, Record<string, unknown> | Record<string, unknown>[]>,
+    fetchedData: { [entityType: string]: EntityRow | EntityRow[] },
     clientEffects: Array<unknown>,
     effectResults: EffectResult[],
     user?: OrbitalEventRequest["user"],
@@ -1147,7 +1149,7 @@ export class OrbitalServerRuntime {
         //                 ["delete", "collection", "id"]
         // ----------------------------------------------------------------
         if (action === 'batch') {
-          const operations = (data as Record<string, unknown> | undefined)?.operations as unknown[] | undefined;
+          const operations = (data as EntityRow | undefined)?.operations as unknown[] | undefined;
           if (!Array.isArray(operations) || operations.length === 0) {
             effectResults.push({
               effect: 'persist',
@@ -1158,7 +1160,7 @@ export class OrbitalServerRuntime {
             return;
           }
 
-          const batchResults: Array<Record<string, unknown>> = [];
+          const batchResults: Array<EntityRow> = [];
           // Track completed ops for rollback on failure (best-effort)
           const completed: Array<{ action: string; entityType: string; id?: string }> = [];
           let batchFailed = false;
@@ -1176,7 +1178,7 @@ export class OrbitalServerRuntime {
             try {
               switch (opAction) {
                 case 'create': {
-                  const createData = (opRest[0] as Record<string, unknown>) || {};
+                  const createData = (opRest[0] as EntityRow) || {};
                   const { id: newId } = await this.persistence.create(opEntityType, createData);
                   batchResults.push({ action: 'create', entityType: opEntityType, id: newId, ...createData });
                   completed.push({ action: 'create', entityType: opEntityType, id: newId });
@@ -1184,7 +1186,7 @@ export class OrbitalServerRuntime {
                 }
                 case 'update': {
                   const updateId = opRest[0] as string;
-                  const updateData = (opRest[1] as Record<string, unknown>) || {};
+                  const updateData = (opRest[1] as EntityRow) || {};
                   await this.persistence.update(opEntityType, updateId, updateData);
                   const updated = await this.persistence.getById(opEntityType, updateId);
                   batchResults.push({ action: 'update', entityType: opEntityType, id: updateId, ...(updated || updateData) });
@@ -1231,7 +1233,7 @@ export class OrbitalServerRuntime {
         // Single operation mode: create / update / delete
         // ----------------------------------------------------------------
         const type = targetEntityType || entityType;
-        let resultData: Record<string, unknown> | undefined;
+        let resultData: EntityRow | undefined;
 
         try {
           // Validate relation cardinality before create/update
@@ -1302,7 +1304,7 @@ export class OrbitalServerRuntime {
           effectResults.push({
             effect: 'call-service',
             action: `${service}.${action}`,
-            data: result as Record<string, unknown> | undefined,
+            data: result as EntityRow | undefined,
             success: true,
           });
 
@@ -1320,7 +1322,7 @@ export class OrbitalServerRuntime {
 
       fetch: async (fetchEntityType, options) => {
         try {
-          let result: Record<string, unknown> | Record<string, unknown>[] | null = null;
+          let result: EntityRow | EntityRow[] | null = null;
 
           if (options?.id) {
             // Single entity fetch
@@ -1364,7 +1366,7 @@ export class OrbitalServerRuntime {
             const records = Array.isArray(result) ? result : [result];
             if (records.length > 0) {
               const merged = Object.assign([...records], records[0]);
-              (bindingsRef as Record<string, unknown>)[fetchEntityType] = merged;
+              bindingsRef[fetchEntityType] = merged;
               if (fetchEntityType === entityType) {
                 bindingsRef.entity = merged;
               }
@@ -1393,7 +1395,7 @@ export class OrbitalServerRuntime {
       deref: async (derefEntityType, options) => {
         // deref is identical to fetch on the server: one-shot read
         try {
-          let result: Record<string, unknown> | Record<string, unknown>[] | null = null;
+          let result: EntityRow | EntityRow[] | null = null;
 
           if (options?.id) {
             const entity = await this.persistence.getById(derefEntityType, options.id);
@@ -1412,7 +1414,7 @@ export class OrbitalServerRuntime {
             const records = Array.isArray(result) ? result : [result];
             if (records.length > 0) {
               const merged = Object.assign([...records], records[0]);
-              (bindingsRef as Record<string, unknown>)[derefEntityType] = merged;
+              bindingsRef[derefEntityType] = merged;
               if (derefEntityType === entityType) {
                 bindingsRef.entity = merged;
               }
@@ -1458,7 +1460,7 @@ export class OrbitalServerRuntime {
             payload,
           });
 
-          let newData: Record<string, unknown>;
+          let newData: EntityRow;
           if (Array.isArray(transform)) {
             // S-expression transform: evaluate with @current bound to the entity
             const result = evaluate(
@@ -1467,14 +1469,14 @@ export class OrbitalServerRuntime {
             );
             // The result should be a record (the transformed entity)
             if (result && typeof result === 'object' && !Array.isArray(result)) {
-              newData = result as Record<string, unknown>;
+              newData = result as EntityRow;
             } else {
               // If transform returned a non-object, treat it as a partial update
               newData = current;
             }
           } else if (typeof transform === 'object' && transform !== null) {
             // Plain object merge: simple field updates
-            newData = { ...current, ...(transform as Record<string, unknown>) };
+            newData = { ...current, ...(transform as EntityRow) };
           } else {
             effectResults.push({
               effect: 'swap',
@@ -1603,7 +1605,7 @@ export class OrbitalServerRuntime {
 
     // Add initial named entity binding
     if (entityType) {
-      (bindings as Record<string, unknown>)[entityType] = entityData;
+      bindings[entityType] = entityData;
     }
 
     // Wire forward refs so fetch/atomic handlers can access bindings and context
@@ -1647,6 +1649,7 @@ export class OrbitalServerRuntime {
    */
   private validateRelationCardinality(
     entityType: string,
+    // eslint-disable-next-line almadar/no-record-string-unknown -- mutates FK fields (string[], string) that don't fit EntityRow's value union
     data: Record<string, unknown>,
   ): void {
     // Find the entity schema
@@ -1740,7 +1743,7 @@ export class OrbitalServerRuntime {
             for (const record of affectedRecords) {
               const recordId = record.id as string;
               if (recordId) {
-                const update: Record<string, unknown> = {};
+                const update: EntityRow = {};
                 const fkValue = record[field.name];
                 if (Array.isArray(fkValue)) {
                   update[field.name] = fkValue.filter((id: unknown) => id !== deletedId);
@@ -1760,6 +1763,7 @@ export class OrbitalServerRuntime {
   }
 
   private async populateRelations(
+    // eslint-disable-next-line almadar/no-record-string-unknown -- entities have FK fields (string[], string) that don't fit EntityRow's value union
     entities: Record<string, unknown>[],
     entityType: string,
     include: string[],
@@ -1833,7 +1837,7 @@ export class OrbitalServerRuntime {
       if (foreignKeyIds.size === 0) continue;
 
       // Batch fetch all related entities
-      const relatedEntities = new Map<string, Record<string, unknown>>();
+      const relatedEntities = new Map<string, EntityRow>();
       for (const fkId of foreignKeyIds) {
         try {
           const related = await this.persistence.getById(relatedEntityType, fkId);
@@ -1948,12 +1952,10 @@ export class OrbitalServerRuntime {
         try {
           const orbitalName = req.params.orbital as string;
           // Extract user from request (set by authenticateFirebase middleware)
-          const firebaseUser = (req as Request & { firebaseUser?: Record<string, unknown> }).firebaseUser;
+          const firebaseUser = (req as Request & { firebaseUser?: OrbitalEventRequest["user"] }).firebaseUser;
           const user = firebaseUser ? {
-            uid: firebaseUser.uid as string,
-            email: firebaseUser.email as string | undefined,
-            displayName: firebaseUser.name as string | undefined,
             ...firebaseUser,
+            displayName: (firebaseUser.name as string | undefined) ?? firebaseUser.displayName,
           } : undefined;
 
           const result = await this.processOrbitalEvent(orbitalName, {

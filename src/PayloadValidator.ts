@@ -8,7 +8,7 @@
  * @packageDocumentation
  */
 
-import type { TraitDefinition } from './types.js';
+import type { TraitDefinition, EventPayload } from './types.js';
 
 // ============================================================================
 // Types
@@ -110,7 +110,7 @@ export function validatePayloadShapes(
  * Extract payload field references from a payloadMapping object.
  * Finds all `@payload.fieldName` patterns and returns the field names.
  */
-function extractPayloadReferences(mapping: Record<string, unknown>): string[] {
+function extractPayloadReferences(mapping: EventPayload): string[] {
     const refs: string[] = [];
 
     function collect(value: unknown): void {
@@ -123,7 +123,7 @@ function extractPayloadReferences(mapping: Record<string, unknown>): string[] {
             if (Array.isArray(value)) {
                 value.forEach(collect);
             } else {
-                Object.values(value as Record<string, unknown>).forEach(collect);
+                Object.values(value as EventPayload).forEach(collect);
             }
         }
     }
@@ -158,7 +158,7 @@ export function buildEmitsFromTraits(
                 if (effect[0] === 'emit' && typeof effect[1] === 'string') {
                     const event = effect[1] as string;
                     // Payload is in effect[2] if present
-                    const payloadObj = effect[2] as Record<string, unknown> | undefined;
+                    const payloadObj = effect[2] as EventPayload | undefined;
                     const payload = payloadObj
                         ? Object.keys(payloadObj).map((name) => ({ name }))
                         : undefined;

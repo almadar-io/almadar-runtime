@@ -59,9 +59,10 @@ export function clearSchemaCache(): void {
 
 function resolveField(field: EntityField): ResolvedField {
   // Use a local extra variable for accessing non-EntityField properties
-  const extra = field as unknown as Record<string, unknown>;
+  interface FieldExtra { enumValues?: string[]; values?: string[]; options?: string[]; validation?: { enum?: string[] }; description?: string }
+  const extra = field as EntityField & FieldExtra;
   // Collect enum values from all possible locations
-  const enumValues = (extra.enumValues as string[] | undefined) || (extra.values as string[] | undefined) || (extra.options as string[] | undefined) || (extra.validation as Record<string, unknown> | undefined)?.enum as string[] | undefined;
+  const enumValues = extra.enumValues || extra.values || extra.options || extra.validation?.enum;
 
   return {
     name: field.name,
@@ -371,7 +372,7 @@ function resolvePages(
         path: pagePath || `/${pageName.toLowerCase()}`,
         featureName: orbitalName,
         viewType: typeof pageRef === 'object' && !('ref' in pageRef) ? (pageRef as Page).viewType as ("create" | "list" | "detail" | "edit" | "dashboard" | undefined) : undefined,
-        layout: typeof pageRef === 'object' ? (pageRef as unknown as Record<string, unknown>).layout as string | undefined : undefined,
+        layout: typeof pageRef === 'object' ? (pageRef as Page & { layout?: string }).layout : undefined,
         sections: [], // Trait-driven: no static sections
         traits: traitBindings,
         entityBindings: [],

@@ -9,6 +9,7 @@
 
 import { faker } from '@faker-js/faker';
 import type { PersistenceAdapter } from './OrbitalServerRuntime.js';
+import type { EntityRow } from './types.js';
 
 // ============================================================================
 // Types
@@ -26,7 +27,7 @@ export interface EntitySchema {
   name: string;
   fields: EntityField[];
   /** Pre-authored instance data from the schema (used instead of faker generation) */
-  seedData?: Record<string, unknown>[];
+  seedData?: EntityRow[];
 }
 
 export interface MockPersistenceConfig {
@@ -46,7 +47,7 @@ export interface MockPersistenceConfig {
  * In-memory mock data store with CRUD operations and faker-based seeding.
  */
 export class MockPersistenceAdapter implements PersistenceAdapter {
-  private stores: Map<string, Map<string, Record<string, unknown>>> = new Map();
+  private stores: Map<string, Map<string, EntityRow>> = new Map();
   private schemas: Map<string, EntitySchema> = new Map();
   private idCounters: Map<string, number> = new Map();
   private config: MockPersistenceConfig;
@@ -71,7 +72,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   // Store Management
   // ============================================================================
 
-  private getStore(entityName: string): Map<string, Record<string, unknown>> {
+  private getStore(entityName: string): Map<string, EntityRow> {
     const normalized = entityName.toLowerCase();
     if (!this.stores.has(normalized)) {
       this.stores.set(normalized, new Map());
@@ -112,7 +113,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   /**
    * Seed an entity with pre-authored instance data.
    */
-  seedFromInstances(entityName: string, instances: Record<string, unknown>[]): void {
+  seedFromInstances(entityName: string, instances: EntityRow[]): void {
     const store = this.getStore(entityName);
 
     if (this.config.debug) {
@@ -122,7 +123,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     for (const instance of instances) {
       const id = (instance.id as string) || this.nextId(entityName);
       const now = new Date().toISOString();
-      const item: Record<string, unknown> = {
+      const item: EntityRow = {
         ...instance,
         id,
         createdAt: instance.createdAt as string || now,
@@ -157,10 +158,10 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     entityName: string,
     fields: EntityField[],
     index: number
-  ): Record<string, unknown> {
+  ): EntityRow {
     const id = this.nextId(entityName);
     const now = new Date().toISOString();
-    const item: Record<string, unknown> = {
+    const item: EntityRow = {
       id,
       createdAt: faker.date.past({ years: 1 }).toISOString(),
       updatedAt: now,
@@ -288,7 +289,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
 
   async create(
     entityType: string,
-    data: Record<string, unknown>
+    data: EntityRow
   ): Promise<{ id: string }> {
     const store = this.getStore(entityType);
     const id = this.nextId(entityType);
@@ -308,7 +309,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   async update(
     entityType: string,
     id: string,
-    data: Record<string, unknown>
+    data: EntityRow
   ): Promise<void> {
     const store = this.getStore(entityType);
     const existing = store.get(id);
@@ -338,12 +339,12 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   async getById(
     entityType: string,
     id: string
-  ): Promise<Record<string, unknown> | null> {
+  ): Promise<EntityRow | null> {
     const store = this.getStore(entityType);
     return store.get(id) ?? null;
   }
 
-  async list(entityType: string): Promise<Array<Record<string, unknown>>> {
+  async list(entityType: string): Promise<Array<EntityRow>> {
     const store = this.getStore(entityType);
     return Array.from(store.values());
   }

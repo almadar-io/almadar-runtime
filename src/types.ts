@@ -7,6 +7,25 @@
  */
 
 // ============================================================================
+// Runtime Data Types
+// ============================================================================
+
+/** Row of entity data at runtime (fields are FieldValue-typed) */
+export type EntityRow = { [field: string]: string | number | boolean | null | undefined | EntityRow | EntityRow[] };
+
+/** Event payload data (field-to-value map) */
+export type EventPayload = { [field: string]: string | number | boolean | null | undefined | EventPayload | EventPayload[] };
+
+/** Service call parameters */
+export type ServiceParams = { [param: string]: string | number | boolean | null | undefined | ServiceParams | ServiceParams[] };
+
+/** Pattern/render props */
+export type PatternProps = { [prop: string]: string | number | boolean | null | undefined | PatternProps | PatternProps[] };
+
+/** Configuration context */
+export type ConfigContext = { [key: string]: string | number | boolean | null | undefined };
+
+// ============================================================================
 // Event Bus Types
 // ============================================================================
 
@@ -17,7 +36,7 @@ export interface RuntimeEvent {
     /** Event type (e.g., "ORDER_CONFIRMED", "TraitName.EVENT_NAME") */
     type: string;
     /** Event payload data */
-    payload?: Record<string, unknown>;
+    payload?: EventPayload;
     /** Timestamp when event was emitted */
     timestamp: number;
     /** Source information for debugging */
@@ -37,7 +56,7 @@ export type Unsubscribe = () => void;
  */
 export interface IEventBus {
     /** Emit an event */
-    emit(type: string, payload?: Record<string, unknown>, source?: RuntimeEvent['source']): void;
+    emit(type: string, payload?: EventPayload, source?: RuntimeEvent['source']): void;
     /** Subscribe to an event */
     on(type: string, listener: EventListener): Unsubscribe;
     /** Subscribe to ALL events (wildcard listener) */
@@ -67,7 +86,7 @@ export interface TraitState {
     /** Last event that caused a transition */
     lastEvent: string | null;
     /** Custom context data */
-    context: Record<string, unknown>;
+    context: ConfigContext;
 }
 
 /**
@@ -114,7 +133,7 @@ export interface TraitDefinition {
     listens?: Array<{
         event: string;
         triggers: string;
-        payloadMapping?: Record<string, unknown>;
+        payloadMapping?: EventPayload;
     }>;
 }
 
@@ -130,13 +149,13 @@ export interface TraitDefinition {
  */
 export interface EffectHandlers {
     /** Emit an event to the event bus */
-    emit: (event: string, payload?: Record<string, unknown>) => void;
+    emit: (event: string, payload?: EventPayload) => void;
 
     /** Persist data (create/update/delete/batch) */
     persist: (
         action: 'create' | 'update' | 'delete' | 'batch',
         entityType: string,
-        data?: Record<string, unknown>
+        data?: EntityRow
     ) => Promise<void>;
 
     /** Set a field value on an entity */
@@ -146,7 +165,7 @@ export interface EffectHandlers {
     callService: (
         service: string,
         action: string,
-        params?: Record<string, unknown>
+        params?: ServiceParams
     ) => Promise<unknown>;
 
     /** Fetch entity data (server only) - returns data for client-side rendering */
@@ -160,10 +179,10 @@ export interface EffectHandlers {
             /** Relation fields to include (populate) in the response */
             include?: string[];
         }
-    ) => Promise<Record<string, unknown> | Record<string, unknown>[] | null>;
+    ) => Promise<EntityRow | EntityRow[] | null>;
 
     /** Spawn a new entity instance */
-    spawn?: (entityType: string, props?: Record<string, unknown>) => void;
+    spawn?: (entityType: string, props?: EntityRow) => void;
 
     /** Despawn (delete) an entity instance */
     despawn?: (entityId: string) => void;
@@ -174,12 +193,12 @@ export interface EffectHandlers {
     renderUI?: (
         slot: string,
         pattern: unknown,
-        props?: Record<string, unknown>,
+        props?: PatternProps,
         priority?: number
     ) => void;
 
     /** Navigate to a route (client only) */
-    navigate?: (path: string, params?: Record<string, unknown>) => void;
+    navigate?: (path: string, params?: { [key: string]: string }) => void;
 
     /** Show a notification (client: toast, server: log) */
     notify?: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;
@@ -199,7 +218,7 @@ export interface EffectHandlers {
             offset?: number;
             include?: string[];
         }
-    ) => Promise<Record<string, unknown> | Record<string, unknown>[] | null>;
+    ) => Promise<EntityRow | EntityRow[] | null>;
 
     /** Deref: one-shot data read (server: same as fetch) */
     deref?: (
@@ -208,19 +227,19 @@ export interface EffectHandlers {
             id?: string;
             filter?: unknown;
         }
-    ) => Promise<Record<string, unknown> | Record<string, unknown>[] | null>;
+    ) => Promise<EntityRow | EntityRow[] | null>;
 
     /** Swap!: atomic read-modify-write on an entity */
     swap?: (
         entityType: string,
         entityId: string,
         transform: unknown,
-    ) => Promise<Record<string, unknown> | null>;
+    ) => Promise<EntityRow | null>;
 
     /** Watch: client-side reactive subscription (no-op on server) */
     watch?: (
         entityType: string,
-        options?: Record<string, unknown>,
+        options?: { id?: string; filter?: unknown; limit?: number },
     ) => void;
 
     /** Atomic: execute inner effects as a transaction */
@@ -230,7 +249,7 @@ export interface EffectHandlers {
 
     // OS trigger handlers (server-side only)
     /** Watch file system for changes matching glob pattern */
-    osWatchFiles?: (glob: string, options: Record<string, unknown>) => void;
+    osWatchFiles?: (glob: string, options: { recursive?: boolean; debounce?: number }) => void;
     /** Monitor a process by name */
     osWatchProcess?: (name: string, subcommand?: string) => void;
     /** Monitor a port for open/close */
@@ -256,13 +275,13 @@ export interface EffectHandlers {
  */
 export interface BindingContext {
     /** Current entity data */
-    entity?: Record<string, unknown>;
+    entity?: EntityRow;
     /** Event payload data */
-    payload?: Record<string, unknown>;
+    payload?: EventPayload;
     /** Current state name */
     state?: string;
     /** Trait-level state/config */
-    config?: Record<string, unknown>;
+    config?: ConfigContext;
     /** Additional custom bindings */
     [key: string]: unknown;
 }

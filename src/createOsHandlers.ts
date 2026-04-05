@@ -13,6 +13,7 @@
 import * as fs from "fs";
 import * as net from "net";
 import { execSync } from "child_process";
+import type { EventPayload } from './types.js';
 import type { EffectHandlers } from "./types.js";
 
 // ============================================================================
@@ -21,7 +22,7 @@ import type { EffectHandlers } from "./types.js";
 
 export interface OsHandlerContext {
   /** Emit an event on the EventBus */
-  emitEvent: (type: string, payload: Record<string, unknown>) => void;
+  emitEvent: (type: string, payload: EventPayload) => void;
   /** Working directory for file watching (defaults to process.cwd()) */
   cwd?: string;
 }
@@ -139,7 +140,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
   const debounceConfig = new Map<string, number>();
   const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  function debouncedEmit(eventType: string, payload: Record<string, unknown>): void {
+  function debouncedEmit(eventType: string, payload: EventPayload): void {
     const ms = debounceConfig.get(eventType);
     if (ms !== undefined && ms > 0) {
       const existing = debounceTimers.get(eventType);
@@ -161,7 +162,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
   // ============================================================================
 
   const handlers: Partial<EffectHandlers> = {
-    osWatchFiles: (glob: string, options: Record<string, unknown>) => {
+    osWatchFiles: (glob: string, options: { recursive?: boolean; debounce?: number }) => {
       const recursive = (options.recursive as boolean) !== false;
       const pattern = globToRegex(glob);
 

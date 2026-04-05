@@ -15,6 +15,8 @@ import type {
     BindingContext,
     RuntimeConfig,
     TransitionObserver,
+    EntityRow,
+    EventPayload,
 } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import { evaluateGuard } from '@almadar/evaluator';
@@ -97,9 +99,9 @@ export interface ProcessEventOptions {
     /** Event key to process */
     eventKey: string;
     /** Event payload */
-    payload?: Record<string, unknown>;
+    payload?: EventPayload;
     /** Entity data for binding resolution */
-    entityData?: Record<string, unknown>;
+    entityData?: EntityRow;
     /**
      * Guard evaluation error handling mode. (RCG-02)
      * - "permissive": Guard errors allow the transition (default, backwards-compatible)
@@ -257,8 +259,8 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
 /** Entry in a per-trait event queue. */
 export interface QueuedEvent {
     eventKey: string;
-    payload?: Record<string, unknown>;
-    entityData?: Record<string, unknown>;
+    payload?: EventPayload;
+    entityData?: EntityRow;
 }
 
 export class StateMachineManager {
@@ -340,8 +342,8 @@ export class StateMachineManager {
      */
     sendEvent(
         eventKey: string,
-        payload?: Record<string, unknown>,
-        entityData?: Record<string, unknown>
+        payload?: EventPayload,
+        entityData?: EntityRow
     ): Array<{ traitName: string; result: TransitionResult }> {
         const results: Array<{ traitName: string; result: TransitionResult }> = [];
 
@@ -402,8 +404,8 @@ export class StateMachineManager {
      */
     enqueueEvent(
         eventKey: string,
-        payload?: Record<string, unknown>,
-        entityData?: Record<string, unknown>
+        payload?: EventPayload,
+        entityData?: EntityRow
     ): void {
         for (const [traitName] of this.traits) {
             const queue = this.queues.get(traitName) ?? [];
@@ -428,7 +430,7 @@ export class StateMachineManager {
         executeEffects: (
             traitName: string,
             result: TransitionResult,
-            payload?: Record<string, unknown>
+            payload?: EventPayload
         ) => Promise<void>
     ): Promise<void> {
         if (this.processing.has(traitName)) return;

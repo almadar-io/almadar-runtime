@@ -172,7 +172,7 @@ export class UnifiedLoader implements SchemaLoader {
         stdLibPath: this.options.stdLibPath,
         scopedPaths: this.options.scopedPaths,
         ...this.options.fileSystem,
-      }) as unknown as SchemaLoader;
+      }) as SchemaLoader;
     }
   }
 

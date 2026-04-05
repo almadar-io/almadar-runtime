@@ -31,7 +31,7 @@
  * @packageDocumentation
  */
 
-import type { IEventBus, RuntimeEvent } from "./types.js";
+import type { IEventBus, RuntimeEvent, EventPayload } from "./types.js";
 
 // ============================================================================
 // Types
@@ -241,7 +241,7 @@ export class ServerBridge {
     }
 
     const result = (await response.json()) as {
-      emittedEvents?: Array<{ event: string; payload?: Record<string, unknown> }>;
+      emittedEvents?: Array<{ event: string; payload?: EventPayload }>;
     };
 
     // If server emitted events, put them on client EventBus
@@ -330,7 +330,7 @@ export class ServerBridge {
   async sendEvent(
     orbitalName: string,
     event: string,
-    payload?: Record<string, unknown>,
+    payload?: EventPayload,
   ): Promise<{
     success: boolean;
     states?: Record<string, string>;

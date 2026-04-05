@@ -158,8 +158,9 @@ function getElectronPaths(): {
 
   try {
     // In Electron renderer process
-    if (typeof window !== "undefined" && (window as unknown as { electronAPI?: { resourcesPath?: string; userDataPath?: string } }).electronAPI) {
-      const api = (window as unknown as { electronAPI: { resourcesPath?: string; userDataPath?: string } }).electronAPI;
+    interface ElectronWindow { electronAPI?: { resourcesPath?: string; userDataPath?: string } }
+    if (typeof window !== "undefined" && (window as ElectronWindow).electronAPI) {
+      const api = (window as ElectronWindow).electronAPI!;
       return {
         resourcesPath: api.resourcesPath || null,
         userDataPath: api.userDataPath || null,
