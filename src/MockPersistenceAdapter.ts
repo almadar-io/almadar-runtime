@@ -10,6 +10,7 @@
 import { faker } from '@faker-js/faker';
 import type { PersistenceAdapter } from './OrbitalServerRuntime.js';
 import type { EntityRow } from './types.js';
+import type { FieldValue } from '@almadar/core';
 
 // ============================================================================
 // Types
@@ -180,13 +181,13 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   /**
    * Generate a mock value for a field based on its schema.
    */
-  private generateFieldValue(entityName: string, field: EntityField, index: number): unknown {
+  private generateFieldValue(entityName: string, field: EntityField, index: number): FieldValue {
     // Handle default values
     if (field.default !== undefined) {
       if (field.default === '@now') {
         return new Date().toISOString();
       }
-      return field.default;
+      return field.default as FieldValue;
     }
 
     // Handle optional fields - 80% chance of having a value
@@ -221,8 +222,9 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         return null; // Relations need special handling
 
       case 'array':
+        return [];
       case 'object':
-        return field.type === 'array' ? [] : {};
+        return null;
 
       default:
         // Treat unknown types as strings

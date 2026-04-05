@@ -61,6 +61,7 @@ import type {
   EntityRow,
   EventPayload,
 } from "./types.js";
+import type { FieldValue } from "@almadar/core";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
   preprocessSchema,
@@ -508,7 +509,7 @@ export class OrbitalServerRuntime {
       if (this.config.debug) {
         console.log(`[OrbitalRuntime] Using cached preprocessed schema: ${schema.name}`);
       }
-      this.register(cached.schema as RuntimeOrbitalSchema);
+      this.register(cached.schema as unknown as RuntimeOrbitalSchema);
       this.entitySharingMap = { ...this.entitySharingMap, ...cached.entitySharing };
       this.eventNamespaceMap = { ...this.eventNamespaceMap, ...cached.eventNamespaces };
       return {
@@ -524,7 +525,7 @@ export class OrbitalServerRuntime {
     }
 
     // Preprocess schema
-    const result = await preprocessSchema(schema as import("@almadar/core").OrbitalSchema, {
+    const result = await preprocessSchema(schema as unknown as import("@almadar/core").OrbitalSchema, {
       basePath: this.config.loaderConfig?.basePath || '.',
       stdLibPath: this.config.loaderConfig?.stdLibPath,
       scopedPaths: this.config.loaderConfig?.scopedPaths,
@@ -547,7 +548,7 @@ export class OrbitalServerRuntime {
     this.eventNamespaceMap = { ...this.eventNamespaceMap, ...result.data.eventNamespaces };
 
     // Register the preprocessed schema
-    this.register(result.data.schema as RuntimeOrbitalSchema);
+    this.register(result.data.schema as unknown as RuntimeOrbitalSchema);
 
     return {
       success: true,
@@ -1122,18 +1123,18 @@ export class OrbitalServerRuntime {
         const id = targetId || entityId;
         if (id) {
           try {
-            await this.persistence.update(entityType, id, { [field]: value });
+            await this.persistence.update(entityType, id, { [field]: value as FieldValue });
             effectResults.push({
               effect: 'set',
               entityType,
-              data: { id, field, value },
+              data: { id, field, value: value as FieldValue },
               success: true,
             });
           } catch (err) {
             effectResults.push({
               effect: 'set',
               entityType,
-              data: { id, field, value },
+              data: { id, field, value: value as FieldValue },
               success: false,
               error: err instanceof Error ? err.message : String(err),
             });
@@ -1222,7 +1223,7 @@ export class OrbitalServerRuntime {
               operations: batchResults,
               completedCount: completed.length,
               totalCount: operations.length,
-            },
+            } as unknown as EntityRow,
             success: !batchFailed,
             ...(batchFailed ? { error: batchError } : {}),
           });
@@ -1857,21 +1858,24 @@ export class OrbitalServerRuntime {
 
       for (const entity of entities) {
         const fkValue = entity[foreignKeyField];
+        // Population assigns related EntityRow objects to fields at runtime.
+        // These won't match the strict FieldValue type, so cast at the boundary.
+        const entityRecord = entity as Record<string, unknown>;
         if (cardinality === 'one' || cardinality === 'many-to-one') {
           // Single FK: attach the related object directly
           if (typeof fkValue === 'string' && relatedEntities.has(fkValue)) {
-            entity[populatedFieldName] = relatedEntities.get(fkValue);
+            entityRecord[populatedFieldName] = relatedEntities.get(fkValue);
           }
         } else {
           // Many cardinality: FK is an array of IDs, resolve each to the full object
           if (Array.isArray(fkValue)) {
-            entity[populatedFieldName] = fkValue
-              .filter((id): id is string => typeof id === 'string')
+            const fkIds = (fkValue as FieldValue[]).filter((id): id is string => typeof id === 'string');
+            entityRecord[populatedFieldName] = fkIds
               .map(id => relatedEntities.get(id))
               .filter(Boolean);
           } else if (typeof fkValue === 'string' && relatedEntities.has(fkValue)) {
             // Fallback: single ID with many cardinality, wrap in array
-            entity[populatedFieldName] = [relatedEntities.get(fkValue)];
+            entityRecord[populatedFieldName] = [relatedEntities.get(fkValue)];
           }
         }
       }

@@ -17,6 +17,7 @@ import type {
     TransitionObserver,
     EntityRow,
     EventPayload,
+    ConfigContext,
 } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import { evaluateGuard } from '@almadar/evaluator';
@@ -368,7 +369,7 @@ export class StateMachineManager {
                     currentState: result.newState,
                     previousState: result.previousState,
                     lastEvent: normalizeEventKey(eventKey),
-                    context: { ...traitState.context, ...payload },
+                    context: { ...traitState.context, ...payload } as ConfigContext,
                 });
 
                 results.push({ traitName, result });
@@ -459,7 +460,7 @@ export class StateMachineManager {
                     currentState: result.newState,
                     previousState: result.previousState,
                     lastEvent: normalizeEventKey(entry.eventKey),
-                    context: { ...traitState.context, ...entry.payload },
+                    context: { ...traitState.context, ...entry.payload } as ConfigContext,
                 });
 
                 if (this.observer && result.transition) {
