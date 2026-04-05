@@ -61,7 +61,15 @@ import type {
   EntityRow,
   EventPayload,
 } from "./types.js";
-import type { FieldValue } from "@almadar/core";
+import type {
+  FieldValue,
+  OrbitalSchema,
+  OrbitalDefinition,
+  Entity,
+  Trait,
+  TraitTick,
+} from "@almadar/core";
+import { isInlineTrait } from "@almadar/core";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
   preprocessSchema,
@@ -79,68 +87,27 @@ import { createOsHandlers, type OsHandlerResult } from "./createOsHandlers.js";
 // Types
 // ============================================================================
 
-/**
- * Simplified OrbitalSchema for runtime registration
- * (Subset of full OrbitalSchema - just what's needed for execution)
- */
-export interface RuntimeOrbitalSchema {
-  name: string;
-  version?: string;
-  orbitals: RuntimeOrbital[];
-}
+// Uses OrbitalSchema, OrbitalDefinition, Trait, TraitTick from @almadar/core directly.
+// No redundant runtime-specific types.
 
-export interface RuntimeOrbital {
-  name: string;
-  entity: {
-    name: string;
-    fields?: Array<{ name: string; type: string; relation?: { entity?: string; cardinality?: string; onDelete?: string } }>;
-    /** Pre-defined entity instances to seed on registration */
-    instances?: Array<EntityRow>;
-  };
-  traits: RuntimeTrait[];
-}
-
-/**
- * Tick definition for scheduled effects
- */
-export interface RuntimeTraitTick {
-  /** Unique name for this tick */
-  name: string;
-  /** Interval in milliseconds, or cron expression string */
-  interval: number | string;
-  /** Guard condition (S-expression) - tick only executes if guard passes */
-  guard?: unknown;
-  /** Effects to execute when tick fires */
-  effects: Effect[];
-  /** Filter to specific entity IDs (optional) */
-  appliesTo?: string[];
-}
-
-export interface RuntimeTrait {
-  name: string;
-  states: Array<{ name: string; isInitial?: boolean }>;
-  transitions: Array<{
-    from: string;
-    to: string;
-    event: string;
-    guard?: unknown;
-    effects?: Effect[];
-  }>;
-  listens?: Array<{
-    event: string;
-    triggers: string;
-    payloadMapping?: EventPayload;
-  }>;
-  emits?: string[];
-  /** Scheduled ticks for this trait */
-  ticks?: RuntimeTraitTick[];
-}
+/** @deprecated Use OrbitalSchema from @almadar/core */
+export type RuntimeOrbitalSchema = OrbitalSchema;
+/** @deprecated Use OrbitalDefinition from @almadar/core */
+export type RuntimeOrbital = OrbitalDefinition;
+/** @deprecated Use Trait from @almadar/core */
+export type RuntimeTrait = Trait;
+/** @deprecated Use TraitTick from @almadar/core */
+export type RuntimeTraitTick = TraitTick;
 
 /**
  * Registered orbital with runtime state
  */
 export interface RegisteredOrbital {
-  schema: RuntimeOrbital;
+  schema: OrbitalDefinition;
+  /** Resolved entity (never a string ref at runtime) */
+  entity: Entity;
+  /** Resolved inline traits (string refs filtered out) */
+  traits: Trait[];
   manager: StateMachineManager;
   entityData: Map<string, EntityRow>; // entityId -> data
 }
@@ -189,8 +156,8 @@ export interface EffectResult {
   action?: string;
   /** Entity type affected (for persist/set/ref/deref/swap) */
   entityType?: string;
-  /** Result data from the effect */
-  data?: EntityRow;
+  /** Result data from the effect (entity row for CRUD, summary for batch) */
+  data?: EntityRow | { operations: EntityRow[]; completedCount: number; totalCount: number };
   /** Whether the effect succeeded */
   success: boolean;
   /** Error message if failed */
@@ -408,7 +375,7 @@ export class OrbitalServerRuntime {
    *
    * For explicit preprocessing control, use `registerWithPreprocess()`.
    */
-  async register(schema: RuntimeOrbitalSchema): Promise<void> {
+  async register(schema: OrbitalSchema): Promise<void> {
     if (this.config.debug) {
       console.log(`[OrbitalRuntime] Registering schema: ${schema.name}`);
     }
@@ -430,7 +397,7 @@ export class OrbitalServerRuntime {
    * Note: This version doesn't wait for instance seeding to complete.
    * Use async register() for guaranteed instance seeding.
    */
-  registerSync(schema: RuntimeOrbitalSchema): void {
+  registerSync(schema: OrbitalSchema): void {
     if (this.config.debug) {
       console.log(`[OrbitalRuntime] Registering schema (sync): ${schema.name}`);
     }
@@ -476,7 +443,7 @@ export class OrbitalServerRuntime {
    * ```
    */
   async registerWithPreprocess(
-    schema: RuntimeOrbitalSchema,
+    schema: OrbitalSchema,
     options?: { sourcePath?: string }
   ): Promise<{
     success: boolean;
@@ -509,7 +476,7 @@ export class OrbitalServerRuntime {
       if (this.config.debug) {
         console.log(`[OrbitalRuntime] Using cached preprocessed schema: ${schema.name}`);
       }
-      this.register(cached.schema as unknown as RuntimeOrbitalSchema);
+      this.register(cached.schema);
       this.entitySharingMap = { ...this.entitySharingMap, ...cached.entitySharing };
       this.eventNamespaceMap = { ...this.eventNamespaceMap, ...cached.eventNamespaces };
       return {
@@ -525,7 +492,7 @@ export class OrbitalServerRuntime {
     }
 
     // Preprocess schema
-    const result = await preprocessSchema(schema as unknown as import("@almadar/core").OrbitalSchema, {
+    const result = await preprocessSchema(schema, {
       basePath: this.config.loaderConfig?.basePath || '.',
       stdLibPath: this.config.loaderConfig?.stdLibPath,
       scopedPaths: this.config.loaderConfig?.scopedPaths,
@@ -548,7 +515,7 @@ export class OrbitalServerRuntime {
     this.eventNamespaceMap = { ...this.eventNamespaceMap, ...result.data.eventNamespaces };
 
     // Register the preprocessed schema
-    this.register(result.data.schema as unknown as RuntimeOrbitalSchema);
+    this.register(result.data.schema);
 
     return {
       success: true,
@@ -584,13 +551,13 @@ export class OrbitalServerRuntime {
   /**
    * Register a single orbital
    */
-  private async registerOrbitalAsync(orbital: RuntimeOrbital): Promise<void> {
-    // Convert traits to TraitDefinition - handle both flat and stateMachine structures
-    const traitDefs: TraitDefinition[] = (orbital.traits || []).map((t) => {
-      // Support both: t.states (flat) and t.stateMachine.states (OrbitalSchema structure)
-      const stateMachine = (t as { stateMachine?: { states?: unknown[]; transitions?: unknown[] } }).stateMachine;
-      const states = t.states || stateMachine?.states || [];
-      const transitions = t.transitions || stateMachine?.transitions || [];
+  private async registerOrbitalAsync(orbital: OrbitalDefinition): Promise<void> {
+    // Convert traits to TraitDefinition - filter to inline traits only (skip string refs)
+    const inlineTraits = (orbital.traits || []).filter(isInlineTrait);
+    const traitDefs: TraitDefinition[] = inlineTraits.map((t: Trait) => {
+      const sm = t.stateMachine;
+      const states = sm?.states || [];
+      const transitions = sm?.transitions || [];
 
       return {
         name: t.name,
@@ -602,14 +569,19 @@ export class OrbitalServerRuntime {
 
     const manager = new StateMachineManager(traitDefs);
 
+    const entityRef = orbital.entity;
+    const entity: Entity = typeof entityRef === 'string'
+      ? { name: entityRef, fields: [] }  // Fallback for string refs
+      : entityRef;
+
     this.orbitals.set(orbital.name, {
       schema: orbital,
+      entity,
+      traits: inlineTraits,
       manager,
       entityData: new Map(),
     });
 
-    const entity = orbital.entity;
-    
     // Seed entity instances from schema if they exist
     if (entity?.name && entity.instances && Array.isArray(entity.instances)) {
       const instances = entity.instances;
@@ -663,7 +635,7 @@ export class OrbitalServerRuntime {
   /**
    * Register a single orbital (sync wrapper for backward compatibility)
    */
-  private registerOrbital(orbital: RuntimeOrbital): void {
+  private registerOrbital(orbital: OrbitalDefinition): void {
     // Create a synchronous version by using a promise that we don't await
     // For truly async registration, use the async register() method
     this.registerOrbitalAsync(orbital).catch((err) => {
@@ -683,7 +655,7 @@ export class OrbitalServerRuntime {
 
     // For each orbital's traits with `listens`
     for (const [orbitalName, registered] of this.orbitals) {
-      for (const trait of registered.schema.traits || []) {
+      for (const trait of registered.traits) {
         if (!trait.listens) continue;
 
         for (const listener of trait.listens) {
@@ -734,7 +706,7 @@ export class OrbitalServerRuntime {
 
     // For each orbital's traits with `ticks`
     for (const [orbitalName, registered] of this.orbitals) {
-      for (const trait of registered.schema.traits || []) {
+      for (const trait of registered.traits || []) {
         if (!trait.ticks || trait.ticks.length === 0) continue;
 
         for (const tick of trait.ticks) {
@@ -827,7 +799,7 @@ export class OrbitalServerRuntime {
     tick: RuntimeTraitTick,
     registered: RegisteredOrbital,
   ): Promise<void> {
-    const entityType = registered.schema.entity.name;
+    const entityType = registered.entity.name;
     const emittedEvents: Array<{ event: string; payload?: unknown }> = [];
 
     try {
@@ -988,7 +960,7 @@ export class OrbitalServerRuntime {
     let entityData: EntityRow = {};
     if (entityId) {
       const stored = await this.persistence.getById(
-        registered.schema.entity.name,
+        registered.entity.name,
         entityId,
       );
       if (stored) {
@@ -1036,9 +1008,8 @@ export class OrbitalServerRuntime {
     }
     // Scan traits for ref effects to know which entity types are ref'd
     const refTypes = new Set<string>();
-    for (const trait of registered.schema.traits || []) {
-      const sm = (trait as { stateMachine?: { transitions?: Array<{ effects?: unknown[] }> } }).stateMachine;
-      const transitions = (sm?.transitions ?? trait.transitions ?? []) as Array<{ effects?: unknown[] }>;
+    for (const trait of registered.traits) {
+      const transitions = trait.stateMachine?.transitions ?? [];
       for (const trans of transitions) {
         for (const eff of trans.effects ?? []) {
           if (Array.isArray(eff) && eff[0] === 'ref' && typeof eff[1] === 'string') {
@@ -1104,7 +1075,7 @@ export class OrbitalServerRuntime {
     effectResults: EffectResult[],
     user?: OrbitalEventRequest["user"],
   ): Promise<void> {
-    const entityType = registered.schema.entity.name;
+    const entityType = registered.entity.name;
 
     // Forward refs - assigned after construction, used by fetch/atomic handlers
     let bindingsRef: BindingContext | null = null;
@@ -1223,7 +1194,7 @@ export class OrbitalServerRuntime {
               operations: batchResults,
               completedCount: completed.length,
               totalCount: operations.length,
-            } as unknown as EntityRow,
+            },
             success: !batchFailed,
             ...(batchFailed ? { error: batchError } : {}),
           });
@@ -1654,9 +1625,9 @@ export class OrbitalServerRuntime {
   ): void {
     // Find the entity schema
     for (const [, registered] of this.orbitals) {
-      if (registered.schema.entity.name !== entityType) continue;
+      if (registered.entity.name !== entityType) continue;
 
-      for (const field of registered.schema.entity.fields ?? []) {
+      for (const field of registered.entity.fields ?? []) {
         if (field.type !== 'relation') continue;
         const value = data[field.name];
         if (value === undefined || value === null) continue;
@@ -1700,15 +1671,15 @@ export class OrbitalServerRuntime {
     deletedId: string,
   ): Promise<void> {
     for (const [, registered] of this.orbitals) {
-      const schema = registered.schema;
-      const fields = schema.entity.fields ?? [];
+      const entity = registered.entity;
+      const fields = entity.fields ?? [];
 
       for (const field of fields) {
         if (field.type !== 'relation') continue;
         if (field.relation?.entity !== entityType) continue;
 
         const onDelete = field.relation.onDelete || 'restrict';
-        const referringEntityType = schema.entity.name;
+        const referringEntityType = entity.name;
 
         // Find all records in the referring entity that reference the deleted ID
         const allRecords = await this.persistence.list(referringEntityType);
@@ -1782,8 +1753,8 @@ export class OrbitalServerRuntime {
     let entityFields: Array<{ name: string; type: string; relation?: { entity?: string; cardinality?: string; onDelete?: string } }> | undefined;
 
     for (const [, registered] of this.orbitals) {
-      if (registered.schema.entity.name === entityType) {
-        entityFields = registered.schema.entity.fields;
+      if (registered.entity.name === entityType) {
+        entityFields = registered.entity.fields;
         break;
       }
     }
@@ -1858,24 +1829,27 @@ export class OrbitalServerRuntime {
 
       for (const entity of entities) {
         const fkValue = entity[foreignKeyField];
-        // Population assigns related EntityRow objects to fields at runtime.
-        // These won't match the strict FieldValue type, so cast at the boundary.
-        const entityRecord = entity as Record<string, unknown>;
+        // Population attaches related EntityRow objects to the entity at runtime.
+        // This mutates beyond the EntityRow type, so we use Object.defineProperty.
         if (cardinality === 'one' || cardinality === 'many-to-one') {
-          // Single FK: attach the related object directly
           if (typeof fkValue === 'string' && relatedEntities.has(fkValue)) {
-            entityRecord[populatedFieldName] = relatedEntities.get(fkValue);
+            Object.defineProperty(entity, populatedFieldName, {
+              value: relatedEntities.get(fkValue),
+              writable: true, enumerable: true, configurable: true,
+            });
           }
         } else {
-          // Many cardinality: FK is an array of IDs, resolve each to the full object
           if (Array.isArray(fkValue)) {
-            const fkIds = (fkValue as FieldValue[]).filter((id): id is string => typeof id === 'string');
-            entityRecord[populatedFieldName] = fkIds
-              .map(id => relatedEntities.get(id))
-              .filter(Boolean);
+            const fkIds = (fkValue as string[]).filter((id): id is string => typeof id === 'string');
+            Object.defineProperty(entity, populatedFieldName, {
+              value: fkIds.map(id => relatedEntities.get(id)).filter(Boolean),
+              writable: true, enumerable: true, configurable: true,
+            });
           } else if (typeof fkValue === 'string' && relatedEntities.has(fkValue)) {
-            // Fallback: single ID with many cardinality, wrap in array
-            entityRecord[populatedFieldName] = [relatedEntities.get(fkValue)];
+            Object.defineProperty(entity, populatedFieldName, {
+              value: [relatedEntities.get(fkValue)],
+              writable: true, enumerable: true, configurable: true,
+            });
           }
         }
       }
@@ -1909,8 +1883,8 @@ export class OrbitalServerRuntime {
       const orbitals = Array.from(this.orbitals.entries()).map(
         ([name, reg]) => ({
           name,
-          entity: reg.schema.entity?.name,
-          traits: (reg.schema.traits || []).map((t) => t.name),
+          entity: reg.entity?.name,
+          traits: (reg.traits || []).map((t) => t.name),
         }),
       );
       res.json({ success: true, orbitals });
@@ -1934,12 +1908,12 @@ export class OrbitalServerRuntime {
         success: true,
         orbital: {
           name: orbitalName,
-          entity: registered.schema.entity,
-          traits: (registered.schema.traits || []).map((t) => ({
+          entity: registered.entity,
+          traits: registered.traits.map((t) => ({
             name: t.name,
             currentState: states[t.name],
-            states: (t.states || []).map((s) => s.name),
-            events: [...new Set((t.transitions || []).map((tr) => tr.event))],
+            states: (t.stateMachine?.states || []).map((s) => s.name),
+            events: [...new Set((t.stateMachine?.transitions || []).map((tr) => tr.event))],
           })),
         },
       });
