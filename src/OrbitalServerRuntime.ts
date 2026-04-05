@@ -1649,8 +1649,7 @@ export class OrbitalServerRuntime {
    */
   private validateRelationCardinality(
     entityType: string,
-    // eslint-disable-next-line almadar/no-record-string-unknown -- mutates FK fields (string[], string) that don't fit EntityRow's value union
-    data: Record<string, unknown>,
+    data: EntityRow,
   ): void {
     // Find the entity schema
     for (const [, registered] of this.orbitals) {
@@ -1763,8 +1762,7 @@ export class OrbitalServerRuntime {
   }
 
   private async populateRelations(
-    // eslint-disable-next-line almadar/no-record-string-unknown -- entities have FK fields (string[], string) that don't fit EntityRow's value union
-    entities: Record<string, unknown>[],
+    entities: EntityRow[],
     entityType: string,
     include: string[],
     depth: number = 0,

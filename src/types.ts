@@ -6,21 +6,21 @@
  * @packageDocumentation
  */
 
+import type {
+    EntityRow,
+    EventPayload,
+    ServiceParams,
+    ResolvedPatternProps,
+} from '@almadar/core';
+
 // ============================================================================
-// Runtime Data Types
+// Runtime Data Types (re-exported from @almadar/core)
 // ============================================================================
 
-/** Row of entity data at runtime (fields are FieldValue-typed) */
-export type EntityRow = { [field: string]: string | number | boolean | null | undefined | EntityRow | EntityRow[] };
+export type { EntityRow, EventPayload, ServiceParams };
 
-/** Event payload data (field-to-value map) */
-export type EventPayload = { [field: string]: string | number | boolean | null | undefined | EventPayload | EventPayload[] };
-
-/** Service call parameters */
-export type ServiceParams = { [param: string]: string | number | boolean | null | undefined | ServiceParams | ServiceParams[] };
-
-/** Pattern/render props */
-export type PatternProps = { [prop: string]: string | number | boolean | null | undefined | PatternProps | PatternProps[] };
+/** Alias for ResolvedPatternProps to avoid breaking internal consumers */
+export type PatternProps = ResolvedPatternProps;
 
 /** Configuration context */
 export type ConfigContext = { [key: string]: string | number | boolean | null | undefined };
