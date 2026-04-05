@@ -80,6 +80,7 @@ export type {
   RuntimeOrbitalSchema,
   RuntimeOrbital,
   RuntimeTrait,
+  RegisteredOrbital,
   OrbitalEventRequest,
   OrbitalEventResponse,
   OrbitalServerRuntimeConfig,

@@ -138,7 +138,7 @@ export interface RuntimeTrait {
 /**
  * Registered orbital with runtime state
  */
-interface RegisteredOrbital {
+export interface RegisteredOrbital {
   schema: RuntimeOrbital;
   manager: StateMachineManager;
   entityData: Map<string, EntityRow>; // entityId -> data
@@ -340,7 +340,7 @@ interface TickBinding {
 }
 
 export class OrbitalServerRuntime {
-  private orbitals = new Map<string, RegisteredOrbital>();
+  protected orbitals = new Map<string, RegisteredOrbital>();
   private eventBus: EventBus;
   private config: OrbitalServerRuntimeConfig;
   private persistence: PersistenceAdapter;
