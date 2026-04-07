@@ -72,7 +72,7 @@ import type {
   Trait,
   TraitTick,
 } from "@almadar/core";
-import { isInlineTrait } from "@almadar/core";
+import { isInlineTrait, isEntityCall } from "@almadar/core";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
   preprocessSchema,
@@ -592,9 +592,23 @@ export class OrbitalServerRuntime {
     });
 
     const entityRef = orbital.entity;
-    const entity: Entity = typeof entityRef === 'string'
-      ? { name: entityRef, fields: [] }  // Fallback for string refs
-      : entityRef;
+    let entity: Entity;
+    if (typeof entityRef === 'string') {
+      entity = { name: entityRef, fields: [] };  // Fallback for string refs
+    } else if (isEntityCall(entityRef)) {
+      // EntityCall (Phase F): synthesize Entity placeholder from the call shape.
+      // The compiler's inline phase produces a fully resolved Entity in OIR;
+      // this branch is the runtime fallback when an unresolved EntityCall reaches us.
+      const fallbackName = entityRef.name ?? entityRef.extends.replace(/\.entity$/, '');
+      entity = {
+        name: fallbackName,
+        fields: entityRef.fields ?? [],
+        ...(entityRef.persistence ? { persistence: entityRef.persistence } : {}),
+        ...(entityRef.collection ? { collection: entityRef.collection } : {}),
+      };
+    } else {
+      entity = entityRef;
+    }
 
     this.orbitals.set(orbital.name, {
       schema: orbital,

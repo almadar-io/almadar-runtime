@@ -248,6 +248,16 @@ export interface EffectHandlers {
         effects: unknown[],
     ) => Promise<void>;
 
+    // === Composition handlers (compile-time, optional) ===
+    /** Compose multiple orbitals into one schema. Compile-time only. */
+    composeBehaviors?: (config: { appName: string; orbitals: unknown[]; layoutStrategy?: string; eventWiring?: unknown[]; entityMappings?: Record<string, string> }) => Promise<unknown> | unknown;
+    /** Apply cross-orbital event wiring. Compile-time only. */
+    applyEventWiring?: (orbitals: unknown[], wiring: unknown[]) => Promise<unknown[]> | unknown[];
+    /** Auto-detect layout strategy. Compile-time only. */
+    detectLayoutStrategy?: (orbitals: unknown[], wiring?: unknown[]) => Promise<string> | string;
+    /** Left-to-right behavior pipeline. Compile-time only. */
+    pipeBehaviors?: (seed: unknown, ...steps: Array<(prev: unknown) => unknown>) => Promise<unknown> | unknown;
+
     // OS trigger handlers (server-side only)
     /** Watch file system for changes matching glob pattern */
     osWatchFiles?: (glob: string, options: { recursive?: boolean; debounce?: number }) => void;

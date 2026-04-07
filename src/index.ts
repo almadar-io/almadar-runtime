@@ -117,3 +117,19 @@ export {
   type PreprocessOptions,
   type PreprocessResult,
 } from "./UsesIntegration.js";
+
+// Composition (runtime-side TS implementation of behavior/* operators)
+export * as composition from "./composition/index.js";
+export {
+  composeBehaviors,
+  applyEventWiring,
+  detectLayoutStrategy,
+  pipeBehaviors,
+} from "./composition/index.js";
+export type {
+  ComposeBehaviorsInput,
+  ComposeBehaviorsResult,
+  EventWiringEntry,
+  LayoutStrategy,
+  PipeStep,
+} from "./composition/index.js";

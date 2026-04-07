@@ -25,6 +25,7 @@ import type {
 } from "@almadar/core";
 import {
   isEntityReference,
+  isEntityCall,
   isPageReference,
   isPageReferenceString,
   isPageReferenceObject,
@@ -326,6 +327,27 @@ export class ReferenceResolver {
     entity: Entity;
     source?: { alias: string; persistence: "persistent" | "runtime" | "singleton" };
   }> {
+    // EntityCall (Phase F): synthesize a placeholder Entity from the call shape.
+    // Full inlining is the compiler's job; this resolver returns the local view.
+    if (isEntityCall(entityRef)) {
+      const fallbackName =
+        entityRef.name ?? entityRef.extends.replace(/\.entity$/, "");
+      return {
+        success: true,
+        data: {
+          entity: {
+            name: fallbackName,
+            fields: entityRef.fields ?? [],
+            ...(entityRef.persistence
+              ? { persistence: entityRef.persistence }
+              : {}),
+            ...(entityRef.collection ? { collection: entityRef.collection } : {}),
+          },
+        },
+        warnings: [],
+      };
+    }
+
     // Inline entity
     if (!isEntityReference(entityRef)) {
       return {
@@ -391,6 +413,19 @@ export class ReferenceResolver {
     if (typeof entityRef === "string") {
       // It's a reference - we don't support chained references
       return null;
+    }
+    if (isEntityCall(entityRef)) {
+      // EntityCall form - synthesize a placeholder Entity from the call shape
+      const fallbackName =
+        entityRef.name ?? entityRef.extends.replace(/\.entity$/, "");
+      return {
+        name: fallbackName,
+        fields: entityRef.fields ?? [],
+        ...(entityRef.persistence
+          ? { persistence: entityRef.persistence }
+          : {}),
+        ...(entityRef.collection ? { collection: entityRef.collection } : {}),
+      };
     }
     return entityRef;
   }

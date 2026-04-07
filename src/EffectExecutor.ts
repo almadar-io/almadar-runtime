@@ -193,6 +193,10 @@ export class EffectExecutor {
             'swap!': this.handlers.swap,
             'watch': this.handlers.watch,
             'atomic': this.handlers.atomic,
+            'behavior/compose': this.handlers.composeBehaviors,
+            'behavior/wire': this.handlers.applyEventWiring,
+            'behavior/detect-layout': this.handlers.detectLayoutStrategy,
+            'behavior/pipe': this.handlers.pipeBehaviors,
         };
         for (const [name, handler] of Object.entries(handlerMap)) {
             if (handler) {
@@ -628,6 +632,53 @@ export class EffectExecutor {
                     this.handlers.osDebounce(args[0] as number, args[1] as string);
                 } else {
                     this.logUnsupported('os/debounce');
+                }
+                break;
+            }
+
+            // === Composition operators (compile-time, optional) ===
+
+            case 'behavior/compose': {
+                if (this.handlers.composeBehaviors) {
+                    const config = args[0] as { appName: string; orbitals: unknown[]; layoutStrategy?: string; eventWiring?: unknown[]; entityMappings?: Record<string, string> };
+                    await this.handlers.composeBehaviors(config);
+                } else {
+                    this.logUnsupported('behavior/compose');
+                }
+                break;
+            }
+
+            case 'behavior/wire': {
+                if (this.handlers.applyEventWiring) {
+                    const wireOrbitals = args[0] as unknown[];
+                    const wireEntries = args[1] as unknown[];
+                    await this.handlers.applyEventWiring(wireOrbitals, wireEntries);
+                } else {
+                    this.logUnsupported('behavior/wire');
+                }
+                break;
+            }
+
+            case 'behavior/detect-layout': {
+                if (this.handlers.detectLayoutStrategy) {
+                    const layoutOrbitals = args[0] as unknown[];
+                    const layoutWiring = args[1] as unknown[] | undefined;
+                    await this.handlers.detectLayoutStrategy(layoutOrbitals, layoutWiring);
+                } else {
+                    this.logUnsupported('behavior/detect-layout');
+                }
+                break;
+            }
+
+            case 'behavior/pipe': {
+                if (this.handlers.pipeBehaviors) {
+                    const [pipeSeed, ...pipeSteps] = args;
+                    await this.handlers.pipeBehaviors(
+                        pipeSeed,
+                        ...(pipeSteps as Array<(prev: unknown) => unknown>),
+                    );
+                } else {
+                    this.logUnsupported('behavior/pipe');
                 }
                 break;
             }
