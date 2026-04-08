@@ -31,6 +31,7 @@ import type {
 } from '@almadar/core';
 import {
   isEntityReference,
+  isEntityCall,
   isPageReferenceString,
   isPageReferenceObject,
   inferTsType,
@@ -108,8 +109,22 @@ function resolveEntities(schema: OrbitalSchema): Map<string, ResolvedEntity> {
           usedByPages: [],
         });
       }
+    } else if (isEntityCall(entityRef)) {
+      // EntityCall: object form like { extends: "Modal.entity", name: "CartItem", fields: [...] }
+      // Full field resolution requires the reference-resolver; create a minimal placeholder
+      const entityName = entityRef.name ?? entityRef.extends.replace('.entity', '');
+      if (!entityMap.has(entityName)) {
+        entityMap.set(entityName, {
+          name: entityName,
+          description: `Extended entity: ${entityRef.extends}`,
+          collection: entityRef.collection ?? entityName.toLowerCase() + 's',
+          fields: (entityRef.fields || []).map(resolveField),
+          usedByTraits: [],
+          usedByPages: [],
+        });
+      }
     } else {
-      // Inline entity definition
+      // Inline OrbitalEntity definition
       const entity = entityRef;
       // Derive runtime/singleton from persistence field
       const isRuntime = entity.persistence === 'runtime';

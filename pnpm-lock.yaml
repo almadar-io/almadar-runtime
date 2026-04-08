@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@almadar/core':
-        specifier: '>=2.13.0'
-        version: 3.0.0
+        specifier: '>=4.2.0'
+        version: 4.2.0
       '@almadar/evaluator':
         specifier: '>=2.5.4'
-        version: 2.7.0
+        version: 2.7.1
       '@almadar/operators':
         specifier: '>=2.1.3'
         version: 3.0.0
@@ -41,7 +41,7 @@ importers:
         version: 4.22.1
       tsup:
         specifier: ^8.0.0
-        version: 8.5.1(postcss@8.5.8)(typescript@5.9.3)
+        version: 8.5.1(postcss@8.5.9)(typescript@5.9.3)
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -51,22 +51,22 @@ importers:
 
 packages:
 
-  '@almadar/core@3.0.0':
-    resolution: {integrity: sha512-vW9w/YlYMClNDOZi4jk+WlxgFtSFTd1caNJ+qwpWLFE98AJkx1vC+e4CTbOrzowWoJy12ecQ2Zq2CDiR0LjixA==}
+  '@almadar/core@4.2.0':
+    resolution: {integrity: sha512-cgw3miOGTJt1lCLK05SdPRdS+0QkSBfFmUvBd7q0Dv55kDpqpbhzN+TlLC1UjQvLeqXpmXzlldSrl4x0gChyGg==}
 
   '@almadar/eslint-plugin@2.7.0':
     resolution: {integrity: sha512-d0WT80e9APcLB6HSP7cVOqJ2jfOzR6TjKkAV5GNbGWqqrRYW7Kj0EtaAMaJEESZD+br9Jr5u8Mub4FJQULhGSg==}
     peerDependencies:
       eslint: '>=8.0.0'
 
-  '@almadar/evaluator@2.7.0':
-    resolution: {integrity: sha512-0h23+0KOH6zwlsCATSOY1S9hVOzoF5W3KOSFDCT6G+o9m+v/LKUoFwseoxR7FABfQPHIufc5BKUEPznCnIRTdg==}
+  '@almadar/evaluator@2.7.1':
+    resolution: {integrity: sha512-lBcA2w+RA2pFIqCZ60/FvsOQebJpjlTGy+smb08TcID12dOFValoX7fAE6odTB7fjoph31P4D0jBQmQ2GQcA+w==}
 
   '@almadar/operators@3.0.0':
     resolution: {integrity: sha512-Ur6dD3FrWiq1A/XZ+I7lyjBev/eOZ77H1F6V2Xp4hZl2gHt7jbxatdCECEsG0qzJCwQen2vCKWLJEpl9yhFwMA==}
 
-  '@almadar/patterns@2.12.0':
-    resolution: {integrity: sha512-vy5niBqe/nyS0m9eEw+6rYfnQV/WocSEnk6R0RMQ4/48vf/1Y7ahXy3MZKnc3ixBAtHUmJO6ppAisOln6xmP+g==}
+  '@almadar/patterns@2.12.1':
+    resolution: {integrity: sha512-9DUspuL5dloYE3Go9rtGk7zt/MRG6ZywzNksZIrLVL8biF67ZBL4zT8CYLgFo6BDcWijOqBZkGcOuxt1RiBgYQ==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -372,20 +372,20 @@ packages:
     resolution: {integrity: sha512-EriSTlt5OC9/7SXkRSCAhfSxxoSUgBm33OH+IkwbdpgoqsSsUg7y3uh+IICI/Qg4BBWr3U2i39RpmycbxMq4ew==}
     engines: {node: ^12.0.0 || ^14.0.0 || >=16.0.0}
 
-  '@eslint/config-array@0.23.4':
-    resolution: {integrity: sha512-lf19F24LSMfF8weXvW5QEtnLqW70u7kgit5e9PSx0MsHAFclGd1T9ynvWEMDT1w5J4Qt54tomGeAhdoAku1Xow==}
+  '@eslint/config-array@0.23.5':
+    resolution: {integrity: sha512-Y3kKLvC1dvTOT+oGlqNQ1XLqK6D1HU2YXPc52NmAlJZbMMWDzGYXMiPRJ8TYD39muD/OTjlZmNJ4ib7dvSrMBA==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  '@eslint/config-helpers@0.5.4':
-    resolution: {integrity: sha512-jJhqiY3wPMlWWO3370M86CPJ7pt8GmEwSLglMfQhjXal07RCvhmU0as4IuUEW5SJeunfItiEetHmSxCCe9lDBg==}
+  '@eslint/config-helpers@0.5.5':
+    resolution: {integrity: sha512-eIJYKTCECbP/nsKaaruF6LW967mtbQbsw4JTtSVkUQc9MneSkbrgPJAbKl9nWr0ZeowV8BfsarBmPpBzGelA2w==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  '@eslint/core@1.2.0':
-    resolution: {integrity: sha512-8FTGbNzTvmSlc4cZBaShkC6YvFMG0riksYWRFKXztqVdXaQbcZLXlFbSpC05s70sGEsXAw0qwhx69JiW7hQS7A==}
+  '@eslint/core@1.2.1':
+    resolution: {integrity: sha512-MwcE1P+AZ4C6DWlpin/OmOA54mmIZ/+xZuJiQd4SyB29oAJjN30UW9wkKNptW2ctp4cEsvhlLY/CsQ1uoHDloQ==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  '@eslint/object-schema@3.0.4':
-    resolution: {integrity: sha512-55lO/7+Yp0ISKRP0PsPtNTeNGapXaO085aELZmWCVc5SH3jfrqpuU6YgOdIxMS99ZHkQN1cXKE+cdIqwww9ptw==}
+  '@eslint/object-schema@3.0.5':
+    resolution: {integrity: sha512-vqTaUEgxzm+YDSdElad6PiRoX4t8VGDjCtt05zn4nU810UIx/uNEV7/lZJ6KwFThKZOzOxzXy48da+No7HZaMw==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
   '@eslint/plugin-kit@0.6.1':
@@ -1209,8 +1209,8 @@ packages:
       yaml:
         optional: true
 
-  postcss@8.5.8:
-    resolution: {integrity: sha512-OW/rX8O/jXnm82Ey1k44pObPtdblfiuWnrd8X7GJ7emImCOstunGbXUpp7HdBrFQX6rJzn3sPT397Wp5aCwCHg==}
+  postcss@8.5.9:
+    resolution: {integrity: sha512-7a70Nsot+EMX9fFU3064K/kdHWZqGVY+BADLyXc8Dfv+mTLLVl6JzJpPaCZ2kQL9gIJvKXSLMHhqdRRjwQeFtw==}
     engines: {node: ^10 || ^12 || >=14}
 
   prelude-ls@1.2.1:
@@ -1335,8 +1335,8 @@ packages:
   tinyexec@0.3.2:
     resolution: {integrity: sha512-KQQR9yN7R5+OSwaK0XQoj22pwHoTlgYqmUscPYoknOoWCWfj/5/ABTMRi69FrKU5ffPVh5QcFikpWJI/P1ocHA==}
 
-  tinyglobby@0.2.15:
-    resolution: {integrity: sha512-j2Zq4NyQYG5XMST4cbs02Ak8iJUdxRM0XI5QyxXuZOzKOINmWurp3smXu3y5wDcJrptwpSjgXHzIQxR0omXljQ==}
+  tinyglobby@0.2.16:
+    resolution: {integrity: sha512-pn99VhoACYR8nFHhxqix+uvsbXineAasWm5ojXoN8xEwK5Kd3/TrhNn1wByuD52UxWRLy8pu+kRMniEi6Eq9Zg==}
     engines: {node: '>=12.0.0'}
 
   tinypool@1.1.1:
@@ -1505,10 +1505,10 @@ packages:
 
 snapshots:
 
-  '@almadar/core@3.0.0':
+  '@almadar/core@4.2.0':
     dependencies:
       '@almadar/operators': 3.0.0
-      '@almadar/patterns': 2.12.0
+      '@almadar/patterns': 2.12.1
       zod: 3.25.76
 
   '@almadar/eslint-plugin@2.7.0(eslint@10.0.0)':
@@ -1516,16 +1516,16 @@ snapshots:
       eslint: 10.0.0
       jsonc-eslint-parser: 3.1.0
 
-  '@almadar/evaluator@2.7.0':
+  '@almadar/evaluator@2.7.1':
     dependencies:
-      '@almadar/core': 3.0.0
+      '@almadar/core': 4.2.0
       '@almadar/operators': 3.0.0
 
   '@almadar/operators@3.0.0': {}
 
-  '@almadar/patterns@2.12.0':
+  '@almadar/patterns@2.12.1':
     dependencies:
-      '@almadar/core': 3.0.0
+      '@almadar/core': 4.2.0
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true
@@ -1681,27 +1681,27 @@ snapshots:
 
   '@eslint-community/regexpp@4.12.2': {}
 
-  '@eslint/config-array@0.23.4':
+  '@eslint/config-array@0.23.5':
     dependencies:
-      '@eslint/object-schema': 3.0.4
+      '@eslint/object-schema': 3.0.5
       debug: 4.4.3
       minimatch: 10.2.5
     transitivePeerDependencies:
       - supports-color
 
-  '@eslint/config-helpers@0.5.4':
+  '@eslint/config-helpers@0.5.5':
     dependencies:
-      '@eslint/core': 1.2.0
+      '@eslint/core': 1.2.1
 
-  '@eslint/core@1.2.0':
+  '@eslint/core@1.2.1':
     dependencies:
       '@types/json-schema': 7.0.15
 
-  '@eslint/object-schema@3.0.4': {}
+  '@eslint/object-schema@3.0.5': {}
 
   '@eslint/plugin-kit@0.6.1':
     dependencies:
-      '@eslint/core': 1.2.0
+      '@eslint/core': 1.2.1
       levn: 0.4.1
 
   '@faker-js/faker@9.9.0': {}
@@ -1894,7 +1894,7 @@ snapshots:
       debug: 4.4.3
       minimatch: 9.0.9
       semver: 7.7.4
-      tinyglobby: 0.2.15
+      tinyglobby: 0.2.16
       ts-api-utils: 2.5.0(typescript@5.9.3)
       typescript: 5.9.3
     transitivePeerDependencies:
@@ -2163,9 +2163,9 @@ snapshots:
     dependencies:
       '@eslint-community/eslint-utils': 4.9.1(eslint@10.0.0)
       '@eslint-community/regexpp': 4.12.2
-      '@eslint/config-array': 0.23.4
-      '@eslint/config-helpers': 0.5.4
-      '@eslint/core': 1.2.0
+      '@eslint/config-array': 0.23.5
+      '@eslint/config-helpers': 0.5.5
+      '@eslint/core': 1.2.1
       '@eslint/plugin-kit': 0.6.1
       '@humanfs/node': 0.16.7
       '@humanwhocodes/module-importer': 1.0.1
@@ -2504,13 +2504,13 @@ snapshots:
       mlly: 1.8.2
       pathe: 2.0.3
 
-  postcss-load-config@6.0.1(postcss@8.5.8):
+  postcss-load-config@6.0.1(postcss@8.5.9):
     dependencies:
       lilconfig: 3.1.3
     optionalDependencies:
-      postcss: 8.5.8
+      postcss: 8.5.9
 
-  postcss@8.5.8:
+  postcss@8.5.9:
     dependencies:
       nanoid: 3.3.11
       picocolors: 1.1.1
@@ -2661,7 +2661,7 @@ snapshots:
       lines-and-columns: 1.2.4
       mz: 2.7.0
       pirates: 4.0.7
-      tinyglobby: 0.2.15
+      tinyglobby: 0.2.16
       ts-interface-checker: 0.1.13
 
   thenify-all@1.6.0:
@@ -2676,7 +2676,7 @@ snapshots:
 
   tinyexec@0.3.2: {}
 
-  tinyglobby@0.2.15:
+  tinyglobby@0.2.16:
     dependencies:
       fdir: 6.5.0(picomatch@4.0.4)
       picomatch: 4.0.4
@@ -2697,7 +2697,7 @@ snapshots:
 
   ts-interface-checker@0.1.13: {}
 
-  tsup@8.5.1(postcss@8.5.8)(typescript@5.9.3):
+  tsup@8.5.1(postcss@8.5.9)(typescript@5.9.3):
     dependencies:
       bundle-require: 5.1.0(esbuild@0.27.7)
       cac: 6.7.14
@@ -2708,16 +2708,16 @@ snapshots:
       fix-dts-default-cjs-exports: 1.0.1
       joycon: 3.1.1
       picocolors: 1.1.1
-      postcss-load-config: 6.0.1(postcss@8.5.8)
+      postcss-load-config: 6.0.1(postcss@8.5.9)
       resolve-from: 5.0.0
       rollup: 4.60.1
       source-map: 0.7.6
       sucrase: 3.35.1
       tinyexec: 0.3.2
-      tinyglobby: 0.2.15
+      tinyglobby: 0.2.16
       tree-kill: 1.2.2
     optionalDependencies:
-      postcss: 8.5.8
+      postcss: 8.5.9
       typescript: 5.9.3
     transitivePeerDependencies:
       - jiti
@@ -2771,7 +2771,7 @@ snapshots:
   vite@5.4.21(@types/node@20.19.39):
     dependencies:
       esbuild: 0.21.5
-      postcss: 8.5.8
+      postcss: 8.5.9
       rollup: 4.60.1
     optionalDependencies:
       '@types/node': 20.19.39
