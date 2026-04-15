@@ -720,22 +720,23 @@ export class OrbitalServerRuntime {
               }
             }
 
-            // Forward entityId from the emitted event's payload so that
-            // the triggered trait can bind @entity.* against the right
-            // row. Without this, cross-trait listens auto-wiring would
-            // always dispatch with entityData={} and every @entity.id
-            // would resolve to undefined.
+            // Forward entityId so the triggered trait can bind @entity.*
+            // against the right row. Without this, cross-trait listens
+            // auto-wiring would always dispatch with entityData={} and
+            // every @entity.id would resolve to undefined.
             //
-            // Priority: explicit payload.entityId, then common row-id
-            // fields that convention maps 1:1 to entity ids (e.g.
-            // OrbitalProcess uses orbitalName as its row id).
-            const forwardedEntityId =
-              ((event.payload as EventPayload | undefined)?.entityId as
-                | string
-                | undefined) ??
-              ((event.payload as EventPayload | undefined)?.orbitalName as
-                | string
-                | undefined);
+            // Priority (checked against the MAPPED payload first so the
+            // schema's payloadMapping takes effect, then the raw emit
+            // payload for listens without a mapping):
+            //   1. mapped or raw payload.entityId
+            //   2. mapped or raw payload.orbitalName (convention: the
+            //      OrbitalProcess entity uses orbitalName as its id)
+            const raw = event.payload as EventPayload | undefined;
+            const mapped = mappedPayload as EventPayload | undefined;
+            const pickId = (field: string): string | undefined =>
+              (mapped?.[field] as string | undefined) ??
+              (raw?.[field] as string | undefined);
+            const forwardedEntityId = pickId("entityId") ?? pickId("orbitalName");
 
             // Trigger the mapped event
             await this.processOrbitalEvent(orbitalName, {

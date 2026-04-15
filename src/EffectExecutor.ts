@@ -336,6 +336,16 @@ export class EffectExecutor {
             case 'set': {
                 const [entityId, field, value] = args as [string, string, unknown];
                 this.handlers.set(entityId, field, value);
+                // Mirror the write into the in-memory bindings so later
+                // effects in the same transition (and any `when`/`if`
+                // guards evaluated against @entity.*) observe the new
+                // value. Without this, a transition that increments a
+                // counter and then conditionally emits on the counter
+                // reads the pre-increment value.
+                const entity = this.bindings.entity as Record<string, unknown> | undefined;
+                if (entity && entity['id'] === entityId) {
+                    entity[field] = value;
+                }
                 break;
             }
 
