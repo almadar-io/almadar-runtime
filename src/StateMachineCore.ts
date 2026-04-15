@@ -271,13 +271,44 @@ export interface QueuedEvent {
     entityData?: EntityRow;
 }
 
+/**
+ * Default scope used when an event arrives without a specific entityId.
+ * Single-entity orbitals (the common case for UI traits) all share this
+ * scope, so the public API stays identical to the pre-multi-entity world.
+ */
+const SINGLETON_SCOPE = '__singleton__';
+
+function scopeOf(entityData?: EntityRow): string {
+    const id = entityData && (entityData['id'] as string | undefined);
+    return id ?? SINGLETON_SCOPE;
+}
+
+function compositeKey(traitName: string, scope: string): string {
+    return `${traitName}::${scope}`;
+}
+
 export class StateMachineManager {
     private traits: Map<string, TraitDefinition> = new Map();
+    /**
+     * State map keyed by `${traitName}::${entityId | __singleton__}`.
+     *
+     * Each entity instance of an orbital gets its own copy of every
+     * trait's state machine. This is what enables N parallel subagents
+     * (one OrbitalProcess row per dispatched orbital) to all run their
+     * own Build/Validate/Fix cycle without colliding on shared trait
+     * state — the original cause of GAP-AGB-2.
+     *
+     * Initial state is created lazily on first event for each scope, so
+     * adding a trait does not pre-allocate state for every potential
+     * entity (and there's no need to know entity ids up front).
+     */
     private states: Map<string, TraitState> = new Map();
     private config: RuntimeConfig;
     private observer?: TransitionObserver;
 
-    // Actor-model per-trait queues
+    // Actor-model queues, also keyed by `${traitName}::${entityId}` so
+    // each entity gets its own actor loop and concurrent subagents do
+    // not serialize through a shared queue.
     private queues: Map<string, QueuedEvent[]> = new Map();
     private processing: Set<string> = new Set();
 
@@ -307,7 +338,7 @@ export class StateMachineManager {
      */
     addTrait(trait: TraitDefinition): void {
         this.traits.set(trait.name, trait);
-        this.states.set(trait.name, createInitialTraitState(trait));
+        // Lazy: state for each entity scope is created on first event.
     }
 
     /**
@@ -315,29 +346,106 @@ export class StateMachineManager {
      */
     removeTrait(traitName: string): void {
         this.traits.delete(traitName);
-        this.states.delete(traitName);
+        // Drop every per-entity state row for this trait.
+        const prefix = `${traitName}::`;
+        for (const key of [...this.states.keys()]) {
+            if (key.startsWith(prefix)) this.states.delete(key);
+        }
+        for (const key of [...this.queues.keys()]) {
+            if (key.startsWith(prefix)) this.queues.delete(key);
+        }
+        for (const key of [...this.processing]) {
+            if (key.startsWith(prefix)) this.processing.delete(key);
+        }
+    }
+
+    /**
+     * Get-or-init the state row for a (trait, entityId) pair.
+     * Returns undefined if the trait isn't registered.
+     */
+    private getOrInitState(
+        traitName: string,
+        scope: string
+    ): TraitState | undefined {
+        const trait = this.traits.get(traitName);
+        if (!trait) return undefined;
+        const key = compositeKey(traitName, scope);
+        let state = this.states.get(key);
+        if (!state) {
+            state = createInitialTraitState(trait);
+            this.states.set(key, state);
+        }
+        return state;
     }
 
     /**
      * Get current state for a trait.
+     *
+     * For single-entity orbitals, omit `entityId` — returns the singleton
+     * scope. For multi-entity orbitals (e.g. agent OrbitalSubagent), pass
+     * the entity row id to look up that specific instance's state.
      */
-    getState(traitName: string): TraitState | undefined {
-        return this.states.get(traitName);
+    getState(traitName: string, entityId?: string): TraitState | undefined {
+        const scope = entityId ?? SINGLETON_SCOPE;
+        const key = compositeKey(traitName, scope);
+        const existing = this.states.get(key);
+        if (existing) return existing;
+        // Lazy init for read-then-no-event scenarios (e.g. ticks).
+        return this.getOrInitState(traitName, scope);
     }
 
     /**
-     * Get all current states.
+     * Get a flat traitName→state map. For multi-entity orbitals this
+     * returns one entry per trait collapsed onto the singleton scope (or
+     * the first observed scope if singleton is empty). Use
+     * `getAllStatesByScope()` to get the full per-entity view.
      */
     getAllStates(): Map<string, TraitState> {
-        return new Map(this.states);
+        const out = new Map<string, TraitState>();
+        for (const traitName of this.traits.keys()) {
+            const singleton = this.states.get(compositeKey(traitName, SINGLETON_SCOPE));
+            if (singleton) {
+                out.set(traitName, singleton);
+                continue;
+            }
+            // Fall back to the first observed entity scope for this trait.
+            for (const [key, state] of this.states) {
+                if (key.startsWith(`${traitName}::`)) {
+                    out.set(traitName, state);
+                    break;
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Get every per-entity state row, grouped by trait. Useful for
+     * inspecting parallel subagent state.
+     */
+    getAllStatesByScope(): Map<string, Map<string, TraitState>> {
+        const grouped = new Map<string, Map<string, TraitState>>();
+        for (const [key, state] of this.states) {
+            const sep = key.indexOf('::');
+            if (sep < 0) continue;
+            const traitName = key.slice(0, sep);
+            const scope = key.slice(sep + 2);
+            let bucket = grouped.get(traitName);
+            if (!bucket) {
+                bucket = new Map();
+                grouped.set(traitName, bucket);
+            }
+            bucket.set(scope, state);
+        }
+        return grouped;
     }
 
     /**
      * Check if a trait can handle an event from its current state.
      */
-    canHandleEvent(traitName: string, eventKey: string): boolean {
+    canHandleEvent(traitName: string, eventKey: string, entityId?: string): boolean {
         const trait = this.traits.get(traitName);
-        const state = this.states.get(traitName);
+        const state = this.getOrInitState(traitName, entityId ?? SINGLETON_SCOPE);
         if (!trait || !state) return false;
 
         return !!findTransition(trait, state.currentState, normalizeEventKey(eventKey));
@@ -354,10 +462,12 @@ export class StateMachineManager {
         entityData?: EntityRow
     ): Array<{ traitName: string; result: TransitionResult }> {
         const results: Array<{ traitName: string; result: TransitionResult }> = [];
+        const scope = scopeOf(entityData);
 
         for (const [traitName, trait] of this.traits) {
-            const traitState = this.states.get(traitName);
+            const traitState = this.getOrInitState(traitName, scope);
             if (!traitState) continue;
+            const key = compositeKey(traitName, scope);
 
             const result = processEvent({
                 traitState,
@@ -371,8 +481,9 @@ export class StateMachineManager {
             });
 
             if (result.executed) {
-                // Update state
-                this.states.set(traitName, {
+                // Update state for THIS entity's scope only — concurrent
+                // entities of the same trait keep independent state.
+                this.states.set(key, {
                     ...traitState,
                     currentState: result.newState,
                     previousState: result.previousState,
@@ -416,23 +527,19 @@ export class StateMachineManager {
         payload?: EventPayload,
         entityData?: EntityRow
     ): void {
+        const scope = scopeOf(entityData);
         for (const [traitName] of this.traits) {
-            const queue = this.queues.get(traitName) ?? [];
+            const key = compositeKey(traitName, scope);
+            const queue = this.queues.get(key) ?? [];
             queue.push({ eventKey, payload, entityData });
-            this.queues.set(traitName, queue);
+            this.queues.set(key, queue);
         }
     }
 
     /**
-     * Drain a single trait's event queue, processing events sequentially.
-     *
-     * This is the core actor loop: each event is fully processed (including
-     * awaiting all effects) before the next event is dequeued. If the queue
-     * is already being drained for this trait, this call is a no-op (the
-     * running drain will pick up newly enqueued events).
-     *
-     * @param traitName - Which trait's queue to drain
-     * @param executeEffects - Async callback to run effects for a successful transition
+     * Drain a single (trait, entity) pair's event queue, processing
+     * events sequentially. Pass `entityId` to drain a specific entity
+     * instance; omit it to drain the singleton scope.
      */
     async drainQueue(
         traitName: string,
@@ -440,16 +547,19 @@ export class StateMachineManager {
             traitName: string,
             result: TransitionResult,
             payload?: EventPayload
-        ) => Promise<void>
+        ) => Promise<void>,
+        entityId?: string
     ): Promise<void> {
-        if (this.processing.has(traitName)) return;
-        this.processing.add(traitName);
+        const scope = entityId ?? SINGLETON_SCOPE;
+        const key = compositeKey(traitName, scope);
+        if (this.processing.has(key)) return;
+        this.processing.add(key);
 
-        const queue = this.queues.get(traitName) ?? [];
+        const queue = this.queues.get(key) ?? [];
         while (queue.length > 0) {
             const entry = queue.shift()!;
             const trait = this.traits.get(traitName);
-            const traitState = this.states.get(traitName);
+            const traitState = this.getOrInitState(traitName, scope);
             if (!trait || !traitState) continue;
 
             const result = processEvent({
@@ -464,7 +574,7 @@ export class StateMachineManager {
             });
 
             if (result.executed) {
-                this.states.set(traitName, {
+                this.states.set(key, {
                     ...traitState,
                     currentState: result.newState,
                     previousState: result.previousState,
@@ -488,39 +598,55 @@ export class StateMachineManager {
             }
         }
 
-        this.processing.delete(traitName);
+        this.processing.delete(key);
     }
 
     /**
      * Check whether a trait's queue is currently being drained.
      */
-    isProcessing(traitName: string): boolean {
-        return this.processing.has(traitName);
+    isProcessing(traitName: string, entityId?: string): boolean {
+        return this.processing.has(compositeKey(traitName, entityId ?? SINGLETON_SCOPE));
     }
 
     /**
      * Get the number of pending events in a trait's queue.
      */
-    getQueueLength(traitName: string): number {
-        return this.queues.get(traitName)?.length ?? 0;
+    getQueueLength(traitName: string, entityId?: string): number {
+        return this.queues.get(compositeKey(traitName, entityId ?? SINGLETON_SCOPE))?.length ?? 0;
     }
 
     /**
      * Reset a trait to its initial state.
+     *
+     * If `entityId` is provided, resets only that entity's scope.
+     * Otherwise resets every entity scope known for the trait.
      */
-    resetTrait(traitName: string): void {
+    resetTrait(traitName: string, entityId?: string): void {
         const trait = this.traits.get(traitName);
-        if (trait) {
-            this.states.set(traitName, createInitialTraitState(trait));
+        if (!trait) return;
+        if (entityId) {
+            this.states.set(compositeKey(traitName, entityId), createInitialTraitState(trait));
+            return;
+        }
+        const prefix = `${traitName}::`;
+        for (const key of [...this.states.keys()]) {
+            if (key.startsWith(prefix)) {
+                this.states.set(key, createInitialTraitState(trait));
+            }
         }
     }
 
     /**
-     * Reset all traits to initial states.
+     * Reset all traits to initial states (every entity scope).
      */
     resetAll(): void {
         for (const [traitName, trait] of this.traits) {
-            this.states.set(traitName, createInitialTraitState(trait));
+            const prefix = `${traitName}::`;
+            for (const key of [...this.states.keys()]) {
+                if (key.startsWith(prefix)) {
+                    this.states.set(key, createInitialTraitState(trait));
+                }
+            }
         }
     }
 }
