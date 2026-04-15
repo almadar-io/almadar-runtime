@@ -226,7 +226,29 @@ export class EffectExecutor {
         // Skip resolveArgs for these — each nested effect will be resolved
         // individually when this.execute() recurses into it via dispatch().
         const isCompound = operator === 'do' || operator === 'when';
-        const resolvedArgs = isCompound ? args : resolveArgs(args, this.bindings, this.strictBindings, this.contextExtensions);
+
+        // 3-elem `set` uses the first arg as a binding PATH (e.g.
+        // `@entity.phase`), not as a value to resolve. Skip interpolating
+        // arg[0] so dispatch('set', ...) can parse the field name out of
+        // the path. The 4-elem form (entityId, field, value) falls through
+        // the normal resolve path below. Rationale: match the orb-language
+        // 3-elem form that `@almadar/std` uses and that `operators.json`
+        // declares (minArity:2, maxArity:2).
+        const isSet3Elem =
+            operator === 'set' &&
+            args.length === 2 &&
+            typeof args[0] === 'string' &&
+            (args[0] as string).startsWith('@entity.');
+
+        let resolvedArgs: unknown[];
+        if (isCompound) {
+            resolvedArgs = args;
+        } else if (isSet3Elem) {
+            const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
+            resolvedArgs = [args[0], interpolateValue(args[1], ctx)];
+        } else {
+            resolvedArgs = resolveArgs(args, this.bindings, this.strictBindings, this.contextExtensions);
+        }
 
         effectLog.debug('execute', { operator, argCount: resolvedArgs.length, context: this.context.traitName });
 
@@ -334,7 +356,31 @@ export class EffectExecutor {
             }
 
             case 'set': {
-                const [entityId, field, value] = args as [string, string, unknown];
+                // Two accepted forms (operators.json declares maxArity:2 → 3-elem canonical;
+                // 4-elem historically accepted for back-compat with consumers that resolve
+                // the entity id externally):
+                //   3-elem: ['set', '@entity.<field>', value]   — parse the field out of the path
+                //   4-elem: ['set', entityId, field, value]     — caller supplies entity id + field
+                const entity = this.bindings.entity as Record<string, unknown> | undefined;
+                let entityId: string | undefined;
+                let field: string;
+                let value: unknown;
+
+                if (args.length === 2 && typeof args[0] === 'string' && (args[0] as string).startsWith('@entity.')) {
+                    const path = args[0] as string;
+                    field = path.slice('@entity.'.length);
+                    value = args[1];
+                    entityId = typeof entity?.['id'] === 'string' ? (entity['id'] as string) : undefined;
+                    if (!entityId) {
+                        effectLog.warn('set:missing-entity-id', { path });
+                        break;
+                    }
+                } else {
+                    entityId = args[0] as string;
+                    field = args[1] as string;
+                    value = args[2];
+                }
+
                 this.handlers.set(entityId, field, value);
                 // Mirror the write into the in-memory bindings so later
                 // effects in the same transition (and any `when`/`if`
@@ -342,7 +388,6 @@ export class EffectExecutor {
                 // value. Without this, a transition that increments a
                 // counter and then conditionally emits on the counter
                 // reads the pre-increment value.
-                const entity = this.bindings.entity as Record<string, unknown> | undefined;
                 if (entity && entity['id'] === entityId) {
                     entity[field] = value;
                 }
