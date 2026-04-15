@@ -58,24 +58,43 @@ export function createInitialTraitState(trait: TraitDefinition): TraitState {
 }
 
 /**
+ * Find every transition matching the current state + event key (in
+ * declaration order). Used by `processEvent` to disambiguate guarded
+ * sibling transitions: when several transitions share the same
+ * `from`/`event` and differ by guard (e.g. retry under attempts<3 vs
+ * give-up under attempts>=3), the runtime must consider all of them and
+ * pick the first whose guard passes.
+ */
+export function findMatchingTransitions(
+    trait: TraitDefinition,
+    currentState: string,
+    eventKey: string
+): TraitDefinition['transitions'] {
+    if (!trait.transitions || trait.transitions.length === 0) {
+        return [];
+    }
+    return trait.transitions.filter((t) => {
+        if (Array.isArray(t.from)) {
+            return t.from.includes(currentState) && t.event === eventKey;
+        }
+        return t.from === currentState && t.event === eventKey;
+    });
+}
+
+/**
  * Find a matching transition from the current state for the given event.
+ *
+ * **Guard-unaware**: returns the first transition matching `from` /
+ * `event` regardless of any attached guard. Use `findMatchingTransitions`
+ * when multiple sibling transitions share the same `from`/`event` and
+ * disambiguate by guard.
  */
 export function findTransition(
     trait: TraitDefinition,
     currentState: string,
     eventKey: string
 ): TraitDefinition['transitions'][0] | undefined {
-    // Guard against missing transitions array
-    if (!trait.transitions || trait.transitions.length === 0) {
-        return undefined;
-    }
-    return trait.transitions.find((t) => {
-        // Handle array 'from' (multiple source states)
-        if (Array.isArray(t.from)) {
-            return t.from.includes(currentState) && t.event === eventKey;
-        }
-        return t.from === currentState && t.event === eventKey;
-    });
+    return findMatchingTransitions(trait, currentState, eventKey)[0];
 }
 
 /**
@@ -159,10 +178,13 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
     } = options;
     const normalizedEvent = normalizeEventKey(eventKey);
 
-    // Find transition from current state
-    const transition = findTransition(trait, traitState.currentState, normalizedEvent);
+    // Find every transition matching from/event so we can pick the first
+    // whose guard passes. This supports the standard "retry vs give-up"
+    // pattern where two transitions share from/event and differ by guard
+    // (e.g. attempts<3 → idle vs attempts>=3 → failed).
+    const candidates = findMatchingTransitions(trait, traitState.currentState, normalizedEvent);
 
-    if (!transition) {
+    if (candidates.length === 0) {
         smLog.debug('noTransition', { trait: trait.name, event: normalizedEvent, currentState: traitState.currentState });
         return {
             executed: false,
@@ -172,10 +194,29 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
         };
     }
 
-    smLog.debug('processEvent', { trait: trait.name, event: normalizedEvent, currentState: traitState.currentState, to: transition.to });
+    // Try each candidate in declaration order; pick the first whose
+    // guard passes (or that has no guard). Guard errors fall through to
+    // the next candidate in permissive mode, block in strict mode.
+    let lastFailedGuardTransition: TraitDefinition['transitions'][0] | undefined;
 
-    // Evaluate guard if present
-    if (transition.guard) {
+    for (const transition of candidates) {
+        smLog.debug('processEvent', { trait: trait.name, event: normalizedEvent, currentState: traitState.currentState, to: transition.to });
+
+        if (!transition.guard) {
+            // Unguarded transition wins immediately.
+            return {
+                executed: true,
+                newState: transition.to,
+                previousState: traitState.currentState,
+                effects: transition.effects || [],
+                transition: {
+                    from: traitState.currentState,
+                    to: transition.to,
+                    event: normalizedEvent,
+                },
+            };
+        }
+
         const ctx = createContextFromBindings({
             entity: entityData,
             payload,
@@ -188,20 +229,22 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
                 ctx
             );
             smLog.debug('guard:evaluate', { trait: trait.name, event: normalizedEvent, guardResult: guardPasses });
-            if (!guardPasses) {
+            if (guardPasses) {
                 return {
-                    executed: false,
-                    newState: traitState.currentState,
+                    executed: true,
+                    newState: transition.to,
                     previousState: traitState.currentState,
-                    effects: [],
+                    effects: transition.effects || [],
                     transition: {
                         from: traitState.currentState,
                         to: transition.to,
                         event: normalizedEvent,
                     },
-                    guardResult: false,
+                    guardResult: true,
                 };
             }
+            // Guard failed — try the next candidate.
+            lastFailedGuardTransition = transition;
         } catch (error) {
             if (guardMode === 'strict') {
                 // RCG-02: In strict mode, guard errors block the transition
@@ -223,23 +266,37 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
                     guardResult: false,
                 };
             }
-            // Permissive mode: allow transition despite guard error (original behavior)
+            // Permissive mode: log and allow (treat as guard pass).
             console.error('[StateMachineCore] Guard evaluation error:', error);
+            return {
+                executed: true,
+                newState: transition.to,
+                previousState: traitState.currentState,
+                effects: transition.effects || [],
+                transition: {
+                    from: traitState.currentState,
+                    to: transition.to,
+                    event: normalizedEvent,
+                },
+                guardResult: true,
+            };
         }
     }
 
-    // Transition should execute
+    // No candidate's guard passed.
     return {
-        executed: true,
-        newState: transition.to,
+        executed: false,
+        newState: traitState.currentState,
         previousState: traitState.currentState,
-        effects: transition.effects || [],
-        transition: {
-            from: traitState.currentState,
-            to: transition.to,
-            event: normalizedEvent,
-        },
-        guardResult: transition.guard ? true : undefined,
+        effects: [],
+        transition: lastFailedGuardTransition
+            ? {
+                from: traitState.currentState,
+                to: lastFailedGuardTransition.to,
+                event: normalizedEvent,
+            }
+            : undefined,
+        guardResult: false,
     };
 }
 
