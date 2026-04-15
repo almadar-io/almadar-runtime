@@ -720,10 +720,28 @@ export class OrbitalServerRuntime {
               }
             }
 
+            // Forward entityId from the emitted event's payload so that
+            // the triggered trait can bind @entity.* against the right
+            // row. Without this, cross-trait listens auto-wiring would
+            // always dispatch with entityData={} and every @entity.id
+            // would resolve to undefined.
+            //
+            // Priority: explicit payload.entityId, then common row-id
+            // fields that convention maps 1:1 to entity ids (e.g.
+            // OrbitalProcess uses orbitalName as its row id).
+            const forwardedEntityId =
+              ((event.payload as EventPayload | undefined)?.entityId as
+                | string
+                | undefined) ??
+              ((event.payload as EventPayload | undefined)?.orbitalName as
+                | string
+                | undefined);
+
             // Trigger the mapped event
             await this.processOrbitalEvent(orbitalName, {
               event: listener.triggers,
               payload: mappedPayload as EventPayload,
+              entityId: forwardedEntityId,
             });
           });
 
