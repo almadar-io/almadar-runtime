@@ -13,7 +13,7 @@
 import * as fs from "fs";
 import * as net from "net";
 import { execSync } from "child_process";
-import type { EventPayload } from './types.js';
+import type { EventPayload, OsEmitConfig } from './types.js';
 import type { EffectHandlers } from "./types.js";
 
 // ============================================================================
@@ -161,15 +161,26 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
   // Handler Implementations
   // ============================================================================
 
+  // When an author sets `emit: { on_message: "X" }` on an os/watch-* effect,
+  // we swap the hardcoded default event name for X. Null-safe: absent emit
+  // config preserves the legacy names so existing schemas keep working.
+  const resolveOnMessage = (emit: OsEmitConfig | undefined, fallback: string): string =>
+    emit?.on_message ?? fallback;
+
   const handlers: Partial<EffectHandlers> = {
-    osWatchFiles: (glob: string, options: { recursive?: boolean; debounce?: number }) => {
+    osWatchFiles: (
+      glob: string,
+      options: { recursive?: boolean; debounce?: number },
+      emit?: OsEmitConfig,
+    ) => {
       const recursive = (options.recursive as boolean) !== false;
       const pattern = globToRegex(glob);
+      const eventName = resolveOnMessage(emit, "OS_FILE_MODIFIED");
 
       try {
         const watcher = fs.watch(cwd, { recursive }, (_event, filename) => {
           if (filename && pattern.test(filename)) {
-            debouncedEmit("OS_FILE_MODIFIED", {
+            debouncedEmit(eventName, {
               file: filename,
               glob,
               cwd,
@@ -178,13 +189,22 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
         });
         watchers.push(watcher);
       } catch (err) {
+        if (emit?.failure) {
+          ctx.emitEvent(emit.failure, {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
         console.warn("[os/watch-files] Failed to start watcher:", err);
       }
     },
 
-    osWatchProcess: (name: string, subcommand?: string) => {
+    osWatchProcess: (name: string, subcommand?: string, emit?: OsEmitConfig) => {
       const searchTerm = subcommand ? `${name} ${subcommand}` : name;
       let wasRunning = false;
+      // Both start + exit transitions share one event name when emit.on_message
+      // is configured (consumers discriminate on the payload's `process` field).
+      const startEvent = resolveOnMessage(emit, "OS_PROCESS_STARTED");
+      const exitEvent = resolveOnMessage(emit, "OS_PROCESS_EXITED");
 
       const interval = setInterval(() => {
         let isRunning = false;
@@ -199,9 +219,9 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
         }
 
         if (isRunning && !wasRunning) {
-          debouncedEmit("OS_PROCESS_STARTED", { process: name, subcommand: subcommand ?? null });
+          debouncedEmit(startEvent, { process: name, subcommand: subcommand ?? null });
         } else if (!isRunning && wasRunning) {
-          debouncedEmit("OS_PROCESS_EXITED", { process: name, subcommand: subcommand ?? null });
+          debouncedEmit(exitEvent, { process: name, subcommand: subcommand ?? null });
         }
         wasRunning = isRunning;
       }, 2000);
@@ -209,13 +229,15 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
       intervals.push(interval);
     },
 
-    osWatchPort: (port: number, protocol: string) => {
+    osWatchPort: (port: number, protocol: string, emit?: OsEmitConfig) => {
       if (protocol !== "tcp") {
         console.warn(`[os/watch-port] Only TCP is supported, got: ${protocol}`);
         return;
       }
 
       let wasOpen = false;
+      const openEvent = resolveOnMessage(emit, "OS_PORT_OPENED");
+      const closeEvent = resolveOnMessage(emit, "OS_PORT_CLOSED");
 
       const interval = setInterval(() => {
         const socket = new net.Socket();
@@ -225,7 +247,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
           socket.destroy();
           if (!wasOpen) {
             wasOpen = true;
-            debouncedEmit("OS_PORT_OPENED", { port, protocol });
+            debouncedEmit(openEvent, { port, protocol });
           }
         });
 
@@ -233,7 +255,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
           socket.destroy();
           if (wasOpen) {
             wasOpen = false;
-            debouncedEmit("OS_PORT_CLOSED", { port, protocol });
+            debouncedEmit(closeEvent, { port, protocol });
           }
         });
 
@@ -241,7 +263,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
           socket.destroy();
           if (wasOpen) {
             wasOpen = false;
-            debouncedEmit("OS_PORT_CLOSED", { port, protocol });
+            debouncedEmit(closeEvent, { port, protocol });
           }
         });
 
@@ -251,7 +273,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
       intervals.push(interval);
     },
 
-    osWatchHttp: (urlPattern: string, method?: string) => {
+    osWatchHttp: (urlPattern: string, method?: string, _emit?: OsEmitConfig) => {
       // HTTP interception requires monkey-patching Node.js module exports (read-only in TS types).
       // The compiled path (backend.rs) generates untyped inline code that handles this.
       // For the interpreted runtime, log a warning.
@@ -264,16 +286,22 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
       }
     },
 
-    osWatchCron: (expression: string) => {
+    osWatchCron: (expression: string, emit?: OsEmitConfig) => {
       let fields: CronFields;
       try {
         fields = parseCron(expression);
       } catch (err) {
+        if (emit?.failure) {
+          ctx.emitEvent(emit.failure, {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
         console.warn("[os/watch-cron] Invalid expression:", err);
         return;
       }
 
       let lastFired = -1;
+      const eventName = resolveOnMessage(emit, "OS_CRON_FIRE");
 
       const interval = setInterval(() => {
         const now = new Date();
@@ -282,7 +310,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
 
         if (minuteKey !== lastFired && cronMatches(fields, now)) {
           lastFired = minuteKey;
-          debouncedEmit("OS_CRON_FIRE", {
+          debouncedEmit(eventName, {
             expression,
             firedAt: now.toISOString(),
           });
@@ -292,29 +320,39 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
       intervals.push(interval);
     },
 
-    osWatchSignal: (signal: string) => {
+    osWatchSignal: (signal: string, emit?: OsEmitConfig) => {
       const sig = signal.toUpperCase() as NodeJS.Signals;
+      // Default name keeps the per-signal suffix (OS_SIGNAL_TERM); a
+      // configured on_message drops that convention in favor of the single
+      // author-chosen event.
       const handler = () => {
-        debouncedEmit(`OS_SIGNAL_${sig}`, { signal: sig });
+        const eventName = emit?.on_message ?? `OS_SIGNAL_${sig}`;
+        debouncedEmit(eventName, { signal: sig });
       };
 
       try {
         process.on(sig, handler);
         signalHandlers.push({ signal: sig, handler });
       } catch (err) {
+        if (emit?.failure) {
+          ctx.emitEvent(emit.failure, {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
         console.warn(`[os/watch-signal] Cannot listen for ${sig}:`, err);
       }
     },
 
-    osWatchEnv: (variable: string) => {
+    osWatchEnv: (variable: string, emit?: OsEmitConfig) => {
       let lastValue = process.env[variable];
+      const eventName = resolveOnMessage(emit, "OS_ENV_CHANGED");
 
       const interval = setInterval(() => {
         const current = process.env[variable];
         if (current !== lastValue) {
           const previous = lastValue;
           lastValue = current;
-          debouncedEmit("OS_ENV_CHANGED", {
+          debouncedEmit(eventName, {
             variable,
             value: current ?? null,
             previous: previous ?? null,

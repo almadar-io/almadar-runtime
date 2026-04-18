@@ -227,25 +227,26 @@ export class EffectExecutor {
         // individually when this.execute() recurses into it via dispatch().
         const isCompound = operator === 'do' || operator === 'when';
 
-        // 3-elem `set` uses the first arg as a binding PATH (e.g.
-        // `@entity.phase`), not as a value to resolve. Skip interpolating
-        // arg[0] so dispatch('set', ...) can parse the field name out of
-        // the path. The 4-elem form (entityId, field, value) falls through
-        // the normal resolve path below. Rationale: match the orb-language
-        // 3-elem form that `@almadar/std` uses and that `operators.json`
-        // declares (minArity:2, maxArity:2).
-        const isSet3Elem =
+        // `set` with an `@entity.<field>` path literal uses that first arg as a
+        // binding PATH, not as a value to resolve. Skip interpolating args[0] so
+        // dispatch('set', ...) can parse the field name from the path. This
+        // applies to both the bare 3-elem form AND the 4-elem form with a
+        // trailing `emit:` options object (added by close-the-circuit Stage 2).
+        // The purely positional 4-elem form (entityId, field, value) falls
+        // through the normal resolve path below.
+        const isSetPathForm =
             operator === 'set' &&
-            args.length === 2 &&
+            args.length >= 2 &&
             typeof args[0] === 'string' &&
             (args[0] as string).startsWith('@entity.');
 
         let resolvedArgs: unknown[];
         if (isCompound) {
             resolvedArgs = args;
-        } else if (isSet3Elem) {
+        } else if (isSetPathForm) {
             const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
-            resolvedArgs = [args[0], interpolateValue(args[1], ctx)];
+            // Preserve args[0] (the @entity.<path> literal); resolve the rest.
+            resolvedArgs = [args[0], ...args.slice(1).map((a) => interpolateValue(a, ctx))];
         } else {
             resolvedArgs = resolveArgs(args, this.bindings, this.strictBindings, this.contextExtensions);
         }
@@ -341,6 +342,84 @@ export class EffectExecutor {
     }
 
     // ==========================================================================
+    // `emit:` config extraction — close-the-circuit on async/reactive ops.
+    //
+    // `fetch`, `persist`, `call-service`, `set`, `ref`, `os/watch-*` may carry
+    // an `emit:` key in their options object. After the effect's work finishes,
+    // the runtime fires the author-configured bus event so downstream state
+    // machines can branch on success/failure without stitching async/sequence.
+    //
+    // See `docs/Almadar_Std_Gaps.md` §3.1 and the emit-config plan for the
+    // semantics. The compiled-path shell does the same work in generated JS.
+    // ==========================================================================
+
+    private extractEmitConfig(
+        rawOpt: unknown,
+    ): {
+        success?: string;
+        failure?: string;
+        on_change?: string;
+        on_message?: string;
+    } | undefined {
+        if (!rawOpt || typeof rawOpt !== 'object' || Array.isArray(rawOpt)) {
+            return undefined;
+        }
+        const obj = rawOpt as { emit?: unknown };
+        const emitBlock = obj.emit;
+        if (!emitBlock || typeof emitBlock !== 'object' || Array.isArray(emitBlock)) {
+            return undefined;
+        }
+        const block = emitBlock as Record<string, unknown>;
+        const readStr = (key: string): string | undefined => {
+            const v = block[key];
+            return typeof v === 'string' ? v : undefined;
+        };
+        return {
+            success: readStr('success'),
+            failure: readStr('failure'),
+            // Resolver accepts both snake_case and camelCase; mirror that here.
+            on_change: readStr('on_change') ?? readStr('onChange'),
+            on_message: readStr('on_message') ?? readStr('onMessage'),
+        };
+    }
+
+    private emitSuccess(
+        emit: ReturnType<EffectExecutor['extractEmitConfig']>,
+        key: 'success' | 'on_change' | 'on_message',
+        payload: unknown,
+    ): void {
+        const eventName = emit?.[key];
+        if (eventName) {
+            this.handlers.emit(eventName, payload as EventPayload | undefined);
+        }
+    }
+
+    private emitFailure(
+        emit: ReturnType<EffectExecutor['extractEmitConfig']>,
+        err: unknown,
+    ): void {
+        if (!emit?.failure) return;
+        const error = err instanceof Error ? err.message : String(err);
+        this.handlers.emit(emit.failure, { error } as EventPayload);
+    }
+
+    /**
+     * Narrow the generic emit config into the `os/watch-*` handler surface
+     * (only `on_message` + `failure` are meaningful for streaming ops).
+     * Returns `undefined` when neither field is set so handlers can test
+     * with a single `if (emit)` guard.
+     */
+    private osEmit(
+        emit: ReturnType<EffectExecutor['extractEmitConfig']>,
+    ): import('./types.js').OsEmitConfig | undefined {
+        if (!emit || (!emit.on_message && !emit.failure)) return undefined;
+        return {
+            on_message: emit.on_message,
+            failure: emit.failure,
+        };
+    }
+
+    // ==========================================================================
     // Effect Dispatch
     // ==========================================================================
 
@@ -361,15 +440,23 @@ export class EffectExecutor {
                 // the entity id externally):
                 //   3-elem: ['set', '@entity.<field>', value]   — parse the field out of the path
                 //   4-elem: ['set', entityId, field, value]     — caller supplies entity id + field
+                //   +emit:  ['set', '@entity.<field>', value, { emit: {...} }]
                 const entity = this.bindings.entity as Record<string, unknown> | undefined;
                 let entityId: string | undefined;
                 let field: string;
                 let value: unknown;
+                let emitCfg: ReturnType<EffectExecutor['extractEmitConfig']>;
 
-                if (args.length === 2 && typeof args[0] === 'string' && (args[0] as string).startsWith('@entity.')) {
+                // Distinguish path-based (`@entity.<field>`) from explicit 4-elem forms.
+                // The path form's 3rd arg may carry `emit:` options; the 4-elem
+                // form's 4th arg may carry the same. `args.length` alone is
+                // ambiguous once `emit:` arrives, so use the path prefix as the
+                // discriminator.
+                if (typeof args[0] === 'string' && (args[0] as string).startsWith('@entity.')) {
                     const path = args[0] as string;
                     field = path.slice('@entity.'.length);
                     value = args[1];
+                    emitCfg = this.extractEmitConfig(args[2]);
                     entityId = typeof entity?.['id'] === 'string' ? (entity['id'] as string) : undefined;
                     if (!entityId) {
                         effectLog.warn('set:missing-entity-id', { path });
@@ -379,6 +466,7 @@ export class EffectExecutor {
                     entityId = args[0] as string;
                     field = args[1] as string;
                     value = args[2];
+                    emitCfg = this.extractEmitConfig(args[3]);
                 }
 
                 this.handlers.set(entityId, field, value);
@@ -391,22 +479,38 @@ export class EffectExecutor {
                 if (entity && entity['id'] === entityId) {
                     entity[field] = value;
                 }
+                // set is synchronous — fire success immediately with the new value.
+                this.emitSuccess(emitCfg, 'success', value);
                 break;
             }
 
             case 'persist': {
                 const action = args[0] as 'create' | 'update' | 'delete' | 'batch';
-                if (action === 'batch') {
-                    // Batch mode: ["persist", "batch", [...operations]]
-                    // Each operation: ["create", "collection", {...}],
-                    //                 ["update", "collection", "id", {...}],
-                    //                 ["delete", "collection", "id"]
-                    const operations = args[1] as unknown[];
-                    await this.handlers.persist('batch', '', { operations } as EntityRow);
-                } else {
-                    const entityType = args[1] as string;
-                    const data = args[2] as EntityRow | undefined;
-                    await this.handlers.persist(action, entityType, data);
+                // Optional trailing options object carrying `emit:` — detected
+                // by having an `emit` key, never by position (so inline data
+                // payloads for create/update are not mistaken for options).
+                const last = args[args.length - 1];
+                const emitCfg = last && typeof last === 'object' && !Array.isArray(last) && 'emit' in (last as object)
+                    ? this.extractEmitConfig(last)
+                    : undefined;
+                try {
+                    if (action === 'batch') {
+                        // Batch mode: ["persist", "batch", [...operations]]
+                        const operations = args[1] as unknown[];
+                        await this.handlers.persist('batch', '', { operations } as EntityRow);
+                        this.emitSuccess(emitCfg, 'success', operations);
+                    } else {
+                        const entityType = args[1] as string;
+                        const data = args[2] as EntityRow | undefined;
+                        await this.handlers.persist(action, entityType, data);
+                        // persist() returns void — best available success payload
+                        // is the data that went in, which matches the interpreted
+                        // runtime's existing @entity reactivity contract.
+                        this.emitSuccess(emitCfg, 'success', data);
+                    }
+                } catch (err) {
+                    this.emitFailure(emitCfg, err);
+                    throw err;
                 }
                 break;
             }
@@ -415,7 +519,15 @@ export class EffectExecutor {
                 const service = args[0] as string;
                 const action = args[1] as string;
                 const params = args[2] as ServiceParams | undefined;
-                await this.handlers.callService(service, action, params);
+                // Optional trailing options object carrying `emit:` at args[3].
+                const emitCfg = this.extractEmitConfig(args[3]);
+                try {
+                    const result = await this.handlers.callService(service, action, params);
+                    this.emitSuccess(emitCfg, 'success', result);
+                } catch (err) {
+                    this.emitFailure(emitCfg, err);
+                    throw err;
+                }
                 break;
             }
 
@@ -424,7 +536,7 @@ export class EffectExecutor {
                     const entityType = args[0] as string;
                     const rawOpt = args[1];
                     // Support both shorthand ['fetch', 'Entity', 'id-value']
-                    // and full options ['fetch', 'Entity', { id: 'id-value' }]
+                    // and full options ['fetch', 'Entity', { id: 'id-value', emit: {...} }]
                     const options = typeof rawOpt === 'string'
                         ? { id: rawOpt }
                         : rawOpt as {
@@ -434,7 +546,14 @@ export class EffectExecutor {
                             offset?: number;
                             include?: string[];
                         } | undefined;
-                    await this.handlers.fetch(entityType, options);
+                    const emitCfg = this.extractEmitConfig(rawOpt);
+                    try {
+                        const result = await this.handlers.fetch(entityType, options);
+                        this.emitSuccess(emitCfg, 'success', result);
+                    } catch (err) {
+                        this.emitFailure(emitCfg, err);
+                        throw err;
+                    }
                 } else {
                     this.logUnsupported('fetch');
                 }
@@ -455,12 +574,24 @@ export class EffectExecutor {
                         offset?: number;
                         include?: string[];
                     } | undefined;
-                if (this.handlers.ref) {
-                    await this.handlers.ref(refEntityType, refOptions);
-                } else if (this.handlers.fetch) {
-                    await this.handlers.fetch(refEntityType, refOptions);
-                } else {
-                    this.logUnsupported('ref');
+                const refEmitCfg = this.extractEmitConfig(rawRefOpt);
+                try {
+                    let result: unknown = undefined;
+                    if (this.handlers.ref) {
+                        result = await this.handlers.ref(refEntityType, refOptions);
+                    } else if (this.handlers.fetch) {
+                        result = await this.handlers.fetch(refEntityType, refOptions);
+                    } else {
+                        this.logUnsupported('ref');
+                    }
+                    // Interpreted runtime fires `on_change` once on the initial
+                    // subscribe. The ongoing-update story lives in the client
+                    // reactivity layer (EntityStore) — it owns subsequent
+                    // emissions since it already subscribes to mutations.
+                    this.emitSuccess(refEmitCfg, 'on_change', result);
+                } catch (err) {
+                    this.emitFailure(refEmitCfg, err);
+                    throw err;
                 }
                 break;
             }
@@ -624,11 +755,23 @@ export class EffectExecutor {
             }
 
             // OS trigger operators (server-side only)
+            //
+            // Each may carry `emit:` inside a trailing options object. The
+            // executor extracts it and passes it to the handler so the
+            // hardcoded fallback name (e.g. OS_CRON_FIRE) is replaced by the
+            // author-configured event.
             case 'os/watch-files': {
                 if (this.handlers.osWatchFiles) {
                     const glob = args[0] as string;
-                    const options = args[1] as { recursive?: boolean; debounce?: number } | undefined;
-                    this.handlers.osWatchFiles(glob, options ?? {});
+                    // options may carry emit: — strip it before passing to the handler.
+                    const rawOptions = args[1] as
+                        | { recursive?: boolean; debounce?: number; emit?: unknown }
+                        | undefined;
+                    const emitCfg = this.extractEmitConfig(rawOptions);
+                    const options = rawOptions
+                        ? { recursive: rawOptions.recursive, debounce: rawOptions.debounce }
+                        : {};
+                    this.handlers.osWatchFiles(glob, options, this.osEmit(emitCfg));
                 } else {
                     this.logUnsupported('os/watch-files');
                 }
@@ -636,7 +779,12 @@ export class EffectExecutor {
             }
             case 'os/watch-process': {
                 if (this.handlers.osWatchProcess) {
-                    this.handlers.osWatchProcess(args[0] as string, args[1] as string | undefined);
+                    const emitCfg = this.extractEmitConfig(args[2]);
+                    this.handlers.osWatchProcess(
+                        args[0] as string,
+                        args[1] as string | undefined,
+                        this.osEmit(emitCfg),
+                    );
                 } else {
                     this.logUnsupported('os/watch-process');
                 }
@@ -644,7 +792,12 @@ export class EffectExecutor {
             }
             case 'os/watch-port': {
                 if (this.handlers.osWatchPort) {
-                    this.handlers.osWatchPort(args[0] as number, (args[1] as string) ?? 'tcp');
+                    const emitCfg = this.extractEmitConfig(args[2]);
+                    this.handlers.osWatchPort(
+                        args[0] as number,
+                        (args[1] as string) ?? 'tcp',
+                        this.osEmit(emitCfg),
+                    );
                 } else {
                     this.logUnsupported('os/watch-port');
                 }
@@ -652,7 +805,12 @@ export class EffectExecutor {
             }
             case 'os/watch-http': {
                 if (this.handlers.osWatchHttp) {
-                    this.handlers.osWatchHttp(args[0] as string, args[1] as string | undefined);
+                    const emitCfg = this.extractEmitConfig(args[2]);
+                    this.handlers.osWatchHttp(
+                        args[0] as string,
+                        args[1] as string | undefined,
+                        this.osEmit(emitCfg),
+                    );
                 } else {
                     this.logUnsupported('os/watch-http');
                 }
@@ -660,7 +818,8 @@ export class EffectExecutor {
             }
             case 'os/watch-cron': {
                 if (this.handlers.osWatchCron) {
-                    this.handlers.osWatchCron(args[0] as string);
+                    const emitCfg = this.extractEmitConfig(args[1]);
+                    this.handlers.osWatchCron(args[0] as string, this.osEmit(emitCfg));
                 } else {
                     this.logUnsupported('os/watch-cron');
                 }
@@ -668,7 +827,8 @@ export class EffectExecutor {
             }
             case 'os/watch-signal': {
                 if (this.handlers.osWatchSignal) {
-                    this.handlers.osWatchSignal(args[0] as string);
+                    const emitCfg = this.extractEmitConfig(args[1]);
+                    this.handlers.osWatchSignal(args[0] as string, this.osEmit(emitCfg));
                 } else {
                     this.logUnsupported('os/watch-signal');
                 }
@@ -676,7 +836,8 @@ export class EffectExecutor {
             }
             case 'os/watch-env': {
                 if (this.handlers.osWatchEnv) {
-                    this.handlers.osWatchEnv(args[0] as string);
+                    const emitCfg = this.extractEmitConfig(args[1]);
+                    this.handlers.osWatchEnv(args[0] as string, this.osEmit(emitCfg));
                 } else {
                     this.logUnsupported('os/watch-env');
                 }

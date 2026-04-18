@@ -259,22 +259,37 @@ export interface EffectHandlers {
     pipeBehaviors?: (seed: unknown, ...steps: Array<(prev: unknown) => unknown>) => Promise<unknown> | unknown;
 
     // OS trigger handlers (server-side only)
+    //
+    // Each handler may accept an optional `emit` config — when present, the
+    // handler fires `emit.on_message` in place of the hardcoded event name
+    // (e.g. `OS_FILE_MODIFIED`). Hardcoded fallback is preserved so existing
+    // schemas without `emit:` keep working.
     /** Watch file system for changes matching glob pattern */
-    osWatchFiles?: (glob: string, options: { recursive?: boolean; debounce?: number }) => void;
+    osWatchFiles?: (
+        glob: string,
+        options: { recursive?: boolean; debounce?: number },
+        emit?: OsEmitConfig,
+    ) => void;
     /** Monitor a process by name */
-    osWatchProcess?: (name: string, subcommand?: string) => void;
+    osWatchProcess?: (name: string, subcommand?: string, emit?: OsEmitConfig) => void;
     /** Monitor a port for open/close */
-    osWatchPort?: (port: number, protocol: string) => void;
+    osWatchPort?: (port: number, protocol: string, emit?: OsEmitConfig) => void;
     /** Intercept HTTP responses matching pattern */
-    osWatchHttp?: (urlPattern: string, method?: string) => void;
+    osWatchHttp?: (urlPattern: string, method?: string, emit?: OsEmitConfig) => void;
     /** Register a cron schedule */
-    osWatchCron?: (expression: string) => void;
+    osWatchCron?: (expression: string, emit?: OsEmitConfig) => void;
     /** Register an OS signal handler */
-    osWatchSignal?: (signal: string) => void;
+    osWatchSignal?: (signal: string, emit?: OsEmitConfig) => void;
     /** Watch an environment variable for changes */
-    osWatchEnv?: (variable: string) => void;
+    osWatchEnv?: (variable: string, emit?: OsEmitConfig) => void;
     /** Configure debounce for an OS event type */
     osDebounce?: (ms: number, eventType: string) => void;
+}
+
+/** Author-configured `emit:` block threaded into `os/watch-*` handlers. */
+export interface OsEmitConfig {
+    on_message?: string;
+    failure?: string;
 }
 
 // ============================================================================

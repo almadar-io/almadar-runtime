@@ -24,6 +24,27 @@ const bindLog = createLogger('almadar:runtime:bindings');
 // Re-export for convenience
 export { createMinimalContext, type EvaluationContext };
 
+/**
+ * Binding roots whose values only exist in client UI state and therefore
+ * cannot be resolved server-side. These bindings round-trip through the
+ * server unchanged; the client (`@almadar/ui`) substitutes them at render
+ * time.
+ *
+ * `trait` — `@trait.<TraitName>[.<slot>]` — resolves via `<TraitFrame>` to
+ * the referenced trait's current `render-ui` output. See
+ * `docs/Almadar_Std_Gaps.md` §3.8.
+ */
+export const CLIENT_ONLY_BINDING_ROOTS: ReadonlySet<string> = new Set(['trait']);
+
+/** Return true when the binding's root segment is reserved for client-only resolution. */
+function isClientOnlyBinding(value: string): boolean {
+    if (!value.startsWith('@')) return false;
+    const afterAt = value.slice(1);
+    const firstDot = afterAt.indexOf('.');
+    const root = firstDot === -1 ? afterAt : afterAt.slice(0, firstDot);
+    return CLIENT_ONLY_BINDING_ROOTS.has(root);
+}
+
 // ============================================================================
 // Main Functions
 // ============================================================================
@@ -90,6 +111,13 @@ export function interpolateValue(value: unknown, ctx: EvaluationContext): unknow
 function interpolateString(value: string, ctx: EvaluationContext): unknown {
     // Pure binding - resolve directly
     if (value.startsWith('@') && isPureBinding(value)) {
+        // Client-only bindings (currently `@trait.*`) round-trip through
+        // the server unchanged — the client's render layer substitutes the
+        // referenced trait's current frame via `<TraitFrame>`.
+        if (isClientOnlyBinding(value)) {
+            bindLog.debug('passthrough:client-only', { binding: value });
+            return value;
+        }
         const resolved = resolveBinding(value, ctx);
         bindLog.debug('resolve', { binding: value, resolvedType: typeof resolved });
         return resolved;
@@ -115,6 +143,10 @@ function isPureBinding(value: string): boolean {
  */
 function interpolateEmbeddedBindings(value: string, ctx: EvaluationContext): string {
     return value.replace(/@[\w]+(?:\.[\w]+)*/g, (match) => {
+        // Client-only bindings round-trip verbatim; see CLIENT_ONLY_BINDING_ROOTS.
+        if (isClientOnlyBinding(match)) {
+            return match;
+        }
         const resolved = resolveBinding(match, ctx);
         return resolved !== undefined ? String(resolved) : match;
     });
