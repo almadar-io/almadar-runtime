@@ -286,11 +286,12 @@ export interface EffectHandlers {
     osDebounce?: (ms: number, eventType: string) => void;
 }
 
-/** Author-configured `emit:` block threaded into `os/watch-*` handlers. */
-export interface OsEmitConfig {
-    on_message?: string;
-    failure?: string;
-}
+/**
+ * Author-configured `emit:` block threaded into `os/watch-*` handlers.
+ * Narrower than @almadar/core's `EmitConfig` — only the keys streaming
+ * operators meaningfully fire.
+ */
+export type OsEmitConfig = Pick<import('@almadar/core').EmitConfig, 'on_message' | 'failure'>;
 
 // ============================================================================
 // Binding Context Types

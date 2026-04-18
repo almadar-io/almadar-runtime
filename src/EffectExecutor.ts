@@ -7,6 +7,7 @@
  * @packageDocumentation
  */
 
+import type { EmitConfig } from '@almadar/core';
 import type {
     EffectHandlers,
     Effect,
@@ -353,14 +354,7 @@ export class EffectExecutor {
     // semantics. The compiled-path shell does the same work in generated JS.
     // ==========================================================================
 
-    private extractEmitConfig(
-        rawOpt: unknown,
-    ): {
-        success?: string;
-        failure?: string;
-        on_change?: string;
-        on_message?: string;
-    } | undefined {
+    private extractEmitConfig(rawOpt: unknown): EmitConfig | undefined {
         if (!rawOpt || typeof rawOpt !== 'object' || Array.isArray(rawOpt)) {
             return undefined;
         }
@@ -369,22 +363,28 @@ export class EffectExecutor {
         if (!emitBlock || typeof emitBlock !== 'object' || Array.isArray(emitBlock)) {
             return undefined;
         }
-        const block = emitBlock as Record<string, unknown>;
-        const readStr = (key: string): string | undefined => {
-            const v = block[key];
-            return typeof v === 'string' ? v : undefined;
+        // Narrow to the known-keys shape so we don't need a Record index.
+        // Resolver accepts both snake_case and camelCase; mirror that here.
+        const block = emitBlock as {
+            success?: unknown;
+            failure?: unknown;
+            on_change?: unknown;
+            onChange?: unknown;
+            on_message?: unknown;
+            onMessage?: unknown;
         };
+        const asStr = (v: unknown): string | undefined =>
+            typeof v === 'string' ? v : undefined;
         return {
-            success: readStr('success'),
-            failure: readStr('failure'),
-            // Resolver accepts both snake_case and camelCase; mirror that here.
-            on_change: readStr('on_change') ?? readStr('onChange'),
-            on_message: readStr('on_message') ?? readStr('onMessage'),
+            success: asStr(block.success),
+            failure: asStr(block.failure),
+            on_change: asStr(block.on_change) ?? asStr(block.onChange),
+            on_message: asStr(block.on_message) ?? asStr(block.onMessage),
         };
     }
 
     private emitSuccess(
-        emit: ReturnType<EffectExecutor['extractEmitConfig']>,
+        emit: EmitConfig | undefined,
         key: 'success' | 'on_change' | 'on_message',
         payload: unknown,
     ): void {
@@ -395,7 +395,7 @@ export class EffectExecutor {
     }
 
     private emitFailure(
-        emit: ReturnType<EffectExecutor['extractEmitConfig']>,
+        emit: EmitConfig | undefined,
         err: unknown,
     ): void {
         if (!emit?.failure) return;
@@ -410,7 +410,7 @@ export class EffectExecutor {
      * with a single `if (emit)` guard.
      */
     private osEmit(
-        emit: ReturnType<EffectExecutor['extractEmitConfig']>,
+        emit: EmitConfig | undefined,
     ): import('./types.js').OsEmitConfig | undefined {
         if (!emit || (!emit.on_message && !emit.failure)) return undefined;
         return {
@@ -441,11 +441,13 @@ export class EffectExecutor {
                 //   3-elem: ['set', '@entity.<field>', value]   — parse the field out of the path
                 //   4-elem: ['set', entityId, field, value]     — caller supplies entity id + field
                 //   +emit:  ['set', '@entity.<field>', value, { emit: {...} }]
-                const entity = this.bindings.entity as Record<string, unknown> | undefined;
+                // bindings.entity is EntityRow | undefined from @almadar/core —
+                // use it directly instead of casting to a record.
+                const entity: EntityRow | undefined = this.bindings.entity;
                 let entityId: string | undefined;
                 let field: string;
                 let value: unknown;
-                let emitCfg: ReturnType<EffectExecutor['extractEmitConfig']>;
+                let emitCfg: EmitConfig | undefined;
 
                 // Distinguish path-based (`@entity.<field>`) from explicit 4-elem forms.
                 // The path form's 3rd arg may carry `emit:` options; the 4-elem
@@ -477,7 +479,11 @@ export class EffectExecutor {
                 // counter and then conditionally emits on the counter
                 // reads the pre-increment value.
                 if (entity && entity['id'] === entityId) {
-                    entity[field] = value;
+                    // EntityRow indexes to FieldValue; the effect's value is
+                    // runtime-shaped `unknown`. The set handler above already
+                    // persisted the real type-checked write — this mirror
+                    // write is for in-memory binding reads only.
+                    entity[field] = value as EntityRow[string];
                 }
                 // set is synchronous — fire success immediately with the new value.
                 this.emitSuccess(emitCfg, 'success', value);
