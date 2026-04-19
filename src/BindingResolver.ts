@@ -15,7 +15,7 @@ import {
     createMinimalContext,
     type EvaluationContext,
 } from '@almadar/evaluator';
-import { isKnownOperator } from '@almadar/operators';
+import { isKnownOperator } from '@almadar/std';
 import type { BindingContext, EntityRow, PatternProps, EvaluationContextExtensions } from './types.js';
 import { createLogger } from './logger.js';
 
