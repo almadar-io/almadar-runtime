@@ -118,6 +118,22 @@ export {
   type PreprocessResult,
 } from "./UsesIntegration.js";
 
+// Loader (for registerWithPreprocess consumers who need to construct a
+// custom SchemaLoader — e.g. to map std imports onto a non-standard
+// on-disk layout).
+export {
+  createUnifiedLoader,
+  isBrowser,
+  isElectron,
+  isNode,
+  type SchemaLoader,
+  type LoadedSchema,
+  type LoadedOrbital,
+  type LoadResult,
+  type ImportChainLike,
+  type UnifiedLoaderOptions,
+} from "./loader/index.js";
+
 // Composition (runtime-side TS implementation of behavior/* operators)
 export * as composition from "./composition/index.js";
 export {
