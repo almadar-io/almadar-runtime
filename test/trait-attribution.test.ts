@@ -164,4 +164,78 @@ describe('OrbitalServerRuntime trait attribution', () => {
       expect(tagged[i].effect).toBe(flat[i]);
     }
   });
+
+  it('register() unwraps preprocessed ref-traits so their state machines run', async () => {
+    // Simulate what `preprocessSchema` produces for a molecule: every trait
+    // with a `linkedEntity` or `config` override comes out as
+    // `{ ref, linkedEntity, _resolved: <inline Trait> }` rather than a flat
+    // inline trait. register() must unwrap `_resolved` so the inlined trait
+    // reaches the StateMachineManager. Without the unwrap, every embedded
+    // atom in a molecule is silently dropped (see §3.1b).
+    const refShapedSchema = {
+      name: 'ref-unwrap-fixture',
+      orbitals: [
+        {
+          name: 'UnwrapOrbital',
+          entity: {
+            name: 'Item',
+            persistence: 'persistent',
+            collection: 'items',
+            fields: [{ name: 'id', type: 'string', required: true }],
+          },
+          traits: [
+            // Preprocess-output shape: `ref` + `linkedEntity` + `_resolved`.
+            {
+              ref: 'WrappedAtom',
+              linkedEntity: 'Item',
+              _resolved: {
+                name: 'WrappedAtom',
+                category: 'interaction',
+                linkedEntity: 'Item',
+                stateMachine: {
+                  states: [{ name: 'idle', isInitial: true }],
+                  events: [{ key: 'INIT' }],
+                  transitions: [
+                    {
+                      from: 'idle',
+                      to: 'idle',
+                      event: 'INIT',
+                      effects: [
+                        ['render-ui', 'main', { type: 'typography', content: 'from WrappedAtom' }],
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+          pages: [
+            {
+              name: 'UnwrapPage',
+              path: '/unwrap',
+              traits: [{ ref: 'WrappedAtom' }],
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = new OrbitalServerRuntime({ debug: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fixture mimics preprocess output shape that isn't part of the public OrbitalSchema type
+    await runtime.register(refShapedSchema as any);
+
+    const result = await runtime.processOrbitalEvent('UnwrapOrbital', {
+      event: 'INIT',
+      payload: {},
+    });
+
+    expect(result.success).toBeTruthy();
+    // The atom should have fired and produced its render-ui effect — not
+    // been dropped by the isInlineTrait filter.
+    expect(result.clientEffects).toHaveLength(1);
+    expect(result.clientEffectsByTrait?.[0]?.traitName).toBe('WrappedAtom');
+    const effect = result.clientEffects![0] as unknown[];
+    expect(effect[0]).toBe('render-ui');
+    expect((effect[2] as { content: string }).content).toBe('from WrappedAtom');
+  });
 });

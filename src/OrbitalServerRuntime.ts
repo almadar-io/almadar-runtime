@@ -581,8 +581,19 @@ export class OrbitalServerRuntime {
    * Register a single orbital
    */
   private async registerOrbitalAsync(orbital: OrbitalDefinition): Promise<void> {
-    // Convert traits to TraitDefinition - filter to inline traits only (skip string refs)
-    const inlineTraits = (orbital.traits || []).filter(isInlineTrait);
+    // Unwrap preprocessed ref-traits: `preprocessSchema` keeps entries with
+    // `config` or `linkedEntity` wrapped as `{ ref, linkedEntity, _resolved }`
+    // (see UsesIntegration.ts:209-222) — the `_resolved` field carries the
+    // fully inlined trait. `isInlineTrait` excludes anything with a `ref`
+    // key, so without this unwrap every preprocessed atom would be dropped
+    // and only the layout-owner survives (see Almadar_Std_Gaps.md §3.1b).
+    const unwrapped = (orbital.traits || []).map((t) => {
+      if (t && typeof t === 'object' && 'ref' in t && '_resolved' in t) {
+        return (t as { _resolved: Trait })._resolved;
+      }
+      return t;
+    });
+    const inlineTraits = unwrapped.filter(isInlineTrait);
     const traitDefs: TraitDefinition[] = inlineTraits.map((t: Trait) => {
       const sm = t.stateMachine;
       const states = sm?.states || [];
