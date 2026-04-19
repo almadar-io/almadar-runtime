@@ -143,6 +143,15 @@ export interface OrbitalEventResponse {
   data?: { [entityType: string]: EntityRow | EntityRow[] };
   /** Client-side effects to execute (render-ui, navigate, notify) */
   clientEffects?: Array<unknown>;
+  /**
+   * Same effects as `clientEffects`, paired with the producing trait name.
+   * Consumers that need per-trait attribution (e.g. `<TraitFrame>` resolving
+   * `@trait.X` bindings) read from this field; legacy consumers ignore it
+   * and continue with the flat `clientEffects` array unchanged.
+   *
+   * Same length and ordering as `clientEffects`; entries are 1:1 by index.
+   */
+  clientEffectsByTrait?: Array<{ traitName: string; effect: unknown[] }>;
   /** Results from server-side effects (persist, call-service, set) */
   effectResults?: EffectResult[];
   error?: string;
@@ -1000,6 +1009,10 @@ export class OrbitalServerRuntime {
     const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
     // Collect client-side effects (render-ui, navigate, notify)
     const clientEffects: Array<unknown> = [];
+    // Same effects, paired with their producing trait — populated in lockstep
+    // by the helper inside executeEffects so consumers can attribute each
+    // effect to the trait that emitted it (used by `<TraitFrame>`).
+    const clientEffectsByTrait: Array<{ traitName: string; effect: unknown[] }> = [];
     // Collect server-side effect results (persist, call-service, set)
     const effectResults: EffectResult[] = [];
 
@@ -1050,6 +1063,7 @@ export class OrbitalServerRuntime {
           clientEffects,
           effectResults,
           user,
+          clientEffectsByTrait,
         );
       }
     }
@@ -1106,6 +1120,12 @@ export class OrbitalServerRuntime {
       response.clientEffects = clientEffects;
     }
 
+    // Per-trait attribution sidecar — same effects as `clientEffects`, paired
+    // 1:1 with the trait that produced each one.
+    if (clientEffectsByTrait.length > 0) {
+      response.clientEffectsByTrait = clientEffectsByTrait;
+    }
+
     // Include server effect results if any
     if (effectResults.length > 0) {
       response.effectResults = effectResults;
@@ -1129,8 +1149,19 @@ export class OrbitalServerRuntime {
     clientEffects: Array<unknown>,
     effectResults: EffectResult[],
     user?: OrbitalEventRequest["user"],
+    clientEffectsByTrait?: Array<{ traitName: string; effect: unknown[] }>,
   ): Promise<void> {
     const entityType = registered.entity.name;
+
+    // Push to both the flat `clientEffects` array (legacy wire shape) and the
+    // tagged `clientEffectsByTrait` sidecar in lockstep. Closure captures
+    // `traitName` from this invocation's scope, so cascade emits — which run
+    // through their own executeEffects call with their own traitName —
+    // attribute correctly.
+    const pushClientEffect = (effect: unknown[]): void => {
+      clientEffects.push(effect);
+      clientEffectsByTrait?.push({ traitName, effect });
+    };
 
     // Forward refs - assigned after construction, used by fetch/atomic handlers
     let bindingsRef: BindingContext | null = null;
@@ -1585,10 +1616,10 @@ export class OrbitalServerRuntime {
 
       // Client-side effects - collect for forwarding to client
       renderUI: (slot, pattern, props, priority) => {
-        clientEffects.push(['render-ui', slot, pattern, props, priority]);
+        pushClientEffect(['render-ui', slot, pattern, props, priority]);
       },
       navigate: (path, params) => {
-        clientEffects.push(['navigate', path, params]);
+        pushClientEffect(['navigate', path, params]);
       },
 
       notify: (message, type) => {
@@ -1596,7 +1627,7 @@ export class OrbitalServerRuntime {
           console.log(`[OrbitalRuntime] Notification (${type}): ${message}`);
         }
         // Forward notify to client as a client effect
-        clientEffects.push(['notify', message, { type }]);
+        pushClientEffect(['notify', message, { type }]);
       },
 
       log: (message, level) => {
