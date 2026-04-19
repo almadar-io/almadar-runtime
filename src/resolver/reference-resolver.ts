@@ -475,10 +475,15 @@ export class ReferenceResolver {
       };
     }
 
-    // Case 2: Reference object { ref: "...", config: {...} }
+    // Case 2: Reference object { ref: "...", name?: "...", config: {...}, linkedEntity: "..." }
     if (typeof traitRef !== "string" && "ref" in traitRef) {
-      const refObj = traitRef as { ref: string; config?: { [key: string]: string | number | boolean | null }; linkedEntity?: string };
-      return this.resolveTraitRefString(refObj.ref, imports, refObj.config, refObj.linkedEntity);
+      const refObj = traitRef as {
+        ref: string;
+        name?: string;
+        config?: { [key: string]: string | number | boolean | null };
+        linkedEntity?: string;
+      };
+      return this.resolveTraitRefString(refObj.ref, imports, refObj.config, refObj.linkedEntity, refObj.name);
     }
 
     // Case 3: String reference
@@ -499,7 +504,8 @@ export class ReferenceResolver {
     ref: string,
     imports: ResolvedImports,
     config?: { [key: string]: string | number | boolean | null },
-    linkedEntity?: string
+    linkedEntity?: string,
+    overrideName?: string,
   ): ResolveResult<ResolvedTrait> {
     // Check if it's an imported trait reference: "Alias.traits.TraitName"
     const parsed = parseImportedTraitRef(ref);
@@ -529,10 +535,21 @@ export class ReferenceResolver {
         };
       }
 
+      // Rename the resolved trait if the call site declared one. Molecules
+      // use this to give an imported atom a domain-specific local name
+      // (e.g. `std-search`'s `SearchResultSearch` renamed to
+      // `FilteredItemSearch` inside `std-filtered-list`). Without the
+      // rename, `@trait.FilteredItemSearch` substrings in render-ui
+      // patterns would fail to resolve because the trait index keys
+      // would still hold the atom's original name.
+      const renamedTrait: Trait = overrideName
+        ? { ...trait, name: overrideName }
+        : trait;
+
       return {
         success: true,
         data: {
-          trait,
+          trait: renamedTrait,
           source: { type: "imported", alias: parsed.alias, traitName: parsed.traitName },
           config,
           linkedEntity,
@@ -544,10 +561,13 @@ export class ReferenceResolver {
     // Local trait (from localTraits map)
     const localTrait = this.localTraits.get(ref);
     if (localTrait) {
+      const renamedLocalTrait: Trait = overrideName
+        ? { ...localTrait, name: overrideName }
+        : localTrait;
       return {
         success: true,
         data: {
-          trait: localTrait,
+          trait: renamedLocalTrait,
           source: { type: "local", name: ref },
           config,
           linkedEntity,

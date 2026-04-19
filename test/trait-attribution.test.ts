@@ -17,6 +17,9 @@
 
 import { describe, expect, it } from 'vitest';
 import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
+import { preprocessSchema } from '../src/UsesIntegration.js';
+import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
+import type { OrbitalSchema } from '@almadar/core';
 
 // Minimal fixture: one orbital, three traits, each emitting render-ui on INIT.
 // Two "atoms" (AtomA, AtomB) share slot 'main' independently; a layout-owner
@@ -163,6 +166,112 @@ describe('OrbitalServerRuntime trait attribution', () => {
     for (let i = 0; i < flat.length; i++) {
       expect(tagged[i].effect).toBe(flat[i]);
     }
+  });
+
+  it('preprocessSchema applies the molecule `name:` override to inlined atoms', async () => {
+    // Simulates a std-filtered-list-style molecule that imports an atom
+    // and renames it locally (e.g. `SearchResultSearch` -> `FilteredItemSearch`).
+    // The rename has to reach the resolved trait's `.name` so that layout
+    // patterns referencing `@trait.FilteredItemSearch` find it via
+    // getTraitContent. Without it, the trait index keys stay as the
+    // atom's original name and the `@trait.X` lookup misses.
+    const atomSchema: OrbitalSchema = {
+      name: 'atom-schema',
+      orbitals: [
+        {
+          name: 'AtomOrbital',
+          entity: {
+            name: 'AtomEntity',
+            persistence: 'persistent',
+            collection: 'atomentities',
+            fields: [{ name: 'id', type: 'string', required: true }],
+          },
+          traits: [
+            {
+              name: 'OriginalAtomName',
+              linkedEntity: 'AtomEntity',
+              stateMachine: {
+                states: [{ name: 'idle', isInitial: true }],
+                events: [{ key: 'INIT' }],
+                transitions: [
+                  {
+                    from: 'idle',
+                    to: 'idle',
+                    event: 'INIT',
+                    effects: [['render-ui', 'main', { type: 'typography', content: 'atom' }]],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const moleculeSchema: OrbitalSchema = {
+      name: 'molecule-schema',
+      orbitals: [
+        {
+          name: 'MoleculeOrbital',
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- `uses` not modeled in OrbitalSchema yet; it's consumed at preprocess time
+          uses: [{ from: 'test://atom-schema', as: 'Atom' }],
+          entity: {
+            name: 'MoleculeEntity',
+            persistence: 'persistent',
+            collection: 'moleculeentities',
+            fields: [{ name: 'id', type: 'string', required: true }],
+          },
+          traits: [
+            // Molecule's rename: atom's `OriginalAtomName` becomes `LocalRenamedAtom`.
+            {
+              ref: 'Atom.traits.OriginalAtomName',
+              name: 'LocalRenamedAtom',
+              linkedEntity: 'MoleculeEntity',
+            },
+          ],
+          pages: [
+            { name: 'MoleculePage', path: '/', traits: [{ ref: 'LocalRenamedAtom' }] },
+          ],
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- schema shape for test fixture
+        } as any,
+      ],
+    };
+
+    // Minimal loader for the test — just returns the atom schema when asked.
+    const loader: SchemaLoader = {
+      async load(path: string): Promise<LoadResult<LoadedSchema>> {
+        if (path === 'test://atom-schema') {
+          return { success: true, data: { schema: atomSchema, sourcePath: path, importPath: path } };
+        }
+        return { success: false, error: `Unknown path: ${path}` };
+      },
+      async loadOrbital(path, orbitalName) {
+        const s = await this.load(path);
+        if (!s.success) return s;
+        const orbital = orbitalName
+          ? s.data.schema.orbitals.find((o) => o.name === orbitalName)
+          : s.data.schema.orbitals[0];
+        if (!orbital) return { success: false, error: `Orbital not found: ${orbitalName}` };
+        return {
+          success: true,
+          data: { orbital, sourcePath: s.data.sourcePath, importPath: path },
+        };
+      },
+      resolvePath(path) { return { success: true, data: path }; },
+      clearCache() { /* no-op */ },
+      getCacheStats() { return { size: 0 }; },
+    };
+
+    const result = await preprocessSchema(moleculeSchema, { basePath: '.', loader });
+    expect(result.success).toBeTruthy();
+
+    const resolvedTraits = result.data!.schema.orbitals[0].traits!;
+    expect(resolvedTraits).toHaveLength(1);
+
+    const first = resolvedTraits[0] as { ref?: string; _resolved?: { name: string } };
+    // The wrapper's ref AND the inlined trait's .name must both reflect the rename.
+    expect(first.ref).toBe('LocalRenamedAtom');
+    expect(first._resolved?.name).toBe('LocalRenamedAtom');
   });
 
   it('register() unwraps preprocessed ref-traits so their state machines run', async () => {

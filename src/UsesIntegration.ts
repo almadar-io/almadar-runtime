@@ -207,7 +207,11 @@ export async function preprocessSchema(
       entity: resolvedOrbital.entity,
       // Resolved traits (inline definitions)
       traits: (resolvedOrbital.traits || []).map((rt) => {
-        // If it has config or linkedEntity, wrap in reference object
+        // If it has config or linkedEntity, wrap in reference object.
+        // `rt.trait.name` reflects any call-site rename applied by
+        // ReferenceResolver.resolveTraitRefString's `overrideName`, so
+        // `ref` and `_resolved.name` stay consistent with whatever local
+        // name the molecule/organism declared for the inlined trait.
         if (rt.config || rt.linkedEntity) {
           return {
             ref: rt.trait.name,
