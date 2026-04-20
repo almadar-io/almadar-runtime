@@ -383,6 +383,15 @@ export class EffectExecutor {
         };
     }
 
+    /** Build the source metadata stamp for an emit fired from this trait. */
+    private sourceStamp(): import('./types.js').RuntimeEvent['source'] {
+        return {
+            orbital: this.context.orbitalName,
+            trait: this.context.traitName,
+            transition: this.context.transition,
+        };
+    }
+
     private emitSuccess(
         emit: EmitConfig | undefined,
         key: 'success' | 'on_change' | 'on_message',
@@ -390,7 +399,7 @@ export class EffectExecutor {
     ): void {
         const eventName = emit?.[key];
         if (eventName) {
-            this.handlers.emit(eventName, payload as EventPayload | undefined);
+            this.handlers.emit(eventName, payload as EventPayload | undefined, this.sourceStamp());
         }
     }
 
@@ -400,7 +409,7 @@ export class EffectExecutor {
     ): void {
         if (!emit?.failure) return;
         const error = err instanceof Error ? err.message : String(err);
-        this.handlers.emit(emit.failure, { error } as EventPayload);
+        this.handlers.emit(emit.failure, { error } as EventPayload, this.sourceStamp());
     }
 
     /**
@@ -430,7 +439,7 @@ export class EffectExecutor {
             case 'emit': {
                 const event = args[0] as string;
                 const payload = args[1] as EventPayload | undefined;
-                this.handlers.emit(event, payload);
+                this.handlers.emit(event, payload, this.sourceStamp());
                 break;
             }
 

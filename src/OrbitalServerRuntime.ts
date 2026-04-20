@@ -719,10 +719,23 @@ export class OrbitalServerRuntime {
         if (!trait.listens) continue;
 
         for (const listener of trait.listens) {
-          const cleanup = this.eventBus.on(listener.event, async (event) => {
+          // Split `listener.event` into { bareEvent, source }.
+          // The .lolo parser encodes `Source EVENT`, `Orbital.Source EVENT`,
+          // or `* EVENT` as `"Source.EVENT"`, `"Orbital.Source.EVENT"`,
+          // `"*.EVENT"` respectively. If the explicit `listener.source` field
+          // is present (new core schema), use it directly; otherwise parse the
+          // legacy concatenated form so migrated and unmigrated schemas both work.
+          const { bareEvent, matcher } = parseListenSource(listener, orbitalName);
+
+          // Subscribe under the bare event key. Source filtering happens
+          // inside the handler closure so a single key can serve many
+          // listeners with different scopes.
+          const cleanup = this.eventBus.on(bareEvent, async (event) => {
+            // Source filter: skip if the emit doesn't match our declared scope.
+            if (!matcher(event.source)) return;
             if (this.config.debug) {
               console.log(
-                `[OrbitalRuntime] ${orbitalName}.${trait.name} received: ${listener.event}`,
+                `[OrbitalRuntime] ${orbitalName}.${trait.name} received: ${listener.event} (from ${event.source?.orbital ?? '?'}.${event.source?.trait ?? '?'})`,
               );
             }
 
@@ -1159,11 +1172,18 @@ export class OrbitalServerRuntime {
     let contextRef: EffectContext | null = null;
 
     const handlers: EffectHandlers = {
-      emit: (event, eventPayload) => {
+      emit: (event, eventPayload, source) => {
         if (this.config.debug) {
-          console.log(`[OrbitalRuntime] Emitting: ${event}`, eventPayload);
+          console.log(`[OrbitalRuntime] Emitting: ${event}`, eventPayload, source);
         }
-        this.eventBus.emit(event, eventPayload);
+        // Forward the source stamp to the bus. If the caller didn't supply
+        // one (legacy callers), synthesize one from the handler's lexical
+        // closure so source-scoped listeners still match.
+        const stamp = source ?? {
+          orbital: registered.schema.name,
+          trait: traitName,
+        };
+        this.eventBus.emit(event, eventPayload, stamp);
         emittedEvents.push({ event, payload: eventPayload });
       },
 
@@ -1574,7 +1594,7 @@ export class OrbitalServerRuntime {
         const atomicExecutor = new EffectExecutor({
           handlers,
           bindings: bindingsRef ?? {},
-          context: contextRef ?? { traitName, state: 'unknown', transition: 'unknown' },
+          context: contextRef ?? { traitName, orbitalName: registered.schema.name, state: 'unknown', transition: 'unknown' },
           debug: this.config.debug,
           contextExtensions: this.config.contextExtensions,
         });
@@ -1663,6 +1683,7 @@ export class OrbitalServerRuntime {
 
     const context: EffectContext = {
       traitName,
+      orbitalName: registered.schema.name,
       state: state?.currentState || "unknown",
       transition: "unknown",
       entityId,
@@ -2105,3 +2126,119 @@ export function createOrbitalServerRuntime(
 ): OrbitalServerRuntime {
   return new OrbitalServerRuntime(config);
 }
+
+// ============================================================================
+// Source-scoped listen support
+// ============================================================================
+
+/**
+ * Parse a `TraitEventListener`'s event key into its bare event name and a
+ * source-matcher predicate.
+ *
+ * Supports both authoring layers:
+ *
+ * 1. **New core schema**: `listener.source` is an explicit object describing
+ *    the scope (`any` / `trait` / `orbital`). Used as-is.
+ * 2. **Legacy concatenated string** in `listener.event`:
+ *    - `"*.EVENT"`            → `{ kind: "any" }`, bare = EVENT
+ *    - `"Trait.EVENT"`        → `{ kind: "trait", trait: "Trait" }`, bare = EVENT
+ *    - `"Orbital.Trait.EVENT"`→ `{ kind: "orbital", orbital, trait }`, bare = EVENT
+ *    - `"EVENT"`              → `{ kind: "any" }`, bare = EVENT (no prefix
+ *      means "I don't know where it came from, accept any").
+ *
+ * The matcher is invoked on every emit that matches the bare event key; it
+ * returns `true` iff the emit's source metadata matches the listener's scope.
+ *
+ * `listenerOrbital` is the orbital that owns the listener; it's used to
+ * resolve intra-orbital trait references for `{ kind: "trait" }` scopes.
+ */
+function parseListenSource(
+  listener: { event: string; source?: unknown },
+  listenerOrbital: string,
+): {
+  bareEvent: string;
+  matcher: (source: EventSourceMeta | undefined) => boolean;
+} {
+  // 1. Explicit source field from the new core schema (preferred).
+  const explicit = (listener as { source?: ListenSourceDescriptor }).source;
+  if (explicit && typeof explicit === 'object') {
+    return {
+      bareEvent: listener.event,
+      matcher: buildMatcher(explicit, listenerOrbital),
+    };
+  }
+
+  // 2. Fall back to parsing the legacy concatenated string.
+  const key = listener.event;
+  const parts = key.split('.');
+  if (parts.length === 1) {
+    // Bare `EVENT` — no source prefix. Accept any source (this is the
+    // safest default; callers who want strict scoping should author the
+    // full two-segment form).
+    return { bareEvent: key, matcher: () => true };
+  }
+
+  if (parts.length === 2) {
+    const [sourceOrStar, eventName] = parts;
+    if (sourceOrStar === '*') {
+      return { bareEvent: eventName, matcher: () => true };
+    }
+    // Single-segment source: intra-orbital trait reference.
+    return {
+      bareEvent: eventName,
+      matcher: buildMatcher(
+        { kind: 'trait', trait: sourceOrStar },
+        listenerOrbital,
+      ),
+    };
+  }
+
+  if (parts.length >= 3) {
+    const eventName = parts[parts.length - 1];
+    const trait = parts[parts.length - 2];
+    const orbital = parts.slice(0, parts.length - 2).join('.');
+    return {
+      bareEvent: eventName,
+      matcher: buildMatcher({ kind: 'orbital', orbital, trait }, listenerOrbital),
+    };
+  }
+
+  // Unreachable given the split above — defensive default.
+  return { bareEvent: key, matcher: () => true };
+}
+
+/** Narrow the structured source descriptor into an executable matcher. */
+function buildMatcher(
+  src: ListenSourceDescriptor,
+  listenerOrbital: string,
+): (source: EventSourceMeta | undefined) => boolean {
+  if (src.kind === 'any') return () => true;
+  if (src.kind === 'trait') {
+    const wantedTrait = src.trait;
+    return (source) =>
+      !!source &&
+      source.orbital === listenerOrbital &&
+      source.trait === wantedTrait;
+  }
+  // src.kind === 'orbital'
+  const wantedOrbital = src.orbital;
+  const wantedTrait = src.trait;
+  return (source) =>
+    !!source &&
+    source.orbital === wantedOrbital &&
+    source.trait === wantedTrait;
+}
+
+/** Shape of the structured `source` field on `TraitEventListener`. */
+type ListenSourceDescriptor =
+  | { kind: 'any' }
+  | { kind: 'trait'; trait: string }
+  | { kind: 'orbital'; orbital: string; trait: string };
+
+/** Shape of `RuntimeEvent.source`. */
+type EventSourceMeta = {
+  orbital?: string;
+  trait?: string;
+  transition?: string;
+  tick?: string;
+};

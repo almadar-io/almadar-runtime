@@ -149,8 +149,16 @@ export interface TraitDefinition {
  * Server: Express, database, integrators
  */
 export interface EffectHandlers {
-    /** Emit an event to the event bus */
-    emit: (event: string, payload?: EventPayload) => void;
+    /**
+     * Emit an event to the event bus.
+     *
+     * `source` carries the emitter's identity (orbital + trait) so that
+     * source-scoped listeners (`TraitName EVENT -> TRIGGER` and
+     * `Orbital.TraitName EVENT -> TRIGGER` in .lolo) can filter incoming
+     * events by their originating trait. Omitted when the emit is
+     * synthesized by a non-trait context (e.g. test harness).
+     */
+    emit: (event: string, payload?: EventPayload, source?: RuntimeEvent['source']) => void;
 
     /** Persist data (create/update/delete/batch) */
     persist: (
@@ -329,6 +337,11 @@ export type Effect = [string, ...unknown[]];
 export interface EffectContext {
     /** Trait name */
     traitName: string;
+    /** Orbital that owns the firing trait. Used to stamp the source
+     * metadata on emits so source-scoped listens (`TraitName EVENT` for
+     * intra-orbital, `Orbital.TraitName EVENT` for cross-orbital) can
+     * filter by emitter identity. */
+    orbitalName?: string;
     /** Current state */
     state: string;
     /** Transition description */
