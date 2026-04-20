@@ -253,13 +253,11 @@ export function createContextFromBindings(
     if (strictBindings) {
         ctx.strictBindings = true;
     }
-    // Copy named entity bindings (e.g., @SpriteEntity) into singletons
-    // so resolveBinding can resolve @EntityName.field
-    for (const [key, value] of Object.entries(bindings)) {
-        if (key !== 'entity' && key !== 'payload' && key !== 'state' && key !== 'config' && key !== 'user' && value != null) {
-            ctx.singletons.set(key, value as EntityRow);
-        }
-    }
+    // V2 Phase 6: the `@EntityName.field` cross-entity binding path via
+    // `ctx.singletons` is gone. Cross-trait data flow routes through the
+    // event bus (listen on an `[external]` Event<T> emit and read via
+    // `@payload.<field>`). Named bindings are no longer copied into the
+    // singleton lookup table.
     // Spread context extensions (e.g., agent: AgentContext) onto the evaluation context.
     // This is how ctx.agent gets populated for agent/* operator dispatch.
     if (contextExtensions) {

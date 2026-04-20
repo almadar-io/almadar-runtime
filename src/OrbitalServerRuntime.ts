@@ -138,9 +138,13 @@ export interface OrbitalEventResponse {
   success: boolean;
   transitioned: boolean;
   states: Record<string, string>;
-  emittedEvents: Array<{ event: string; payload?: unknown }>;
-  /** Entity data fetched by `fetch` effects - keyed by entity type */
-  data?: { [entityType: string]: EntityRow | EntityRow[] };
+  /**
+   * Events emitted during processing, in declaration order. Payloads are
+   * typed against `@almadar/core`'s `EventPayload` — the recursive record of
+   * primitive + nested EventPayload values the state machine already uses
+   * internally. Kept as the single source of truth for emit-payload shape.
+   */
+  emittedEvents: Array<{ event: string; payload?: EventPayload }>;
   /** Client-side effects to execute (render-ui, navigate, notify) */
   clientEffects?: Array<unknown>;
   /**
@@ -875,7 +879,7 @@ export class OrbitalServerRuntime {
     registered: RegisteredOrbital,
   ): Promise<void> {
     const entityType = registered.entity.name;
-    const emittedEvents: Array<{ event: string; payload?: unknown }> = [];
+    const emittedEvents: Array<{ event: string; payload?: EventPayload }> = [];
 
     try {
       // Get all entities (or filtered by appliesTo)
@@ -1015,7 +1019,7 @@ export class OrbitalServerRuntime {
     }
 
     const { event, payload, entityId, user } = request;
-    const emittedEvents: Array<{ event: string; payload?: unknown }> = [];
+    const emittedEvents: Array<{ event: string; payload?: EventPayload }> = [];
     // Collect data fetched by `fetch` effects
     const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
     // Collect client-side effects (render-ui, navigate, notify)
@@ -1079,34 +1083,11 @@ export class OrbitalServerRuntime {
       }
     }
 
-    // After all effects execute, auto-fetch entity types that have ref effects and were mutated
-    const persistedTypes = new Set<string>();
-    for (const er of effectResults) {
-      if ((er.effect === 'persist' || er.effect === 'set' || er.effect === 'swap') && er.success && er.entityType) {
-        persistedTypes.add(er.entityType as string);
-      }
-    }
-    // Scan traits for ref effects to know which entity types are ref'd
-    const refTypes = new Set<string>();
-    for (const trait of registered.traits) {
-      const transitions = trait.stateMachine?.transitions ?? [];
-      for (const trans of transitions) {
-        for (const eff of trans.effects ?? []) {
-          if (Array.isArray(eff) && eff[0] === 'ref' && typeof eff[1] === 'string') {
-            refTypes.add(eff[1]);
-          }
-        }
-      }
-    }
-    // Only re-fetch entity types that were both mutated AND have ref subscribers
-    for (const mutatedEntityType of persistedTypes) {
-      if (refTypes.has(mutatedEntityType)) {
-        try {
-          const fresh = await this.persistence.list(mutatedEntityType);
-          fetchedData[mutatedEntityType] = fresh;
-        } catch { /* ignore */ }
-      }
-    }
+    // V2 Phase 6: auto-refetch on ref-subscribed entities is gone. The
+    // `ref` operator is deprecated; entities flow through explicit fetch+emit
+    // listeners now. Downstream re-reads are triggered by the listener wiring
+    // in the state machine (listen on the LOADED emit), not by the server
+    // re-fetching after every mutation.
 
     // Build current states
     const states: Record<string, string> = {};
@@ -1121,10 +1102,9 @@ export class OrbitalServerRuntime {
       emittedEvents,
     };
 
-    // Include fetched data if any
-    if (Object.keys(fetchedData).length > 0) {
-      response.data = fetchedData;
-    }
+    // V2 Phase 6: `response.data` is gone. Fetched entities are surfaced via
+    // typed emit payloads on `emittedEvents` and through the rendered effect
+    // tree instead of a sidecar record bag.
 
     // Include client effects if any
     if (clientEffects.length > 0) {
@@ -1155,7 +1135,7 @@ export class OrbitalServerRuntime {
     payload: EventPayload | undefined,
     entityData: EntityRow,
     entityId: string | undefined,
-    emittedEvents: Array<{ event: string; payload?: unknown }>,
+    emittedEvents: Array<{ event: string; payload?: EventPayload }>,
     fetchedData: { [entityType: string]: EntityRow | EntityRow[] },
     clientEffects: Array<unknown>,
     effectResults: EffectResult[],
