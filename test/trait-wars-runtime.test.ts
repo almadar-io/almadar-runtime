@@ -506,21 +506,11 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
   });
 
   describe('BONUS: fetch Effect Support', () => {
-    it('should execute fetch effects and return data', async () => {
-      const runtime = new OrbitalServerRuntime({ debug: false });
-      await runtime.register(traitWarsSchema);
-
-      const result = await runtime.processOrbitalEvent('TacticalBattle', {
-        event: 'INIT',
-        payload: {},
-      });
-
-      expect(result.success).toBeTruthy();
-      expect(result.data).toBeDefined();
-
-      const entityTypes = Object.keys(result.data!);
-      expect(entityTypes.length).toBeGreaterThan(0);
-      expect(result.data!.Unit).toBeDefined();
+    it.skip('[pre-V2] returned fetched data on response.data', async () => {
+      // V2 Phase 6 removed `OrbitalEventResponse.data`. Fetched entities now
+      // flow through `emittedEvents` with typed Event<T> payloads. The V2-shape
+      // assertion belongs on a migrated trait that declares `type UnitLoaded
+      // = Event Unit` and emits via `(fetch Unit { emit: { success: UnitLoaded } })`.
     });
   });
 

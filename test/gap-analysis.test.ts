@@ -255,21 +255,13 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
   });
 
   describe('BONUS: fetch Effect', () => {
-    it('✅ Runtime executes fetch effects and returns data', async () => {
-      const runtime = new OrbitalServerRuntime({ debug: false });
-      await runtime.register(traitWarsSchema);
-
-      const result = await runtime.processOrbitalEvent('TacticalBattle', {
-        event: 'INIT',
-        payload: {},
-      });
-
-      expect(result.success).toBeTruthy();
-      expect(result.data).toBeDefined();
-      expect(result.data!.Unit).toBeDefined();
-
-      const units = result.data!.Unit as Record<string, unknown>[];
-      expect(units.length).toBeGreaterThan(0);
+    it.skip('[pre-V2] Runtime returned fetched data on response.data', async () => {
+      // V2 Phase 6 removed `OrbitalEventResponse.data`. Fetched entities now
+      // flow through `emittedEvents` with typed Event<T> payloads. A V2-shape
+      // test belongs in a trait that declares a `*Loaded` emit via Event<T>
+      // and asserts the emitted payload instead of the sidecar data bag.
+      // Covered by the std-browse / Event<T> fixtures in orbital-lolo's
+      // golden suite — not re-run here.
     });
   });
 });
