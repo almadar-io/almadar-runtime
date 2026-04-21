@@ -23,6 +23,7 @@ import type {
   TraitConfig,
   OrbitalSchema,
   UseDeclaration,
+  PatternConfig,
 } from "@almadar/core";
 import {
   isEntityReference,
@@ -165,9 +166,108 @@ export type ResolveResult<T> =
 // ============================================================================
 
 /**
+ * Recursively rewrite every event-name prop inside a render-ui config
+ * tree. These are the user-dispatchable event keys the client renders
+ * on buttons / actions / form handlers — they live at arbitrary nesting
+ * depth inside a render-ui's second argument and must track the same
+ * rename the state machine does, or the button emits the old key into
+ * a machine that only knows the new one (dead-click bug).
+ *
+ * Rewrites:
+ *   - `action: "X"` on any pattern (button, chip, floating-action, ...)
+ *   - any prop whose key ends in `Event` with a non-binding string value
+ *     (`submitEvent`, `cancelEvent`, `selectEvent`, `changeEvent`, ...)
+ *   - `actions: [{ event: "X" }]` and `itemActions: [{ event: "X" }]`
+ *   - `onX: "EVENT"` handlers
+ *
+ * Skips anything that looks like a binding (`@config.X`, `@entity.Y`).
+ * Recurses into every nested object/array value without hardcoding
+ * slot / child field names — traits using `children`, `content`,
+ * `leading`, `trailing`, etc. all get covered automatically.
+ */
+function renameEventsInRenderUiConfig(
+  node: PatternConfig | readonly unknown[] | unknown,
+  rename: (k: string | undefined) => string | undefined,
+): PatternConfig | unknown[] | unknown {
+  if (node === null || node === undefined) return node;
+  if (Array.isArray(node)) {
+    return node.map((item) => renameEventsInRenderUiConfig(item, rename));
+  }
+  if (typeof node !== "object") return node;
+
+  // Every PatternConfig variant is a string-indexable object — the
+  // discriminated union's `type` field picks which pattern's props
+  // apply, but Object.entries returns each prop as [string, PropValue].
+  // Mapped output preserves every key by re-spreading the node via a
+  // shallow iteration, so we never lose the discriminator or untouched
+  // props.
+  const obj = node as PatternConfig;
+  const next: PatternConfig = { ...obj };
+  for (const [key, value] of Object.entries(obj)) {
+    if (key === "action" && typeof value === "string" && !value.startsWith("@")) {
+      (next as { [k: string]: PatternConfig[keyof PatternConfig] })[key] =
+        (rename(value) ?? value) as PatternConfig[keyof PatternConfig];
+      continue;
+    }
+    if (/^on[A-Z]/.test(key) && typeof value === "string" && !value.startsWith("@")) {
+      (next as { [k: string]: PatternConfig[keyof PatternConfig] })[key] =
+        (rename(value) ?? value) as PatternConfig[keyof PatternConfig];
+      continue;
+    }
+    if (key.endsWith("Event") && typeof value === "string" && !value.startsWith("@")) {
+      (next as { [k: string]: PatternConfig[keyof PatternConfig] })[key] =
+        (rename(value) ?? value) as PatternConfig[keyof PatternConfig];
+      continue;
+    }
+    if ((key === "actions" || key === "itemActions") && Array.isArray(value)) {
+      const rewrittenArray = value.map((entry): unknown => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+        // Pattern action entries have a shared minimal contract: `event`
+        // (required event key), `label`, `icon`, `variant`. Narrow to
+        // that shape for the event rewrite; other keys pass through the
+        // spread intact.
+        const action = entry as { event?: string; [k: string]: unknown };
+        if (typeof action.event === "string" && !action.event.startsWith("@")) {
+          return { ...action, event: rename(action.event) ?? action.event };
+        }
+        return action;
+      });
+      (next as { [k: string]: unknown })[key] = rewrittenArray;
+      continue;
+    }
+    (next as { [k: string]: unknown })[key] = renameEventsInRenderUiConfig(value, rename);
+  }
+  return next;
+}
+
+/**
+ * Rewrite event names inside an effects SExpr array. Walks every
+ * `(render-ui slot config)` call and passes the config through
+ * {@link renameEventsInRenderUiConfig}. Preserves non-render-ui effects
+ * unchanged.
+ */
+function renameEventsInEffects(
+  effects: readonly unknown[],
+  rename: (k: string | undefined) => string | undefined,
+): unknown[] {
+  return effects.map((effect) => {
+    if (!Array.isArray(effect)) return effect;
+    if (effect[0] === "render-ui" && effect.length >= 3) {
+      const slot = effect[1];
+      const config = effect[2];
+      const nextConfig = renameEventsInRenderUiConfig(config, rename);
+      return [effect[0], slot, nextConfig, ...effect.slice(3)];
+    }
+    return effect;
+  });
+}
+
+/**
  * Apply a call-site `events: { OLD: NEW, ... }` rename map to a resolved
  * trait's state machine. Rewrites every mention of an old key in:
  *   - `stateMachine.transitions[].event` (the trigger)
+ *   - `stateMachine.transitions[].effects[]` render-ui button / action /
+ *     itemAction / submitEvent / cancelEvent / onX event-name props
  *   - `stateMachine.events[].key` + `.name` (humanized display)
  *   - `emits[].event`
  *
@@ -185,10 +285,13 @@ function applyEventRenames(
     k !== undefined && k in renames ? renames[k] : k;
   const sm = trait.stateMachine;
   if (!sm) return trait;
-  const nextTransitions = (sm.transitions ?? []).map((t) => ({
-    ...t,
-    event: rename(t.event) ?? t.event,
-  }));
+  const nextTransitions = (sm.transitions ?? []).map((t) => {
+    const nextEvent = rename(t.event) ?? t.event;
+    const nextEffects = t.effects
+      ? (renameEventsInEffects(t.effects as readonly unknown[], rename) as typeof t.effects)
+      : t.effects;
+    return { ...t, event: nextEvent, effects: nextEffects };
+  });
   const nextEvents = (sm.events ?? []).map((e) => {
     const newKey = rename(e.key);
     if (newKey === e.key) return e;
