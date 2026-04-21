@@ -564,7 +564,11 @@ export class EffectExecutor {
                     const emitCfg = this.extractEmitConfig(rawOpt);
                     try {
                         const result = await this.handlers.fetch(entityType, options);
-                        this.emitSuccess(emitCfg, 'success', result);
+                        // Wrap the result under `{ data: ... }` so the emit payload
+                        // is always an object (never a bare array). Authors access
+                        // the fetched records via `@payload.data`, matching the
+                        // persist convention.
+                        this.emitSuccess(emitCfg, 'success', { data: result } as EventPayload);
                     } catch (err) {
                         this.emitFailure(emitCfg, err);
                         throw err;
@@ -601,9 +605,10 @@ export class EffectExecutor {
                     }
                     // Interpreted runtime fires `on_change` once on the initial
                     // subscribe. The ongoing-update story lives in the client
-                    // reactivity layer (EntityStore) — it owns subsequent
-                    // emissions since it already subscribes to mutations.
-                    this.emitSuccess(refEmitCfg, 'on_change', result);
+                    // reactivity layer — it owns subsequent emissions since it
+                    // already subscribes to mutations. Wrap under `{ data: ... }`
+                    // so the payload is always an object, matching fetch.
+                    this.emitSuccess(refEmitCfg, 'on_change', { data: result } as EventPayload);
                 } catch (err) {
                     this.emitFailure(refEmitCfg, err);
                     throw err;
