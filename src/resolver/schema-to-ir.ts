@@ -224,19 +224,38 @@ function resolveTraits(schema: OrbitalSchema): Map<string, ResolvedTrait> {
   // Note: OrbitalSchema no longer has top-level traits
   // Traits are only inside orbitals now
 
-  // Collect inline traits from orbital.traits
+  // Collect inline traits from orbital.traits. Include preprocessed ref
+  // traits that carry their fully-resolved definition under `_resolved`
+  // (produced by `@almadar/runtime`'s preprocessSchema) — those are the
+  // post-rename, post-config-substitution variant and SHOULD be findable
+  // when page bindings reference them by name.
   for (const orbital of schema.orbitals || []) {
     if ('ref' in orbital && !('traits' in orbital)) continue;
 
     const orbitalTraits = (orbital as Orbital).traits || [];
 
     for (const trait of orbitalTraits) {
-      // Skip trait references (they have 'ref')
-      if (typeof trait === 'string' || 'ref' in trait) continue;
+      if (typeof trait === 'string') continue;
 
-      // This is an inline trait definition
+      // Preprocessed ref-trait wrapper: { ref, config, linkedEntity, _resolved }
+      // Register _resolved under the ref's local name so page bindings can find it.
+      if ('ref' in trait) {
+        // eslint-disable-next-line almadar/no-record-string-unknown -- dynamic shape from preprocessor
+        const wrap = trait as Record<string, unknown>;
+        const resolved = wrap['_resolved'] as { name?: string; stateMachine?: unknown } | undefined;
+        if (resolved && resolved.stateMachine) {
+          // eslint-disable-next-line almadar/no-record-string-unknown -- dynamic shape from preprocessor
+          const name = resolved.name ?? (trait as { ref?: string }).ref;
+          if (name && !traitMap.has(name)) {
+            // eslint-disable-next-line almadar/no-record-string-unknown -- dynamic shape from preprocessor
+            traitMap.set(name, resolveTrait(resolved as any, 'inline'));
+          }
+        }
+        continue;
+      }
+
+      // Plain inline trait definition
       if (!trait.name || traitMap.has(trait.name)) continue;
-
       traitMap.set(trait.name, resolveTrait(trait, 'inline'));
     }
   }
@@ -263,8 +282,24 @@ function resolveTraitBinding(
     };
   }
 
-  // Case 2: Reference object { ref: "TraitName" }
+  // Case 2: Reference object { ref: "TraitName", ... }
+  // Preprocessed ref traits from @almadar/runtime's preprocessSchema carry
+  // `_resolved: FullTrait` alongside the ref — the state machine (with events
+  // rename already applied at preprocess time) lives there. If we skip the
+  // `_resolved` path, traitMap.get(t.ref) returns undefined for renamed refs
+  // like "CartItemAddItem" (which aren't top-level library traits), we fall
+  // back to createEmptyTrait, and useTraitStateMachine subscribes to zero
+  // events. Result: UI:ADD_ITEM button clicks have no listener and the state
+  // machine is silent.
   if (t.ref && !t.stateMachine) {
+    if (t._resolved && t._resolved.stateMachine) {
+      return {
+        ref: t._resolved.name ?? t.ref,
+        trait: resolveTrait(t._resolved, 'inline'),
+        config: t.config,
+        linkedEntity: t.linkedEntity || orbitalEntity,
+      };
+    }
     const trait = traitMap.get(t.ref);
     return {
       ref: t.ref,
