@@ -443,15 +443,26 @@ export class OrbitalServerRuntime {
       return;
     }
     try {
-      const [{ createRequire }, path] = await Promise.all([
+      const [{ createRequire }, path, fs] = await Promise.all([
         import('node:module'),
         import('node:path'),
+        import('node:fs'),
       ]);
       const require = createRequire(import.meta.url);
-      // Resolve to @almadar/std's installed directory. `package.json` is the
-      // most stable entry to pin the root.
-      const stdPkgJson = require.resolve('@almadar/std/package.json');
-      const stdLibPath = path.dirname(stdPkgJson);
+      // Resolve the main entry (always present in `exports`) then walk up to
+      // the package root by looking for its package.json. This is robust
+      // against `exports` restrictions that don't expose `./package.json`.
+      const mainEntry = require.resolve('@almadar/std');
+      let stdLibPath = path.dirname(mainEntry);
+      while (stdLibPath !== path.dirname(stdLibPath)) {
+        if (fs.existsSync(path.join(stdLibPath, 'package.json'))) {
+          const pkg = JSON.parse(
+            fs.readFileSync(path.join(stdLibPath, 'package.json'), 'utf-8'),
+          ) as { name?: string };
+          if (pkg.name === '@almadar/std') break;
+        }
+        stdLibPath = path.dirname(stdLibPath);
+      }
       const basePath =
         this.config.loaderConfig?.basePath ?? process.cwd();
       this.loader = createUnifiedLoader({
