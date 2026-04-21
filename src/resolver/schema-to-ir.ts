@@ -244,11 +244,9 @@ function resolveTraits(schema: OrbitalSchema): Map<string, ResolvedTrait> {
         const wrap = trait as Record<string, unknown>;
         const resolved = wrap['_resolved'] as { name?: string; stateMachine?: unknown } | undefined;
         if (resolved && resolved.stateMachine) {
-          // eslint-disable-next-line almadar/no-record-string-unknown -- dynamic shape from preprocessor
           const name = resolved.name ?? (trait as { ref?: string }).ref;
           if (name && !traitMap.has(name)) {
-            // eslint-disable-next-line almadar/no-record-string-unknown -- dynamic shape from preprocessor
-            traitMap.set(name, resolveTrait(resolved as any, 'inline'));
+            traitMap.set(name, resolveTrait(resolved, 'inline'));
           }
         }
         continue;

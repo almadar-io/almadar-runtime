@@ -69,7 +69,7 @@ describe('emit: — fetch', () => {
         ]);
         const successCalls = emit.mock.calls.filter(([e]) => e === 'PATIENT_LOADED');
         expect(successCalls).toHaveLength(1);
-        expect(successCalls[0][1]).toEqual({ id: 'p-42', name: 'Fetched' });
+        expect(successCalls[0][1]).toEqual({ data: { id: 'p-42', name: 'Fetched' } });
     });
 
     it('fires emit.failure when fetch throws and captures failure result', async () => {
@@ -231,7 +231,7 @@ describe('emit: — ref', () => {
         ]);
         const calls = emit.mock.calls.filter(([e]) => e === 'PATIENT_UPDATED');
         expect(calls).toHaveLength(1);
-        expect(calls[0][1]).toMatchObject({ reactive: true });
+        expect(calls[0][1]).toMatchObject({ data: { reactive: true } });
     });
 });
 
