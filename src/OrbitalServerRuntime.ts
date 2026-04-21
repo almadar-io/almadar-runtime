@@ -387,9 +387,15 @@ export class OrbitalServerRuntime {
     };
     this.eventBus = new EventBus();
 
-    // Initialize loader if config provided
-    if (config.loaderConfig) {
-      this.loader = config.loaderConfig.loader ?? createUnifiedLoader({
+    // Initialize loader only if a fully-configured one was handed in, or if
+    // stdLibPath is explicitly set. Otherwise leave null so ensureLoader()
+    // can lazily construct one with the auto-detected @almadar/std path —
+    // passing only basePath here would build a loader without stdLibPath
+    // and then short-circuit ensureLoader's proper lookup.
+    if (config.loaderConfig?.loader) {
+      this.loader = config.loaderConfig.loader;
+    } else if (config.loaderConfig?.stdLibPath) {
+      this.loader = createUnifiedLoader({
         basePath: config.loaderConfig.basePath,
         stdLibPath: config.loaderConfig.stdLibPath,
         scopedPaths: config.loaderConfig.scopedPaths,
