@@ -443,16 +443,18 @@ export class OrbitalServerRuntime {
       return;
     }
     try {
-      const [{ createRequire }, path, fs] = await Promise.all([
-        import('node:module'),
+      const [{ fileURLToPath }, path, fs] = await Promise.all([
+        import('node:url'),
         import('node:path'),
         import('node:fs'),
       ]);
-      const require = createRequire(import.meta.url);
-      // Resolve the main entry (always present in `exports`) then walk up to
-      // the package root by looking for its package.json. This is robust
-      // against `exports` restrictions that don't expose `./package.json`.
-      const mainEntry = require.resolve('@almadar/std');
+      // Use ESM resolution (import.meta.resolve) because @almadar/std's
+      // exports field only declares the `import` condition, which createRequire
+      // (CJS conditions) can't match. Walk up from the resolved main entry
+      // to the package root — robust against `exports` restrictions that
+      // don't expose `./package.json` directly.
+      const mainEntryUrl = import.meta.resolve('@almadar/std');
+      const mainEntry = fileURLToPath(mainEntryUrl);
       let stdLibPath = path.dirname(mainEntry);
       while (stdLibPath !== path.dirname(stdLibPath)) {
         if (fs.existsSync(path.join(stdLibPath, 'package.json'))) {
