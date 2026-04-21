@@ -376,6 +376,7 @@ export class OrbitalServerRuntime {
   private eventNamespaceMap: EventNamespaceMap = {};
   private osHandlers: OsHandlerResult | null = null;
   private localPersistence: PersistenceAdapter | null = null;
+  private resolvedSchema: OrbitalSchema | null = null;
 
   constructor(config: OrbitalServerRuntimeConfig = {}) {
     this.config = {
@@ -544,6 +545,11 @@ export class OrbitalServerRuntime {
 
     // Set up scheduled ticks
     this.setupTicks();
+
+    // Stash the post-preprocessing schema so HTTP layers (e.g. a playground
+    // server's /api/schema handler) can serve the fully-resolved copy instead
+    // of re-reading the raw .orb from disk. See getResolvedSchema().
+    this.resolvedSchema = schema;
   }
 
   /**
@@ -565,6 +571,47 @@ export class OrbitalServerRuntime {
 
     // Set up scheduled ticks
     this.setupTicks();
+
+    this.resolvedSchema = schema;
+  }
+
+  /**
+   * Returns the schema that this runtime is currently executing, post-
+   * preprocessing. Safe to expose from an HTTP `/api/schema` endpoint — every
+   * cross-orbital trait ref will have an inline `stateMachine` already, which
+   * is what the browser's `schema-to-ir` resolver needs to wire button clicks
+   * back to state transitions.
+   *
+   * Returns `null` if `register()` hasn't run yet.
+   */
+  getResolvedSchema(): OrbitalSchema | null {
+    return this.resolvedSchema;
+  }
+
+  /**
+   * One-call entry point: read an `.orb` file from disk, parse it, preprocess
+   * cross-orbital imports, and register the result. Callers never touch raw
+   * `.orb` bytes — `register()` handles preprocessing internally.
+   *
+   * Node only. Browsers must receive already-resolved schemas from their
+   * server (see `getResolvedSchema()`).
+   */
+  async registerFromFile(path: string): Promise<void> {
+    if (typeof process === 'undefined' || !process.versions?.node) {
+      throw new Error(
+        'registerFromFile is Node-only. Browsers should receive resolved schemas from their server.',
+      );
+    }
+    const { readFile } = await import('node:fs/promises');
+    const raw = await readFile(path, 'utf-8');
+    let schema: OrbitalSchema;
+    try {
+      schema = JSON.parse(raw) as OrbitalSchema;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`registerFromFile: ${path} is not valid JSON: ${msg}`);
+    }
+    await this.register(schema);
   }
 
   /**
