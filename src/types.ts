@@ -12,6 +12,10 @@ import type {
     ServiceParams,
     ResolvedPatternProps,
     AgentContext,
+    BusEvent,
+    BusEventSource,
+    BusEventListener,
+    Unsubscribe as CoreUnsubscribe,
 } from '@almadar/core';
 
 // ============================================================================
@@ -39,33 +43,21 @@ export type ConfigContext = TraitConfig;
 // ============================================================================
 
 /**
- * Event structure for cross-trait communication
+ * Event structure for cross-trait communication.
+ * Re-export of `BusEvent` from `@almadar/core` so runtime + ui + codegen
+ * all agree on the bus envelope shape. `RuntimeEvent` is kept as a type
+ * alias for anyone importing by the old name.
  */
-export interface RuntimeEvent {
-    /** Event type (e.g., "ORDER_CONFIRMED", "TraitName.EVENT_NAME") */
-    type: string;
-    /** Event payload data */
-    payload?: EventPayload;
-    /** Timestamp when event was emitted */
-    timestamp: number;
-    /** Source information for debugging */
-    source?: {
-        orbital?: string;
-        trait?: string;
-        transition?: string;
-        tick?: string;
-    };
-}
-
-export type EventListener = (event: RuntimeEvent) => void;
-export type Unsubscribe = () => void;
+export type RuntimeEvent = BusEvent;
+export type EventListener = BusEventListener;
+export type Unsubscribe = CoreUnsubscribe;
 
 /**
  * Event bus interface for pub/sub communication
  */
 export interface IEventBus {
     /** Emit an event */
-    emit(type: string, payload?: EventPayload, source?: RuntimeEvent['source']): void;
+    emit(type: string, payload?: EventPayload, source?: BusEventSource): void;
     /** Subscribe to an event */
     on(type: string, listener: EventListener): Unsubscribe;
     /** Subscribe to ALL events (wildcard listener) */
