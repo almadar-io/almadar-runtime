@@ -322,8 +322,37 @@ class InMemoryPersistence implements PersistenceAdapter {
 // ============================================================================
 
 /**
- * Dynamic server-side orbital execution runtime
+ * Check whether a schema needs preprocessing (has `uses` declarations or
+ * un-inlined cross-orbital trait references).
+ *
+ * Cross-orbital refs are trait entries like
+ * `{ ref: "Modal.traits.ModalRecordModal", ... }` with no inline
+ * `stateMachine`. If these aren't resolved before `register()` runs, the
+ * trait binder produces an empty state machine and all interactions
+ * targeting the trait are silently dropped.
  */
+function needsPreprocessing(schema: OrbitalSchema): boolean {
+  for (const orbital of schema.orbitals) {
+    const uses = (orbital as { uses?: unknown[] }).uses;
+    if (Array.isArray(uses) && uses.length > 0) {
+      return true;
+    }
+    const traits = (orbital as { traits?: unknown[] }).traits ?? [];
+    for (const t of traits) {
+      if (!t || typeof t !== 'object') continue;
+      const obj = t as { ref?: unknown; stateMachine?: unknown };
+      if (
+        typeof obj.ref === 'string' &&
+        obj.ref.includes('.') &&
+        !obj.stateMachine
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /**
  * Internal tick binding for tracking active ticks
  */
@@ -396,6 +425,53 @@ export class OrbitalServerRuntime {
     };
   }
 
+  /**
+   * Lazily construct a default loader when the caller didn't provide one
+   * but `register()` needs to preprocess. Looks for `@almadar/std` in the
+   * nearest `node_modules` so cross-orbital `std/behaviors/<name>` imports
+   * resolve to the tiered registry on disk.
+   *
+   * Node only — browsers should receive already-preprocessed schemas from
+   * their server.
+   */
+  private async ensureLoader(): Promise<void> {
+    if (this.loader) return;
+    if (typeof process === 'undefined' || !process.versions?.node) {
+      // Not Node — can't read the filesystem. Bail silently; the caller's
+      // debug log in register() explains the skip.
+      return;
+    }
+    try {
+      const [{ createRequire }, path] = await Promise.all([
+        import('node:module'),
+        import('node:path'),
+      ]);
+      const require = createRequire(import.meta.url);
+      // Resolve to @almadar/std's installed directory. `package.json` is the
+      // most stable entry to pin the root.
+      const stdPkgJson = require.resolve('@almadar/std/package.json');
+      const stdLibPath = path.dirname(stdPkgJson);
+      const basePath =
+        this.config.loaderConfig?.basePath ?? process.cwd();
+      this.loader = createUnifiedLoader({
+        basePath,
+        stdLibPath,
+        scopedPaths: this.config.loaderConfig?.scopedPaths,
+      });
+      if (this.config.debug) {
+        console.log(
+          `[OrbitalRuntime] Default loader constructed: basePath=${basePath} stdLibPath=${stdLibPath}`,
+        );
+      }
+    } catch (err) {
+      if (this.config.debug) {
+        console.warn(
+          `[OrbitalRuntime] Could not auto-construct loader: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
   // ==========================================================================
   // Schema Registration
   // ==========================================================================
@@ -403,14 +479,59 @@ export class OrbitalServerRuntime {
   /**
    * Register an OrbitalSchema for execution.
    *
-   * If `autoPreprocess` is enabled in config and schema has `uses` declarations,
-   * it will be preprocessed first to resolve imports.
+   * Auto-preprocesses the schema when it contains `uses` declarations or
+   * unresolved cross-orbital trait references (e.g. a trait with
+   * `ref: "Modal.traits.ModalRecordModal"` and no inline `stateMachine`).
+   * Without preprocessing, those refs arrive empty at the state machine and
+   * button clicks silently do nothing — see Phase 9.5.H.
    *
-   * For explicit preprocessing control, use `registerWithPreprocess()`.
+   * Preprocessing needs a loader. If `loaderConfig` is set, that loader is
+   * used. Otherwise, a default loader is constructed that points at
+   * `<cwd>` (for `basePath`) and the nearest `node_modules/@almadar/std` (for
+   * `stdLibPath`), which matches how every caller in this monorepo has the
+   * std registry on disk.
    */
   async register(schema: OrbitalSchema): Promise<void> {
     if (this.config.debug) {
       console.log(`[OrbitalRuntime] Registering schema: ${schema.name}`);
+    }
+
+    // Auto-preprocess if the schema has unresolved imports and we have (or
+    // can construct) a loader. This replaces the old autoPreprocess flag,
+    // which was off by default and led to silent failures when a consumer
+    // forgot to enable it.
+    if (needsPreprocessing(schema)) {
+      await this.ensureLoader();
+      if (this.loader) {
+        if (this.config.debug) {
+          console.log(`[OrbitalRuntime] Schema has uses/refs — auto-preprocessing`);
+        }
+        const result = await preprocessSchema(schema, {
+          basePath: this.config.loaderConfig?.basePath || process.cwd(),
+          stdLibPath: this.config.loaderConfig?.stdLibPath,
+          scopedPaths: this.config.loaderConfig?.scopedPaths,
+          loader: this.loader,
+          namespaceEvents: this.config.namespaceEvents,
+        });
+        if (!result.success) {
+          throw new Error(
+            `Schema preprocessing failed: ${result.errors.join('; ')}`,
+          );
+        }
+        schema = result.data.schema;
+        this.entitySharingMap = {
+          ...this.entitySharingMap,
+          ...result.data.entitySharing,
+        };
+        this.eventNamespaceMap = {
+          ...this.eventNamespaceMap,
+          ...result.data.eventNamespaces,
+        };
+      } else if (this.config.debug) {
+        console.warn(
+          `[OrbitalRuntime] Schema has uses/refs but no loader available — proceeding without preprocessing. Cross-orbital trait refs will be empty.`,
+        );
+      }
     }
 
     // Register all orbitals (await to ensure instance seeding completes)

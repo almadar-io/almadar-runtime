@@ -325,6 +325,13 @@ export class ExternalOrbitalLoader {
 
   /**
    * Resolve a standard library path.
+   *
+   * The std registry uses a tiered layout under
+   * `<stdLibPath>/behaviors/registry/{atoms,molecules,organisms}/<name>.orb`.
+   * For `std/behaviors/<name>` imports, try each tier in order and return
+   * the first one that exists on disk. This matches how the Rust compiler's
+   * `embedded.rs` resolves std paths — one registry, three tiers, flat
+   * import name.
    */
   private resolveStdPath(importPath: string): LoadResult<string> {
     if (!this.options.stdLibPath) {
@@ -334,26 +341,40 @@ export class ExternalOrbitalLoader {
       };
     }
 
-    // std/behaviors/game-core -> stdLibPath/behaviors/game-core.orb
-    const relativePath = importPath.slice(4); // Remove "std/"
-    let absolutePath = path.join(this.options.stdLibPath, relativePath);
+    // std/behaviors/<name> → extract <name>.
+    // `relativePath` shape is `behaviors/<name>` or `behaviors/<name>.orb`.
+    const relativePath = importPath.slice(4); // strip "std/"
+    const name = relativePath
+      .replace(/^behaviors\//, "")
+      .replace(/\.orb$/, "");
 
-    // Add .orb extension if not present
-    if (!absolutePath.endsWith(".orb")) {
-      absolutePath += ".orb";
-    }
-
-    // Validate it's within std library
-    const normalizedPath = path.normalize(absolutePath);
     const normalizedStdLib = path.normalize(this.options.stdLibPath);
-    if (!normalizedPath.startsWith(normalizedStdLib)) {
-      return {
-        success: false,
-        error: `Path traversal outside std library: ${importPath}`,
-      };
+    const tiers = ["atoms", "molecules", "organisms"] as const;
+    const candidates = tiers.map((tier) =>
+      path.join(normalizedStdLib, "behaviors", "registry", tier, `${name}.orb`),
+    );
+
+    // Back-compat: if the caller pointed stdLibPath at something older (no
+    // tiered registry), also try the legacy flat layout
+    // `<stdLibPath>/behaviors/<name>.orb`.
+    const legacyPath = path.join(normalizedStdLib, relativePath.endsWith(".orb") ? relativePath : `${relativePath}.orb`);
+    candidates.push(legacyPath);
+
+    for (const candidate of candidates) {
+      const normalized = path.normalize(candidate);
+      // Validate within stdLib (path traversal guard)
+      if (!normalized.startsWith(normalizedStdLib)) {
+        continue;
+      }
+      if (fs.existsSync(normalized)) {
+        return { success: true, data: normalized };
+      }
     }
 
-    return { success: true, data: absolutePath };
+    return {
+      success: false,
+      error: `std behavior not found in registry: ${importPath} (tried ${candidates.length} locations under ${normalizedStdLib})`,
+    };
   }
 
   /**
