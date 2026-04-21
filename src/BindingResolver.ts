@@ -253,6 +253,13 @@ export function createContextFromBindings(
     if (strictBindings) {
         ctx.strictBindings = true;
     }
+    // Surface the call-site trait config on the context so `@config.X`
+    // bindings resolve in render-ui patterns. See OrbitalServerRuntime's
+    // executeEffects where `bindings.config` is populated from
+    // RegisteredOrbital.configByTrait.
+    if (bindings.config) {
+        ctx.config = bindings.config;
+    }
     // V2 Phase 6: the `@EntityName.field` cross-entity binding path via
     // `ctx.singletons` is gone. Cross-trait data flow routes through the
     // event bus (listen on an `[external]` Event<T> emit and read via

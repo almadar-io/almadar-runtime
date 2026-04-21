@@ -71,6 +71,7 @@ import type {
   Entity,
   Trait,
   TraitTick,
+  TraitConfig,
 } from "@almadar/core";
 import { isInlineTrait, isEntityCall } from "@almadar/core";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
@@ -111,6 +112,14 @@ export interface RegisteredOrbital {
   entity: Entity;
   /** Resolved inline traits (string refs filtered out) */
   traits: Trait[];
+  /**
+   * Call-site `config: { ... }` attached to each trait ref, keyed by trait
+   * name. Used to populate the `@config.X` binding when running that trait's
+   * effects. Preserved from the preprocessed schema's trait-ref wrapper
+   * (`{ ref, config, linkedEntity, _resolved }`) before the wrapper is
+   * unwrapped to its inline form.
+   */
+  configByTrait: Map<string, TraitConfig>;
   manager: StateMachineManager;
   entityData: Map<string, EntityRow>; // entityId -> data
 }
@@ -778,9 +787,22 @@ export class OrbitalServerRuntime {
     // fully inlined trait. `isInlineTrait` excludes anything with a `ref`
     // key, so without this unwrap every preprocessed atom would be dropped
     // and only the layout-owner survives (see Almadar_Std_Gaps.md §3.1b).
+    // Unwrap preprocessed ref-traits while capturing their call-site `config`
+    // for later binding-context injection. The wrapper has shape
+    // `{ ref, name?, config?, linkedEntity?, _resolved: Trait }`; we keep the
+    // config keyed by the resolved trait name so effects can read `@config.X`.
+    const configByTrait = new Map<string, TraitConfig>();
     const unwrapped = (orbital.traits || []).map((t) => {
       if (t && typeof t === 'object' && 'ref' in t && '_resolved' in t) {
-        return (t as { _resolved: Trait })._resolved;
+        const wrapper = t as {
+          _resolved: Trait;
+          config?: TraitConfig;
+        };
+        const inner = wrapper._resolved;
+        if (wrapper.config && inner?.name) {
+          configByTrait.set(inner.name, wrapper.config);
+        }
+        return inner;
       }
       return t;
     });
@@ -825,6 +847,7 @@ export class OrbitalServerRuntime {
       schema: orbital,
       entity,
       traits: inlineTraits,
+      configByTrait,
       manager,
       entityData: new Map(),
     });
@@ -1859,6 +1882,18 @@ export class OrbitalServerRuntime {
       state: state?.currentState || "unknown",
       user, // @user bindings from Firebase auth
     };
+
+    // Call-site `config: { ... }` injection. Reference-resolver captures the
+    // trait ref's config block into RegisteredOrbital.configByTrait at
+    // registration time (see registerOrbitalAsync). Here we surface it on the
+    // binding context so render-ui patterns can read `@config.icon`,
+    // `@config.title`, `@config.fields`, etc. — the mechanism that lets a
+    // molecule parameterize an imported atom's UI without duplicating the
+    // render-ui body.
+    const traitConfig = registered.configByTrait.get(traitName);
+    if (traitConfig) {
+      bindings.config = traitConfig;
+    }
 
     // Add initial named entity binding
     if (entityType) {

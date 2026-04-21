@@ -23,8 +23,16 @@ export type { EntityRow, EventPayload, ServiceParams };
 /** Alias for ResolvedPatternProps to avoid breaking internal consumers */
 export type PatternProps = ResolvedPatternProps;
 
-/** Configuration context */
-export type ConfigContext = { [key: string]: string | number | boolean | null | undefined };
+/**
+ * Configuration context.
+ *
+ * Re-export of `TraitConfig` from `@almadar/core` for the runtime's binding
+ * and state-machine layers. Supports scalar, array, and nested-object values
+ * so `config.fields = ["name", "description"]` and similar authoring shapes
+ * flow through the binding context without type widening.
+ */
+import type { TraitConfig } from '@almadar/core';
+export type ConfigContext = TraitConfig;
 
 // ============================================================================
 // Event Bus Types

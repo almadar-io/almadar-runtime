@@ -20,6 +20,7 @@ import type {
   Page,
   Trait,
   TraitRef,
+  TraitConfig,
   OrbitalSchema,
   UseDeclaration,
 } from "@almadar/core";
@@ -116,7 +117,7 @@ export interface ResolvedTrait {
   linkedEntity?: string;
 
   /** Configuration overrides */
-  config?: { [key: string]: string | number | boolean | null };
+  config?: TraitConfig;
 }
 
 /**
@@ -158,6 +159,56 @@ export interface ResolveOptions extends LoaderOptions {
 export type ResolveResult<T> =
   | { success: true; data: T; warnings: string[] }
   | { success: false; errors: string[] };
+
+// ============================================================================
+// Call-site event rename
+// ============================================================================
+
+/**
+ * Apply a call-site `events: { OLD: NEW, ... }` rename map to a resolved
+ * trait's state machine. Rewrites every mention of an old key in:
+ *   - `stateMachine.transitions[].event` (the trigger)
+ *   - `stateMachine.events[].key` + `.name` (humanized display)
+ *   - `emits[].event`
+ *
+ * Does NOT rewrite `listens[].event`: those entries reference OTHER traits'
+ * events, not this trait's own events, so the rename doesn't apply.
+ *
+ * Returns the trait unchanged when `renames` is empty or undefined.
+ */
+function applyEventRenames(
+  trait: Trait,
+  renames?: { [oldKey: string]: string },
+): Trait {
+  if (!renames || Object.keys(renames).length === 0) return trait;
+  const rename = (k: string | undefined): string | undefined =>
+    k !== undefined && k in renames ? renames[k] : k;
+  const sm = trait.stateMachine;
+  if (!sm) return trait;
+  const nextTransitions = (sm.transitions ?? []).map((t) => ({
+    ...t,
+    event: rename(t.event) ?? t.event,
+  }));
+  const nextEvents = (sm.events ?? []).map((e) => {
+    const newKey = rename(e.key);
+    if (newKey === e.key) return e;
+    return { ...e, key: newKey ?? e.key };
+  });
+  const nextEmits = (trait.emits ?? []).map((em) => {
+    if (typeof em === "string") return rename(em) ?? em;
+    const newEvent = rename(em.event);
+    return newEvent === em.event ? em : { ...em, event: newEvent ?? em.event };
+  });
+  return {
+    ...trait,
+    stateMachine: {
+      ...sm,
+      transitions: nextTransitions,
+      events: nextEvents,
+    },
+    emits: nextEmits,
+  } as Trait;
+}
 
 // ============================================================================
 // Reference Resolver
@@ -475,15 +526,30 @@ export class ReferenceResolver {
       };
     }
 
-    // Case 2: Reference object { ref: "...", name?: "...", config: {...}, linkedEntity: "..." }
+    // Case 2: Reference object { ref: "...", name?, config?, linkedEntity?, events? }
+    // `events` is the call-site rename map ({ OLD: NEW, ... }). Every mention
+    // of an old key inside the resolved trait's state machine (transition
+    // triggers, events list entries, emits) is rewritten to the new key.
+    // Without this, buttons in a molecule that dispatch the renamed event
+    // (e.g. `ADD_ITEM` instead of the atom's internal `OPEN`) fire into a
+    // trait whose state machine still only knows the old trigger, and the
+    // transition silently fails to fire.
     if (typeof traitRef !== "string" && "ref" in traitRef) {
       const refObj = traitRef as {
         ref: string;
         name?: string;
-        config?: { [key: string]: string | number | boolean | null };
+        config?: TraitConfig;
         linkedEntity?: string;
+        events?: { [oldKey: string]: string };
       };
-      return this.resolveTraitRefString(refObj.ref, imports, refObj.config, refObj.linkedEntity, refObj.name);
+      return this.resolveTraitRefString(
+        refObj.ref,
+        imports,
+        refObj.config,
+        refObj.linkedEntity,
+        refObj.name,
+        refObj.events,
+      );
     }
 
     // Case 3: String reference
@@ -503,9 +569,10 @@ export class ReferenceResolver {
   private resolveTraitRefString(
     ref: string,
     imports: ResolvedImports,
-    config?: { [key: string]: string | number | boolean | null },
+    config?: TraitConfig,
     linkedEntity?: string,
     overrideName?: string,
+    eventRenames?: { [oldKey: string]: string },
   ): ResolveResult<ResolvedTrait> {
     // Check if it's an imported trait reference: "Alias.traits.TraitName"
     const parsed = parseImportedTraitRef(ref);
@@ -542,9 +609,10 @@ export class ReferenceResolver {
       // rename, `@trait.FilteredItemSearch` substrings in render-ui
       // patterns would fail to resolve because the trait index keys
       // would still hold the atom's original name.
-      const renamedTrait: Trait = overrideName
+      const baseTrait: Trait = overrideName
         ? { ...trait, name: overrideName }
         : trait;
+      const renamedTrait = applyEventRenames(baseTrait, eventRenames);
 
       return {
         success: true,
@@ -561,9 +629,10 @@ export class ReferenceResolver {
     // Local trait (from localTraits map)
     const localTrait = this.localTraits.get(ref);
     if (localTrait) {
-      const renamedLocalTrait: Trait = overrideName
+      const baseLocal: Trait = overrideName
         ? { ...localTrait, name: overrideName }
         : localTrait;
+      const renamedLocalTrait = applyEventRenames(baseLocal, eventRenames);
       return {
         success: true,
         data: {
