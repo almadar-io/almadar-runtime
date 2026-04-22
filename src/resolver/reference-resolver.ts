@@ -209,6 +209,21 @@ function renameEventsInRenderUiConfig(
         (rename(value) ?? value) as PatternConfig[keyof PatternConfig];
       continue;
     }
+    // Stale-atom tolerance: some standard atoms shipped their button event
+    // key as `event: "X"` before the EventKey migration renamed the prop
+    // to `action:`. Callers (`use Foo` with `events: { OLD: NEW }`) expect
+    // both spellings to rewrite; ButtonPattern's `action ?? onClick ??
+    // event` fallback then picks up the renamed value. Without this
+    // branch, stale-atom buttons rendered with the pre-rename event name
+    // and the molecule's rename map leaked into runtime-visible UI
+    // (CONFIRM_REMOVE molecule → button stamped data-testid="action-
+    // CONFIRM"). When the atom is republished with the `action:` key, this
+    // branch becomes a no-op.
+    if (key === "event" && typeof value === "string" && !value.startsWith("@")) {
+      (next as { [k: string]: PatternConfig[keyof PatternConfig] })[key] =
+        (rename(value) ?? value) as PatternConfig[keyof PatternConfig];
+      continue;
+    }
     if (/^on[A-Z]/.test(key) && typeof value === "string" && !value.startsWith("@")) {
       (next as { [k: string]: PatternConfig[keyof PatternConfig] })[key] =
         (rename(value) ?? value) as PatternConfig[keyof PatternConfig];

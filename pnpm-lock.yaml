@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@almadar/core':
         specifier: '>=5.5.0'
-        version: 5.5.0
+        version: 5.6.1
       '@almadar/evaluator':
         specifier: '>=2.9.2'
         version: 2.9.2
@@ -51,8 +51,8 @@ importers:
 
 packages:
 
-  '@almadar/core@5.5.0':
-    resolution: {integrity: sha512-3MAde4EC+72rtWK5qZy4GIL2g6fIBXXo85WU37Z7mmSpdx82JVq/13qRNkmGY9AwD/VJq7mocO0k9wb5Uo3gmQ==}
+  '@almadar/core@5.6.1':
+    resolution: {integrity: sha512-Rxdk2I5XG1C+xYYEtr0XSG38W2bdUgjzhLco5YBsR3ZaVBXBfCLrcTgEjVymjVoqQ7+27RJ06O5DKL90JE7w+Q==}
 
   '@almadar/eslint-plugin@2.8.0':
     resolution: {integrity: sha512-8abtGsVP+YBaUEchSfGfQV3ZHEPtWt+4Swtu3P0AFofr+OMSfHLnor4aIwULzag+nHD9FQ7cQkVCTfBVgTHgiw==}
@@ -62,8 +62,8 @@ packages:
   '@almadar/evaluator@2.9.2':
     resolution: {integrity: sha512-yzhTtWbhvqCS/FoAK/pIyVuDV+8QwC/Csfcs/tUJOwq7fGHBhKwOrxgRqK/DNp1g7p2W/yvRPqQMUJVK1ynTQA==}
 
-  '@almadar/patterns@2.14.2':
-    resolution: {integrity: sha512-3s1O0U1klHJDZjJY/714Hsdw2/ufh1iWAOLScVdOTNl/daj/hljvc2dkJdsyEXuSY+WRiNdY630aYrrEtKIvVA==}
+  '@almadar/patterns@2.17.2':
+    resolution: {integrity: sha512-lVC+7ROwge6hnpIjtOEfKsFo90sEdfnxFfJ8rJe7M9MSsHiJ1U9r3wfV2rwUG5ku2NZGuM0N75dLHN5JKAoYrg==}
 
   '@almadar/std@7.2.0':
     resolution: {integrity: sha512-Gs+1GyDEYxTW+mSf4HDKAmCSzbCFGtKKzwF083prTtlvAieYA0zBoGC3XH6MI0i1deARPTbpTV+PAhVArLzDaQ==}
@@ -1509,9 +1509,9 @@ packages:
 
 snapshots:
 
-  '@almadar/core@5.5.0':
+  '@almadar/core@5.6.1':
     dependencies:
-      '@almadar/patterns': 2.14.2
+      '@almadar/patterns': 2.17.2
       zod: 3.25.76
 
   '@almadar/eslint-plugin@2.8.0(eslint@10.0.0)':
@@ -1521,16 +1521,16 @@ snapshots:
 
   '@almadar/evaluator@2.9.2':
     dependencies:
-      '@almadar/core': 5.5.0
+      '@almadar/core': 5.6.1
       '@almadar/std': 7.2.0
 
-  '@almadar/patterns@2.14.2':
+  '@almadar/patterns@2.17.2':
     dependencies:
-      '@almadar/core': 5.5.0
+      '@almadar/core': 5.6.1
 
   '@almadar/std@7.2.0':
     dependencies:
-      '@almadar/core': 5.5.0
+      '@almadar/core': 5.6.1
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true
