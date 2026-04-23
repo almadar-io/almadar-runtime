@@ -10,13 +10,13 @@ importers:
     dependencies:
       '@almadar/core':
         specifier: ^5.7.0
-        version: 5.7.0
+        version: 5.8.0
       '@almadar/evaluator':
         specifier: '>=2.9.2'
         version: 2.9.2
       '@almadar/std':
         specifier: '>=7.2.4'
-        version: 7.4.1
+        version: 7.9.0
       '@faker-js/faker':
         specifier: ^9.3.0
         version: 9.9.0
@@ -51,8 +51,8 @@ importers:
 
 packages:
 
-  '@almadar/core@5.7.0':
-    resolution: {integrity: sha512-YrUgun1TqvDFmBQWPuXLpVzoy1t1S4PCtxHh+rCgt8Diyc/SWLBVSHb97S1tIRSjR9KJQ3GFtKxgPVr+N2sjLg==}
+  '@almadar/core@5.8.0':
+    resolution: {integrity: sha512-gOpnEev/pO4cm5GeUyzq4cgzrEvS8lsSLPfT7TEXc9hroAJU8fxv9anF+68AhPfnlfxYGQXFJTS268Th31fMxA==}
 
   '@almadar/eslint-plugin@2.8.0':
     resolution: {integrity: sha512-8abtGsVP+YBaUEchSfGfQV3ZHEPtWt+4Swtu3P0AFofr+OMSfHLnor4aIwULzag+nHD9FQ7cQkVCTfBVgTHgiw==}
@@ -65,8 +65,8 @@ packages:
   '@almadar/patterns@2.17.2':
     resolution: {integrity: sha512-lVC+7ROwge6hnpIjtOEfKsFo90sEdfnxFfJ8rJe7M9MSsHiJ1U9r3wfV2rwUG5ku2NZGuM0N75dLHN5JKAoYrg==}
 
-  '@almadar/std@7.4.1':
-    resolution: {integrity: sha512-QLWD5u2j4HdUSKJOWR3CZy4U9btp3y0dKLayKLa6qwEAOnU05fEHr/RL/KVLqFKhYSbHwxdJZUgnA1rXp+HMow==}
+  '@almadar/std@7.9.0':
+    resolution: {integrity: sha512-fZxuiHRrxTv1uyE1trjcSRfmk0yyAKhvylCTILPjEr4UEy4Em3RkD8kLUvR2YAwCiNqkwPsNKIL9jVIc9BS7QA==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -686,8 +686,8 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
-  ajv@6.14.0:
-    resolution: {integrity: sha512-IWrosm/yrn43eiKqkfkHis7QioDleaXQHdDVPKg0FSwwd/DuvyX79TZnFOnYpB7dcsFAMmtFztZuXPDvSePkFw==}
+  ajv@6.15.0:
+    resolution: {integrity: sha512-fgFx7Hfoq60ytK2c7DhnF8jIvzYgOMxfugjLOSMHjLIPgenqa7S7oaagATUq99mV6IYvN2tRmC0wnTYX6iPbMw==}
 
   any-promise@1.3.0:
     resolution: {integrity: sha512-7UvmKalWRt1wgjL1RrGxoSJW/0QZFIegpeGvZG9kjp8vrRu55XTHbwnqq2GpXm9uLbcuhxm3IqX9OB4MZR1b2A==}
@@ -1509,7 +1509,7 @@ packages:
 
 snapshots:
 
-  '@almadar/core@5.7.0':
+  '@almadar/core@5.8.0':
     dependencies:
       '@almadar/patterns': 2.17.2
       zod: 3.25.76
@@ -1521,16 +1521,16 @@ snapshots:
 
   '@almadar/evaluator@2.9.2':
     dependencies:
-      '@almadar/core': 5.7.0
-      '@almadar/std': 7.4.1
+      '@almadar/core': 5.8.0
+      '@almadar/std': 7.9.0
 
   '@almadar/patterns@2.17.2':
     dependencies:
-      '@almadar/core': 5.7.0
+      '@almadar/core': 5.8.0
 
-  '@almadar/std@7.4.1':
+  '@almadar/std@7.9.0':
     dependencies:
-      '@almadar/core': 5.7.0
+      '@almadar/core': 5.8.0
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true
@@ -1966,7 +1966,7 @@ snapshots:
 
   acorn@8.16.0: {}
 
-  ajv@6.14.0:
+  ajv@6.15.0:
     dependencies:
       fast-deep-equal: 3.1.3
       fast-json-stable-stringify: 2.1.0
@@ -2181,7 +2181,7 @@ snapshots:
       '@humanwhocodes/module-importer': 1.0.1
       '@humanwhocodes/retry': 0.4.3
       '@types/estree': 1.0.8
-      ajv: 6.14.0
+      ajv: 6.15.0
       cross-spawn: 7.0.6
       debug: 4.4.3
       escape-string-regexp: 4.0.0

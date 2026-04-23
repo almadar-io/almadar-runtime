@@ -255,76 +255,15 @@ export interface OrbitalServerRuntimeConfig {
 /**
  * Adapter for persisting entity data
  */
-export interface PersistenceAdapter {
-  create(
-    entityType: string,
-    data: EntityRow,
-  ): Promise<{ id: string }>;
-  update(
-    entityType: string,
-    id: string,
-    data: EntityRow,
-  ): Promise<void>;
-  delete(entityType: string, id: string): Promise<void>;
-  getById(
-    entityType: string,
-    id: string,
-  ): Promise<EntityRow | null>;
-  list(entityType: string): Promise<Array<EntityRow>>;
-}
-
-// ============================================================================
-// In-Memory Persistence (Default)
-// ============================================================================
-
-/**
- * Simple in-memory persistence for development/testing
- */
-class InMemoryPersistence implements PersistenceAdapter {
-  private data = new Map<string, Map<string, EntityRow>>();
-  private idCounter = 0;
-
-  async create(
-    entityType: string,
-    data: EntityRow,
-  ): Promise<{ id: string }> {
-    // Use provided ID if it exists, otherwise generate one
-    const id = (data.id as string) || `${entityType}-${++this.idCounter}`;
-    if (!this.data.has(entityType)) {
-      this.data.set(entityType, new Map());
-    }
-    this.data.get(entityType)!.set(id, { ...data, id });
-    return { id };
-  }
-
-  async update(
-    entityType: string,
-    id: string,
-    data: EntityRow,
-  ): Promise<void> {
-    const collection = this.data.get(entityType);
-    if (collection?.has(id)) {
-      const existing = collection.get(id)!;
-      collection.set(id, { ...existing, ...data });
-    }
-  }
-
-  async delete(entityType: string, id: string): Promise<void> {
-    this.data.get(entityType)?.delete(id);
-  }
-
-  async getById(
-    entityType: string,
-    id: string,
-  ): Promise<EntityRow | null> {
-    return this.data.get(entityType)?.get(id) || null;
-  }
-
-  async list(entityType: string): Promise<Array<EntityRow>> {
-    const collection = this.data.get(entityType);
-    return collection ? Array.from(collection.values()) : [];
-  }
-}
+// `PersistenceAdapter` + `InMemoryPersistence` live in their own browser-safe
+// module so the in-browser mock runtime can reuse the same storage contract
+// without pulling in this server-only module's express dependency. Re-exported
+// here so existing `import { PersistenceAdapter } from './OrbitalServerRuntime'`
+// call sites keep working.
+export type { PersistenceAdapter } from "./PersistenceAdapter.js";
+export { InMemoryPersistence } from "./PersistenceAdapter.js";
+import type { PersistenceAdapter } from "./PersistenceAdapter.js";
+import { InMemoryPersistence } from "./PersistenceAdapter.js";
 
 // ============================================================================
 // OrbitalServerRuntime

@@ -84,8 +84,26 @@ export type {
   OrbitalEventRequest,
   OrbitalEventResponse,
   OrbitalServerRuntimeConfig,
-  PersistenceAdapter,
 } from "./OrbitalServerRuntime.js";
+
+// Storage contract + in-memory default — extracted from OrbitalServerRuntime
+// so browser-side mock runtimes can use the same adapter interface.
+export type { PersistenceAdapter } from "./PersistenceAdapter.js";
+export { InMemoryPersistence } from "./PersistenceAdapter.js";
+
+// Mock-data persistence adapter (faker-seeded) — browser-safe, for use in
+// offline previews (`OrbPreview autoMock`) or dev harnesses.
+export { MockPersistenceAdapter, createMockPersistence } from "./MockPersistenceAdapter.js";
+
+// Server-side effect handlers factory — the `fetch`/`persist`/`set`/`ref`/
+// `deref`/`swap!`/`atomic`/`callService` layer. Mirrors the handlers built
+// inline in `OrbitalServerRuntime.executeEffects` so client-side offline
+// previews run the same semantics against an `InMemoryPersistence`.
+export {
+  createServerEffectHandlers,
+  type CreateServerEffectHandlersOptions,
+  type ServerEffectResult,
+} from "./ServerEffectHandlers.js";
 
 export type { ServerBridgeConfig, ServerBridgeState } from "./ServerBridge.js";
 
