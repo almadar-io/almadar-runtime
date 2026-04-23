@@ -1598,15 +1598,25 @@ export class OrbitalServerRuntime {
                 resultData = updated || { id: updateId, ...(data || {}) };
               }
               break;
-            case "delete":
-              if (data?.id || entityId) {
-                const deleteId = (data?.id as string) || entityId!;
+            case "delete": {
+              // `(persist delete Entity @payload.id)` resolves to a raw
+              // id STRING as the 4th arg, not `{id: ...}`. Accept both
+              // shapes — the .lolo authoring form is string, and batch
+              // callers may pass {id} too — so VG31-delete's cascade
+              // doesn't silently no-op when `data` is a scalar id.
+              const directId = typeof data === 'string' ? data : undefined;
+              const nestedId = typeof data === 'object' && data !== null
+                ? (data.id as string | undefined)
+                : undefined;
+              const deleteId = directId ?? nestedId ?? entityId;
+              if (deleteId) {
                 // Enforce onDelete relation rules before deleting
                 await this.enforceOnDeleteRules(type, deleteId);
                 await this.persistence.delete(type, deleteId);
                 resultData = { id: deleteId, deleted: true };
               }
               break;
+            }
           }
 
           effectResults.push({
