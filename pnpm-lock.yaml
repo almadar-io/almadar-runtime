@@ -9,7 +9,7 @@ importers:
   .:
     dependencies:
       '@almadar/core':
-        specifier: '>=5.5.0'
+        specifier: ^5.7.0
         version: 5.7.0
       '@almadar/evaluator':
         specifier: '>=2.9.2'

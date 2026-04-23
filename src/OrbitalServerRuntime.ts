@@ -1350,6 +1350,31 @@ export class OrbitalServerRuntime {
     // in the state machine (listen on the LOADED emit), not by the server
     // re-fetching after every mutation.
 
+    // Re-emit each successfully-transitioned event on the bus so cross-trait
+    // `listens { SourceTrait EVENT → Trigger }` wiring fires in response to
+    // user-driven events too (VG31). Without this, a `(persist create ...)`
+    // cascade declared on Persistor as `listens SAVE` from the Add-Item
+    // trait never runs — the Add-Item's SAVE transition succeeds but nothing
+    // re-broadcasts SAVE on the bus for the listener closure in
+    // setupListeners() to pick up. The compiled path solves this by
+    // re-emitting the transition event from the client bridge
+    // (useOrbitalBridge.ts / backend.rs bridge-cascade block); runtime
+    // needs the equivalent on the in-process bus.
+    //
+    // Skip lifecycle events (INIT / LOAD / $MOUNT / $UNMOUNT) to avoid
+    // re-dispatching the listener-side INIT cascades that `listens` already
+    // triggers via processOrbitalEvent.
+    const LIFECYCLE_EVENTS = new Set(['INIT', 'LOAD', '$MOUNT', '$UNMOUNT']);
+    if (!LIFECYCLE_EVENTS.has(event)) {
+      for (const { traitName } of filteredResults) {
+        this.eventBus.emit(event, cleanPayload as EventPayload | undefined, {
+          orbital: orbitalName,
+          trait: traitName,
+          fromBridge: true,
+        });
+      }
+    }
+
     // Build current states
     const states: Record<string, string> = {};
     for (const [name, state] of registered.manager.getAllStates()) {
