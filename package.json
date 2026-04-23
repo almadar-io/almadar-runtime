@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "4.7.0",
+  "version": "4.8.0",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",

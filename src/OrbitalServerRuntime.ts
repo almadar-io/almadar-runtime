@@ -1212,10 +1212,48 @@ export class OrbitalServerRuntime {
     this.orbitals.clear();
     this.eventBus.clear();
 
+    // Clear mock persistence so the next registerFromFile re-seeds from
+    // the schema instead of inheriting rows the previous walk created.
+    // Without this, runtime-verify's state walk keeps every SAVE's
+    // persist-create row across test sessions — the grid accumulates
+    // "Mock name" rows that are never pruned, and empty cards from
+    // partial walk-step payloads stay visible forever.
+    if (this.persistence instanceof MockPersistenceAdapter) {
+      this.persistence.clearAll();
+    }
+
     // Clean up OS handlers (close file watchers, intervals, signal listeners)
     if (this.osHandlers) {
       this.osHandlers.cleanup();
       this.osHandlers = null;
+    }
+  }
+
+  /**
+   * Reset the mock persistence store to a clean-slate re-seed without
+   * unregistering orbitals. Exposed for verifier tools that want to
+   * start each test with deterministic seeded rows, not the residue of
+   * the previous walk's persist-creates. No-op when the persistence
+   * layer is not MockPersistenceAdapter.
+   */
+  resetMockPersistence(): void {
+    if (!(this.persistence instanceof MockPersistenceAdapter)) return;
+    this.persistence.clearAll();
+    // Re-run the mock registration for every known entity so seed data
+    // repopulates. The register path already iterates each orbital's
+    // entity block; re-seeding via registerEntity mirrors initial load.
+    for (const registered of this.orbitals.values()) {
+      const entity = registered.entity;
+      if (entity?.name && entity.fields) {
+        const fields = entity.fields.map((f) => ({
+          name: f.name,
+          type: f.type,
+          required: f.required,
+          values: f.values,
+          default: f.default,
+        }));
+        this.persistence.registerEntity({ name: entity.name, fields });
+      }
     }
   }
 
