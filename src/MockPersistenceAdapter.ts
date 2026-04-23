@@ -285,8 +285,10 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     const id = this.nextId(entityType);
     const now = new Date().toISOString();
 
+    const withDefaults = this.applyFieldDefaults(entityType, data);
+
     const item = {
-      ...data,
+      ...withDefaults,
       id,
       createdAt: now,
       updatedAt: now,
@@ -294,6 +296,28 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
 
     store.set(id, item);
     return { id };
+  }
+
+  /**
+   * Fill in any entity-declared field defaults that the caller omitted.
+   * SAVE payloads coming from form-section only carry the fields the user
+   * edited; persisted rows should still honor `field.default` so downstream
+   * row-content probes (VG11f) see a row whose every declared-default field
+   * is non-empty. `@now` resolves to the current ISO timestamp.
+   */
+  private applyFieldDefaults(entityType: string, data: EntityRow): EntityRow {
+    const schema = this.schemas.get(entityType.toLowerCase());
+    if (!schema) return data;
+    const result: EntityRow = { ...data };
+    for (const field of schema.fields) {
+      if (field.name === 'id' || field.name === 'createdAt' || field.name === 'updatedAt') continue;
+      if (result[field.name] !== undefined) continue;
+      if (field.default === undefined) continue;
+      result[field.name] = field.default === '@now'
+        ? new Date().toISOString()
+        : (field.default as FieldValue);
+    }
+    return result;
   }
 
   async update(
