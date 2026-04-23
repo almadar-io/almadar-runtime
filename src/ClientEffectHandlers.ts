@@ -75,8 +75,15 @@ export function createClientEffectHandlers(
 
     return {
         emit: (event: string, payload?: EventPayload) => {
+            // The event bus emits with shape `{ type, payload, source }` per
+            // IEventBus. Subscribers read `event.payload` to get the trait-
+            // supplied payload. Wrapping it again as `{ payload }` here
+            // produced a doubly-nested envelope — `@payload.X` bindings on
+            // the receiving render-ui then resolved to `undefined` because
+            // the real keys lived one level deeper. Pass the payload through
+            // directly so the subscriber sees exactly what the trait emitted.
             const prefixedEvent = event.startsWith('UI:') ? event : `UI:${event}`;
-            eventBus.emit(prefixedEvent, { payload });
+            eventBus.emit(prefixedEvent, payload);
         },
 
         persist: async () => {
