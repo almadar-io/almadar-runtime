@@ -1350,30 +1350,20 @@ export class OrbitalServerRuntime {
     // in the state machine (listen on the LOADED emit), not by the server
     // re-fetching after every mutation.
 
-    // Re-emit each successfully-transitioned event on the bus so cross-trait
-    // `listens { SourceTrait EVENT → Trigger }` wiring fires in response to
-    // user-driven events too (VG31). Without this, a `(persist create ...)`
-    // cascade declared on Persistor as `listens SAVE` from the Add-Item
-    // trait never runs — the Add-Item's SAVE transition succeeds but nothing
-    // re-broadcasts SAVE on the bus for the listener closure in
-    // setupListeners() to pick up. The compiled path solves this by
-    // re-emitting the transition event from the client bridge
-    // (useOrbitalBridge.ts / backend.rs bridge-cascade block); runtime
-    // needs the equivalent on the in-process bus.
-    //
-    // Skip lifecycle events (INIT / LOAD / $MOUNT / $UNMOUNT) to avoid
-    // re-dispatching the listener-side INIT cascades that `listens` already
-    // triggers via processOrbitalEvent.
-    const LIFECYCLE_EVENTS = new Set(['INIT', 'LOAD', '$MOUNT', '$UNMOUNT']);
-    if (!LIFECYCLE_EVENTS.has(event)) {
-      for (const { traitName } of filteredResults) {
-        this.eventBus.emit(event, cleanPayload as EventPayload | undefined, {
-          orbital: orbitalName,
-          trait: traitName,
-          fromBridge: true,
-        });
-      }
-    }
+    // NOTE (VG31-duplicate, 4.10.0): the server-side re-emit that used to
+    // live here fanned SAVE/CONFIRM_REMOVE onto the server bus so
+    // `setupListeners()` could dispatch cascade triggers (DO_CREATE,
+    // DO_DELETE). That was RIGHT when the runtime was server-only, but the
+    // runtime playground now has matching cross-trait listens wiring on
+    // the CLIENT (@almadar/ui 3.7.0+ useTraitStateMachine). With both
+    // sides listening, every SAVE fired DO_CREATE twice — once from the
+    // client's re-broadcast → onEventProcessed → server persist, and once
+    // from the server's own bus listener → server persist. Two "Mock
+    // name" rows appeared per click instead of one. Leaving the re-emit
+    // out here is safe: the client posts DO_CREATE/DO_DELETE to the
+    // server directly via bridge.sendEvent, and the server processes
+    // those directly — the server-side listens fan-out is redundant in
+    // the playground topology.
 
     // Build current states
     const states: Record<string, string> = {};
