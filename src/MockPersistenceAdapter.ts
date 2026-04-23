@@ -192,11 +192,13 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       return field.default as FieldValue;
     }
 
-    // Handle optional fields - 80% chance of having a value
-    if (!field.required && Math.random() > 0.8) {
-      return null;
-    }
-
+    // Always populate seeded fields. The previous 80% heuristic dropped
+    // ~20% of optional fields to null to "exercise the UI's empty path",
+    // but that flaked runtime-verify — a seeded row could silently come
+    // out with `name=null` and the DataGrid would render a blank-title
+    // card that didn't match any test expectation. Deterministic seed
+    // data is more valuable than random-nil stress; callers who want
+    // nil-testing should construct that scenario explicitly.
     const fieldType = field.type.toLowerCase();
 
     switch (fieldType) {
