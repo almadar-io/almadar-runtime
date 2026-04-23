@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@almadar/core':
         specifier: '>=5.5.0'
-        version: 5.6.1
+        version: 5.7.0
       '@almadar/evaluator':
         specifier: '>=2.9.2'
         version: 2.9.2
@@ -51,8 +51,8 @@ importers:
 
 packages:
 
-  '@almadar/core@5.6.1':
-    resolution: {integrity: sha512-Rxdk2I5XG1C+xYYEtr0XSG38W2bdUgjzhLco5YBsR3ZaVBXBfCLrcTgEjVymjVoqQ7+27RJ06O5DKL90JE7w+Q==}
+  '@almadar/core@5.7.0':
+    resolution: {integrity: sha512-YrUgun1TqvDFmBQWPuXLpVzoy1t1S4PCtxHh+rCgt8Diyc/SWLBVSHb97S1tIRSjR9KJQ3GFtKxgPVr+N2sjLg==}
 
   '@almadar/eslint-plugin@2.8.0':
     resolution: {integrity: sha512-8abtGsVP+YBaUEchSfGfQV3ZHEPtWt+4Swtu3P0AFofr+OMSfHLnor4aIwULzag+nHD9FQ7cQkVCTfBVgTHgiw==}
@@ -1509,7 +1509,7 @@ packages:
 
 snapshots:
 
-  '@almadar/core@5.6.1':
+  '@almadar/core@5.7.0':
     dependencies:
       '@almadar/patterns': 2.17.2
       zod: 3.25.76
@@ -1521,16 +1521,16 @@ snapshots:
 
   '@almadar/evaluator@2.9.2':
     dependencies:
-      '@almadar/core': 5.6.1
+      '@almadar/core': 5.7.0
       '@almadar/std': 7.4.0
 
   '@almadar/patterns@2.17.2':
     dependencies:
-      '@almadar/core': 5.6.1
+      '@almadar/core': 5.7.0
 
   '@almadar/std@7.4.0':
     dependencies:
-      '@almadar/core': 5.6.1
+      '@almadar/core': 5.7.0
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true

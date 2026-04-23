@@ -22,6 +22,8 @@ export interface EntityField {
   required?: boolean;
   values?: string[]; // For enum types
   default?: unknown;
+  /** Validation format: email/url/phone/date/datetime/uuid. Drives mock-value shape without name heuristics. */
+  format?: 'email' | 'url' | 'phone' | 'date' | 'datetime' | 'uuid';
 }
 
 export interface EntitySchema {
@@ -233,51 +235,35 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   }
 
   /**
-   * Generate a string value based on field name heuristics.
+   * Generate a string value based on the field's declared schema metadata.
+   * Reads `values` (enum) first, then `format` (email/url/phone/uuid/date/
+   * datetime), then falls back to faker.lorem.words. No field-name heuristics
+   * — the schema is the source of truth. If a caller needs a real email, they
+   * declare `format: "email"`; if they need an enum, they declare `values: [...]`.
    */
-  private generateStringValue(entityName: string, field: EntityField, index: number): string {
-    const name = field.name.toLowerCase();
-
-    // If field has enum values, use them
+  private generateStringValue(_entityName: string, field: EntityField, _index: number): string {
     if (field.values && field.values.length > 0) {
       return faker.helpers.arrayElement(field.values);
     }
-
-    // Specific fields - use faker for realistic data
-    if (name.includes('email')) return faker.internet.email();
-    if (name.includes('phone')) return faker.phone.number();
-    if (name.includes('address')) return faker.location.streetAddress();
-    if (name.includes('city')) return faker.location.city();
-    if (name.includes('country')) return faker.location.country();
-    if (name.includes('url') || name.includes('website')) return faker.internet.url();
-    if (name.includes('avatar') || name.includes('image')) return faker.image.avatar();
-    if (name.includes('color')) return faker.color.human();
-    if (name.includes('uuid')) return faker.string.uuid();
-    if (name.includes('description') || name.includes('bio')) return faker.lorem.paragraph();
-
-    // Generic name/title/text fields - use entity-aware readable format
-    const entityLabel = this.capitalizeFirst(entityName);
-    const fieldLabel = this.capitalizeFirst(field.name);
-    return `${entityLabel} ${fieldLabel} ${index}`;
+    switch (field.format) {
+      case 'email': return faker.internet.email();
+      case 'url': return faker.internet.url();
+      case 'phone': return faker.phone.number();
+      case 'uuid': return faker.string.uuid();
+      case 'date': return faker.date.recent().toISOString().split('T')[0]!;
+      case 'datetime': return faker.date.recent().toISOString();
+      default: return faker.lorem.words(2);
+    }
   }
 
   /**
-   * Generate a date value based on field name heuristics.
+   * Generate a date value. Uses the field's `format` (date vs datetime) to
+   * decide ISO shape; otherwise returns a recent ISO-8601 datetime. No
+   * field-name heuristics.
    */
   private generateDateValue(field: EntityField): string {
-    const name = field.name.toLowerCase();
-
-    let date: Date;
-    if (name.includes('created') || name.includes('start') || name.includes('birth')) {
-      date = faker.date.past({ years: 2 });
-    } else if (name.includes('updated') || name.includes('modified')) {
-      date = faker.date.recent({ days: 30 });
-    } else if (name.includes('deadline') || name.includes('due') || name.includes('end') || name.includes('expires')) {
-      date = faker.date.future({ years: 1 });
-    } else {
-      date = faker.date.anytime();
-    }
-
+    const date = faker.date.recent({ days: 30 });
+    if (field.format === 'date') return date.toISOString().split('T')[0]!;
     return date.toISOString();
   }
 
