@@ -20,11 +20,23 @@ import type {
   BindingContext,
   EffectContext,
   EntityRow,
-  IEventBus,
 } from "./types.js";
 import { EffectExecutor } from "./EffectExecutor.js";
 import { createContextFromBindings } from "./BindingResolver.js";
 import { evaluate } from "@almadar/evaluator";
+
+/**
+ * Minimal event-bus contract the server handlers need. Narrower than the
+ * full `IEventBus` so clients with a React-context bus (only `emit` is
+ * relevant for effect dispatch) can hand it in without adapter code.
+ */
+export interface ServerEffectEventBus {
+  emit(
+    event: string,
+    payload?: EventPayload,
+    source?: { orbital?: string; trait?: string },
+  ): void;
+}
 
 /**
  * Result entry recorded for each effect invocation. Mirrors the server
@@ -51,8 +63,8 @@ export interface ServerEffectResult {
 export interface CreateServerEffectHandlersOptions {
   /** Persistent store backing `fetch` / `persist` / `ref` / `deref` / `swap`. */
   persistence: PersistenceAdapter;
-  /** Event bus that `emit` delegates to. */
-  eventBus: IEventBus;
+  /** Event bus that `emit` delegates to. Only `.emit()` is required. */
+  eventBus: ServerEffectEventBus;
   /** The trait's linked entity type (used as the default for persist/set). */
   entityType: string;
   /** Current entity row id (used by `set`, `persist update/delete` fallback). */
