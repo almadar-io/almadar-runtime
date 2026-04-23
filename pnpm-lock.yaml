@@ -16,7 +16,7 @@ importers:
         version: 2.9.2
       '@almadar/std':
         specifier: '>=7.2.4'
-        version: 7.4.0
+        version: 7.4.1
       '@faker-js/faker':
         specifier: ^9.3.0
         version: 9.9.0
@@ -65,8 +65,8 @@ packages:
   '@almadar/patterns@2.17.2':
     resolution: {integrity: sha512-lVC+7ROwge6hnpIjtOEfKsFo90sEdfnxFfJ8rJe7M9MSsHiJ1U9r3wfV2rwUG5ku2NZGuM0N75dLHN5JKAoYrg==}
 
-  '@almadar/std@7.4.0':
-    resolution: {integrity: sha512-l6Quow9u/PxYdeJErbWpwJwjzLoerv9Ljstd4faNYAghY11qINLGDco2drP0aoY5+wFixf1/lB6ZzOMhuzatBw==}
+  '@almadar/std@7.4.1':
+    resolution: {integrity: sha512-QLWD5u2j4HdUSKJOWR3CZy4U9btp3y0dKLayKLa6qwEAOnU05fEHr/RL/KVLqFKhYSbHwxdJZUgnA1rXp+HMow==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -1522,13 +1522,13 @@ snapshots:
   '@almadar/evaluator@2.9.2':
     dependencies:
       '@almadar/core': 5.7.0
-      '@almadar/std': 7.4.0
+      '@almadar/std': 7.4.1
 
   '@almadar/patterns@2.17.2':
     dependencies:
       '@almadar/core': 5.7.0
 
-  '@almadar/std@7.4.0':
+  '@almadar/std@7.4.1':
     dependencies:
       '@almadar/core': 5.7.0
 

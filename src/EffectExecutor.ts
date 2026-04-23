@@ -469,9 +469,37 @@ export class EffectExecutor {
                     value = args[1];
                     emitCfg = this.extractEmitConfig(args[2]);
                     entityId = typeof entity?.['id'] === 'string' ? (entity['id'] as string) : undefined;
+                    // Auto-seed entity.id from @payload.id when the trait's
+                    // entity context is empty. Row-click patterns (e.g.
+                    // std-confirmation's REQUEST) open a modal for a specific
+                    // row, then `(set @entity.pendingId @payload.id)` to
+                    // remember which one — but the trait's entity starts
+                    // empty, so the old "bail with missing-entity-id" path
+                    // silently dropped the set and every subsequent
+                    // `@entity.*` read returned undefined. Compiled path
+                    // already has this implicit contract (server dispatches
+                    // with the payload's row identified). Mirror it here so
+                    // runtime and compiled render the same @entity.* values.
                     if (!entityId) {
-                        effectLog.warn('set:missing-entity-id', { path });
-                        break;
+                        const payload = this.bindings.payload;
+                        const payloadId = payload && typeof payload === 'object' && 'id' in payload
+                            ? (payload as EventPayload).id
+                            : undefined;
+                        if (typeof payloadId === 'string') {
+                            entityId = payloadId;
+                            // Seed a minimal entity so follow-up reads in the
+                            // same transition (and the mirror write below)
+                            // see a real row.
+                            if (!entity) {
+                                this.bindings.entity = { id: payloadId } as EntityRow;
+                            } else {
+                                entity['id'] = payloadId;
+                            }
+                            effectLog.debug('set:auto-seed-entity-id', { path, id: payloadId });
+                        } else {
+                            effectLog.warn('set:missing-entity-id', { path });
+                            break;
+                        }
                     }
                 } else {
                     entityId = args[0] as string;
