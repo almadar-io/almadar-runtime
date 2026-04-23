@@ -276,6 +276,101 @@ function renameEventsInEffects(
  *
  * Returns the trait unchanged when `renames` is empty or undefined.
  */
+/**
+ * Walk a render-ui pattern config and rewrite every `entity: "<oldName>"`
+ * string to `entity: "<newName>"`. Applied when a molecule pins an
+ * imported atom to a different linked entity — the atom declared
+ * `entity: "ModalRecord"` on its form-section, but at the ref site the
+ * molecule said `linkedEntity: "CartItem"`, so the runtime needs to see
+ * `entity: "CartItem"` at render time for schema enrichment
+ * (UISlotRenderer looks up `schemaCtx.entities.get(entityName)` to
+ * inject field types + enum values for form controls).
+ *
+ * Without this rewrite, the lookup misses the molecule-level entity and
+ * the form renders text inputs for every field — including enum-shaped
+ * ones that should be `<Select>`. VG20.
+ *
+ * Bindings (`@entity.X`, `@payload.X`) are NOT touched; only bare string
+ * literals matching `atomLinkedEntity` get rewritten.
+ */
+function renameEntityInRenderUiConfig(
+  node: PatternConfig | readonly unknown[] | unknown,
+  oldName: string,
+  newName: string,
+): PatternConfig | unknown[] | unknown {
+  if (node === null || node === undefined) return node;
+  if (Array.isArray(node)) {
+    return node.map((item) => renameEntityInRenderUiConfig(item, oldName, newName));
+  }
+  if (typeof node !== "object") return node;
+  const obj = node as PatternConfig;
+  const next: PatternConfig = { ...obj };
+  for (const [key, value] of Object.entries(obj)) {
+    if (key === "entity" && value === oldName) {
+      (next as { [k: string]: unknown })[key] = newName;
+      continue;
+    }
+    (next as { [k: string]: unknown })[key] = renameEntityInRenderUiConfig(value, oldName, newName);
+  }
+  return next;
+}
+
+/**
+ * Walk a trait's effects and rewrite entity-name literals via
+ * {@link renameEntityInRenderUiConfig}. Only touches `(render-ui ...)`
+ * effect payloads — other effects (persist, fetch, emit) use bindings,
+ * not string literals, so they don't need rewriting.
+ */
+function renameEntityInEffects(
+  effects: readonly unknown[],
+  oldName: string,
+  newName: string,
+): unknown[] {
+  return effects.map((effect) => {
+    if (!Array.isArray(effect)) return effect;
+    if (effect[0] === "render-ui" && effect.length >= 3) {
+      const [op, slot, config, ...rest] = effect;
+      const nextConfig = renameEntityInRenderUiConfig(config, oldName, newName);
+      return [op, slot, nextConfig, ...rest];
+    }
+    return effect;
+  });
+}
+
+/**
+ * Apply a linkedEntity override from a trait-ref call site to an
+ * imported atom. When the atom declared `entity: "ModalRecord"` inside
+ * its render-ui configs and the ref site supplied
+ * `linkedEntity: "CartItem"`, rewrite every such literal so runtime
+ * consumers (EntitySchemaContext lookup, DataService collection binding)
+ * see the molecule-level entity name. No-op when either argument is
+ * missing or when the names match.
+ */
+function applyLinkedEntityRename(
+  trait: Trait,
+  linkedEntity: string | undefined,
+): Trait {
+  const atomLinked = trait.linkedEntity;
+  if (!linkedEntity || !atomLinked || linkedEntity === atomLinked) return trait;
+  const sm = trait.stateMachine;
+  if (!sm) return { ...trait, linkedEntity };
+  const nextTransitions = (sm.transitions ?? []).map((t) => {
+    const nextEffects = t.effects
+      ? (renameEntityInEffects(
+          t.effects as readonly unknown[],
+          atomLinked,
+          linkedEntity,
+        ) as typeof t.effects)
+      : t.effects;
+    return { ...t, effects: nextEffects };
+  });
+  return {
+    ...trait,
+    linkedEntity,
+    stateMachine: { ...sm, transitions: nextTransitions },
+  } as Trait;
+}
+
 function applyEventRenames(
   trait: Trait,
   renames?: { [oldKey: string]: string },
@@ -715,7 +810,8 @@ export class ReferenceResolver {
       const baseTrait: Trait = overrideName
         ? { ...trait, name: overrideName }
         : trait;
-      const renamedTrait = applyEventRenames(baseTrait, eventRenames);
+      const reboundTrait = applyLinkedEntityRename(baseTrait, linkedEntity);
+      const renamedTrait = applyEventRenames(reboundTrait, eventRenames);
 
       return {
         success: true,
@@ -735,7 +831,8 @@ export class ReferenceResolver {
       const baseLocal: Trait = overrideName
         ? { ...localTrait, name: overrideName }
         : localTrait;
-      const renamedLocalTrait = applyEventRenames(baseLocal, eventRenames);
+      const reboundLocal = applyLinkedEntityRename(baseLocal, linkedEntity);
+      const renamedLocalTrait = applyEventRenames(reboundLocal, eventRenames);
       return {
         success: true,
         data: {
