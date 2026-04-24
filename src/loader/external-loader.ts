@@ -326,12 +326,13 @@ export class ExternalOrbitalLoader {
   /**
    * Resolve a standard library path.
    *
-   * The std registry uses a tiered layout under
-   * `<stdLibPath>/behaviors/registry/{atoms,molecules,organisms}/<name>.orb`.
-   * For `std/behaviors/<name>` imports, try each tier in order and return
-   * the first one that exists on disk. This matches how the Rust compiler's
-   * `embedded.rs` resolves std paths — one registry, three tiers, flat
-   * import name.
+   * The std registry uses a topic/tier layout under
+   * `<stdLibPath>/behaviors/registry/<topic>/{atoms,molecules,organisms}/<name>.orb`
+   * (topic ∈ core|agent|game|service|app|probes). For `std/behaviors/<name>`
+   * imports, try each (topic × tier) combination in order and return the first
+   * one that exists on disk. Falls back to the pre-topic flat-tier layout and
+   * the very old flat layout for back-compat. This matches how the Rust
+   * compiler's `embedded.rs` resolves std paths.
    */
   private resolveStdPath(importPath: string): LoadResult<string> {
     if (!this.options.stdLibPath) {
@@ -349,14 +350,27 @@ export class ExternalOrbitalLoader {
       .replace(/\.orb$/, "");
 
     const normalizedStdLib = path.normalize(this.options.stdLibPath);
+    const topics = ["core", "agent", "game", "service", "app", "probes"] as const;
     const tiers = ["atoms", "molecules", "organisms"] as const;
-    const candidates = tiers.map((tier) =>
-      path.join(normalizedStdLib, "behaviors", "registry", tier, `${name}.orb`),
-    );
+    const candidates: string[] = [];
 
-    // Back-compat: if the caller pointed stdLibPath at something older (no
-    // tiered registry), also try the legacy flat layout
-    // `<stdLibPath>/behaviors/<name>.orb`.
+    // Primary: topic/tier layout (std 7.11+).
+    for (const topic of topics) {
+      for (const tier of tiers) {
+        candidates.push(
+          path.join(normalizedStdLib, "behaviors", "registry", topic, tier, `${name}.orb`),
+        );
+      }
+    }
+
+    // Back-compat: pre-topic flat-tier layout (std 6.1–7.10).
+    for (const tier of tiers) {
+      candidates.push(
+        path.join(normalizedStdLib, "behaviors", "registry", tier, `${name}.orb`),
+      );
+    }
+
+    // Oldest back-compat: flat `<stdLibPath>/behaviors/<name>.orb`.
     const legacyPath = path.join(normalizedStdLib, relativePath.endsWith(".orb") ? relativePath : `${relativePath}.orb`);
     candidates.push(legacyPath);
 
