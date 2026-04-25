@@ -72,6 +72,7 @@ import type {
   Trait,
   TraitTick,
   TraitConfig,
+  TraitConfigValue,
 } from "@almadar/core";
 import { isInlineTrait, isEntityCall } from "@almadar/core";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
@@ -279,6 +280,44 @@ import { InMemoryPersistence } from "./PersistenceAdapter.js";
  * trait binder produces an empty state machine and all interactions
  * targeting the trait are silently dropped.
  */
+/**
+ * Walk a trait's DECLARED config schema (`{ icon: { type, default }, ... }`)
+ * and collect a flat `{ icon: <default>, ... }` map of just the default
+ * values. Used to seed the `@config.X` binding context with the atom's
+ * own declared defaults before any call-site override is applied. Mirrors
+ * the compiled path's `DEFAULT_<TRAIT>_CONFIG` constant emitted by
+ * backend.rs's Solution-1 plumbing.
+ *
+ * Returns `undefined` when the trait has no config schema or none of its
+ * fields declare a default — keeps the caller's existing fast-path.
+ */
+function collectDeclaredConfigDefaults(
+  trait: Trait | undefined,
+): TraitConfig | undefined {
+  if (!trait) return undefined;
+  // The Trait type doesn't model the declared config schema (only the
+  // call-site override shape under TraitReferenceObject), but the JSON
+  // object loaded from the .orb carries it on the trait declaration.
+  // Read it through a structural cast — schema-to-ir.ts:216 also reads
+  // `trait.config` the same way for ResolvedTrait.
+  const schema = (trait as Trait & {
+    config?: Record<string, { default?: TraitConfigValue } | TraitConfigValue>;
+  }).config;
+  if (!schema || typeof schema !== 'object') return undefined;
+  const defaults: Record<string, TraitConfigValue> = {};
+  let hasAny = false;
+  for (const [key, field] of Object.entries(schema)) {
+    if (field && typeof field === 'object' && !Array.isArray(field) && 'default' in field) {
+      const def = (field as { default?: TraitConfigValue }).default;
+      if (def !== undefined) {
+        defaults[key] = def;
+        hasAny = true;
+      }
+    }
+  }
+  return hasAny ? defaults : undefined;
+}
+
 function needsPreprocessing(schema: OrbitalSchema): boolean {
   for (const orbital of schema.orbitals) {
     const uses = (orbital as { uses?: unknown[] }).uses;
@@ -1892,9 +1931,20 @@ export class OrbitalServerRuntime {
     // `@config.title`, `@config.fields`, etc. — the mechanism that lets a
     // molecule parameterize an imported atom's UI without duplicating the
     // render-ui body.
-    const traitConfig = registered.configByTrait.get(traitName);
-    if (traitConfig) {
-      bindings.config = traitConfig;
+    // Defaults from the trait's DECLARED config schema must merge BEHIND the
+    // call-site override so atoms verified standalone (no consumer override)
+    // still see their declared icon/title/fields/mode values. Without this,
+    // `@config.icon` resolved to undefined → Icon fell back to "?", and
+    // `@config.title` rendered as empty. The compiled path's Solution-1 in
+    // backend.rs emits `DEFAULT_<TRAIT>_CONFIG` + `mergedConfig`; the runtime
+    // path needs the same merge or std-modal/std-confirmation render bare in
+    // playground while the compiled bundle renders correctly.
+    const declaredDefaults = collectDeclaredConfigDefaults(
+      registered.traits.find((t) => t.name === traitName),
+    );
+    const callSiteOverride = registered.configByTrait.get(traitName);
+    if (declaredDefaults || callSiteOverride) {
+      bindings.config = { ...(declaredDefaults ?? {}), ...(callSiteOverride ?? {}) };
     }
 
     // Add initial named entity binding
