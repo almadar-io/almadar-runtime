@@ -236,6 +236,58 @@ describe('emit: — ref', () => {
 });
 
 // ============================================================================
+// G46 — set against an id-less in-memory entity
+// ============================================================================
+
+describe('set: — in-memory mirror without entity id (G46)', () => {
+    it('mirrors @entity.<field> writes onto bindings.entity even when no id is available', async () => {
+        // Reproduces std-agent-completion's SHOW transition: the trait's
+        // entity is an id-less in-memory singleton; SHOW carries
+        // { message, notificationType } with no id. Compiled path renders
+        // the alert with the new message; runtime previously dropped the
+        // set as 'missing-entity-id' and rendered empty.
+        const emit = vi.fn();
+        const handlers: EffectHandlers = {
+            emit,
+            set: vi.fn(),
+        };
+        const bindings: BindingContext = {
+            entity: undefined,
+            payload: { message: 'hello', notificationType: 'info' },
+        };
+        const context: EffectContext = {
+            traitName: 'AgentCompletionNotification',
+            state: 'hidden',
+            transition: 'hidden->visible',
+        };
+        const executor = new EffectExecutor({ handlers, bindings, context });
+        await executor.execute(['set', '@entity.message', '@payload.message']);
+        expect(bindings.entity).toBeDefined();
+        expect(bindings.entity?.message).toBe('hello');
+        // No persistence write should have fired because there's no id.
+        expect(handlers.set).not.toHaveBeenCalled();
+    });
+
+    it('mirrors successive @entity.<field> writes onto the same in-memory row', async () => {
+        const emit = vi.fn();
+        const handlers: EffectHandlers = { emit, set: vi.fn() };
+        const bindings: BindingContext = {
+            entity: undefined,
+            payload: { message: 'm', notificationType: 'success' },
+        };
+        const executor = new EffectExecutor({
+            handlers,
+            bindings,
+            context: { traitName: 't', state: 's', transition: 's->s' },
+        });
+        await executor.execute(['set', '@entity.message', '@payload.message']);
+        await executor.execute(['set', '@entity.notificationType', '@payload.notificationType']);
+        expect(bindings.entity?.message).toBe('m');
+        expect(bindings.entity?.notificationType).toBe('success');
+    });
+});
+
+// ============================================================================
 // camelCase aliases
 // ============================================================================
 

@@ -497,7 +497,24 @@ export class EffectExecutor {
                             }
                             effectLog.debug('set:auto-seed-entity-id', { path, id: payloadId });
                         } else {
-                            effectLog.warn('set:missing-entity-id', { path });
+                            // No persistable entity id (and the payload
+                            // doesn't carry one — typical for instance-scoped
+                            // notification traits whose SHOW payload is
+                            // `{ message, notificationType }`). Skip the
+                            // persistence write but still update the
+                            // in-memory binding so the very next render-ui
+                            // in the same transition resolves @entity.<field>
+                            // to the value just set. Without this mirror, the
+                            // compiled path renders the alert with the new
+                            // message text while the runtime path renders
+                            // empty — same .orb, divergent output.
+                            effectLog.debug('set:in-memory-mirror-only', { path });
+                            if (!entity) {
+                                this.bindings.entity = {} as EntityRow;
+                            }
+                            (this.bindings.entity as EntityRow)[field] =
+                                value as EntityRow[string];
+                            this.emitSuccess(emitCfg, 'success', value);
                             break;
                         }
                     }
@@ -515,7 +532,14 @@ export class EffectExecutor {
                 // value. Without this, a transition that increments a
                 // counter and then conditionally emits on the counter
                 // reads the pre-increment value.
-                if (entity && entity['id'] === entityId) {
+                //
+                // Match by id when both sides have one. When the
+                // in-memory entity is "rowless" (id-less), still mirror —
+                // a path-form set against the singleton in-memory entity
+                // is the only one that landed here without an id, and
+                // dropping the mirror would let the compiled vs runtime
+                // paths diverge on the very next render.
+                if (entity && (entity['id'] === entityId || !entity['id'])) {
                     // EntityRow indexes to FieldValue; the effect's value is
                     // runtime-shaped `unknown`. The set handler above already
                     // persisted the real type-checked write — this mirror
