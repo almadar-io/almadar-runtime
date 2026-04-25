@@ -1288,6 +1288,22 @@ export class OrbitalServerRuntime {
       if (stored) {
         entityData = stored;
       }
+    } else if (registered.entity?.name) {
+      // No entityId on the event — fall back to the first persisted row so
+      // `@entity.<field>` bindings resolve to a real row instead of `{}`.
+      // The compiled path's render layer reads `data['<EntityName>'][0]?.X`,
+      // which has the same effect; mirror that here so instance-scoped
+      // traits (e.g. AgentCompletionModal's render-ui binding @entity.provider
+      // / @entity.model) render seeded values in the playground instead of
+      // empty Badges. Falls through to `{}` when persistence is empty.
+      try {
+        const all = await this.persistence.list(registered.entity.name);
+        if (Array.isArray(all) && all.length > 0 && all[0]) {
+          entityData = all[0] as EntityRow;
+        }
+      } catch {
+        // persistence list may not exist or may throw — keep entityData = {}
+      }
     }
 
     // Process event through state machine
