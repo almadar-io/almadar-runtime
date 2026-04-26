@@ -19,7 +19,7 @@ import type { TraitDefinition, EventPayload } from './types.js';
  */
 interface EmitDeclaration {
     event: string;
-    payload?: Array<{ name: string; type?: string }>;
+    payloadSchema?: Array<{ name: string; type?: string }>;
 }
 
 /**
@@ -71,7 +71,7 @@ export function validatePayloadShapes(
     const emitIndex = new Map<string, { traitName: string; fields: string[] }>();
     for (const [traitName, declarations] of emits) {
         for (const decl of declarations) {
-            const fields = decl.payload?.map((p) => p.name) ?? [];
+            const fields = decl.payloadSchema?.map((p) => p.name) ?? [];
             emitIndex.set(decl.event, { traitName, fields });
         }
     }
@@ -157,15 +157,17 @@ export function buildEmitsFromTraits(
                 if (!Array.isArray(effect)) continue;
                 if (effect[0] === 'emit' && typeof effect[1] === 'string') {
                     const event = effect[1] as string;
-                    // Payload is in effect[2] if present
+                    // Payload value at the emit call site — used to
+                    // infer a `payloadSchema` from the runtime literal
+                    // when an explicit declaration isn't supplied.
                     const payloadObj = effect[2] as EventPayload | undefined;
-                    const payload = payloadObj
+                    const payloadSchema = payloadObj
                         ? Object.keys(payloadObj).map((name) => ({ name }))
                         : undefined;
 
                     // Avoid duplicates
                     if (!emitDecls.some((d) => d.event === event)) {
-                        emitDecls.push({ event, payload });
+                        emitDecls.push({ event, payloadSchema });
                     }
                 }
             }
