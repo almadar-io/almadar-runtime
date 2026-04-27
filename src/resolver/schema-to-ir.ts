@@ -66,7 +66,11 @@ function resolveField(field: EntityField): ResolvedField {
   const enumValues = extra.enumValues || extra.values || extra.options || extra.validation?.enum;
 
   return {
-    name: field.name,
+    // EntityField.name is optional in @almadar/core 7+ (matches Rust IR
+    // FieldDefinition.name: Option<String>). Top-level entity fields
+    // always carry a name; nameless nested item descriptors don't reach
+    // this resolver path.
+    name: field.name ?? '',
     type: field.type || 'string',
     tsType: inferTsType(field.type || 'string'),
     description: extra.description as string | undefined,

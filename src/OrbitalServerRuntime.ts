@@ -859,13 +859,17 @@ export class OrbitalServerRuntime {
         console.log(`[OrbitalRuntime] No instances in schema, generating mock data for ${entity?.name}`);
       }
       if (entity?.name && entity.fields) {
-        const fields = entity.fields.map((f: { name: string; type: string; required?: boolean; values?: string[]; default?: unknown }) => ({
-          name: f.name,
-          type: f.type,
-          required: f.required,
-          values: f.values,
-          default: f.default,
-        }));
+        const fields = entity.fields
+          .filter((f): f is typeof f & { name: string } =>
+            typeof f.name === 'string' && f.name.length > 0,
+          )
+          .map((f) => ({
+            name: f.name,
+            type: f.type,
+            required: f.required,
+            values: f.values,
+            default: f.default,
+          }));
         this.persistence.registerEntity({ name: entity.name, fields });
         if (this.config.debug) {
           console.log(`[OrbitalRuntime] Seeded mock data for entity: ${entity.name}, count: ${this.persistence.count(entity.name)}`);
@@ -1223,13 +1227,17 @@ export class OrbitalServerRuntime {
     for (const registered of this.orbitals.values()) {
       const entity = registered.entity;
       if (entity?.name && entity.fields) {
-        const fields = entity.fields.map((f) => ({
-          name: f.name,
-          type: f.type,
-          required: f.required,
-          values: f.values,
-          default: f.default,
-        }));
+        const fields = entity.fields
+          .filter((f): f is typeof f & { name: string } =>
+            typeof f.name === 'string' && f.name.length > 0,
+          )
+          .map((f) => ({
+            name: f.name,
+            type: f.type,
+            required: f.required,
+            values: f.values,
+            default: f.default,
+          }));
         this.persistence.registerEntity({ name: entity.name, fields });
       }
     }
@@ -2019,29 +2027,27 @@ export class OrbitalServerRuntime {
 
       for (const field of registered.entity.fields ?? []) {
         if (field.type !== 'relation') continue;
-        const value = data[field.name];
+        if (field.name === undefined) continue;
+        const fieldName = field.name;
+        const value = data[fieldName];
         if (value === undefined || value === null) continue;
 
         const cardinality = field.relation?.cardinality || 'one';
 
         if (cardinality === 'one' || cardinality === 'many-to-one') {
-          // Single cardinality: value must be a string, not an array
           if (Array.isArray(value)) {
             throw new Error(
-              `Cardinality violation: ${entityType}.${field.name} has cardinality '${cardinality}' but received an array. Expected a single string ID.`
+              `Cardinality violation: ${entityType}.${fieldName} has cardinality '${cardinality}' but received an array. Expected a single string ID.`
             );
           }
         } else if (cardinality === 'many' || cardinality === 'many-to-many' || cardinality === 'one-to-many') {
-          // Many cardinality: value must be an array of strings
           if (typeof value === 'string') {
-            // Auto-correct: wrap single string in array (permissive)
-            data[field.name] = [value];
+            data[fieldName] = [value];
           } else if (Array.isArray(value)) {
-            // Validate all elements are strings
             const nonStrings = value.filter((v: unknown) => typeof v !== 'string');
             if (nonStrings.length > 0) {
               throw new Error(
-                `Cardinality violation: ${entityType}.${field.name} has cardinality '${cardinality}' but array contains non-string values.`
+                `Cardinality violation: ${entityType}.${fieldName} has cardinality '${cardinality}' but array contains non-string values.`
               );
             }
           }
@@ -2067,14 +2073,15 @@ export class OrbitalServerRuntime {
       for (const field of fields) {
         if (field.type !== 'relation') continue;
         if (field.relation?.entity !== entityType) continue;
+        if (field.name === undefined) continue;
+        const fieldName = field.name;
 
         const onDelete = field.relation.onDelete || 'restrict';
         const referringEntityType = entity.name;
 
-        // Find all records in the referring entity that reference the deleted ID
         const allRecords = await this.persistence.list(referringEntityType);
         const affectedRecords = allRecords.filter(record => {
-          const fkValue = record[field.name];
+          const fkValue = record[fieldName];
           if (typeof fkValue === 'string') return fkValue === deletedId;
           if (Array.isArray(fkValue)) return fkValue.includes(deletedId);
           return false;
@@ -2103,13 +2110,14 @@ export class OrbitalServerRuntime {
           case 'nullify':
             for (const record of affectedRecords) {
               const recordId = record.id as string;
-              if (recordId) {
+              if (recordId && field.name !== undefined) {
+                const fieldName = field.name;
                 const update: EntityRow = {};
-                const fkValue = record[field.name];
+                const fkValue = record[fieldName];
                 if (Array.isArray(fkValue)) {
-                  update[field.name] = fkValue.filter((id: unknown) => id !== deletedId);
+                  update[fieldName] = fkValue.filter((id: unknown) => id !== deletedId);
                 } else {
-                  update[field.name] = null;
+                  update[fieldName] = null;
                 }
                 await this.persistence.update(referringEntityType, recordId, update);
               }
@@ -2144,7 +2152,14 @@ export class OrbitalServerRuntime {
 
     for (const [, registered] of this.orbitals) {
       if (registered.entity.name === entityType) {
-        entityFields = registered.entity.fields;
+        // EntityField.name is optional in @almadar/core 7+ to match the
+        // Rust IR (FieldDefinition.name: Option<String>). For relation
+        // population we only care about named top-level fields; nameless
+        // nested item descriptors don't carry FK metadata.
+        entityFields = registered.entity.fields.filter(
+          (f): f is typeof f & { name: string } =>
+            typeof f.name === 'string' && f.name.length > 0,
+        );
         break;
       }
     }

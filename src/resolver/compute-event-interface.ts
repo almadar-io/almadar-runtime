@@ -138,7 +138,7 @@ function collectTraitEmits(
                 trait: trait.name,
             },
             description: emit.description,
-            payload: emit.payload,
+            payload: emit.payloadSchema,
         });
     }
 }
@@ -192,7 +192,7 @@ function collectTickEmits(
                     tick: tick.name,
                 },
                 description: contract.description,
-                payload: contract.payload,
+                payload: contract.payloadSchema,
             });
         }
     }
