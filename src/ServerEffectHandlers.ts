@@ -13,7 +13,7 @@
  * @packageDocumentation
  */
 
-import type { EventPayload } from "@almadar/core";
+import type { EventPayload, SExpr } from "@almadar/core";
 import type { PersistenceAdapter } from "./PersistenceAdapter.js";
 import type {
   EffectHandlers,
@@ -24,6 +24,9 @@ import type {
 import { EffectExecutor } from "./EffectExecutor.js";
 import { createContextFromBindings } from "./BindingResolver.js";
 import { evaluate } from "@almadar/evaluator";
+import { createLogger } from "./logger.js";
+
+const effectLog = createLogger("almadar:runtime:effects");
 
 /**
  * Minimal event-bus contract the server handlers need. Narrower than the
@@ -142,12 +145,18 @@ export function createServerEffectHandlers(
   const handlers: EffectHandlers = {
     emit: (event, eventPayload, emitSource) => {
       if (debug) {
-        // eslint-disable-next-line no-console
         console.log(`[ServerEffectHandlers] emit ${event}`, eventPayload);
       }
       const stamp = emitSource ?? source;
       eventBus.emit(event, eventPayload, stamp);
       emittedEvents?.push({ event, payload: eventPayload });
+      effectLog.debug("emit:push", {
+        event,
+        cumulativeEmittedCount: emittedEvents?.length,
+        sourceTrait: stamp?.trait,
+        sourceOrbital: stamp?.orbital,
+        emittedEventsBound: emittedEvents !== undefined,
+      });
     },
 
     set: async (targetId, field, value) => {
@@ -284,6 +293,7 @@ export function createServerEffectHandlers(
 
       const type = targetEntityType || entityType;
       let resultData: EntityRow | undefined;
+      const sizeBefore = (await persistence.list(type)).length;
       try {
         switch (action) {
           case "create": {
@@ -315,6 +325,15 @@ export function createServerEffectHandlers(
             break;
           }
         }
+        const sizeAfter = (await persistence.list(type)).length;
+        effectLog.debug("persist:store-mutate", {
+          action,
+          entityType: type,
+          resultId: resultData?.id as string | undefined,
+          sizeBefore,
+          sizeAfter,
+          delta: sizeAfter - sizeBefore,
+        });
         record({
           effect: "persist",
           action,
@@ -323,6 +342,11 @@ export function createServerEffectHandlers(
           success: true,
         });
       } catch (err) {
+        effectLog.error("persist:store-mutate-error", {
+          action,
+          entityType: type,
+          error: err instanceof Error ? err.message : String(err),
+        });
         record({
           effect: "persist",
           action,
@@ -339,7 +363,6 @@ export function createServerEffectHandlers(
         if (consumerCallService) {
           result = await consumerCallService(service, action, params);
         } else if (debug) {
-          // eslint-disable-next-line no-console
           console.warn(
             `[ServerEffectHandlers] call-service not configured: ${service}.${action}`,
           );
@@ -385,16 +408,15 @@ export function createServerEffectHandlers(
         if (bindings && result) {
           const records = Array.isArray(result) ? result : [result];
           if (records.length > 0) {
-            const merged = Object.assign([...records], records[0]);
-            (bindings as Record<string, unknown>)[fetchEntityType] = merged;
+            const merged: EntityRow & EntityRow[] = Object.assign([...records], records[0]);
+            bindings[fetchEntityType] = merged;
             if (fetchEntityType === entityType) {
-              (bindings as Record<string, unknown>).entity = merged;
+              bindings.entity = merged;
             }
           }
         }
         return result;
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error(
           `[ServerEffectHandlers] fetch error for ${fetchEntityType}:`,
           err,
@@ -427,10 +449,10 @@ export function createServerEffectHandlers(
         if (bindings && result) {
           const records = Array.isArray(result) ? result : [result];
           if (records.length > 0) {
-            const merged = Object.assign([...records], records[0]);
-            (bindings as Record<string, unknown>)[derefEntityType] = merged;
+            const merged: EntityRow & EntityRow[] = Object.assign([...records], records[0]);
+            bindings[derefEntityType] = merged;
             if (derefEntityType === entityType) {
-              (bindings as Record<string, unknown>).entity = merged;
+              bindings.entity = merged;
             }
           }
         }
@@ -469,7 +491,7 @@ export function createServerEffectHandlers(
         );
         let newData: EntityRow;
         if (Array.isArray(transform)) {
-          const evalResult = evaluate(transform as unknown as never, ctx);
+          const evalResult = evaluate(transform as SExpr, ctx);
           if (
             evalResult &&
             typeof evalResult === "object" &&

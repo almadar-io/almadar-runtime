@@ -560,12 +560,32 @@ export class EffectExecutor {
                 const emitCfg = last && typeof last === 'object' && !Array.isArray(last) && 'emit' in (last as object)
                     ? this.extractEmitConfig(last)
                     : undefined;
+                effectLog.debug('persist:dispatch', {
+                    action,
+                    argCount: args.length,
+                    argTypes: args.map((a) => Array.isArray(a) ? 'array' : a === null ? 'null' : typeof a).join(','),
+                    traitName: this.context.traitName,
+                    transition: this.context.transition,
+                });
+                effectLog.debug('persist:emit-config', {
+                    action,
+                    hasEmitCfg: emitCfg !== undefined,
+                    success: emitCfg?.success,
+                    failure: emitCfg?.failure,
+                });
                 try {
                     if (action === 'batch') {
                         // Batch mode: ["persist", "batch", [...operations]]
                         const operations = args[1] as unknown[];
                         await this.handlers.persist('batch', '', { operations } as EntityRow);
+                        effectLog.debug('persist:success', {
+                            action,
+                            entityType: 'batch',
+                            opCount: operations.length,
+                            willEmit: emitCfg?.success,
+                        });
                         this.emitSuccess(emitCfg, 'success', operations);
+                        effectLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
                     } else {
                         const entityType = args[1] as string;
                         const data = args[2] as EntityRow | undefined;
@@ -573,9 +593,24 @@ export class EffectExecutor {
                         // persist() returns void — best available success payload
                         // is the data that went in, which matches the interpreted
                         // runtime's existing @entity reactivity contract.
+                        const dataId = typeof data === 'string'
+                            ? data
+                            : (data && typeof data === 'object' ? ((data as { id?: unknown }).id as string | undefined) : undefined);
+                        effectLog.debug('persist:success', {
+                            action,
+                            entityType,
+                            dataId,
+                            willEmit: emitCfg?.success,
+                        });
                         this.emitSuccess(emitCfg, 'success', data);
+                        effectLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
                     }
                 } catch (err) {
+                    effectLog.error('persist:error', {
+                        action,
+                        entityType: action === 'batch' ? 'batch' : (args[1] as string),
+                        error: err instanceof Error ? err.message : String(err),
+                    });
                     this.emitFailure(emitCfg, err);
                     throw err;
                 }

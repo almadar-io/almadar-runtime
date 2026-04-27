@@ -46,7 +46,10 @@ import {
   createInitialTraitState,
 } from "./StateMachineCore.js";
 import { EffectExecutor } from "./EffectExecutor.js";
+import { createLogger } from "./logger.js";
 import { LocalPersistenceAdapter } from "./LocalPersistenceAdapter.js";
+
+const effectLog = createLogger("almadar:runtime:effects");
 export { LocalPersistenceAdapter } from "./LocalPersistenceAdapter.js";
 import {
   interpolateProps,
@@ -1450,6 +1453,12 @@ export class OrbitalServerRuntime {
         };
         this.eventBus.emit(event, eventPayload, stamp);
         emittedEvents.push({ event, payload: eventPayload });
+        effectLog.debug("emit:push", {
+          event,
+          cumulativeEmittedCount: emittedEvents.length,
+          sourceTrait: stamp.trait,
+          sourceOrbital: stamp.orbital,
+        });
       },
 
       set: async (targetId, field, value) => {
@@ -1568,6 +1577,7 @@ export class OrbitalServerRuntime {
         // ----------------------------------------------------------------
         const type = targetEntityType || entityType;
         let resultData: EntityRow | undefined;
+        const sizeBefore = (await this.persistence.list(type)).length;
 
         try {
           // Validate relation cardinality before create/update
@@ -1611,6 +1621,16 @@ export class OrbitalServerRuntime {
             }
           }
 
+          const sizeAfter = (await this.persistence.list(type)).length;
+          effectLog.debug("persist:store-mutate", {
+            action,
+            entityType: type,
+            resultId: resultData?.id as string | undefined,
+            sizeBefore,
+            sizeAfter,
+            delta: sizeAfter - sizeBefore,
+          });
+
           effectResults.push({
             effect: 'persist',
             action,
@@ -1619,6 +1639,11 @@ export class OrbitalServerRuntime {
             success: true,
           });
         } catch (err) {
+          effectLog.error("persist:store-mutate-error", {
+            action,
+            entityType: type,
+            error: err instanceof Error ? err.message : String(err),
+          });
           effectResults.push({
             effect: 'persist',
             action,

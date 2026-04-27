@@ -151,6 +151,57 @@ describe('emit: — persist', () => {
         const failures = emit.mock.calls.filter(([e]) => e === 'PATIENT_SAVE_FAILED');
         expect(failures).toHaveLength(1);
     });
+
+    // Permanent observability for the persist hot path. The runtime logger
+    // (`createLogger('almadar:runtime:effects')`) writes these log lines at
+    // every persist boundary so a future verifier-failure on DO_UPDATE /
+    // DO_DELETE can be triaged from the run log alone, without re-instrumenting.
+    it('logs persist:dispatch + persist:emit-config + persist:emit-fired around a successful update', async () => {
+        const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+        try {
+            const { executor } = makeContext();
+            await executor.execute([
+                'persist',
+                'update',
+                'Patient',
+                { id: 'p-1', status: 'done' },
+                { emit: { success: 'PATIENT_SAVED' } },
+            ]);
+            const debugMessages = debugSpy.mock.calls.map((call) => String(call[1] ?? ''));
+            expect(debugMessages).toContain('persist:dispatch');
+            expect(debugMessages).toContain('persist:emit-config');
+            expect(debugMessages).toContain('persist:emit-fired');
+            const emitFiredCall = debugSpy.mock.calls.find((call) => call[1] === 'persist:emit-fired');
+            expect(emitFiredCall?.[2]).toMatchObject({ action: 'update', eventName: 'PATIENT_SAVED' });
+        } finally {
+            debugSpy.mockRestore();
+        }
+    });
+
+    it('logs persist:error with action and entityType on failure', async () => {
+        const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        try {
+            const { handlers } = makeContext();
+            (handlers.persist as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+                throw new Error('boom');
+            });
+            const executor = new EffectExecutor({
+                handlers,
+                bindings: {},
+                context: { traitName: 'T', state: 's', transition: 't' },
+            });
+            await executor.executeWithResults([
+                ['persist', 'update', 'Patient', { id: 'p-1' }, { emit: { failure: 'F' } }],
+            ]);
+            const errorCall = errorSpy.mock.calls.find((call) => call[1] === 'persist:error');
+            expect(errorCall).toBeDefined();
+            expect(errorCall?.[2]).toMatchObject({ action: 'update', entityType: 'Patient', error: 'boom' });
+        } finally {
+            debugSpy.mockRestore();
+            errorSpy.mockRestore();
+        }
+    });
 });
 
 // ============================================================================
