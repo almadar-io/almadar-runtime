@@ -100,6 +100,7 @@ export function interpolateProps(
     // regressions of this contract surface immediately.
     const entityBindingRaw = props['entity'];
     const typeBindingRaw = props['type'];
+    const patternType = typeof typeBindingRaw === 'string' ? typeBindingRaw : undefined;
     if (typeof entityBindingRaw === 'string') {
         const resolvedEntity = result['entity'];
         const resolvedRow: EntityRow | null =
@@ -111,11 +112,24 @@ export function interpolateProps(
         // typeof check rather than a cast chain.
         const ctxRow = ctx.payload['row'];
         renderLog.debug('interpolateProps:entity', {
-            patternType: typeof typeBindingRaw === 'string' ? typeBindingRaw : undefined,
+            patternType,
             entityBinding: entityBindingRaw,
             resolvedIsObject: resolvedRow !== null,
             resolvedEqualsCtxRow: ctxRow !== undefined && resolvedRow !== null && resolvedRow === ctxRow,
             resolvedRowId: resolvedRow?.id,
+        });
+    }
+    if (patternType === 'form-section' || patternType === 'form') {
+        const modeRaw = result['mode'];
+        const submitRaw = result['submitEvent'];
+        const cancelRaw = result['cancelEvent'];
+        bindLog.debug('form-binding', {
+            patternType,
+            mode: typeof modeRaw === 'string' ? modeRaw : undefined,
+            submitEvent: typeof submitRaw === 'string' ? submitRaw : undefined,
+            cancelEvent: typeof cancelRaw === 'string' ? cancelRaw : undefined,
+            entity: JSON.stringify(result['entity'] ?? null),
+            fields: JSON.stringify(result['fields'] ?? null),
         });
     }
     return anyChanged ? result : props;

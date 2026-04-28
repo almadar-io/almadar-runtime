@@ -55,6 +55,7 @@ import {
 } from "./PayloadValidator.js";
 
 const effectLog = createLogger("almadar:runtime:effects");
+const busLog = createLogger("almadar:runtime:bus");
 // Render-ui-side observability for the runtime path. Lit up via
 // `ALMADAR_DEBUG=almadar:runtime:render-ui` (or `localStorage.ALMADAR_DEBUG`
 // in the browser). Tracks every render-ui clientEffect push so we can tell
@@ -1312,6 +1313,18 @@ export class OrbitalServerRuntime {
       hasPayloadRow: payloadRowAsPayload !== undefined,
       payloadRowId: typeof payloadRowId === 'string' || typeof payloadRowId === 'number' ? payloadRowId : undefined,
       entityId: request.entityId,
+    });
+    busLog.debug('bus:incoming', {
+      orbital: orbitalName,
+      event: request.event,
+      payload: JSON.stringify(request.payload ?? null),
+      entityId: request.entityId,
+      traitStates: JSON.stringify(
+        Array.from(registered.manager.getAllStates().entries()).map(([traitName, state]) => ({
+          traitName,
+          currentState: state.currentState,
+        })),
+      ),
     });
 
     const { event, payload, entityId, user } = request;
