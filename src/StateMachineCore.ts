@@ -124,6 +124,17 @@ export interface ProcessEventOptions {
     /** Entity data for binding resolution */
     entityData?: EntityRow;
     /**
+     * Trait config for `@config.X` resolution inside guard expressions.
+     * Surfaced on the EvaluationContext so guards can write mode-aware
+     * predicates — e.g. std-modal's OPEN can require `@payload.row` only
+     * when `@config.mode === "edit"`. The validator (sigil_context.rs)
+     * allows `@config` in guard context as of v3.12.0; this field is
+     * the runtime side of the same contract. Threaded by the caller
+     * (typically `OrbitalServerRuntime.processEvent` reading from the
+     * trait's `RegisteredOrbital.configByTrait`).
+     */
+    config?: ConfigContext;
+    /**
      * Guard evaluation error handling mode. (RCG-02)
      * - "permissive": Guard errors allow the transition (default, backwards-compatible)
      * - "strict": Guard errors block the transition
@@ -172,6 +183,7 @@ export interface ProcessEventOptions {
 export function processEvent(options: ProcessEventOptions): TransitionResult {
     const {
         traitState, trait, eventKey, payload, entityData,
+        config,
         guardMode = 'permissive',
         strictBindings = false,
         contextExtensions,
@@ -221,6 +233,12 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
             entity: entityData,
             payload,
             state: traitState.currentState,
+            // Surface call-site config so `@config.X` resolves inside
+            // guard expressions (matches the validator's allowed sigil
+            // list as of v3.12.0). createContextFromBindings already
+            // propagates `bindings.config` to ctx.config when present —
+            // we just need to pass it through here.
+            config,
         }, strictBindings, contextExtensions);
 
         try {
@@ -347,6 +365,15 @@ function compositeKey(traitName: string, scope: string): string {
 export class StateMachineManager {
     private traits: Map<string, TraitDefinition> = new Map();
     /**
+     * Per-trait call-site config, surfaced to guard expressions so
+     * `@config.X` resolves at runtime. Populated by the orbital's
+     * registration step (see `OrbitalServerRuntime.registerOrbital`'s
+     * `configByTrait` projection). Empty for atom-scope traits whose
+     * call-site config wasn't supplied — guards that read `@config.X`
+     * in that case will see `undefined` and short-circuit accordingly.
+     */
+    private traitConfigs: Map<string, ConfigContext> = new Map();
+    /**
      * State map keyed by `${traitName}::${entityId | __singleton__}`.
      *
      * Each entity instance of an orbital gets its own copy of every
@@ -396,6 +423,20 @@ export class StateMachineManager {
     addTrait(trait: TraitDefinition): void {
         this.traits.set(trait.name, trait);
         // Lazy: state for each entity scope is created on first event.
+    }
+
+    /**
+     * Bind the call-site config for a trait so guard `@config.X`
+     * resolves at runtime. Typically called by the orbital
+     * registration step right after `addTrait`. Idempotent; passing
+     * `undefined` clears the binding.
+     */
+    setTraitConfig(traitName: string, config: ConfigContext | undefined): void {
+        if (config === undefined) {
+            this.traitConfigs.delete(traitName);
+        } else {
+            this.traitConfigs.set(traitName, config);
+        }
     }
 
     /**
@@ -532,6 +573,7 @@ export class StateMachineManager {
                 eventKey,
                 payload,
                 entityData,
+                config: this.traitConfigs.get(traitName),
                 guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,
                 contextExtensions: this.config.contextExtensions,
@@ -625,6 +667,7 @@ export class StateMachineManager {
                 eventKey: entry.eventKey,
                 payload: entry.payload,
                 entityData: entry.entityData,
+                config: this.traitConfigs.get(traitName),
                 guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,
                 contextExtensions: this.config.contextExtensions,

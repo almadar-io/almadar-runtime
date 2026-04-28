@@ -50,6 +50,13 @@ import { createLogger } from "./logger.js";
 import { LocalPersistenceAdapter } from "./LocalPersistenceAdapter.js";
 
 const effectLog = createLogger("almadar:runtime:effects");
+// Render-ui-side observability for the runtime path. Lit up via
+// `ALMADAR_DEBUG=almadar:runtime:render-ui` (or `localStorage.ALMADAR_DEBUG`
+// in the browser). Tracks every render-ui clientEffect push so we can tell
+// when the runtime re-fires `render-ui` for the modal slot during a typing
+// session — the suspected reason form fields snap back to pre-fill on the
+// runtime path while the compiled path holds them stable.
+const renderLog = createLogger("almadar:runtime:render-ui");
 export { LocalPersistenceAdapter } from "./LocalPersistenceAdapter.js";
 import {
   interpolateProps,
@@ -66,6 +73,7 @@ import type {
   EntityRow,
   EventPayload,
   EvaluationContextExtensions,
+  RuntimeRenderPattern,
 } from "./types.js";
 import type {
   FieldValue,
@@ -805,6 +813,17 @@ export class OrbitalServerRuntime {
       contextExtensions: this.config.contextExtensions,
     });
 
+    // Bind each trait's call-site config to the manager so `@config.X`
+    // resolves inside guard expressions at runtime. The orbital's
+    // `configByTrait` map was just built above from the trait-ref
+    // wrapper config blocks; thread those through to the SMM so
+    // mode-aware guards (e.g. std-modal's "OPEN requires row when
+    // mode=edit") work end-to-end on the runtime path. No-op for
+    // traits with no call-site config supplied.
+    for (const [traitName, traitConfig] of configByTrait) {
+      manager.setTraitConfig(traitName, traitConfig);
+    }
+
     const entityRef = orbital.entity;
     let entity: Entity;
     if (typeof entityRef === 'string') {
@@ -1267,6 +1286,28 @@ export class OrbitalServerRuntime {
         error: `Orbital not found: ${orbitalName}`,
       };
     }
+
+    // Trace every server-side event entry. If the runtime path is
+    // re-firing render-ui during a typing session, the smoking gun
+    // appears here: a `processOrbitalEvent:enter` line per keystroke
+    // means something upstream (bus replay, snapshot poll, cascade
+    // listener) is triggering a transition cycle the user didn't
+    // intend. EventPayload values are typed as `EventPayloadValue`
+    // (a recursive union including nested EventPayload) — narrow with
+    // typeof checks instead of an unknown cast.
+    const payloadRow = request.payload?.['row'];
+    const payloadRowAsPayload =
+      payloadRow !== null && typeof payloadRow === 'object' && !Array.isArray(payloadRow)
+        ? (payloadRow as EventPayload)
+        : undefined;
+    const payloadRowId = payloadRowAsPayload?.['id'];
+    renderLog.debug('processOrbitalEvent:enter', {
+      orbital: orbitalName,
+      event: request.event,
+      hasPayloadRow: payloadRowAsPayload !== undefined,
+      payloadRowId: typeof payloadRowId === 'string' || typeof payloadRowId === 'number' ? payloadRowId : undefined,
+      entityId: request.entityId,
+    });
 
     const { event, payload, entityId, user } = request;
     const emittedEvents: Array<{ event: string; payload?: EventPayload }> = [];
@@ -1927,6 +1968,29 @@ export class OrbitalServerRuntime {
 
       // Client-side effects - collect for forwarding to client
       renderUI: (slot, pattern, props, priority) => {
+        // Snapshot the resolved row reference (if any) so the log can
+        // tell whether successive render-ui pushes for the same slot
+        // carry the SAME row object (stable, no remount expected) or a
+        // freshly-cloned one (would invalidate Form's normalizedInitialData
+        // memo and reset typed values). We read `pattern.entity` because
+        // form-section binds the row to `entity: @payload.row`.
+        const patternNode: RuntimeRenderPattern | null =
+          pattern !== null && typeof pattern === 'object' && !Array.isArray(pattern)
+            ? (pattern as RuntimeRenderPattern)
+            : null;
+        const patternEntity = patternNode?.entity;
+        const entityRow: EntityRow | null =
+          patternEntity !== null && typeof patternEntity === 'object' && !Array.isArray(patternEntity)
+            ? (patternEntity as EntityRow)
+            : null;
+        const patternTypeRaw = patternNode?.['type'];
+        renderLog.debug('renderUI:push', {
+          trait: traitName,
+          slot,
+          patternType: typeof patternTypeRaw === 'string' ? patternTypeRaw : undefined,
+          entityRowId: typeof entityRow?.id === 'string' ? entityRow.id : undefined,
+          entityIsObject: entityRow !== null,
+        });
         pushClientEffect(['render-ui', slot, pattern, props, priority]);
       },
       navigate: (path, params) => {

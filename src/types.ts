@@ -28,6 +28,35 @@ export type { EntityRow, EventPayload, ServiceParams };
 export type PatternProps = ResolvedPatternProps;
 
 /**
+ * Value a render-ui pattern prop can carry AFTER interpolation. Mirrors
+ * `FieldValue` but extends with `RuntimeRenderPattern` so nested pattern
+ * configs (children, slot props that are themselves render-ui nodes)
+ * round-trip without an `unknown` escape hatch.
+ */
+export type RuntimePatternValue =
+    | string
+    | number
+    | boolean
+    | null
+    | undefined
+    | EntityRow
+    | EntityRow[]
+    | readonly RuntimePatternValue[]
+    | RuntimeRenderPattern;
+
+/**
+ * Shape of a render-ui pattern AFTER interpolation, as the runtime hands
+ * it to `EffectHandlers.renderUI`. Different from `ResolvedPatternProps`
+ * (`@almadar/core`) because the post-interpolation pattern carries
+ * resolved EntityRow values (e.g. `{ entity: <row> }` from `@payload.row`)
+ * not just primitives. Used by render-ui observability helpers to narrow
+ * safely without `unknown` casts.
+ */
+export interface RuntimeRenderPattern {
+    readonly [prop: string]: RuntimePatternValue;
+}
+
+/**
  * Configuration context.
  *
  * Re-export of `TraitConfig` from `@almadar/core` for the runtime's binding

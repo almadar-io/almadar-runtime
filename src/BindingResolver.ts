@@ -20,6 +20,10 @@ import type { BindingContext, EntityRow, PatternProps, EvaluationContextExtensio
 import { createLogger } from './logger.js';
 
 const bindLog = createLogger('almadar:runtime:bindings');
+// See OrbitalServerRuntime — same `almadar:runtime:render-ui` namespace,
+// instantiated here so interpolation of pattern objects can report
+// whether the resolved row reference matches what arrived in ctx.
+const renderLog = createLogger('almadar:runtime:render-ui');
 
 // Re-export for convenience
 export { createMinimalContext, type EvaluationContext };
@@ -71,11 +75,50 @@ export function interpolateProps(
     props: PatternProps,
     ctx: EvaluationContext
 ): PatternProps {
+    // Identity-preserving walk: if no key produced a different value
+    // from the input, return the ORIGINAL `props` reference instead of
+    // a fresh clone. Pre-fix every render-ui evaluation deep-cloned
+    // pattern objects (and the resolved entity rows nested inside),
+    // which gave Form's `entity` prop a fresh JS reference per pass
+    // and silently fired the `[normalizedInitialData]` reset useEffect
+    // mid-edit, wiping typed values. The compiled path uses a stable
+    // `lastPayload.row` from `useReducer` and never hit this; the
+    // runtime path now matches that semantic — pure data passes through
+    // by reference, only branches that actually resolve a binding (or
+    // an sexpr) yield a new value.
     const result: PatternProps = {};
+    let anyChanged = false;
     for (const [key, value] of Object.entries(props)) {
-        result[key] = interpolateValue(value, ctx) as PatternProps[string];
+        const interpolated = interpolateValue(value, ctx) as PatternProps[string];
+        result[key] = interpolated;
+        if (interpolated !== value) anyChanged = true;
     }
-    return result;
+    // When a pattern carries an `entity: @payload.row` binding, log
+    // whether the resolved row matches the same JS reference still
+    // present on ctx.payload.row. Originally added to confirm the
+    // clone hypothesis; kept as permanent observability so future
+    // regressions of this contract surface immediately.
+    const entityBindingRaw = props['entity'];
+    const typeBindingRaw = props['type'];
+    if (typeof entityBindingRaw === 'string') {
+        const resolvedEntity = result['entity'];
+        const resolvedRow: EntityRow | null =
+            resolvedEntity !== null && typeof resolvedEntity === 'object' && !Array.isArray(resolvedEntity)
+                ? (resolvedEntity as EntityRow)
+                : null;
+        // ctx.payload is typed as `Record<string, unknown>` by
+        // `@almadar/evaluator` — narrow the `row` value with a
+        // typeof check rather than a cast chain.
+        const ctxRow = ctx.payload['row'];
+        renderLog.debug('interpolateProps:entity', {
+            patternType: typeof typeBindingRaw === 'string' ? typeBindingRaw : undefined,
+            entityBinding: entityBindingRaw,
+            resolvedIsObject: resolvedRow !== null,
+            resolvedEqualsCtxRow: ctxRow !== undefined && resolvedRow !== null && resolvedRow === ctxRow,
+            resolvedRowId: resolvedRow?.id,
+        });
+    }
+    return anyChanged ? result : props;
 }
 
 /**
@@ -161,14 +204,32 @@ function interpolateEmbeddedBindings(value: string, ctx: EvaluationContext): str
  */
 function interpolateArray(value: unknown[], ctx: EvaluationContext): unknown {
     if (value.length === 0) {
-        return [];
+        // Preserve identity for empty arrays too — same rationale as
+        // `interpolateProps` below.
+        return value;
     }
 
     if (isSExpression(value)) {
         return evaluate(value as Parameters<typeof evaluate>[0], ctx);
     }
 
-    return value.map((item) => interpolateValue(item, ctx));
+    // Identity-preserving map: only return a new array if any item
+    // actually changed during interpolation. Otherwise the original
+    // array reference passes through unchanged. Mirrors
+    // `interpolateProps`' identity rule so e.g. an entity-row array
+    // (`entity: @payload.data` resolved to `[row1, row2, ...]`)
+    // doesn't get cloned every render-ui evaluation. The element type
+    // is the input array's own element type — no `unknown` annotation
+    // beyond the function's existing public surface.
+    const mapped: typeof value = [];
+    let anyChanged = false;
+    for (let i = 0; i < value.length; i++) {
+        const item = value[i];
+        const interpolated = interpolateValue(item, ctx);
+        mapped.push(interpolated);
+        if (interpolated !== item) anyChanged = true;
+    }
+    return anyChanged ? mapped : value;
 }
 
 /**
