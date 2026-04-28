@@ -48,6 +48,11 @@ import {
 import { EffectExecutor } from "./EffectExecutor.js";
 import { createLogger } from "./logger.js";
 import { LocalPersistenceAdapter } from "./LocalPersistenceAdapter.js";
+import {
+  validateEventPayload,
+  formatPayloadValidationError,
+  type PayloadValidationFailure,
+} from "./PayloadValidator.js";
 
 const effectLog = createLogger("almadar:runtime:effects");
 // Render-ui-side observability for the runtime path. Lit up via
@@ -1310,6 +1315,44 @@ export class OrbitalServerRuntime {
     });
 
     const { event, payload, entityId, user } = request;
+
+    // API-boundary payload validation. Each trait declares a
+    // `payloadSchema` per event in its `stateMachine.events` block
+    // (lowered from the `.lolo` listens block). A field marked with
+    // `!` (e.g. `data : ListItem!`) becomes `required: true`; this
+    // check rejects the request when a required field is missing or
+    // null. Without this, the persist effect happily writes empty
+    // rows for `payload: {}` requests — exactly what produced the
+    // junk-card artifact in the verifier's bus-replay coverage walk.
+    // The compiled-path generated handler emits the equivalent
+    // inline check (per-event required-field list inlined from
+    // `OirEvent.payload_required_fields`) so guards behave
+    // identically across paths.
+    //
+    // Use `registered.traits` (already-unwrapped `Trait[]`) instead
+    // of `registered.schema.traits` (which holds the unprocessed
+    // `TraitRef` wrappers with `_resolved` attached by
+    // preprocessSchema). The unwrap was already done in
+    // registerOrbitalAsync.
+    const validationFailures: PayloadValidationFailure[] = [];
+    for (const trait of registered.traits) {
+      const eventSchema = trait.stateMachine?.events?.find((e) => e.key === event);
+      if (eventSchema?.payloadSchema && eventSchema.payloadSchema.length > 0) {
+        validationFailures.push(
+          ...validateEventPayload(event, payload, eventSchema.payloadSchema),
+        );
+      }
+    }
+    if (validationFailures.length > 0) {
+      return {
+        success: false,
+        transitioned: false,
+        states: {},
+        emittedEvents: [],
+        error: formatPayloadValidationError(validationFailures),
+      };
+    }
+
     const emittedEvents: Array<{ event: string; payload?: EventPayload }> = [];
     // Collect data fetched by `fetch` effects
     const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};

@@ -119,7 +119,10 @@ export type {
 export {
   validatePayloadShapes,
   buildEmitsFromTraits,
+  validateEventPayload,
+  formatPayloadValidationError,
   type PayloadMismatch,
+  type PayloadValidationFailure,
 } from "./PayloadValidator.js";
 
 // Uses Integration (for `uses` system)

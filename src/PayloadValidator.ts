@@ -8,7 +8,79 @@
  * @packageDocumentation
  */
 
+import type { PayloadField } from '@almadar/core';
 import type { TraitDefinition, EventPayload } from './types.js';
+
+// ============================================================================
+// Per-Request Payload Validation
+// ============================================================================
+
+/**
+ * Per-event payload-validation error. Returned by `validateEventPayload`
+ * when a request body doesn't match the trait's listens schema for the
+ * dispatched event. Caller (HTTP handler in either path) translates
+ * this into a 400 response.
+ */
+export interface PayloadValidationFailure {
+    readonly event: string;
+    readonly field: string;
+    readonly reason: 'missing' | 'null' | 'wrong-type';
+    readonly expectedType?: string;
+}
+
+/**
+ * Validate an incoming event payload against its trait's declared
+ * `stateMachine.events[i].payloadSchema`. Currently checks the
+ * `required: true` flag against undefined/null values — i.e. enforces
+ * the `!` author marker at the API boundary so the persist effect
+ * never sees a missing-but-required field.
+ *
+ * Returns an empty array if the payload is valid; one entry per
+ * violation otherwise. Pass through if the event has no schema
+ * (e.g. INIT, untyped emits) — coverage walks of unschemaed events
+ * stay legal.
+ *
+ * Both the runtime path (`OrbitalServerRuntime.processOrbitalEvent`)
+ * and the compiled-path generated handlers call this with the same
+ * arguments so guards behave identically across the two paths.
+ *
+ * Uses `@almadar/core`'s `PayloadField` directly — that's the type
+ * the IR's `Event.payloadSchema` carries (open `type: string`,
+ * matching the Rust validator's acceptance of entity-name references
+ * like `ListItem`). No parallel runtime type.
+ */
+export function validateEventPayload(
+    eventKey: string,
+    payload: EventPayload | undefined,
+    schema: ReadonlyArray<PayloadField> | undefined,
+): PayloadValidationFailure[] {
+    if (!schema || schema.length === 0) return [];
+    const failures: PayloadValidationFailure[] = [];
+    for (const field of schema) {
+        if (!field.required) continue;
+        const value = payload?.[field.name];
+        if (value === undefined) {
+            failures.push({ event: eventKey, field: field.name, reason: 'missing', expectedType: field.type });
+            continue;
+        }
+        if (value === null) {
+            failures.push({ event: eventKey, field: field.name, reason: 'null', expectedType: field.type });
+        }
+    }
+    return failures;
+}
+
+/**
+ * Format a validation failure into a human-readable error string for
+ * the API response body.
+ */
+export function formatPayloadValidationError(failures: ReadonlyArray<PayloadValidationFailure>): string {
+    if (failures.length === 0) return '';
+    const parts = failures.map((f) =>
+        `${f.field} (${f.reason}${f.expectedType ? `, expected ${f.expectedType}` : ''})`,
+    );
+    return `Payload validation failed for event '${failures[0].event}': ${parts.join('; ')}`;
+}
 
 // ============================================================================
 // Types
