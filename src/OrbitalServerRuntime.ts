@@ -1248,10 +1248,11 @@ export class OrbitalServerRuntime {
    */
   resetMockPersistence(): void {
     if (!(this.persistence instanceof MockPersistenceAdapter)) return;
+    busLog.debug('mock:reset:enter', {
+      orbitalCount: this.orbitals.size,
+      timestamp: new Date().toISOString(),
+    });
     this.persistence.clearAll();
-    // Re-run the mock registration for every known entity so seed data
-    // repopulates. The register path already iterates each orbital's
-    // entity block; re-seeding via registerEntity mirrors initial load.
     for (const registered of this.orbitals.values()) {
       const entity = registered.entity;
       if (entity?.name && entity.fields) {

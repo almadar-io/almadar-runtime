@@ -11,6 +11,18 @@ import { faker } from '@faker-js/faker';
 import type { PersistenceAdapter } from './OrbitalServerRuntime.js';
 import type { EntityRow } from './types.js';
 import type { FieldValue } from '@almadar/core';
+import { createLogger } from './logger.js';
+
+const mockLog = createLogger('almadar:runtime:mock');
+
+/** Default seed used when callers don't provide one. Fixed so re-seeds
+ *  during hermetic-frame mode produce identical row data each time —
+ *  matching the compiled path's compile-baked-in mock semantics. */
+const DEFAULT_MOCK_SEED = 42;
+/** Reference timestamp used as `now` for seeded rows. Deterministic so
+ *  diff observers don't see all rows as "changed" between frames just
+ *  because the wallclock advanced. */
+const SEED_REFERENCE_TIMESTAMP = '2024-01-01T00:00:00.000Z';
 
 // ============================================================================
 // Types
@@ -59,15 +71,21 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     this.config = {
       defaultSeedCount: 6,
       debug: false,
+      seed: DEFAULT_MOCK_SEED,
       ...config,
     };
+    faker.seed(this.config.seed);
+    mockLog.debug('mock:adapter:init', { seed: this.config.seed });
+  }
 
-    // Set seed for deterministic generation if provided
-    if (config.seed !== undefined) {
-      faker.seed(config.seed);
-      if (this.config.debug) {
-        console.log(`[MockPersistence] Using seed: ${config.seed}`);
-      }
+  /** Re-anchor faker's PRNG to the configured seed. Called before every
+   *  re-seed loop so identical reseed sequences produce identical rows
+   *  (timestamps + faker-generated fields). Without this, the first
+   *  reseed produces row set A, the second produces row set B, and
+   *  diff observers see all rows as "changed" between frames. */
+  resetFakerSeed(): void {
+    if (this.config.seed !== undefined) {
+      faker.seed(this.config.seed);
     }
   }
 
@@ -125,12 +143,11 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
 
     for (const instance of instances) {
       const id = (instance.id as string) || this.nextId(entityName);
-      const now = new Date().toISOString();
       const item: EntityRow = {
         ...instance,
         id,
-        createdAt: instance.createdAt as string || now,
-        updatedAt: now,
+        createdAt: instance.createdAt as string || SEED_REFERENCE_TIMESTAMP,
+        updatedAt: SEED_REFERENCE_TIMESTAMP,
       };
       store.set(id, item);
     }
@@ -147,10 +164,16 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       console.log(`[MockPersistence] Seeding ${count} ${entityName}...`);
     }
 
+    const generated: Array<{ id: string; updatedAt: string }> = [];
     for (let i = 0; i < count; i++) {
       const item = this.generateMockItem(normalized, entityName, fields, i + 1);
       store.set(item.id as string, item);
+      generated.push({
+        id: item.id as string,
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : '',
+      });
     }
+    mockLog.debug('mock:seed', { entityName, count, idsAndTimestamps: JSON.stringify(generated) });
   }
 
   /**
@@ -163,11 +186,14 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     index: number
   ): EntityRow {
     const id = this.nextId(entityName);
-    const now = new Date().toISOString();
+    // Deterministic timestamps: keep updatedAt anchored at the seed
+    // reference so re-seeded rows compare identically across hermetic
+    // frames. createdAt uses faker (also deterministic with seed) to
+    // simulate a realistic creation date.
     const item: EntityRow = {
       id,
       createdAt: faker.date.past({ years: 1 }).toISOString(),
-      updatedAt: now,
+      updatedAt: SEED_REFERENCE_TIMESTAMP,
     };
 
     for (const field of fields) {
@@ -376,12 +402,14 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     this.idCounters.delete(normalized);
   }
 
-  /**
-   * Clear all data.
-   */
+  /** Clear all data + re-anchor faker so the next seed loop reproduces
+   *  identical rows. Hermetic-frame mode calls this between every step
+   *  via OrbitalServerRuntime.resetMockPersistence. */
   clearAll(): void {
     this.stores.clear();
     this.idCounters.clear();
+    this.resetFakerSeed();
+    mockLog.debug('mock:adapter:clearAll', { reanchored: this.config.seed });
   }
 
   /**
