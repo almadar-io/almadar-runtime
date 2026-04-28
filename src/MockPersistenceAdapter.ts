@@ -71,8 +71,10 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     this.config = {
       defaultSeedCount: 6,
       debug: false,
-      seed: DEFAULT_MOCK_SEED,
       ...config,
+      // Apply default after spread so an undefined `seed` in the
+      // input doesn't overwrite the default.
+      seed: config.seed ?? DEFAULT_MOCK_SEED,
     };
     faker.seed(this.config.seed);
     mockLog.debug('mock:adapter:init', { seed: this.config.seed });
