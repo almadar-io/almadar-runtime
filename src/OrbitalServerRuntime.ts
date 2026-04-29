@@ -63,6 +63,12 @@ const busLog = createLogger("almadar:runtime:bus");
 // session — the suspected reason form fields snap back to pre-fill on the
 // runtime path while the compiled path holds them stable.
 const renderLog = createLogger("almadar:runtime:render-ui");
+// Gap #11 (Almadar_Std_Verification.md): cross-orbital cascade tracing.
+// Logs per processOrbitalEvent entry and per emit so the runtime-verify
+// console capture shows which orbital's traits actually fired during a
+// dispatch. Pairs with the UI-side `almadar:runtime:cross-orbital` channel
+// in OrbPreview / ServerBridge / SlotsContext.
+const xOrbitalLog = createLogger("almadar:runtime:cross-orbital");
 export { LocalPersistenceAdapter } from "./LocalPersistenceAdapter.js";
 import {
   interpolateProps,
@@ -90,7 +96,50 @@ import type {
   TraitTick,
   TraitConfig,
   TraitConfigValue,
+  BusEventSource,
+  PatternConfig,
+  ResolvedPatternProps,
+  SExpr,
 } from "@almadar/core";
+
+/**
+ * Client-side effect tuple shipped in `OrbitalEventResponse.clientEffects`.
+ * Restricted to the three effect kinds the client knows how to apply to the
+ * UI: render-ui (slot mutation), navigate (route change), notify (toast).
+ * Server-only effects (persist, set, fetch, ...) execute on the server and
+ * surface their results via `effectResults` and `emittedEvents`, not here.
+ *
+ * Shape note: the wire form is broader than `RenderUIEffect` /
+ * `NavigateEffect` / `NotifyEffect` from `@almadar/core/types/effect.ts` in
+ * two places — the runtime appends an interpolated `props` object plus an
+ * optional `priority` slot to render-ui (slot 4 + 5), and `navigate` /
+ * `notify` may surface their optional argument as `undefined` rather than
+ * absent. The local union spells those variants out explicitly so consumers
+ * (ServerBridge.tsx parser, debugger inspector) get accurate completions
+ * instead of `unknown[]`.
+ *
+ * `slot` is a plain `string` in this wire shape (not `UISlot`'s literal
+ * union) because the runtime forwards the raw string from the trait's
+ * `(render-ui slot ...)` SExpr without re-validating against the registry —
+ * registry validation lives in `orbital validate` / `lolo` parse, not here.
+ */
+export type ClientRenderUITuple =
+  | ['render-ui', string, PatternConfig | null]
+  | ['render-ui', string, PatternConfig | null, ResolvedPatternProps]
+  | ['render-ui', string, PatternConfig | null, ResolvedPatternProps | undefined, number | undefined];
+
+export type ClientNavigateTuple =
+  | ['navigate', string]
+  | ['navigate', string, Record<string, string> | undefined];
+
+export type ClientNotifyTuple =
+  | ['notify', string, string | SExpr | undefined]
+  | ['notify', string, string | SExpr | undefined, { type?: string }];
+
+export type ClientEffectTuple =
+  | ClientRenderUITuple
+  | ClientNavigateTuple
+  | ClientNotifyTuple;
 import { isInlineTrait, isEntityCall } from "@almadar/core";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
@@ -170,10 +219,16 @@ export interface OrbitalEventResponse {
    * typed against `@almadar/core`'s `EventPayload` — the recursive record of
    * primitive + nested EventPayload values the state machine already uses
    * internally. Kept as the single source of truth for emit-payload shape.
+   *
+   * Each entry carries a `source: BusEventSource` so the client-side
+   * ServerBridge can re-broadcast on the qualified `UI:Orbital.Trait.EVENT`
+   * bus key. Without source the re-broadcast skips the entry and downstream
+   * listeners (e.g. ContactBrowse waiting for ContactLoaded after a fetch)
+   * never fire — the dashboard-layout that ContactLoaded renders disappears.
    */
-  emittedEvents: Array<{ event: string; payload?: EventPayload }>;
+  emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>;
   /** Client-side effects to execute (render-ui, navigate, notify) */
-  clientEffects?: Array<unknown>;
+  clientEffects?: ClientEffectTuple[];
   /**
    * Same effects as `clientEffects`, paired with the producing trait name.
    * Consumers that need per-trait attribution (e.g. `<TraitFrame>` resolving
@@ -182,7 +237,7 @@ export interface OrbitalEventResponse {
    *
    * Same length and ordering as `clientEffects`; entries are 1:1 by index.
    */
-  clientEffectsByTrait?: Array<{ traitName: string; effect: unknown[] }>;
+  clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>;
   /** Results from server-side effects (persist, call-service, set) */
   effectResults?: EffectResult[];
   error?: string;
@@ -1112,7 +1167,7 @@ export class OrbitalServerRuntime {
     registered: RegisteredOrbital,
   ): Promise<void> {
     const entityType = registered.entity.name;
-    const emittedEvents: Array<{ event: string; payload?: EventPayload }> = [];
+    const emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }> = [];
 
     try {
       // Get all entities (or filtered by appliesTo)
@@ -1166,7 +1221,7 @@ export class OrbitalServerRuntime {
         // Execute effects for this entity
         if (tick.effects && tick.effects.length > 0) {
           const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
-          const clientEffects: Array<unknown> = [];
+          const clientEffects: ClientEffectTuple[] = [];
           const tickEffectResults: EffectResult[] = [];
           await this.executeEffects(
             registered,
@@ -1327,6 +1382,14 @@ export class OrbitalServerRuntime {
         })),
       ),
     });
+    xOrbitalLog.info('processOrbitalEvent:enter', {
+      orbital: orbitalName,
+      event: request.event,
+      traitsInOrbital: registered.traits.map((t) => t.name).join(','),
+      payloadActiveTraits: JSON.stringify(
+        (request.payload as EventPayload | undefined)?.['_activeTraits'] ?? null,
+      ),
+    });
 
     const { event, payload, entityId, user } = request;
 
@@ -1367,15 +1430,15 @@ export class OrbitalServerRuntime {
       };
     }
 
-    const emittedEvents: Array<{ event: string; payload?: EventPayload }> = [];
+    const emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }> = [];
     // Collect data fetched by `fetch` effects
     const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
     // Collect client-side effects (render-ui, navigate, notify)
-    const clientEffects: Array<unknown> = [];
+    const clientEffects: ClientEffectTuple[] = [];
     // Same effects, paired with their producing trait — populated in lockstep
     // by the helper inside executeEffects so consumers can attribute each
     // effect to the trait that emitted it (used by `<TraitFrame>`).
-    const clientEffectsByTrait: Array<{ traitName: string; effect: unknown[] }> = [];
+    const clientEffectsByTrait: Array<{ traitName: string; effect: ClientEffectTuple }> = [];
     // Collect server-side effect results (persist, call-service, set)
     const effectResults: EffectResult[] = [];
 
@@ -1514,12 +1577,12 @@ export class OrbitalServerRuntime {
     payload: EventPayload | undefined,
     entityData: EntityRow,
     entityId: string | undefined,
-    emittedEvents: Array<{ event: string; payload?: EventPayload }>,
+    emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>,
     fetchedData: { [entityType: string]: EntityRow | EntityRow[] },
-    clientEffects: Array<unknown>,
+    clientEffects: ClientEffectTuple[],
     effectResults: EffectResult[],
     user?: OrbitalEventRequest["user"],
-    clientEffectsByTrait?: Array<{ traitName: string; effect: unknown[] }>,
+    clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>,
   ): Promise<void> {
     const entityType = registered.entity.name;
 
@@ -1528,7 +1591,7 @@ export class OrbitalServerRuntime {
     // `traitName` from this invocation's scope, so cascade emits — which run
     // through their own executeEffects call with their own traitName —
     // attribute correctly.
-    const pushClientEffect = (effect: unknown[]): void => {
+    const pushClientEffect = (effect: ClientEffectTuple): void => {
       clientEffects.push(effect);
       clientEffectsByTrait?.push({ traitName, effect });
     };
@@ -1550,12 +1613,18 @@ export class OrbitalServerRuntime {
           trait: traitName,
         };
         this.eventBus.emit(event, eventPayload, stamp);
-        emittedEvents.push({ event, payload: eventPayload });
+        emittedEvents.push({ event, payload: eventPayload, source: stamp });
         effectLog.debug("emit:push", {
           event,
           cumulativeEmittedCount: emittedEvents.length,
           sourceTrait: stamp.trait,
           sourceOrbital: stamp.orbital,
+        });
+        xOrbitalLog.info('emit:server', {
+          event,
+          sourceOrbital: stamp.orbital,
+          sourceTrait: stamp.trait,
+          dispatchOrbital: registered.schema.name,
         });
       },
 

@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import type { EmitConfig } from '@almadar/core';
+import type { EmitConfig, PatternConfig } from '@almadar/core';
 import type {
     EffectHandlers,
     Effect,
@@ -801,7 +801,16 @@ export class EffectExecutor {
             case 'render': {
                 if (this.handlers.renderUI) {
                     const slot = args[0] as string;
-                    const pattern = args[1];
+                    // The render-ui SExpr's pattern slot carries either a
+                    // resolved `PatternConfig` (post-interpolation) or `null`
+                    // when the trait is clearing the slot. Anything else is
+                    // a schema bug — runtime keeps the type narrow so
+                    // downstream renderers don't have to re-validate.
+                    const patternRaw = args[1];
+                    const pattern: PatternConfig | null =
+                        patternRaw === null
+                            ? null
+                            : (patternRaw as PatternConfig);
                     const props = args[2] as PatternProps | undefined;
                     const priority = args[3] as number | undefined;
                     this.handlers.renderUI(slot, pattern, props, priority);
