@@ -154,6 +154,15 @@ import {
 } from "./loader/index.js";
 import { createOsHandlers, type OsHandlerResult } from "./createOsHandlers.js";
 
+// Node-detection helper. Used to guard call sites of express, fs/path/net,
+// and child_process — those modules are stubbed by the package.json `browser`
+// field in browser bundles, so calling them would crash. Browser consumers
+// (e.g. `<BrowserPlayground>` from @almadar/ui in mock mode) skip these
+// paths entirely.
+function isNodeEnv(): boolean {
+  return typeof process !== "undefined" && Boolean(process.versions?.node);
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -475,15 +484,22 @@ export class OrbitalServerRuntime {
       this.persistence = config.persistence || new InMemoryPersistence();
     }
 
-    // Initialize local persistence adapter for persistence: "local" entities
-    if (config.localStorageRoot) {
+    // Initialize local persistence adapter for persistence: "local" entities.
+    // Node-only: the package.json `browser` field stubs LocalPersistenceAdapter
+    // in browser builds, so the constructor would crash on `new` if invoked.
+    if (config.localStorageRoot && isNodeEnv()) {
       this.localPersistence = new LocalPersistenceAdapter(config.localStorageRoot);
     }
 
-    // Auto-wire OS handlers (server-side only)
-    this.osHandlers = createOsHandlers({
-      emitEvent: (type, payload) => this.eventBus.emit(type, payload),
-    });
+    // Auto-wire OS handlers (server-side only). Node-only: createOsHandlers
+    // pulls fs/net/child_process; the package.json `browser` field stubs the
+    // module in browser builds, so we skip the call entirely there. Browser
+    // consumers (e.g. <BrowserPlayground>) don't need OS effects.
+    this.osHandlers = isNodeEnv()
+      ? createOsHandlers({
+          emitEvent: (type, payload) => this.eventBus.emit(type, payload),
+        })
+      : { handlers: {}, cleanup: () => {} };
     // Merge OS handlers under user-provided handlers (user can override)
     this.config.effectHandlers = {
       ...this.osHandlers.handlers,
@@ -2496,6 +2512,12 @@ export class OrbitalServerRuntime {
    * - POST /:orbital/events - Send event to orbital (includes data from `fetch` effects)
    */
   router(): Router {
+    if (!isNodeEnv()) {
+      throw new Error(
+        "OrbitalServerRuntime.router() is Node-only (uses Express). " +
+        "For in-browser use, mount <BrowserPlayground> from @almadar/ui instead.",
+      );
+    }
     const router = Router();
 
     // List orbitals
