@@ -21,6 +21,7 @@ import type {
   Trait,
   TraitRef,
   TraitConfig,
+  TraitEventListener,
   OrbitalSchema,
   UseDeclaration,
   PatternConfig,
@@ -42,6 +43,9 @@ import type {
   SchemaLoader,
   ImportChainLike,
 } from "../loader/schema-loader.js";
+import { createLogger } from "../logger.js";
+
+const refResolverLog = createLogger("almadar:runtime:ref-resolver");
 
 // ============================================================================
 // Types
@@ -724,7 +728,7 @@ export class ReferenceResolver {
       };
     }
 
-    // Case 2: Reference object { ref: "...", name?, config?, linkedEntity?, events? }
+    // Case 2: Reference object { ref: "...", name?, config?, linkedEntity?, events?, listens? }
     // `events` is the call-site rename map ({ OLD: NEW, ... }). Every mention
     // of an old key inside the resolved trait's state machine (transition
     // triggers, events list entries, emits) is rewritten to the new key.
@@ -732,6 +736,13 @@ export class ReferenceResolver {
     // (e.g. `ADD_ITEM` instead of the atom's internal `OPEN`) fire into a
     // trait whose state machine still only knows the old trigger, and the
     // transition silently fails to fire.
+    //
+    // `listens` is the Phase F.7 override: replace the imported trait's
+    // `listens` array entirely with the call-site list. Required for
+    // ref-based traits that need cross-trait subscription wiring (e.g.
+    // CartItemAddItem listening to CartItemCartBrowse.ADD_ITEM); without
+    // it the atom's empty listens flow through and the bus subscription
+    // is never set up.
     if (typeof traitRef !== "string" && "ref" in traitRef) {
       const refObj = traitRef as {
         ref: string;
@@ -739,6 +750,7 @@ export class ReferenceResolver {
         config?: TraitConfig;
         linkedEntity?: string;
         events?: { [oldKey: string]: string };
+        listens?: TraitEventListener[];
       };
       return this.resolveTraitRefString(
         refObj.ref,
@@ -747,6 +759,7 @@ export class ReferenceResolver {
         refObj.linkedEntity,
         refObj.name,
         refObj.events,
+        refObj.listens,
       );
     }
 
@@ -771,6 +784,7 @@ export class ReferenceResolver {
     linkedEntity?: string,
     overrideName?: string,
     eventRenames?: { [oldKey: string]: string },
+    listensOverride?: TraitEventListener[],
   ): ResolveResult<ResolvedTrait> {
     // Check if it's an imported trait reference: "Alias.traits.TraitName"
     const parsed = parseImportedTraitRef(ref);
@@ -812,11 +826,22 @@ export class ReferenceResolver {
         : trait;
       const reboundTrait = applyLinkedEntityRename(baseTrait, linkedEntity);
       const renamedTrait = applyEventRenames(reboundTrait, eventRenames);
+      const finalTrait: Trait = listensOverride !== undefined
+        ? { ...renamedTrait, listens: listensOverride }
+        : renamedTrait;
+      if (listensOverride !== undefined) {
+        refResolverLog.info("listens-override:imported", {
+          trait: finalTrait.name,
+          ref,
+          atomListens: trait.listens?.length ?? 0,
+          callSiteListens: listensOverride.length,
+        });
+      }
 
       return {
         success: true,
         data: {
-          trait: renamedTrait,
+          trait: finalTrait,
           source: { type: "imported", alias: parsed.alias, traitName: parsed.traitName },
           config,
           linkedEntity,
@@ -833,10 +858,21 @@ export class ReferenceResolver {
         : localTrait;
       const reboundLocal = applyLinkedEntityRename(baseLocal, linkedEntity);
       const renamedLocalTrait = applyEventRenames(reboundLocal, eventRenames);
+      const finalLocalTrait: Trait = listensOverride !== undefined
+        ? { ...renamedLocalTrait, listens: listensOverride }
+        : renamedLocalTrait;
+      if (listensOverride !== undefined) {
+        refResolverLog.info("listens-override:local", {
+          trait: finalLocalTrait.name,
+          ref,
+          atomListens: localTrait.listens?.length ?? 0,
+          callSiteListens: listensOverride.length,
+        });
+      }
       return {
         success: true,
         data: {
-          trait: renamedLocalTrait,
+          trait: finalLocalTrait,
           source: { type: "local", name: ref },
           config,
           linkedEntity,
