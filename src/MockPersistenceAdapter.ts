@@ -212,11 +212,15 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * Generate a mock value for a field based on its schema.
    */
   private generateFieldValue(entityName: string, field: EntityField, index: number): FieldValue {
-    // Handle default values
-    if (field.default !== undefined) {
-      if (field.default === '@now') {
-        return new Date().toISOString();
-      }
+    // Mock-seed default policy: numeric fields preserve their declared
+    // default (so `tokenCount : number = 0` stays 0), every other type
+    // falls through to faker. Mirrors the gate in the compiled-path
+    // codegen (`backend.rs:generate_seed_mock_data`). String/enum/bool/
+    // date placeholder defaults like `name = ""` would otherwise paint
+    // every seeded row with the same literal.
+    const fieldTypeLc = field.type.toLowerCase();
+    const isNumeric = fieldTypeLc === 'number' || fieldTypeLc === 'integer';
+    if (isNumeric && field.default !== undefined) {
       return field.default as FieldValue;
     }
 
@@ -227,9 +231,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     // card that didn't match any test expectation. Deterministic seed
     // data is more valuable than random-nil stress; callers who want
     // nil-testing should construct that scenario explicitly.
-    const fieldType = field.type.toLowerCase();
-
-    switch (fieldType) {
+    switch (fieldTypeLc) {
       case 'string':
         return this.generateStringValue(entityName, field, index);
 
