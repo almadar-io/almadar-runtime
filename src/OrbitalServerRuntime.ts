@@ -33,11 +33,17 @@
  * @packageDocumentation
  */
 
-import {
-  Router,
-  type Request,
-  type Response,
-  type NextFunction,
+// `express` is Node-only (HTTP router, no browser equivalent). Importing
+// the named `Router` at top-level baked the module into the dist bundle,
+// where Vite/rollup's stricter named-import resolution choked because
+// `__vite-browser-external` doesn't expose `Router`. Solution: type-only
+// import here, load the runtime value inside `router()` via the
+// eval-require helper below — invisible to bundler static analysis.
+import type {
+  Router as ExpressRouter,
+  Request,
+  Response,
+  NextFunction,
 } from "express";
 import { EventBus } from "./EventBus.js";
 import {
@@ -47,12 +53,71 @@ import {
 } from "./StateMachineCore.js";
 import { EffectExecutor } from "./EffectExecutor.js";
 import { createLogger } from "./logger.js";
-import { LocalPersistenceAdapter } from "./LocalPersistenceAdapter.js";
+// Same treatment for `LocalPersistenceAdapter` (uses `fs`, `path`) and
+// `createOsHandlers` (uses `fs`, `net`, `child_process`). The runtime
+// auto-wires both in the constructor's Node-only branch — guarded by
+// `isNodeEnv()` — and the eval-require keeps the imports out of the
+// browser bundle entirely.
+import type { LocalPersistenceAdapter as LocalPersistenceAdapterType } from "./LocalPersistenceAdapter.js";
+import type {
+  createOsHandlers as CreateOsHandlersFn,
+  OsHandlerResult,
+} from "./createOsHandlers.js";
 import {
   validateEventPayload,
   formatPayloadValidationError,
   type PayloadValidationFailure,
 } from "./PayloadValidator.js";
+
+/**
+ * Synchronous Node-only require, hidden from bundler static analysis.
+ *
+ * Bundlers (tsup, Vite/rollup, webpack) walk imports statically. The two
+ * indirections below — `(0, eval)('require')` and the namespace import of
+ * `'module'` resolved by property access — keep the dist bundle free of
+ * any reference to `fs`, `net`, `child_process`, or `express`, so any
+ * browser bundler can consume `OrbitalServerRuntime.js` without a
+ * polyfill / stub / fallback chain.
+ *
+ * Why both paths:
+ * - `eval('require')` works in CommonJS Node (returns the runtime require).
+ * - In ESM Node, `require` isn't a global, so the eval returns undefined.
+ *   We fall back to `createRequire(import.meta.url)` from the `'module'`
+ *   built-in, which IS the canonical ESM-Node way to synchronously load
+ *   a Node module.
+ *
+ * Every call site is guarded by `isNodeEnv()` upstream so the browser
+ * never reaches this. In browsers the namespace import of `'module'`
+ * resolves to an empty stub via the package.json `browser` field; the
+ * function is never invoked, so the empty-stub never matters.
+ */
+import * as nodeModule from 'module';
+let _resolvedNodeRequire: NodeRequire | null = null;
+function nodeRequire<T = unknown>(modulePath: string): T {
+  if (!_resolvedNodeRequire) {
+    const evalRequire = (0, eval)('typeof require !== "undefined" ? require : null') as NodeRequire | null;
+    if (evalRequire) {
+      _resolvedNodeRequire = evalRequire;
+    } else {
+      const createReq = (nodeModule as { createRequire?: (url: string | URL) => NodeRequire }).createRequire;
+      if (typeof createReq !== 'function') {
+        throw new Error(
+          '[OrbitalServerRuntime] No synchronous require available. This branch is Node-only — invoking it from a browser indicates an isNodeEnv() guard regression upstream.',
+        );
+      }
+      _resolvedNodeRequire = createReq(import.meta.url);
+    }
+  }
+  return _resolvedNodeRequire(modulePath) as T;
+}
+
+/**
+ * Pick the module-spec extension to use with `nodeRequire`. In Vitest /
+ * source mode, `import.meta.url` ends in `.ts` and the dist `.js` files
+ * don't exist; in production dist runs, the spec must be `.js`. Detecting
+ * via `import.meta.url` keeps both paths working without test-mode flags.
+ */
+const _nodeRequireExt = import.meta.url.endsWith('.ts') ? '.ts' : '.js';
 
 const effectLog = createLogger("almadar:runtime:effects");
 const busLog = createLogger("almadar:runtime:bus");
@@ -69,7 +134,10 @@ const renderLog = createLogger("almadar:runtime:render-ui");
 // dispatch. Pairs with the UI-side `almadar:runtime:cross-orbital` channel
 // in OrbPreview / ServerBridge / SlotsContext.
 const xOrbitalLog = createLogger("almadar:runtime:cross-orbital");
-export { LocalPersistenceAdapter } from "./LocalPersistenceAdapter.js";
+// Note: `LocalPersistenceAdapter` is re-exported from `index.ts`, not from
+// here. Keeping a value re-export here would force tsup to inline the
+// adapter into `OrbitalServerRuntime.js`'s bundle, defeating the
+// type-only-import-plus-eval-require strategy described above.
 import {
   interpolateProps,
   createContextFromBindings,
@@ -152,7 +220,11 @@ import {
   type SchemaLoader,
   createUnifiedLoader,
 } from "./loader/index.js";
-import { createOsHandlers, type OsHandlerResult } from "./createOsHandlers.js";
+// `createOsHandlers` is type-imported at the top of this file and value-
+// loaded via `nodeRequire` inside the constructor's Node-only branch.
+// Removed the value-import here so the dist bundle has no static
+// reference to `./createOsHandlers.js` and its fs/net/child_process
+// imports vanish from the browser-side dependency graph.
 
 // Node-detection helper. Used to guard call sites of express, fs/path/net,
 // and child_process — those modules are stubbed by the package.json `browser`
@@ -485,21 +557,24 @@ export class OrbitalServerRuntime {
     }
 
     // Initialize local persistence adapter for persistence: "local" entities.
-    // Node-only: the package.json `browser` field stubs LocalPersistenceAdapter
-    // in browser builds, so the constructor would crash on `new` if invoked.
+    // Node-only — eval-require so the dist bundle has no static reference
+    // to `./LocalPersistenceAdapter.js` (and its `fs`/`path` imports).
     if (config.localStorageRoot && isNodeEnv()) {
+      const { LocalPersistenceAdapter } = nodeRequire<{ LocalPersistenceAdapter: new (root: string) => LocalPersistenceAdapterType }>(`./LocalPersistenceAdapter${_nodeRequireExt}`);
       this.localPersistence = new LocalPersistenceAdapter(config.localStorageRoot);
     }
 
-    // Auto-wire OS handlers (server-side only). Node-only: createOsHandlers
-    // pulls fs/net/child_process; the package.json `browser` field stubs the
-    // module in browser builds, so we skip the call entirely there. Browser
-    // consumers (e.g. <BrowserPlayground>) don't need OS effects.
-    this.osHandlers = isNodeEnv()
-      ? createOsHandlers({
-          emitEvent: (type, payload) => this.eventBus.emit(type, payload),
-        })
-      : { handlers: {}, cleanup: () => {} };
+    // Auto-wire OS handlers (server-side only). Same eval-require trick —
+    // `./createOsHandlers.js` pulls fs/net/child_process and would otherwise
+    // poison the browser-side dependency graph.
+    if (isNodeEnv()) {
+      const { createOsHandlers } = nodeRequire<{ createOsHandlers: typeof CreateOsHandlersFn }>(`./createOsHandlers${_nodeRequireExt}`);
+      this.osHandlers = createOsHandlers({
+        emitEvent: (type, payload) => this.eventBus.emit(type, payload),
+      });
+    } else {
+      this.osHandlers = { handlers: {}, cleanup: () => {} };
+    }
     // Merge OS handlers under user-provided handlers (user can override)
     this.config.effectHandlers = {
       ...this.osHandlers.handlers,
@@ -2511,13 +2586,17 @@ export class OrbitalServerRuntime {
    * - GET  /:orbital      - Get orbital info and current states
    * - POST /:orbital/events - Send event to orbital (includes data from `fetch` effects)
    */
-  router(): Router {
+  router(): ExpressRouter {
     if (!isNodeEnv()) {
       throw new Error(
         "OrbitalServerRuntime.router() is Node-only (uses Express). " +
         "For in-browser use, mount <BrowserPlayground> from @almadar/ui instead.",
       );
     }
+    // Eval-require so the dist bundle has no static `import 'express'`
+    // — browsers (which never reach this branch anyway) get a clean
+    // bundle with zero express references.
+    const { Router } = nodeRequire<typeof import('express')>('express');
     const router = Router();
 
     // List orbitals
