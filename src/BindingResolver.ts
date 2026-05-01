@@ -223,6 +223,23 @@ function interpolateArray(value: unknown[], ctx: EvaluationContext): unknown {
         return value;
     }
 
+    // Per-item render lambdas (`["fn", argName, body]`) are
+    // structurally SExpressions — `fn` is a registered control-category
+    // operator — but they must NOT be evaluated here. The renderer
+    // (`@almadar/ui`'s `renderPatternProps`) is the consumer that
+    // converts them into React render props at render time, when each
+    // row's `arg` is actually known. Evaluating now produces an
+    // unserialisable function value that gets stripped to `undefined`
+    // when crossing the server bridge, which is exactly the gap that
+    // left std-search/std-filter `renderItem` undefined and the
+    // Filter atom's chips empty. Preserve the raw array (with deep
+    // recursion into the body so nested `@<arg>.*` placeholders and
+    // any other inner SExpressions stay intact) instead.
+    if (Array.isArray(value) && value.length === 3 && value[0] === 'fn'
+        && typeof value[1] === 'string') {
+        return value;
+    }
+
     if (isSExpression(value)) {
         return evaluate(value as Parameters<typeof evaluate>[0], ctx);
     }
