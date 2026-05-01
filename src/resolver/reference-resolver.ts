@@ -320,25 +320,131 @@ function renameEntityInRenderUiConfig(
 }
 
 /**
- * Walk a trait's effects and rewrite entity-name literals via
- * {@link renameEntityInRenderUiConfig}. Only touches `(render-ui ...)`
- * effect payloads — other effects (persist, fetch, emit) use bindings,
- * not string literals, so they don't need rewriting.
+ * Walk a trait's effects and rewrite entity-name literals to match the
+ * call-site's `linkedEntity` override.
+ *
+ * The previous version only rewrote `(render-ui ...)` config payloads,
+ * with a comment claiming "other effects use bindings, not string
+ * literals" — which is wrong. Several operators take the entity name
+ * as a positional STRING LITERAL argument:
+ *
+ * - `(fetch <Entity> [options])`               — position 1
+ * - `(persist <create|update|delete|clear> <Entity> ...)` — position 2
+ * - `(ref <Entity|@binding> [options])`        — position 1 (string-only)
+ * - `(deref <Entity|@binding> [options])`      — position 1 (string-only)
+ * - `(spawn <Entity> [initialState])`          — position 1
+ *
+ * Without this rewrite, an inlined std-browse atom rebound via
+ * `trait FilteredItemBrowse = Browse.traits.BrowseItemBrowse -> FilteredListItem {}`
+ * would still call `MockPersistenceAdapter.list("BrowseItem")` — which
+ * returns zero rows because only `FilteredListItem` is registered. The
+ * data-grid renders empty even though the molecule looks correct in
+ * `.lolo`. The compiled-path codegen handles this in Rust at compile
+ * time; the runtime must do the equivalent rewrite at registration
+ * time.
+ *
+ * Wrapper operators (`do`, `atomic`, `if`, `when`, `let`, `async/*`)
+ * recurse into nested effects so a `(do (fetch X) ...)` block is
+ * rewritten end-to-end.
  */
 function renameEntityInEffects(
   effects: readonly unknown[],
   oldName: string,
   newName: string,
 ): unknown[] {
-  return effects.map((effect) => {
-    if (!Array.isArray(effect)) return effect;
-    if (effect[0] === "render-ui" && effect.length >= 3) {
-      const [op, slot, config, ...rest] = effect;
-      const nextConfig = renameEntityInRenderUiConfig(config, oldName, newName);
-      return [op, slot, nextConfig, ...rest];
-    }
-    return effect;
-  });
+  return effects.map((effect) => renameEntityInEffect(effect, oldName, newName));
+}
+
+/**
+ * Operators that take an entity-name string literal as their FIRST
+ * positional argument: `(op "<Entity>" ...)`.
+ * Source: `@almadar/core/types/effect.ts` (FetchEffect, RefEffect,
+ * DerefEffect, SpawnEffect tuple shapes).
+ */
+const ENTITY_AT_POS_1 = new Set(["fetch", "ref", "deref", "spawn"]);
+
+/**
+ * Wrapper operators where ALL positional args (positions ≥ 1) are
+ * nested effects. Recurse into every arg. From the typed effect
+ * tuples: DoEffect, AtomicEffect, AsyncRaceEffect, AsyncAllEffect,
+ * AsyncSequenceEffect.
+ */
+const ALL_ARGS_ARE_EFFECTS = new Set([
+  "do",
+  "atomic",
+  "async/race",
+  "async/all",
+  "async/sequence",
+]);
+
+/**
+ * Wrapper operators where position 1 is something other than an
+ * effect (a condition expression, a let-binding list, or an
+ * async-timing value), and positions ≥ 2 are nested effects.
+ * Skipping position 1 is critical so we don't accidentally rewrite
+ * a literal value used as a comparison RHS (e.g. `(if (= @entity.foo
+ * "BrowseItem") ...)` — the string "BrowseItem" there is a value
+ * being compared, not an entity-name we want to rename).
+ *
+ * IfEffect / WhenEffect — position 1 is `Expression` (condition).
+ * LetEffect — position 1 is `[string, unknown][]` (bindings).
+ * AsyncDelay / Debounce / Throttle / Interval — position 1 is duration.
+ */
+const ARGS_FROM_POS_2_ARE_EFFECTS = new Set([
+  "if",
+  "when",
+  "let",
+  "async/delay",
+  "async/debounce",
+  "async/throttle",
+  "async/interval",
+]);
+
+function renameEntityInEffect(
+  effect: unknown,
+  oldName: string,
+  newName: string,
+): unknown {
+  if (!Array.isArray(effect) || effect.length === 0) return effect;
+  const op = effect[0];
+  if (typeof op !== "string") return effect;
+
+  // `(render-ui slot config)` — recurse into the pattern tree config.
+  // Bare `entity: "<OldName>"` string-literal props inside the
+  // pattern tree get rewritten too.
+  if (op === "render-ui" && effect.length >= 3) {
+    const [, slot, config, ...rest] = effect;
+    const nextConfig = renameEntityInRenderUiConfig(config, oldName, newName);
+    return [op, slot, nextConfig, ...rest];
+  }
+
+  // `(persist <op> <Entity> ...)`. Entity at position 2 (after the
+  // create/update/delete/clear keyword). Per PersistEffect tuple shape.
+  if (op === "persist" && effect.length >= 3 && effect[2] === oldName) {
+    return [op, effect[1], newName, ...effect.slice(3)];
+  }
+
+  // Operators with the entity name at position 1.
+  if (ENTITY_AT_POS_1.has(op) && effect[1] === oldName) {
+    return [op, newName, ...effect.slice(2)];
+  }
+
+  // Wrappers — recurse into nested effects. Whether to skip position 1
+  // depends on the operator's argument structure (see set comments).
+  const skipFirstNonEffectArg = ARGS_FROM_POS_2_ARE_EFFECTS.has(op);
+  const recurseAll = ALL_ARGS_ARE_EFFECTS.has(op);
+  if (recurseAll || skipFirstNonEffectArg) {
+    const startIndex = skipFirstNonEffectArg ? 2 : 1;
+    return effect.map((arg, i) => {
+      if (i < startIndex) return arg;
+      if (Array.isArray(arg)) {
+        return renameEntityInEffect(arg, oldName, newName);
+      }
+      return arg;
+    });
+  }
+
+  return effect;
 }
 
 /**
@@ -367,6 +473,16 @@ function applyLinkedEntityRename(
         ) as typeof t.effects)
       : t.effects;
     return { ...t, effects: nextEffects };
+  });
+  // Observability: structured log fires once per call-site rebind so
+  // verifier traces show exactly which trait got which entity rewrite.
+  // Especially load-bearing for catching the "fetch <OldEntity>" gap
+  // that was silently dropping data-grid rows on every embedded atom.
+  refResolverLog.info("linkedEntity:rename", {
+    trait: trait.name,
+    from: atomLinked,
+    to: linkedEntity,
+    transitionCount: nextTransitions.length,
   });
   return {
     ...trait,
