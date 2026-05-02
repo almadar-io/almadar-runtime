@@ -219,6 +219,16 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     // date placeholder defaults like `name = ""` would otherwise paint
     // every seeded row with the same literal.
     const fieldTypeLc = field.type.toLowerCase();
+    mockLog.debug('field:generate', {
+      entityName,
+      fieldName: field.name,
+      fieldType: fieldTypeLc,
+      hasValues: !!field.values?.length,
+      valuesCount: field.values?.length ?? 0,
+      values: field.values?.length ? field.values.join(',') : null,
+      format: field.format ?? null,
+      hasDefault: field.default !== undefined,
+    });
     const isNumeric = fieldTypeLc === 'number' || fieldTypeLc === 'integer';
     if (isNumeric && field.default !== undefined) {
       return field.default as FieldValue;
@@ -273,7 +283,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * — the schema is the source of truth. If a caller needs a real email, they
    * declare `format: "email"`; if they need an enum, they declare `values: [...]`.
    */
-  private generateStringValue(_entityName: string, field: EntityField, _index: number): string {
+  private generateStringValue(entityName: string, field: EntityField, _index: number): string {
     if (field.values && field.values.length > 0) {
       return faker.helpers.arrayElement(field.values);
     }
@@ -284,7 +294,17 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       case 'uuid': return faker.string.uuid();
       case 'date': return faker.date.recent().toISOString().split('T')[0]!;
       case 'datetime': return faker.date.recent().toISOString();
-      default: return faker.lorem.words(2);
+      default: {
+        const value = faker.lorem.words(2);
+        mockLog.warn('field:fallback-lorem', {
+          entityName,
+          fieldName: field.name,
+          hasValues: false,
+          format: field.format ?? null,
+          generated: value,
+        });
+        return value;
+      }
     }
   }
 
