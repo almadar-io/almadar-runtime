@@ -230,6 +230,14 @@ export async function preprocessSchema(
       exposes: resolvedOrbital.original.exposes,
       domainContext: resolvedOrbital.original.domainContext,
       design: resolvedOrbital.original.design,
+      // Gap #22: pass through auxiliary entities so OrbitalServerRuntime's
+      // mock-seed branch registers SearchResult / FilterTarget / PagedItem
+      // alongside the molecule's primary entity. Without this, an inlined
+      // .orb that has `auxiliaryEntities` populated by the Rust inline
+      // phase still loses them here, and `(set @entity.searchTerm ...)` /
+      // `(fetch SearchResult ...)` from no-rebind imports hit unregistered
+      // persistence and silently no-op.
+      auxiliaryEntities: resolvedOrbital.original.auxiliaryEntities,
     };
 
     preprocessedOrbitals.push(preprocessedOrbital);
