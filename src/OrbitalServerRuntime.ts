@@ -2345,17 +2345,40 @@ export class OrbitalServerRuntime {
     // backend.rs emits `DEFAULT_<TRAIT>_CONFIG` + `mergedConfig`; the runtime
     // path needs the same merge or std-modal/std-confirmation render bare in
     // playground while the compiled bundle renders correctly.
-    const declaredDefaults = collectDeclaredConfigDefaults(
-      registered.traits.find((t) => t.name === traitName),
-    );
+    const traitDef = registered.traits.find((t) => t.name === traitName);
+    const declaredDefaults = collectDeclaredConfigDefaults(traitDef);
     const callSiteOverride = registered.configByTrait.get(traitName);
     if (declaredDefaults || callSiteOverride) {
       bindings.config = { ...(declaredDefaults ?? {}), ...(callSiteOverride ?? {}) };
     }
 
+    // For [interaction, collection] traits, `@entity` must resolve to the
+    // full row collection (matching the compiled path, where it lowers to
+    // `data['<EntityName>'] ?? []`). Without this branch the bare
+    // entityData fallback above selects only the first row, so a
+    // render-ui pattern like `entity: @entity` on a `data-grid` shows a
+    // single row in the playground while the compiled bundle correctly
+    // shows all rows.
+    if (traitDef?.scope === 'collection' && entityType && !entityId) {
+      try {
+        const all = await this.persistence.list(entityType);
+        if (Array.isArray(all) && all.length > 0) {
+          const merged: EntityRow & EntityRow[] = Object.assign(
+            [...all],
+            all[0],
+          );
+          bindings.entity = merged;
+        }
+      } catch {
+        // Persistence may not be ready (e.g. mock not yet seeded). Leave
+        // entityData fallback in place — render-ui sees the first row,
+        // same as before this branch existed.
+      }
+    }
+
     // Add initial named entity binding
     if (entityType) {
-      bindings[entityType] = entityData;
+      bindings[entityType] = bindings.entity ?? entityData;
     }
 
     // Wire forward refs so fetch/atomic handlers can access bindings and context
