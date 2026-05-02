@@ -1979,8 +1979,28 @@ export class OrbitalServerRuntime {
             // Collection fetch
             let entities = await this.persistence.list(fetchEntityType);
 
-            // Apply filter if provided (basic implementation - can be extended)
-            // TODO: Implement proper filter evaluation using evaluateGuard
+            // Apply filter SExpression if provided. Mirrors
+            // ServerEffectHandlers.fetch. Each row is evaluated against
+            // the predicate with @entity bound to the row, @payload to
+            // the inbound event payload, and @current to the row.
+            if (options?.filter !== undefined && options.filter !== null) {
+              const predicate = options.filter as SExpr;
+              entities = entities.filter((entity) => {
+                const ctx = createContextFromBindings(
+                  { entity, payload: bindingsRef?.payload, current: entity },
+                  false,
+                );
+                try {
+                  return Boolean(evaluate(predicate, ctx));
+                } catch (err) {
+                  console.error(
+                    `[OrbitalServerRuntime] fetch filter eval error for ${fetchEntityType}:`,
+                    err,
+                  );
+                  return false;
+                }
+              });
+            }
 
             // Apply pagination
             if (options?.offset && options.offset > 0) {
