@@ -111,12 +111,24 @@ export function interpolateProps(
         // `@almadar/evaluator` — narrow the `row` value with a
         // typeof check rather than a cast chain.
         const ctxRow = ctx.payload['row'];
+        const ctxPayloadKeys = Object.keys(ctx.payload).join(',');
+        const payloadDataRaw = ctx.payload['data'];
+        const payloadDataLen = Array.isArray(payloadDataRaw) ? payloadDataRaw.length : null;
+        const ctxEntityRaw = ctx.entity as EntityRow | EntityRow[] | null;
+        const ctxEntityLen = Array.isArray(ctxEntityRaw) ? ctxEntityRaw.length : null;
+        const resolvedLen = Array.isArray(resolvedEntity) ? resolvedEntity.length : null;
         renderLog.debug('interpolateProps:entity', {
             patternType,
             entityBinding: entityBindingRaw,
             resolvedIsObject: resolvedRow !== null,
+            resolvedIsArray: Array.isArray(resolvedEntity),
+            resolvedLen,
             resolvedEqualsCtxRow: ctxRow !== undefined && resolvedRow !== null && resolvedRow === ctxRow,
             resolvedRowId: resolvedRow?.id,
+            ctxPayloadKeys,
+            ctxPayloadDataLen: payloadDataLen,
+            ctxEntityIsArray: Array.isArray(ctxEntityRaw),
+            ctxEntityLen,
         });
     }
     if (patternType === 'form-section' || patternType === 'form') {
