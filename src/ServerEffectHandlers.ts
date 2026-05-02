@@ -396,6 +396,24 @@ export function createServerEffectHandlers(
           }
         } else {
           let entities = await persistence.list(fetchEntityType);
+          if (options?.filter !== undefined && options.filter !== null) {
+            const predicate = options.filter as SExpr;
+            entities = entities.filter((entity) => {
+              const ctx = createContextFromBindings(
+                { entity, payload: bindings?.payload, current: entity },
+                false,
+              );
+              try {
+                return Boolean(evaluate(predicate, ctx));
+              } catch (err) {
+                console.error(
+                  `[ServerEffectHandlers] fetch filter eval error for ${fetchEntityType}:`,
+                  err,
+                );
+                return false;
+              }
+            });
+          }
           if (options?.offset && options.offset > 0) {
             entities = entities.slice(options.offset);
           }
