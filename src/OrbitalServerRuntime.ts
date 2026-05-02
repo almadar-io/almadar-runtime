@@ -1063,6 +1063,50 @@ export class OrbitalServerRuntime {
       }
     }
 
+    // Gap #22 — register + mock-seed auxiliary entities. These are imported
+    // atom entities surfaced when a trait reference omits the `-> Entity`
+    // rebind at the molecule's call site, registered on the resolved
+    // schema's `auxiliaryEntities` field by the inline phase. Without this
+    // block, `(fetch SearchResult ...)` from a trait whose linkedEntity is
+    // an imported atom hits an unregistered persistence entry and returns
+    // empty, breaking the entity-as-UI-state contract those slim atoms rely
+    // on. Mock-mode seeding mirrors the primary entity branch above.
+    const auxiliaryEntities = orbital.auxiliaryEntities;
+    if (
+      auxiliaryEntities !== undefined &&
+      auxiliaryEntities.length > 0 &&
+      this.config.mode === 'mock' &&
+      this.persistence instanceof MockPersistenceAdapter
+    ) {
+      for (const auxRef of auxiliaryEntities) {
+        // EntityRef is a union of string | EntityCall | Entity. The
+        // inline phase populates auxiliaryEntities with inline Entity
+        // objects (string/EntityCall forms get resolved before this
+        // branch fires), but narrow defensively to keep the type
+        // checker happy and to skip unresolved forms gracefully.
+        if (typeof auxRef === 'string' || isEntityCall(auxRef)) continue;
+        const auxEntity: Entity = auxRef;
+        if (!auxEntity.name || !auxEntity.fields) continue;
+        const auxFields = auxEntity.fields
+          .filter((f): f is typeof f & { name: string } =>
+            typeof f.name === 'string' && f.name.length > 0,
+          )
+          .map((f) => ({
+            name: f.name,
+            type: f.type,
+            required: f.required,
+            values: f.values,
+            default: f.default,
+          }));
+        this.persistence.registerEntity({ name: auxEntity.name, fields: auxFields });
+        if (this.config.debug) {
+          console.log(
+            `[OrbitalRuntime] Seeded mock data for auxiliary entity: ${auxEntity.name}, count: ${this.persistence.count(auxEntity.name)}`,
+          );
+        }
+      }
+    }
+
     if (this.config.debug) {
       console.log(
         `[OrbitalRuntime] Registered orbital: ${orbital.name} with ${(orbital.traits || []).length} trait(s)`,
