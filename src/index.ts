@@ -86,6 +86,12 @@ export type {
   OrbitalServerRuntimeConfig,
 } from "./OrbitalServerRuntime.js";
 
+// Trait config-defaults extractor — used by client-side state machines
+// (`@almadar/ui` useTraitStateMachine) to merge declared `config { }`
+// defaults into the @config.X binding context, mirroring the server-side
+// merge in OrbitalServerRuntime.executeEffects.
+export { collectDeclaredConfigDefaults } from "./OrbitalServerRuntime.js";
+
 // Storage contract + in-memory default — extracted from OrbitalServerRuntime
 // so browser-side mock runtimes can use the same adapter interface.
 export type { PersistenceAdapter } from "./PersistenceAdapter.js";

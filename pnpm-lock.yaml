@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@almadar/core':
-        specifier: ^7.0.0
-        version: 7.5.0
+        specifier: ^7.5.1
+        version: 7.5.1
       '@almadar/evaluator':
         specifier: '>=2.9.2'
         version: 2.9.2
       '@almadar/std':
         specifier: '>=7.2.4'
-        version: 12.0.0
+        version: 13.0.3
       '@faker-js/faker':
         specifier: ^9.3.0
         version: 9.9.0
@@ -51,8 +51,8 @@ importers:
 
 packages:
 
-  '@almadar/core@7.5.0':
-    resolution: {integrity: sha512-pNh2DS/OrIxNUA18Pf0w72HR5e3NYtj40+FRXLT1NwJ/FgLhF+Kgc5RUeDBPo35Jwyh4jCyv1CFfcVKcZ35qkA==}
+  '@almadar/core@7.5.1':
+    resolution: {integrity: sha512-zHeUq4JdNgc0VOsgBVzGFkoDLxJ/Rq7zKzgzz2A9s+whfo/AjQiQO+l/qml3VGSGTN9W4oSJqW0J1owRRfZOjQ==}
 
   '@almadar/eslint-plugin@2.8.1':
     resolution: {integrity: sha512-DaWThhbtFMT/IrqEyc+XADrhAqTjc+jeSO9CeiSJKs0+UoBDuNLZNhLy1kiXT61XdHSxCNZD7jjjtHbXbe59+g==}
@@ -65,8 +65,8 @@ packages:
   '@almadar/patterns@2.18.2':
     resolution: {integrity: sha512-sUHGo1nSYQyB7A0oYA8hVciZBvvgpgIURDnz1qqvCNv4vvbjPBLXbUZPIEL21YkBrQoCMFY17JDObpbT7cPPiw==}
 
-  '@almadar/std@12.0.0':
-    resolution: {integrity: sha512-vHiuvRuTn/2RuxN2QLW+CmDxt+ZXN3z/IDTgGM0LyLUKNB5mD0SfAhiUI3xQMFpIB9f+W5+20umZ/D9g4UhqQA==}
+  '@almadar/std@13.0.3':
+    resolution: {integrity: sha512-jNKvHyuEr3brxngHU2Msb+SiBWwpENXoc/SBlLux2Mps7Cj7d/YZcvpn0twsmIiVO6kzbVxosnK4tOED2dyJnA==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -1513,7 +1513,7 @@ packages:
 
 snapshots:
 
-  '@almadar/core@7.5.0':
+  '@almadar/core@7.5.1':
     dependencies:
       '@almadar/patterns': 2.18.2
       zod: 3.25.76
@@ -1525,16 +1525,16 @@ snapshots:
 
   '@almadar/evaluator@2.9.2':
     dependencies:
-      '@almadar/core': 7.5.0
-      '@almadar/std': 12.0.0
+      '@almadar/core': 7.5.1
+      '@almadar/std': 13.0.3
 
   '@almadar/patterns@2.18.2':
     dependencies:
-      '@almadar/core': 7.5.0
+      '@almadar/core': 7.5.1
 
-  '@almadar/std@12.0.0':
+  '@almadar/std@13.0.3':
     dependencies:
-      '@almadar/core': 7.5.0
+      '@almadar/core': 7.5.1
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true

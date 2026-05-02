@@ -444,18 +444,30 @@ import { InMemoryPersistence } from "./PersistenceAdapter.js";
  * Returns `undefined` when the trait has no config schema or none of its
  * fields declare a default — keeps the caller's existing fast-path.
  */
-function collectDeclaredConfigDefaults(
-  trait: Trait | undefined,
+/**
+ * Structural shape that both `@almadar/core`'s `Trait` and
+ * `ResolvedTrait` satisfy: a `config?` map keyed by field name whose
+ * values either carry a `default` (the declared-schema form loaded
+ * from `.orb`) or are bare values (the runtime-resolved form).
+ *
+ * Widening to a structural parameter lets callers from the resolved
+ * side (e.g., `@almadar/ui`'s `useTraitStateMachine`) pass their own
+ * `ResolvedTrait` without an `as unknown as` cast.
+ */
+/**
+ * Read the `default` from each field of a trait's declared
+ * `config { }` schema and return the flat `{ key: default, ... }`
+ * map. Used to seed `@config.X` binding context with the atom's
+ * own declared defaults before any call-site override is applied.
+ *
+ * Mirrors the compiled path's `DEFAULT_<TRAIT>_CONFIG` constant
+ * emitted by `backend.rs` Solution-1.
+ */
+export function collectDeclaredConfigDefaults(
+  trait: { config?: import('@almadar/core').DeclaredTraitConfig } | undefined,
 ): TraitConfig | undefined {
   if (!trait) return undefined;
-  // The Trait type doesn't model the declared config schema (only the
-  // call-site override shape under TraitReferenceObject), but the JSON
-  // object loaded from the .orb carries it on the trait declaration.
-  // Read it through a structural cast — schema-to-ir.ts:216 also reads
-  // `trait.config` the same way for ResolvedTrait.
-  const schema = (trait as Trait & {
-    config?: Record<string, { default?: TraitConfigValue } | TraitConfigValue>;
-  }).config;
+  const schema = trait.config;
   if (!schema || typeof schema !== 'object') return undefined;
   const defaults: Record<string, TraitConfigValue> = {};
   let hasAny = false;
