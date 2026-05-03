@@ -2409,6 +2409,15 @@ export class OrbitalServerRuntime {
       bindings.config = { ...(declaredDefaults ?? {}), ...(callSiteOverride ?? {}) };
     }
 
+    // Trait-bound entity for `@entity` resolution. For atoms imported via
+    // `uses` without an explicit `-> Entity` rebind (e.g. Pagination's
+    // PagedItem auxiliary entity), the trait's `linkedEntity` differs from
+    // the orbital's primary `entityType`. Without using the trait's own
+    // linkedEntity for the bindings.entity seed, instance-scope renders
+    // see the orbital's primary first row (FilteredListItem) and
+    // `@entity.currentPage` resolves to undefined.
+    const traitLinkedEntity = traitDef?.linkedEntity ?? entityType;
+
     // For [interaction, collection] traits, `@entity` resolves to the
     // last-fetched collection — mirrors the compiled path's per-trait
     // reducer `state.data[<EntityName>] ?? []`, where the bridge writes
@@ -2417,26 +2426,49 @@ export class OrbitalServerRuntime {
     // populated by the fetch handler on success. On first read (no
     // cache entry yet) we seed from `persistence.list()` so initial
     // INIT renders show all rows before any fetch settles.
-    if (traitDef?.scope === 'collection' && entityType && !entityId) {
-      const cached = registered.dataCache.get(entityType);
+    if (traitDef?.scope === 'collection' && traitLinkedEntity && !entityId) {
+      const cached = registered.dataCache.get(traitLinkedEntity);
       if (cached !== undefined) {
         bindings.entity = cached as EntityRow & EntityRow[];
       } else {
         try {
-          const all = await this.persistence.list(entityType);
+          const all = await this.persistence.list(traitLinkedEntity);
           if (Array.isArray(all) && all.length > 0) {
             const merged: EntityRow & EntityRow[] = Object.assign(
               [...all],
               all[0],
             );
             bindings.entity = merged;
-            registered.dataCache.set(entityType, merged);
+            registered.dataCache.set(traitLinkedEntity, merged);
           }
         } catch {
           // Persistence may not be ready (e.g. mock not yet seeded).
           // Leave the entityData fallback in place — render-ui sees the
           // first row, same as before this branch existed.
         }
+      }
+    }
+
+    // For [interaction, instance] traits with a non-primary linkedEntity
+    // (auxiliary entity case — Pagination's PagedItem, Filter's
+    // FilterTarget, Search's SearchResult), seed bindings.entity from the
+    // first persisted row of that linkedEntity. Without this, render-ui
+    // resolves `@entity.X` against the orbital's primary entity first row
+    // and instance-state fields like `currentPage` come back undefined.
+    if (
+      traitDef?.scope === 'instance'
+      && traitLinkedEntity
+      && traitLinkedEntity !== entityType
+      && !entityId
+    ) {
+      try {
+        const all = await this.persistence.list(traitLinkedEntity);
+        if (Array.isArray(all) && all.length > 0 && all[0]) {
+          bindings.entity = all[0];
+        }
+      } catch {
+        // Persistence may be empty for this auxiliary entity — leave the
+        // entityData fallback in place.
       }
     }
 
