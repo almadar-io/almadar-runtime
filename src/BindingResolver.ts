@@ -260,7 +260,7 @@ function interpolateArray(value: unknown[], ctx: EvaluationContext): unknown {
             inputJson: JSON.stringify(value).slice(0, 300),
             resultType: typeof result,
             resultJson: typeof result === 'object' && result !== null
-                ? JSON.stringify(result).slice(0, 200)
+                ? JSON.stringify(result).slice(0, 2000)
                 : String(result),
         });
         return result;
