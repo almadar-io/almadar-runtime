@@ -437,16 +437,6 @@ export function createServerEffectHandlers(
           if (fetchedData) fetchedData[fetchEntityType] = entities;
           result = entities;
         }
-        if (bindings && result) {
-          const records = Array.isArray(result) ? result : [result];
-          if (records.length > 0) {
-            const merged: EntityRow & EntityRow[] = Object.assign([...records], records[0]);
-            bindings[fetchEntityType] = merged;
-            if (fetchEntityType === entityType) {
-              bindings.entity = merged;
-            }
-          }
-        }
         return result === null ? null : { rows: result, total };
       } catch (err) {
         console.error(
@@ -480,16 +470,6 @@ export function createServerEffectHandlers(
           if (fetchedData) fetchedData[derefEntityType] = entities;
           result = entities;
           total = entities.length;
-        }
-        if (bindings && result) {
-          const records = Array.isArray(result) ? result : [result];
-          if (records.length > 0) {
-            const merged: EntityRow & EntityRow[] = Object.assign([...records], records[0]);
-            bindings[derefEntityType] = merged;
-            if (derefEntityType === entityType) {
-              bindings.entity = merged;
-            }
-          }
         }
         record({
           effect: "deref",

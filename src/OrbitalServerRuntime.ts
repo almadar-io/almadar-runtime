@@ -271,16 +271,12 @@ export interface RegisteredOrbital {
   manager: StateMachineManager;
   entityData: Map<string, EntityRow>; // entityId -> data
   /**
-   * Last-fetched collection per entityType. Mirrors the compiled path's
-   * per-trait reducer `state.data[<EntityName>]`: the trait's `@entity`
-   * binding resolves from this cache so a filter narrows the rendered
-   * list across events. Without this, executeEffects re-reads the full
-   * persistence list on every event and clobbers the prior fetch's
-   * filtered subset. Populated by the fetch handler on success; seeded
-   * lazily from `persistence.list()` when a collection-scope binding is
-   * first read with no cache entry.
+   * Per-trait scalar state set by `(set @entity.X Y)`. Mirrors compiled's
+   * `state.fields`. The trait's `@entity` binding resolves from this map
+   * during effect interpolation. Initial empty; mutated only by the `set`
+   * effect handler. No implicit seeding from persistence.
    */
-  dataCache: Map<string, EntityRow | EntityRow[]>;
+  traitFieldStates: Map<string, EntityRow>;
 }
 
 /**
@@ -1025,7 +1021,7 @@ export class OrbitalServerRuntime {
       configByTrait,
       manager,
       entityData: new Map(),
-      dataCache: new Map(),
+      traitFieldStates: new Map(),
     });
 
     // Seed entity instances from schema if they exist
@@ -1619,22 +1615,6 @@ export class OrbitalServerRuntime {
       if (stored) {
         entityData = stored;
       }
-    } else if (registered.entity?.name) {
-      // No entityId on the event — fall back to the first persisted row so
-      // `@entity.<field>` bindings resolve to a real row instead of `{}`.
-      // The compiled path's render layer reads `data['<EntityName>'][0]?.X`,
-      // which has the same effect; mirror that here so instance-scoped
-      // traits (e.g. AgentCompletionModal's render-ui binding @entity.provider
-      // / @entity.model) render seeded values in the playground instead of
-      // empty Badges. Falls through to `{}` when persistence is empty.
-      try {
-        const all = await this.persistence.list(registered.entity.name);
-        if (Array.isArray(all) && all.length > 0 && all[0]) {
-          entityData = all[0] as EntityRow;
-        }
-      } catch {
-        // persistence list may not exist or may throw — keep entityData = {}
-      }
     }
 
     // Process event through state machine
@@ -1788,26 +1768,21 @@ export class OrbitalServerRuntime {
       },
 
       set: async (targetId, field, value) => {
-        const id = targetId || entityId;
-        if (id) {
-          try {
-            await this.persistence.update(entityType, id, { [field]: value as FieldValue });
-            effectResults.push({
-              effect: 'set',
-              entityType,
-              data: { id, field, value: value as FieldValue },
-              success: true,
-            });
-          } catch (err) {
-            effectResults.push({
-              effect: 'set',
-              entityType,
-              data: { id, field, value: value as FieldValue },
-              success: false,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+        // `(set @entity.X Y)` writes to per-trait scalar state, not
+        // persistence. Persistence writes only via explicit
+        // `(persist update ...)`. Mirrors compiled's `state.fields` reducer.
+        let fieldState = registered.traitFieldStates.get(traitName);
+        if (!fieldState) {
+          fieldState = {} as EntityRow;
+          registered.traitFieldStates.set(traitName, fieldState);
         }
+        fieldState[field] = value as FieldValue;
+        effectResults.push({
+          effect: 'set',
+          entityType,
+          data: { id: targetId || entityId || '', field, value: value as FieldValue },
+          success: true,
+        });
       },
 
       persist: async (action, targetEntityType, data) => {
@@ -2091,43 +2066,6 @@ export class OrbitalServerRuntime {
             result = entities;
           }
 
-          // Sync fetched data into bindings so @EntityName.field resolves
-          // in subsequent render-ui effects, and persist into the orbital's
-          // dataCache so the NEXT event's `@entity` resolution (above) sees
-          // the post-fetch subset instead of re-reading the full collection
-          // from persistence.
-          if (result) {
-            const records = Array.isArray(result) ? result : [result];
-            if (records.length > 0) {
-              const merged: EntityRow & EntityRow[] = Object.assign(
-                [...records],
-                records[0],
-              );
-              if (bindingsRef) {
-                bindingsRef[fetchEntityType] = merged;
-                if (fetchEntityType === entityType) {
-                  bindingsRef.entity = merged;
-                }
-              }
-              registered.dataCache.set(fetchEntityType, merged);
-            } else {
-              // Empty result narrows the cache to an empty collection so
-              // `@entity` reflects "no rows match the current filter"
-              // rather than re-falling-back to the full persistence list.
-              const emptyCollection: EntityRow & EntityRow[] = Object.assign(
-                [] as EntityRow[],
-                {} as EntityRow,
-              );
-              if (bindingsRef) {
-                bindingsRef[fetchEntityType] = emptyCollection;
-                if (fetchEntityType === entityType) {
-                  bindingsRef.entity = emptyCollection;
-                }
-              }
-              registered.dataCache.set(fetchEntityType, emptyCollection);
-            }
-          }
-
           return result === null
             ? null
             : { rows: result, total };
@@ -2167,18 +2105,6 @@ export class OrbitalServerRuntime {
             fetchedData[derefEntityType] = entities;
             result = entities;
             total = entities.length;
-          }
-
-          // Sync into bindings like fetch does
-          if (bindingsRef && result) {
-            const records = Array.isArray(result) ? result : [result];
-            if (records.length > 0) {
-              const merged = Object.assign([...records], records[0]);
-              bindingsRef[derefEntityType] = merged;
-              if (derefEntityType === entityType) {
-                bindingsRef.entity = merged;
-              }
-            }
           }
 
           effectResults.push({
@@ -2409,67 +2335,13 @@ export class OrbitalServerRuntime {
       bindings.config = { ...(declaredDefaults ?? {}), ...(callSiteOverride ?? {}) };
     }
 
-    // Trait-bound entity for `@entity` resolution. For atoms imported via
-    // `uses` without an explicit `-> Entity` rebind (e.g. Pagination's
-    // PagedItem auxiliary entity), the trait's `linkedEntity` differs from
-    // the orbital's primary `entityType`. Without using the trait's own
-    // linkedEntity for the bindings.entity seed, instance-scope renders
-    // see the orbital's primary first row (FilteredListItem) and
-    // `@entity.currentPage` resolves to undefined.
-    const traitLinkedEntity = traitDef?.linkedEntity ?? entityType;
-
-    // For [interaction, collection] traits, `@entity` resolves to the
-    // last-fetched collection — mirrors the compiled path's per-trait
-    // reducer `state.data[<EntityName>] ?? []`, where the bridge writes
-    // each fetch's result and subsequent render-ui resolves `@entity`
-    // from that state. The runtime equivalent is `registered.dataCache`,
-    // populated by the fetch handler on success. On first read (no
-    // cache entry yet) we seed from `persistence.list()` so initial
-    // INIT renders show all rows before any fetch settles.
-    if (traitDef?.scope === 'collection' && traitLinkedEntity && !entityId) {
-      const cached = registered.dataCache.get(traitLinkedEntity);
-      if (cached !== undefined) {
-        bindings.entity = cached as EntityRow & EntityRow[];
-      } else {
-        try {
-          const all = await this.persistence.list(traitLinkedEntity);
-          if (Array.isArray(all) && all.length > 0) {
-            const merged: EntityRow & EntityRow[] = Object.assign(
-              [...all],
-              all[0],
-            );
-            bindings.entity = merged;
-            registered.dataCache.set(traitLinkedEntity, merged);
-          }
-        } catch {
-          // Persistence may not be ready (e.g. mock not yet seeded).
-          // Leave the entityData fallback in place — render-ui sees the
-          // first row, same as before this branch existed.
-        }
-      }
-    }
-
-    // For [interaction, instance] traits with a non-primary linkedEntity
-    // (auxiliary entity case — Pagination's PagedItem, Filter's
-    // FilterTarget, Search's SearchResult), seed bindings.entity from the
-    // first persisted row of that linkedEntity. Without this, render-ui
-    // resolves `@entity.X` against the orbital's primary entity first row
-    // and instance-state fields like `currentPage` come back undefined.
-    if (
-      traitDef?.scope === 'instance'
-      && traitLinkedEntity
-      && traitLinkedEntity !== entityType
-      && !entityId
-    ) {
-      try {
-        const all = await this.persistence.list(traitLinkedEntity);
-        if (Array.isArray(all) && all.length > 0 && all[0]) {
-          bindings.entity = all[0];
-        }
-      } catch {
-        // Persistence may be empty for this auxiliary entity — leave the
-        // entityData fallback in place.
-      }
+    // `@entity` resolves to the per-trait scalar state populated by
+    // explicit `(set @entity.X Y)` effects. No implicit seeding from
+    // persistence — if the schema author didn't `(set)` a field, it
+    // stays undefined and render-ui shows nothing.
+    const traitFieldState = registered.traitFieldStates.get(traitName);
+    if (traitFieldState) {
+      bindings.entity = traitFieldState;
     }
 
     // Add initial named entity binding
