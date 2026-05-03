@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "5.10.0",
+  "version": "5.10.1",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -56,7 +56,7 @@
     "@faker-js/faker": "^9.3.0"
   },
   "peerDependencies": {
-    "express": "^4.0.0"
+    "express": "^4.0.0 || ^5.0.0"
   },
   "devDependencies": {
     "@almadar/eslint-plugin": ">=2.7.0",
