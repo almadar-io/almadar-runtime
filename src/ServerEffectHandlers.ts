@@ -387,6 +387,19 @@ export function createServerEffectHandlers(
 
     fetch: async (fetchEntityType, options) => {
       try {
+        effectLog.info("clientFetch:enter", {
+          entityType: fetchEntityType,
+          hasOptions: options !== undefined && options !== null,
+          optionsKeys: options && typeof options === 'object'
+            ? Object.keys(options as object).join(',')
+            : '',
+          filterType: typeof (options as { filter?: unknown } | undefined)?.filter,
+          filterIsArray: Array.isArray((options as { filter?: unknown } | undefined)?.filter),
+          filterJson: JSON.stringify(
+            (options as { filter?: unknown } | undefined)?.filter ?? null,
+          ).slice(0, 300),
+          payloadJson: JSON.stringify(bindings?.payload ?? null).slice(0, 300),
+        });
         let result: EntityRow | EntityRow[] | null = null;
         if (options?.id) {
           const entity = await persistence.getById(fetchEntityType, options.id);

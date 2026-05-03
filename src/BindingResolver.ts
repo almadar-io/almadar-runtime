@@ -253,7 +253,17 @@ function interpolateArray(value: unknown[], ctx: EvaluationContext): unknown {
     }
 
     if (isSExpression(value)) {
-        return evaluate(value as Parameters<typeof evaluate>[0], ctx);
+        const result = evaluate(value as Parameters<typeof evaluate>[0], ctx);
+        bindLog.info('sexpr:eval', {
+            operator: typeof value[0] === 'string' ? value[0] : '<non-string>',
+            argCount: value.length - 1,
+            inputJson: JSON.stringify(value).slice(0, 300),
+            resultType: typeof result,
+            resultJson: typeof result === 'object' && result !== null
+                ? JSON.stringify(result).slice(0, 200)
+                : String(result),
+        });
+        return result;
     }
 
     // Identity-preserving map: only return a new array if any item

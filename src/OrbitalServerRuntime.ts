@@ -270,6 +270,17 @@ export interface RegisteredOrbital {
   configByTrait: Map<string, TraitConfig>;
   manager: StateMachineManager;
   entityData: Map<string, EntityRow>; // entityId -> data
+  /**
+   * Last-fetched collection per entityType. Mirrors the compiled path's
+   * per-trait reducer `state.data[<EntityName>]`: the trait's `@entity`
+   * binding resolves from this cache so a filter narrows the rendered
+   * list across events. Without this, executeEffects re-reads the full
+   * persistence list on every event and clobbers the prior fetch's
+   * filtered subset. Populated by the fetch handler on success; seeded
+   * lazily from `persistence.list()` when a collection-scope binding is
+   * first read with no cache entry.
+   */
+  dataCache: Map<string, EntityRow | EntityRow[]>;
 }
 
 /**
@@ -1014,6 +1025,7 @@ export class OrbitalServerRuntime {
       configByTrait,
       manager,
       entityData: new Map(),
+      dataCache: new Map(),
     });
 
     // Seed entity instances from schema if they exist
@@ -2005,6 +2017,19 @@ export class OrbitalServerRuntime {
 
       fetch: async (fetchEntityType, options) => {
         try {
+          xOrbitalLog.info('fetch:enter', {
+            entityType: fetchEntityType,
+            hasOptions: options !== undefined && options !== null,
+            optionsKeys: options && typeof options === 'object'
+              ? Object.keys(options as object).join(',')
+              : '',
+            filterType: typeof (options as { filter?: unknown } | undefined)?.filter,
+            filterIsArray: Array.isArray((options as { filter?: unknown } | undefined)?.filter),
+            filterJson: JSON.stringify(
+              (options as { filter?: unknown } | undefined)?.filter ?? null,
+            ).slice(0, 300),
+            payloadJson: JSON.stringify(bindingsRef?.payload ?? null).slice(0, 300),
+          });
           let result: EntityRow | EntityRow[] | null = null;
 
           if (options?.id) {
@@ -2064,15 +2089,39 @@ export class OrbitalServerRuntime {
           }
 
           // Sync fetched data into bindings so @EntityName.field resolves
-          // in subsequent render-ui effects
-          if (bindingsRef && result) {
+          // in subsequent render-ui effects, and persist into the orbital's
+          // dataCache so the NEXT event's `@entity` resolution (above) sees
+          // the post-fetch subset instead of re-reading the full collection
+          // from persistence.
+          if (result) {
             const records = Array.isArray(result) ? result : [result];
             if (records.length > 0) {
-              const merged = Object.assign([...records], records[0]);
-              bindingsRef[fetchEntityType] = merged;
-              if (fetchEntityType === entityType) {
-                bindingsRef.entity = merged;
+              const merged: EntityRow & EntityRow[] = Object.assign(
+                [...records],
+                records[0],
+              );
+              if (bindingsRef) {
+                bindingsRef[fetchEntityType] = merged;
+                if (fetchEntityType === entityType) {
+                  bindingsRef.entity = merged;
+                }
               }
+              registered.dataCache.set(fetchEntityType, merged);
+            } else {
+              // Empty result narrows the cache to an empty collection so
+              // `@entity` reflects "no rows match the current filter"
+              // rather than re-falling-back to the full persistence list.
+              const emptyCollection: EntityRow & EntityRow[] = Object.assign(
+                [] as EntityRow[],
+                {} as EntityRow,
+              );
+              if (bindingsRef) {
+                bindingsRef[fetchEntityType] = emptyCollection;
+                if (fetchEntityType === entityType) {
+                  bindingsRef.entity = emptyCollection;
+                }
+              }
+              registered.dataCache.set(fetchEntityType, emptyCollection);
             }
           }
 
@@ -2352,27 +2401,34 @@ export class OrbitalServerRuntime {
       bindings.config = { ...(declaredDefaults ?? {}), ...(callSiteOverride ?? {}) };
     }
 
-    // For [interaction, collection] traits, `@entity` must resolve to the
-    // full row collection (matching the compiled path, where it lowers to
-    // `data['<EntityName>'] ?? []`). Without this branch the bare
-    // entityData fallback above selects only the first row, so a
-    // render-ui pattern like `entity: @entity` on a `data-grid` shows a
-    // single row in the playground while the compiled bundle correctly
-    // shows all rows.
+    // For [interaction, collection] traits, `@entity` resolves to the
+    // last-fetched collection — mirrors the compiled path's per-trait
+    // reducer `state.data[<EntityName>] ?? []`, where the bridge writes
+    // each fetch's result and subsequent render-ui resolves `@entity`
+    // from that state. The runtime equivalent is `registered.dataCache`,
+    // populated by the fetch handler on success. On first read (no
+    // cache entry yet) we seed from `persistence.list()` so initial
+    // INIT renders show all rows before any fetch settles.
     if (traitDef?.scope === 'collection' && entityType && !entityId) {
-      try {
-        const all = await this.persistence.list(entityType);
-        if (Array.isArray(all) && all.length > 0) {
-          const merged: EntityRow & EntityRow[] = Object.assign(
-            [...all],
-            all[0],
-          );
-          bindings.entity = merged;
+      const cached = registered.dataCache.get(entityType);
+      if (cached !== undefined) {
+        bindings.entity = cached as EntityRow & EntityRow[];
+      } else {
+        try {
+          const all = await this.persistence.list(entityType);
+          if (Array.isArray(all) && all.length > 0) {
+            const merged: EntityRow & EntityRow[] = Object.assign(
+              [...all],
+              all[0],
+            );
+            bindings.entity = merged;
+            registered.dataCache.set(entityType, merged);
+          }
+        } catch {
+          // Persistence may not be ready (e.g. mock not yet seeded).
+          // Leave the entityData fallback in place — render-ui sees the
+          // first row, same as before this branch existed.
         }
-      } catch {
-        // Persistence may not be ready (e.g. mock not yet seeded). Leave
-        // entityData fallback in place — render-ui sees the first row,
-        // same as before this branch existed.
       }
     }
 

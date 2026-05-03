@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import type { EmitConfig, PatternConfig } from '@almadar/core';
+import type { EmitConfig, FetchOptions, PatternConfig } from '@almadar/core';
 import type {
     EffectHandlers,
     Effect,
@@ -241,6 +241,25 @@ export class EffectExecutor {
             typeof args[0] === 'string' &&
             (args[0] as string).startsWith('@entity.');
 
+        // Resource-fetch operators carry a `filter` SExpression in args[1]
+        // that the handler evaluates per-row against the fetched collection.
+        // Pre-interpolation collapses it to a single constant boolean (e.g.
+        // `(or (= "active" "") (= (object/get @entity "status") "active"))`
+        // becomes literal `true` or `false` against the OUTER trait's bound
+        // entity), so the handler then applies the same constant to every
+        // row — no narrowing. Preserve the filter SExpression verbatim;
+        // resolve the rest of the options object normally.
+        const isFetchLike =
+            (operator === 'fetch' ||
+                operator === 'ref' ||
+                operator === 'deref' ||
+                operator === 'os/watch-collection' ||
+                operator === 'os/watch') &&
+            args.length >= 2 &&
+            args[1] !== null &&
+            typeof args[1] === 'object' &&
+            !Array.isArray(args[1]);
+
         let resolvedArgs: unknown[];
         if (isCompound) {
             resolvedArgs = args;
@@ -248,6 +267,22 @@ export class EffectExecutor {
             const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
             // Preserve args[0] (the @entity.<path> literal); resolve the rest.
             resolvedArgs = [args[0], ...args.slice(1).map((a) => interpolateValue(a, ctx))];
+        } else if (isFetchLike) {
+            const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
+            const opts = args[1] as FetchOptions;
+            const resolvedOpts: FetchOptions = {
+                ...(opts.id !== undefined && { id: interpolateValue(opts.id, ctx) as string }),
+                ...(opts.filter !== undefined && { filter: opts.filter }),
+                ...(opts.limit !== undefined && { limit: interpolateValue(opts.limit, ctx) as number }),
+                ...(opts.offset !== undefined && { offset: interpolateValue(opts.offset, ctx) as number }),
+                ...(opts.include !== undefined && { include: interpolateValue(opts.include, ctx) as string[] }),
+                ...(opts.emit !== undefined && { emit: interpolateValue(opts.emit, ctx) as FetchOptions['emit'] }),
+            };
+            resolvedArgs = [
+                interpolateValue(args[0], ctx),
+                resolvedOpts,
+                ...args.slice(2).map((a) => interpolateValue(a, ctx)),
+            ];
         } else {
             resolvedArgs = resolveArgs(args, this.bindings, this.strictBindings, this.contextExtensions);
         }
