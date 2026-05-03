@@ -9,6 +9,7 @@
 import type {
     EntityRow,
     EventPayload,
+    FetchResult,
     ServiceParams,
     ResolvedPatternProps,
     AgentContext,
@@ -23,7 +24,7 @@ import type {
 // Runtime Data Types (re-exported from @almadar/core)
 // ============================================================================
 
-export type { EntityRow, EventPayload, ServiceParams };
+export type { EntityRow, EventPayload, FetchResult, ServiceParams };
 
 /** Alias for ResolvedPatternProps to avoid breaking internal consumers */
 export type PatternProps = ResolvedPatternProps;
@@ -207,7 +208,14 @@ export interface EffectHandlers {
         params?: ServiceParams
     ) => Promise<unknown>;
 
-    /** Fetch entity data (server only) - returns data for client-side rendering */
+    /** Fetch entity data (server only) - returns data for client-side rendering.
+     *
+     * Always returns a `FetchResult` (`{rows, total}`) on success. `total`
+     * is the count of rows matching the `filter` BEFORE `offset`/`limit`
+     * are applied so a paginating caller can compute totalPages without
+     * a second round-trip. Single-id fetches return `total: 1`. `null`
+     * means "not found / failed".
+     */
     fetch?: (
         entityType: string,
         options?: {
@@ -218,7 +226,7 @@ export interface EffectHandlers {
             /** Relation fields to include (populate) in the response */
             include?: string[];
         }
-    ) => Promise<EntityRow | EntityRow[] | null>;
+    ) => Promise<FetchResult | null>;
 
     /** Spawn a new entity instance */
     spawn?: (entityType: string, props?: EntityRow) => void;
@@ -259,7 +267,7 @@ export interface EffectHandlers {
             offset?: number;
             include?: string[];
         }
-    ) => Promise<EntityRow | EntityRow[] | null>;
+    ) => Promise<FetchResult | null>;
 
     /** Deref: one-shot data read (server: same as fetch) */
     deref?: (
@@ -268,7 +276,7 @@ export interface EffectHandlers {
             id?: string;
             filter?: unknown;
         }
-    ) => Promise<EntityRow | EntityRow[] | null>;
+    ) => Promise<FetchResult | null>;
 
     /** Swap!: atomic read-modify-write on an entity */
     swap?: (

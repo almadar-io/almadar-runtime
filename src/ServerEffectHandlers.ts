@@ -390,22 +390,20 @@ export function createServerEffectHandlers(
         effectLog.info("clientFetch:enter", {
           entityType: fetchEntityType,
           hasOptions: options !== undefined && options !== null,
-          optionsKeys: options && typeof options === 'object'
-            ? Object.keys(options as object).join(',')
-            : '',
-          filterType: typeof (options as { filter?: unknown } | undefined)?.filter,
-          filterIsArray: Array.isArray((options as { filter?: unknown } | undefined)?.filter),
-          filterJson: JSON.stringify(
-            (options as { filter?: unknown } | undefined)?.filter ?? null,
-          ).slice(0, 300),
+          optionsKeys: options ? Object.keys(options).join(',') : '',
+          filterType: typeof options?.filter,
+          filterIsArray: Array.isArray(options?.filter),
+          filterJson: JSON.stringify(options?.filter ?? null).slice(0, 300),
           payloadJson: JSON.stringify(bindings?.payload ?? null).slice(0, 300),
         });
         let result: EntityRow | EntityRow[] | null = null;
+        let total = 0;
         if (options?.id) {
           const entity = await persistence.getById(fetchEntityType, options.id);
           if (entity) {
             if (fetchedData) fetchedData[fetchEntityType] = [entity];
             result = entity;
+            total = 1;
           }
         } else {
           let entities = await persistence.list(fetchEntityType);
@@ -427,6 +425,9 @@ export function createServerEffectHandlers(
               }
             });
           }
+          // Capture total AFTER filter, BEFORE offset/limit so paginating
+          // consumers receive the count of rows matching the filter.
+          total = entities.length;
           if (options?.offset && options.offset > 0) {
             entities = entities.slice(options.offset);
           }
@@ -446,7 +447,7 @@ export function createServerEffectHandlers(
             }
           }
         }
-        return result;
+        return result === null ? null : { rows: result, total };
       } catch (err) {
         console.error(
           `[ServerEffectHandlers] fetch error for ${fetchEntityType}:`,
@@ -466,16 +467,19 @@ export function createServerEffectHandlers(
     deref: async (derefEntityType, options) => {
       try {
         let result: EntityRow | EntityRow[] | null = null;
+        let total = 0;
         if (options?.id) {
           const entity = await persistence.getById(derefEntityType, options.id);
           if (entity) {
             if (fetchedData) fetchedData[derefEntityType] = [entity];
             result = entity;
+            total = 1;
           }
         } else {
           const entities = await persistence.list(derefEntityType);
           if (fetchedData) fetchedData[derefEntityType] = entities;
           result = entities;
+          total = entities.length;
         }
         if (bindings && result) {
           const records = Array.isArray(result) ? result : [result];
@@ -492,7 +496,7 @@ export function createServerEffectHandlers(
           entityType: derefEntityType,
           success: true,
         });
-        return result;
+        return result === null ? null : { rows: result, total };
       } catch (err) {
         record({
           effect: "deref",

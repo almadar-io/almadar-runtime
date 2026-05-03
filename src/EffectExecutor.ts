@@ -17,7 +17,7 @@ import type {
 } from './types.js';
 import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
-import type { BindingContext, EntityRow, EventPayload, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
+import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
 import { createLogger } from './logger.js';
 
 const effectLog = createLogger('almadar:runtime:effects');
@@ -686,11 +686,16 @@ export class EffectExecutor {
                     const emitCfg = this.extractEmitConfig(rawOpt);
                     try {
                         const result = await this.handlers.fetch(entityType, options);
-                        // Wrap the result under `{ data: ... }` so the emit payload
-                        // is always an object (never a bare array). Authors access
-                        // the fetched records via `@payload.data`, matching the
-                        // persist convention.
-                        this.emitSuccess(emitCfg, 'success', { data: result } as EventPayload);
+                        // Authors read fetched records via `@payload.data`. The
+                        // sibling `totalCount` is the pre-pagination row count so
+                        // paginating consumers can compute totalPages without a
+                        // second round-trip. `result === null` means "not found";
+                        // emit success with `data: null, totalCount: 0` so the
+                        // payload shape stays stable.
+                        const payload: EventPayload = result
+                            ? { data: result.rows, totalCount: result.total }
+                            : { data: null, totalCount: 0 };
+                        this.emitSuccess(emitCfg, 'success', payload);
                     } catch (err) {
                         this.emitFailure(emitCfg, err);
                         throw err;
@@ -717,7 +722,7 @@ export class EffectExecutor {
                     } | undefined;
                 const refEmitCfg = this.extractEmitConfig(rawRefOpt);
                 try {
-                    let result: unknown = undefined;
+                    let result: FetchResult | null = null;
                     if (this.handlers.ref) {
                         result = await this.handlers.ref(refEntityType, refOptions);
                     } else if (this.handlers.fetch) {
@@ -726,11 +731,12 @@ export class EffectExecutor {
                         this.logUnsupported('ref');
                     }
                     // Interpreted runtime fires `on_change` once on the initial
-                    // subscribe. The ongoing-update story lives in the client
-                    // reactivity layer — it owns subsequent emissions since it
-                    // already subscribes to mutations. Wrap under `{ data: ... }`
-                    // so the payload is always an object, matching fetch.
-                    this.emitSuccess(refEmitCfg, 'on_change', { data: result } as EventPayload);
+                    // subscribe. Match fetch's payload shape so paginating
+                    // subscribers receive the same {data, totalCount} contract.
+                    const refPayload: EventPayload = result
+                        ? { data: result.rows, totalCount: result.total }
+                        : { data: null, totalCount: 0 };
+                    this.emitSuccess(refEmitCfg, 'on_change', refPayload);
                 } catch (err) {
                     this.emitFailure(refEmitCfg, err);
                     throw err;

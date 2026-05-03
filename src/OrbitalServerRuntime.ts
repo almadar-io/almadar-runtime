@@ -2020,17 +2020,14 @@ export class OrbitalServerRuntime {
           xOrbitalLog.info('fetch:enter', {
             entityType: fetchEntityType,
             hasOptions: options !== undefined && options !== null,
-            optionsKeys: options && typeof options === 'object'
-              ? Object.keys(options as object).join(',')
-              : '',
-            filterType: typeof (options as { filter?: unknown } | undefined)?.filter,
-            filterIsArray: Array.isArray((options as { filter?: unknown } | undefined)?.filter),
-            filterJson: JSON.stringify(
-              (options as { filter?: unknown } | undefined)?.filter ?? null,
-            ).slice(0, 300),
+            optionsKeys: options ? Object.keys(options).join(',') : '',
+            filterType: typeof options?.filter,
+            filterIsArray: Array.isArray(options?.filter),
+            filterJson: JSON.stringify(options?.filter ?? null).slice(0, 300),
             payloadJson: JSON.stringify(bindingsRef?.payload ?? null).slice(0, 300),
           });
           let result: EntityRow | EntityRow[] | null = null;
+          let total = 0;
 
           if (options?.id) {
             // Single entity fetch
@@ -2043,6 +2040,7 @@ export class OrbitalServerRuntime {
               // Always store as array for consistent access via FetchedDataContext
               fetchedData[fetchEntityType] = [entity];
               result = entity;
+              total = 1;
             }
           } else {
             // Collection fetch
@@ -2070,6 +2068,11 @@ export class OrbitalServerRuntime {
                 }
               });
             }
+
+            // Capture total AFTER filter, BEFORE offset/limit — paginating
+            // consumers need the count of rows matching the filter, not
+            // just the slice length.
+            total = entities.length;
 
             // Apply pagination
             if (options?.offset && options.offset > 0) {
@@ -2125,7 +2128,9 @@ export class OrbitalServerRuntime {
             }
           }
 
-          return result;
+          return result === null
+            ? null
+            : { rows: result, total };
         } catch (error) {
           console.error(`[OrbitalRuntime] Fetch error for ${fetchEntityType}:`, error);
           return null;
@@ -2148,17 +2153,20 @@ export class OrbitalServerRuntime {
         // deref is identical to fetch on the server: one-shot read
         try {
           let result: EntityRow | EntityRow[] | null = null;
+          let total = 0;
 
           if (options?.id) {
             const entity = await this.persistence.getById(derefEntityType, options.id);
             if (entity) {
               fetchedData[derefEntityType] = [entity];
               result = entity;
+              total = 1;
             }
           } else {
             const entities = await this.persistence.list(derefEntityType);
             fetchedData[derefEntityType] = entities;
             result = entities;
+            total = entities.length;
           }
 
           // Sync into bindings like fetch does
@@ -2179,7 +2187,7 @@ export class OrbitalServerRuntime {
             success: true,
           });
 
-          return result;
+          return result === null ? null : { rows: result, total };
         } catch (error) {
           effectResults.push({
             effect: 'deref',
