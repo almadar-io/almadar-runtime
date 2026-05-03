@@ -295,11 +295,18 @@ function resolveTraitBinding(
   // machine is silent.
   if (t.ref && !t.stateMachine) {
     if (t._resolved && t._resolved.stateMachine) {
+      // Wrapper-level rebind wins; otherwise inherit the inlined atom's
+      // own linkedEntity (e.g. PagedItem for std-pagination), and fall
+      // back to the orbital's primary entity only if neither names a
+      // target. Without this, atoms imported via `uses` without an
+      // explicit `-> Entity` rebind silently rebind to the orbital's
+      // primary entity (the gap #22 design intent of "atoms keep their
+      // own auxiliary entity" was being overridden here).
       return {
         ref: t._resolved.name ?? t.ref,
         trait: resolveTrait(t._resolved, 'inline'),
         config: t.config,
-        linkedEntity: t.linkedEntity || orbitalEntity,
+        linkedEntity: t.linkedEntity || t._resolved.linkedEntity || orbitalEntity,
       };
     }
     const trait = traitMap.get(t.ref);
@@ -307,7 +314,7 @@ function resolveTraitBinding(
       ref: t.ref,
       trait: trait || createEmptyTrait(t.ref, 'library'),
       config: t.config,
-      linkedEntity: t.linkedEntity || orbitalEntity,
+      linkedEntity: t.linkedEntity || trait?.linkedEntity || orbitalEntity,
     };
   }
 
@@ -319,7 +326,7 @@ function resolveTraitBinding(
       ref: t.name,
       trait: inlineTrait,
       config: t.config,
-      linkedEntity: t.linkedEntity || orbitalEntity,
+      linkedEntity: t.linkedEntity || inlineTrait.linkedEntity || orbitalEntity,
     };
   }
 
@@ -330,7 +337,7 @@ function resolveTraitBinding(
     ref,
     trait: trait || createEmptyTrait(ref, 'library'),
     config: t.config,
-    linkedEntity: t.linkedEntity || orbitalEntity,
+    linkedEntity: t.linkedEntity || trait?.linkedEntity || orbitalEntity,
   };
 }
 
