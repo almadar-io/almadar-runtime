@@ -344,6 +344,8 @@ export interface QueuedEvent {
     eventKey: string;
     payload?: EventPayload;
     entityData?: EntityRow;
+    /** Per-trait entity overrides (see `sendEvent` doc). */
+    entityByTrait?: Record<string, EntityRow>;
 }
 
 /**
@@ -552,12 +554,20 @@ export class StateMachineManager {
     /**
      * Send an event to all traits.
      *
+     * `entityByTrait` lets callers supply per-trait entity rows for guard
+     * evaluation when traits accumulate scalar state via `(set @entity.X)`
+     * effects across transitions. The runtime UI hook builds this map from
+     * its `traitFieldStatesRef` before each dispatch so guards reading
+     * `@entity.X` see prior step writes — required for [runtime] entities
+     * that have no persistence row to reload.
+     *
      * @returns Array of transition results (one per trait that had a matching transition)
      */
     sendEvent(
         eventKey: string,
         payload?: EventPayload,
-        entityData?: EntityRow
+        entityData?: EntityRow,
+        entityByTrait?: Record<string, EntityRow>
     ): Array<{ traitName: string; result: TransitionResult }> {
         const results: Array<{ traitName: string; result: TransitionResult }> = [];
         const scope = scopeOf(entityData);
@@ -567,12 +577,14 @@ export class StateMachineManager {
             if (!traitState) continue;
             const key = compositeKey(traitName, scope);
 
+            const perTraitEntity = entityByTrait?.[traitName] ?? entityData;
+
             const result = processEvent({
                 traitState,
                 trait,
                 eventKey,
                 payload,
-                entityData,
+                entityData: perTraitEntity,
                 config: this.traitConfigs.get(traitName),
                 guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,
@@ -624,13 +636,14 @@ export class StateMachineManager {
     enqueueEvent(
         eventKey: string,
         payload?: EventPayload,
-        entityData?: EntityRow
+        entityData?: EntityRow,
+        entityByTrait?: Record<string, EntityRow>
     ): void {
         const scope = scopeOf(entityData);
         for (const [traitName] of this.traits) {
             const key = compositeKey(traitName, scope);
             const queue = this.queues.get(key) ?? [];
-            queue.push({ eventKey, payload, entityData });
+            queue.push({ eventKey, payload, entityData, entityByTrait });
             this.queues.set(key, queue);
         }
     }
@@ -661,12 +674,15 @@ export class StateMachineManager {
             const traitState = this.getOrInitState(traitName, scope);
             if (!trait || !traitState) continue;
 
+            const perTraitEntity =
+                entry.entityByTrait?.[traitName] ?? entry.entityData;
+
             const result = processEvent({
                 traitState,
                 trait,
                 eventKey: entry.eventKey,
                 payload: entry.payload,
-                entityData: entry.entityData,
+                entityData: perTraitEntity,
                 config: this.traitConfigs.get(traitName),
                 guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,

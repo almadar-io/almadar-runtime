@@ -1617,8 +1617,25 @@ export class OrbitalServerRuntime {
       }
     }
 
+    // Build per-trait entity overrides from `traitFieldStates` (mutated by
+    // `(set @entity.X Y)` effects). For [runtime] entities with no persistence
+    // row, this is the only way `@entity.X` references in guards get resolved
+    // to the values prior transitions committed — matches the runtime UI hook
+    // behavior so guard outcomes are identical across both paths.
+    const entityByTrait: Record<string, EntityRow> = {};
+    for (const [name, fields] of registered.traitFieldStates) {
+      if (fields && Object.keys(fields).length > 0) {
+        entityByTrait[name] = fields;
+      }
+    }
+
     // Process event through state machine
-    const results = registered.manager.sendEvent(event, cleanPayload, entityData);
+    const results = registered.manager.sendEvent(
+      event,
+      cleanPayload,
+      entityData,
+      entityByTrait,
+    );
 
     // Filter results to only active traits (if specified)
     const filteredResults = activeTraits && activeTraits.length > 0
