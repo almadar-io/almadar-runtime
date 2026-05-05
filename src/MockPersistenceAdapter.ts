@@ -19,6 +19,16 @@ const mockLog = createLogger('almadar:runtime:mock');
  *  during hermetic-frame mode produce identical row data each time —
  *  matching the compiled path's compile-baked-in mock semantics. */
 const DEFAULT_MOCK_SEED = 42;
+
+/** Return a deterministic stock-photo URL from Picsum Photos.
+ *  Free, no API key, seed-stable so the same entity+field always renders
+ *  the same image across reruns. Used for fields declaring
+ *  `format: "image" | "avatar" | "thumbnail"` and a few well-known field
+ *  names (`imageUrl`, `photo`, etc.). */
+function picsumUrl(entityName: string, fieldName: string, width = 400, height = 400): string {
+  const seed = `${entityName}-${fieldName}-${faker.number.int({ min: 0, max: 1000 })}`;
+  return `https://picsum.photos/seed/${encodeURIComponent(seed)}/${width}/${height}`;
+}
 /** Reference timestamp used as `now` for seeded rows. Deterministic so
  *  diff observers don't see all rows as "changed" between frames just
  *  because the wallclock advanced. */
@@ -35,7 +45,7 @@ export interface EntityField {
   values?: string[]; // For enum types
   default?: unknown;
   /** Validation format: email/url/phone/date/datetime/uuid. Drives mock-value shape without name heuristics. */
-  format?: 'email' | 'url' | 'phone' | 'date' | 'datetime' | 'uuid';
+  format?: 'email' | 'url' | 'phone' | 'date' | 'datetime' | 'uuid' | 'image' | 'avatar' | 'thumbnail';
 }
 
 export interface EntitySchema {
@@ -294,18 +304,47 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       case 'uuid': return faker.string.uuid();
       case 'date': return faker.date.recent().toISOString().split('T')[0]!;
       case 'datetime': return faker.date.recent().toISOString();
-      default: {
-        const value = faker.lorem.words(2);
-        mockLog.warn('field:fallback-lorem', {
-          entityName,
-          fieldName: field.name,
-          hasValues: false,
-          format: field.format ?? null,
-          generated: value,
-        });
-        return value;
-      }
+      case 'image':
+      case 'avatar':
+      case 'thumbnail':
+        return picsumUrl(entityName, field.name);
     }
+    // Field-name fallback for image-bearing string fields. Authors who haven't
+    // (yet) annotated `format: "image"` still get a real photo from Picsum
+    // rather than a `faker.lorem.words(2)` sentence that breaks data-grid
+    // imageField rendering. Heuristic is narrow + clearly named.
+    const lname = field.name.toLowerCase();
+    if (
+      lname === 'image' ||
+      lname === 'imageurl' ||
+      lname === 'image_url' ||
+      lname === 'photo' ||
+      lname === 'photourl' ||
+      lname === 'photo_url' ||
+      lname === 'avatar' ||
+      lname === 'avatarurl' ||
+      lname === 'avatar_url' ||
+      lname === 'thumbnail' ||
+      lname === 'thumbnailurl' ||
+      lname === 'thumbnail_url' ||
+      lname === 'picture' ||
+      lname === 'pictureurl' ||
+      lname === 'cover' ||
+      lname === 'coverurl' ||
+      lname === 'banner' ||
+      lname === 'bannerurl'
+    ) {
+      return picsumUrl(entityName, field.name);
+    }
+    const value = faker.lorem.words(2);
+    mockLog.warn('field:fallback-lorem', {
+      entityName,
+      fieldName: field.name,
+      hasValues: false,
+      format: field.format ?? null,
+      generated: value,
+    });
+    return value;
   }
 
   /**
