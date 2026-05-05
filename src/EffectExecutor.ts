@@ -551,7 +551,7 @@ export class EffectExecutor {
                             }
                             (this.bindings.entity as EntityRow)[field] =
                                 value as EntityRow[string];
-                            this.handlers.set(entityId, field, value);
+                            this.handlers.set(entityId ?? '', field, value);
                             this.emitSuccess(emitCfg, 'success', value);
                             break;
                         }
