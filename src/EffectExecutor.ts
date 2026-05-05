@@ -535,20 +535,23 @@ export class EffectExecutor {
                             // No persistable entity id (and the payload
                             // doesn't carry one — typical for instance-scoped
                             // notification traits whose SHOW payload is
-                            // `{ message, notificationType }`). Skip the
-                            // persistence write but still update the
-                            // in-memory binding so the very next render-ui
-                            // in the same transition resolves @entity.<field>
-                            // to the value just set. Without this mirror, the
-                            // compiled path renders the alert with the new
-                            // message text while the runtime path renders
-                            // empty — same .orb, divergent output.
+                            // `{ message, notificationType }`, and for
+                            // [runtime] entities like wizards that accumulate
+                            // scalar state across transitions). Update the
+                            // in-memory binding AND still dispatch through
+                            // handlers.set so the per-trait scalar-state
+                            // wrapper in useTraitStateMachine populates
+                            // `traitFieldStatesRef` — guards in subsequent
+                            // sendEvent calls read `@entity.X` from there.
+                            // Without the handlers.set call, the wrapper
+                            // never runs and step-skip guards always fail.
                             effectLog.debug('set:in-memory-mirror-only', { path });
                             if (!entity) {
                                 this.bindings.entity = {} as EntityRow;
                             }
                             (this.bindings.entity as EntityRow)[field] =
                                 value as EntityRow[string];
+                            this.handlers.set(entityId, field, value);
                             this.emitSuccess(emitCfg, 'success', value);
                             break;
                         }
