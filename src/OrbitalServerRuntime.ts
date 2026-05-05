@@ -1982,6 +1982,32 @@ export class OrbitalServerRuntime {
               action,
               params,
             );
+          } else if (this.config.mode === 'mock') {
+            // Mock mode: return a useful default so service-atom chains
+            // (e.g. std-service-stripe createPaymentIntent → PAYMENT_CREATED
+            // → confirmPayment → PAYMENT_CONFIRMED) advance instead of
+            // stalling at an empty payload. Fields cover the common
+            // service-result shapes:
+            //   - `id` / `clientSecret` for payment-intent style results
+            //   - `success` / `status` for boolean-ish action results
+            //   - `result` (object) for actions that wrap a result
+            //   - echo `params` so consumers reading the request shape see it
+            const mockId = `mock_${service}_${action}_${Math.random().toString(36).slice(2, 10)}`;
+            const paramsEcho: Partial<EntityRow> = {};
+            if (params) {
+              for (const [k, v] of Object.entries(params)) {
+                if (v !== undefined && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null || v instanceof Date)) {
+                  paramsEcho[k] = v;
+                }
+              }
+            }
+            result = {
+              id: mockId,
+              clientSecret: `secret_${mockId}`,
+              success: true,
+              status: 'succeeded',
+              ...paramsEcho,
+            } as EntityRow;
           } else {
             console.warn(
               `[OrbitalRuntime] call-service not configured: ${service}.${action}`,
