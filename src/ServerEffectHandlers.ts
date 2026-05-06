@@ -13,7 +13,7 @@
  * @packageDocumentation
  */
 
-import type { EventPayload, SExpr } from "@almadar/core";
+import type { EventPayload, SExpr, ServiceParams } from "@almadar/core";
 import type { PersistenceAdapter } from "./PersistenceAdapter.js";
 import type {
   EffectHandlers,
@@ -362,10 +362,40 @@ export function createServerEffectHandlers(
         let result: unknown = null;
         if (consumerCallService) {
           result = await consumerCallService(service, action, params);
-        } else if (debug) {
-          console.warn(
-            `[ServerEffectHandlers] call-service not configured: ${service}.${action}`,
-          );
+        } else {
+          // Mock fallback: synthetic result satisfying common service-atom
+          // emit shapes ({id, clientSecret, success, status, params-echo}).
+          // Mirrors createClientEffectHandlers + OrbitalServerRuntime mock
+          // mode so service-atom chains advance end-to-end in offline /
+          // standalone-preview without explicit handler wiring.
+          const mockId = `mock_${service}_${action}_${Math.random().toString(36).slice(2, 10)}`;
+          const paramsEcho: Partial<EntityRow> = {};
+          if (params && typeof params === "object") {
+            for (const [k, v] of Object.entries(params as ServiceParams)) {
+              if (
+                v !== undefined &&
+                (typeof v === "string" ||
+                  typeof v === "number" ||
+                  typeof v === "boolean" ||
+                  v === null ||
+                  v instanceof Date)
+              ) {
+                paramsEcho[k] = v;
+              }
+            }
+          }
+          result = {
+            id: mockId,
+            clientSecret: `secret_${mockId}`,
+            success: true,
+            status: "succeeded",
+            ...paramsEcho,
+          } as EntityRow;
+          if (debug) {
+            console.warn(
+              `[ServerEffectHandlers] call-service not configured: ${service}.${action} — using mock result`,
+            );
+          }
         }
         record({
           effect: "call-service",
