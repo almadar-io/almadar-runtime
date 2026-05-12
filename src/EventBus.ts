@@ -7,7 +7,10 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '@almadar/logger';
 import type { IEventBus, RuntimeEvent, EventListener, Unsubscribe, EventPayload } from './types.js';
+
+const log = createLogger('almadar:runtime:eventbus');
 
 /**
  * EventBus - Simple pub/sub event bus
@@ -30,14 +33,16 @@ import type { IEventBus, RuntimeEvent, EventListener, Unsubscribe, EventPayload 
  */
 export class EventBus implements IEventBus {
     private listeners: Map<string, Set<EventListener>> = new Map();
-    private debug: boolean;
     /** Maximum recursion depth before circuit breaker activates (RCG-05) */
     private maxDepth: number;
     /** Current emission depth for circular loop detection */
     private depth: number = 0;
 
     constructor(options: { debug?: boolean; maxDepth?: number } = {}) {
-        this.debug = options.debug ?? false;
+        // `debug` is accepted for backwards-compatibility but is now a no-op;
+        // diagnostic output is gated by @almadar/logger (env ALMADAR_DEBUG or
+        // globalThis.__ALMADAR_DEBUG__='almadar:runtime:eventbus').
+        void options.debug;
         this.maxDepth = options.maxDepth ?? 10;
     }
 
@@ -55,11 +60,7 @@ export class EventBus implements IEventBus {
     ): void {
         // RCG-05: Circuit breaker for circular event loops
         if (this.depth >= this.maxDepth) {
-            console.error(
-                `[EventBus] Circular event loop detected: "${type}" at depth ${this.depth}. ` +
-                `Event dropped to prevent infinite recursion. ` +
-                `Increase maxDepth (currently ${this.maxDepth}) if this is intentional.`
-            );
+            log.error('circular event loop dropped', { type, depth: this.depth, maxDepth: this.maxDepth });
             return;
         }
 
@@ -73,12 +74,10 @@ export class EventBus implements IEventBus {
         const listeners = this.listeners.get(type);
         const listenerCount = listeners?.size ?? 0;
 
-        if (this.debug) {
-            if (listenerCount > 0) {
-                console.log(`[EventBus] Emit: ${type} → ${listenerCount} listener(s) (depth: ${this.depth})`, payload);
-            } else {
-                console.warn(`[EventBus] Emit: ${type} (NO LISTENERS)`, payload);
-            }
+        if (listenerCount > 0) {
+            log.debug('emit', { type, listenerCount, depth: this.depth });
+        } else {
+            log.warn('emit no listeners', { type });
         }
 
         this.depth++;
@@ -90,7 +89,7 @@ export class EventBus implements IEventBus {
                     try {
                         listener(event);
                     } catch (error) {
-                        console.error(`[EventBus] Error in listener for '${type}':`, error);
+                        log.error('listener threw', { type, error: error instanceof Error ? error : String(error) });
                     }
                 }
             }
@@ -103,7 +102,7 @@ export class EventBus implements IEventBus {
                         try {
                             listener(event);
                         } catch (error) {
-                            console.error(`[EventBus] Error in wildcard listener:`, error);
+                            log.error('wildcard listener threw', { error: error instanceof Error ? error : String(error) });
                         }
                     }
                 }
@@ -124,15 +123,11 @@ export class EventBus implements IEventBus {
         const listeners = this.listeners.get(type)!;
         listeners.add(listener);
 
-        if (this.debug) {
-            console.log(`[EventBus] Subscribed to '${type}', total: ${listeners.size}`);
-        }
+        log.debug('subscribe', { type, total: listeners.size });
 
         return () => {
             listeners.delete(listener);
-            if (this.debug) {
-                console.log(`[EventBus] Unsubscribed from '${type}', remaining: ${listeners.size}`);
-            }
+            log.debug('unsubscribe', { type, remaining: listeners.size });
             if (listeners.size === 0) {
                 this.listeners.delete(type);
             }
@@ -166,9 +161,7 @@ export class EventBus implements IEventBus {
      * Clear all listeners
      */
     clear(): void {
-        if (this.debug) {
-            console.log(`[EventBus] Clearing all listeners (${this.listeners.size} event types)`);
-        }
+        log.debug('clear', { eventTypeCount: this.listeners.size });
         this.listeners.clear();
     }
 

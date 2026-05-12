@@ -17,7 +17,7 @@ import {
 } from '@almadar/evaluator';
 import { isKnownOperator } from '@almadar/std';
 import type { BindingContext, EntityRow, PatternProps, EvaluationContextExtensions } from './types.js';
-import { createLogger } from './logger.js';
+import { createLogger } from '@almadar/logger';
 
 const bindLog = createLogger('almadar:runtime:bindings');
 // See OrbitalServerRuntime — same `almadar:runtime:render-ui` namespace,

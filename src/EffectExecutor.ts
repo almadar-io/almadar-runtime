@@ -18,7 +18,7 @@ import type {
 import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
-import { createLogger } from './logger.js';
+import { createLogger } from '@almadar/logger';
 
 const effectLog = createLogger('almadar:runtime:effects');
 

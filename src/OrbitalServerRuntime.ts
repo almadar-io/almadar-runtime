@@ -52,7 +52,7 @@ import {
   createInitialTraitState,
 } from "./StateMachineCore.js";
 import { EffectExecutor } from "./EffectExecutor.js";
-import { createLogger } from "./logger.js";
+import { createLogger } from '@almadar/logger';
 // Same treatment for `LocalPersistenceAdapter` (uses `fs`, `path`) and
 // `createOsHandlers` (uses `fs`, `net`, `child_process`). The runtime
 // auto-wires both in the constructor's Node-only branch — guarded by

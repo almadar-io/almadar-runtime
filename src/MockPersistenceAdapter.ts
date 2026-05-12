@@ -11,7 +11,7 @@ import { faker } from '@faker-js/faker';
 import type { PersistenceAdapter } from './OrbitalServerRuntime.js';
 import type { EntityRow } from './types.js';
 import type { FieldValue } from '@almadar/core';
-import { createLogger } from './logger.js';
+import { createLogger } from '@almadar/logger';
 
 const mockLog = createLogger('almadar:runtime:mock');
 

@@ -43,7 +43,7 @@ import type {
   SchemaLoader,
   ImportChainLike,
 } from "../loader/schema-loader.js";
-import { createLogger } from "../logger.js";
+import { createLogger } from '@almadar/logger';
 
 const refResolverLog = createLogger("almadar:runtime:ref-resolver");
 

@@ -22,7 +22,7 @@ import type {
 } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import { evaluateGuard } from '@almadar/evaluator';
-import { createLogger } from './logger.js';
+import { createLogger } from '@almadar/logger';
 
 const smLog = createLogger('almadar:runtime:sm');
 

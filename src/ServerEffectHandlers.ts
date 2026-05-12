@@ -24,7 +24,7 @@ import type {
 import { EffectExecutor } from "./EffectExecutor.js";
 import { createContextFromBindings } from "./BindingResolver.js";
 import { evaluate } from "@almadar/evaluator";
-import { createLogger } from "./logger.js";
+import { createLogger } from '@almadar/logger';
 
 const effectLog = createLogger("almadar:runtime:effects");
 
