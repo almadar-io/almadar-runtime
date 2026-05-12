@@ -1525,7 +1525,7 @@ export class OrbitalServerRuntime {
       payloadRowId: typeof payloadRowId === 'string' || typeof payloadRowId === 'number' ? payloadRowId : undefined,
       entityId: request.entityId,
     });
-    busLog.debug('bus:incoming', {
+    busLog.debug('bus:incoming', () => ({
       orbital: orbitalName,
       event: request.event,
       payload: JSON.stringify(request.payload ?? null),
@@ -1536,15 +1536,15 @@ export class OrbitalServerRuntime {
           currentState: state.currentState,
         })),
       ),
-    });
-    xOrbitalLog.info('processOrbitalEvent:enter', {
+    }));
+    xOrbitalLog.info('processOrbitalEvent:enter', () => ({
       orbital: orbitalName,
       event: request.event,
       traitsInOrbital: registered.traits.map((t) => t.name).join(','),
       payloadActiveTraits: JSON.stringify(
         (request.payload as EventPayload | undefined)?.['_activeTraits'] ?? null,
       ),
-    });
+    }));
 
     const { event, payload, entityId, user } = request;
 
@@ -2035,7 +2035,7 @@ export class OrbitalServerRuntime {
 
       fetch: async (fetchEntityType, options) => {
         try {
-          xOrbitalLog.info('fetch:enter', {
+          xOrbitalLog.info('fetch:enter', () => ({
             entityType: fetchEntityType,
             hasOptions: options !== undefined && options !== null,
             optionsKeys: options ? Object.keys(options).join(',') : '',
@@ -2043,7 +2043,7 @@ export class OrbitalServerRuntime {
             filterIsArray: Array.isArray(options?.filter),
             filterJson: JSON.stringify(options?.filter ?? null).slice(0, 300),
             payloadJson: JSON.stringify(bindingsRef?.payload ?? null).slice(0, 300),
-          });
+          }));
           let result: EntityRow | EntityRow[] | null = null;
           let total = 0;
 

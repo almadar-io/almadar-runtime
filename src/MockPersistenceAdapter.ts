@@ -185,7 +185,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : '',
       });
     }
-    mockLog.debug('mock:seed', { entityName, count, idsAndTimestamps: JSON.stringify(generated) });
+    mockLog.debug('mock:seed', () => ({ entityName, count, idsAndTimestamps: JSON.stringify(generated) }));
   }
 
   /**

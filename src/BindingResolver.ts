@@ -102,46 +102,47 @@ export function interpolateProps(
     const typeBindingRaw = props['type'];
     const patternType = typeof typeBindingRaw === 'string' ? typeBindingRaw : undefined;
     if (typeof entityBindingRaw === 'string') {
-        const resolvedEntity = result['entity'];
-        const resolvedRow: EntityRow | null =
-            resolvedEntity !== null && typeof resolvedEntity === 'object' && !Array.isArray(resolvedEntity)
-                ? (resolvedEntity as EntityRow)
-                : null;
-        // ctx.payload is typed as `Record<string, unknown>` by
-        // `@almadar/evaluator` — narrow the `row` value with a
-        // typeof check rather than a cast chain.
-        const ctxRow = ctx.payload['row'];
-        const ctxPayloadKeys = Object.keys(ctx.payload).join(',');
-        const payloadDataRaw = ctx.payload['data'];
-        const payloadDataLen = Array.isArray(payloadDataRaw) ? payloadDataRaw.length : null;
-        const ctxEntityRaw = ctx.entity as EntityRow | EntityRow[] | null;
-        const ctxEntityLen = Array.isArray(ctxEntityRaw) ? ctxEntityRaw.length : null;
-        const resolvedLen = Array.isArray(resolvedEntity) ? resolvedEntity.length : null;
-        renderLog.debug('interpolateProps:entity', {
-            patternType,
-            entityBinding: entityBindingRaw,
-            resolvedIsObject: resolvedRow !== null,
-            resolvedIsArray: Array.isArray(resolvedEntity),
-            resolvedLen,
-            resolvedEqualsCtxRow: ctxRow !== undefined && resolvedRow !== null && resolvedRow === ctxRow,
-            resolvedRowId: resolvedRow?.id,
-            ctxPayloadKeys,
-            ctxPayloadDataLen: payloadDataLen,
-            ctxEntityIsArray: Array.isArray(ctxEntityRaw),
-            ctxEntityLen,
+        renderLog.debug('interpolateProps:entity', () => {
+            const resolvedEntity = result['entity'];
+            const resolvedRow: EntityRow | null =
+                resolvedEntity !== null && typeof resolvedEntity === 'object' && !Array.isArray(resolvedEntity)
+                    ? (resolvedEntity as EntityRow)
+                    : null;
+            const ctxRow = ctx.payload['row'];
+            const ctxPayloadKeys = Object.keys(ctx.payload).join(',');
+            const payloadDataRaw = ctx.payload['data'];
+            const payloadDataLen = Array.isArray(payloadDataRaw) ? payloadDataRaw.length : null;
+            const ctxEntityRaw = ctx.entity as EntityRow | EntityRow[] | null;
+            const ctxEntityLen = Array.isArray(ctxEntityRaw) ? ctxEntityRaw.length : null;
+            const resolvedLen = Array.isArray(resolvedEntity) ? resolvedEntity.length : null;
+            return {
+                patternType,
+                entityBinding: entityBindingRaw,
+                resolvedIsObject: resolvedRow !== null,
+                resolvedIsArray: Array.isArray(resolvedEntity),
+                resolvedLen,
+                resolvedEqualsCtxRow: ctxRow !== undefined && resolvedRow !== null && resolvedRow === ctxRow,
+                resolvedRowId: resolvedRow?.id,
+                ctxPayloadKeys,
+                ctxPayloadDataLen: payloadDataLen,
+                ctxEntityIsArray: Array.isArray(ctxEntityRaw),
+                ctxEntityLen,
+            };
         });
     }
     if (patternType === 'form-section' || patternType === 'form') {
-        const modeRaw = result['mode'];
-        const submitRaw = result['submitEvent'];
-        const cancelRaw = result['cancelEvent'];
-        bindLog.debug('form-binding', {
-            patternType,
-            mode: typeof modeRaw === 'string' ? modeRaw : undefined,
-            submitEvent: typeof submitRaw === 'string' ? submitRaw : undefined,
-            cancelEvent: typeof cancelRaw === 'string' ? cancelRaw : undefined,
-            entity: JSON.stringify(result['entity'] ?? null),
-            fields: JSON.stringify(result['fields'] ?? null),
+        bindLog.debug('form-binding', () => {
+            const modeRaw = result['mode'];
+            const submitRaw = result['submitEvent'];
+            const cancelRaw = result['cancelEvent'];
+            return {
+                patternType,
+                mode: typeof modeRaw === 'string' ? modeRaw : undefined,
+                submitEvent: typeof submitRaw === 'string' ? submitRaw : undefined,
+                cancelEvent: typeof cancelRaw === 'string' ? cancelRaw : undefined,
+                entity: JSON.stringify(result['entity'] ?? null),
+                fields: JSON.stringify(result['fields'] ?? null),
+            };
         });
     }
     return anyChanged ? result : props;
@@ -254,7 +255,7 @@ function interpolateArray(value: unknown[], ctx: EvaluationContext): unknown {
 
     if (isSExpression(value)) {
         const result = evaluate(value as Parameters<typeof evaluate>[0], ctx);
-        bindLog.info('sexpr:eval', {
+        bindLog.debug('sexpr:eval', () => ({
             operator: typeof value[0] === 'string' ? value[0] : '<non-string>',
             argCount: value.length - 1,
             inputJson: JSON.stringify(value).slice(0, 300),
@@ -262,7 +263,7 @@ function interpolateArray(value: unknown[], ctx: EvaluationContext): unknown {
             resultJson: typeof result === 'object' && result !== null
                 ? JSON.stringify(result).slice(0, 2000)
                 : String(result),
-        });
+        }));
         return result;
     }
 
