@@ -337,13 +337,13 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       return picsumUrl(entityName, field.name);
     }
     const value = faker.lorem.words(2);
-    mockLog.warn('field:fallback-lorem', {
+    mockLog.debug('field:fallback-lorem', () => ({
       entityName,
       fieldName: field.name,
       hasValues: false,
       format: field.format ?? null,
       generated: value,
-    });
+    }));
     return value;
   }
 
