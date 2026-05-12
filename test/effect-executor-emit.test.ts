@@ -37,8 +37,16 @@ function makeContext(): {
         persist: vi.fn(async () => undefined),
         set: vi.fn(),
         callService: vi.fn(async (_s, _a, params) => ({ ok: true, echoed: params })),
-        fetch: vi.fn(async (_type, opts) => ({ id: opts?.id ?? 'none', name: 'Fetched' })),
-        ref: vi.fn(async (_type, opts) => ({ id: opts?.id ?? 'none', reactive: true })),
+        // fetch/ref now return the FetchResult shape: { rows, total }. The
+        // emit payload is { data: result.rows, totalCount: result.total }.
+        fetch: vi.fn(async (_type, opts) => ({
+            rows: [{ id: opts?.id ?? 'none', name: 'Fetched' }],
+            total: 1,
+        })),
+        ref: vi.fn(async (_type, opts) => ({
+            rows: [{ id: opts?.id ?? 'none', reactive: true }],
+            total: 1,
+        })),
     };
     const bindings: BindingContext = {
         entity: { id: 'ent-1' } as unknown as BindingContext['entity'],
@@ -69,7 +77,10 @@ describe('emit: — fetch', () => {
         ]);
         const successCalls = emit.mock.calls.filter(([e]) => e === 'PATIENT_LOADED');
         expect(successCalls).toHaveLength(1);
-        expect(successCalls[0][1]).toEqual({ data: { id: 'p-42', name: 'Fetched' } });
+        expect(successCalls[0][1]).toEqual({
+            data: [{ id: 'p-42', name: 'Fetched' }],
+            totalCount: 1,
+        });
     });
 
     it('fires emit.failure when fetch throws and captures failure result', async () => {
@@ -282,7 +293,10 @@ describe('emit: — ref', () => {
         ]);
         const calls = emit.mock.calls.filter(([e]) => e === 'PATIENT_UPDATED');
         expect(calls).toHaveLength(1);
-        expect(calls[0][1]).toMatchObject({ data: { reactive: true } });
+        expect(calls[0][1]).toMatchObject({
+            data: [{ id: 'p-1', reactive: true }],
+            totalCount: 1,
+        });
     });
 });
 
@@ -315,8 +329,13 @@ describe('set: — in-memory mirror without entity id (G46)', () => {
         await executor.execute(['set', '@entity.message', '@payload.message']);
         expect(bindings.entity).toBeDefined();
         expect(bindings.entity?.message).toBe('hello');
-        // No persistence write should have fired because there's no id.
-        expect(handlers.set).not.toHaveBeenCalled();
+        // The runtime mirrors to bindings.entity AND dispatches `set` with an
+        // empty id so the per-trait scalar-state wrapper in
+        // useTraitStateMachine populates traitFieldStatesRef — guards in
+        // subsequent sendEvent calls read @entity.<field> from there.
+        // Without the dispatch the wrapper never runs and step-skip guards
+        // always fail.
+        expect(handlers.set).toHaveBeenCalledWith('', 'message', 'hello');
     });
 
     it('mirrors successive @entity.<field> writes onto the same in-memory row', async () => {

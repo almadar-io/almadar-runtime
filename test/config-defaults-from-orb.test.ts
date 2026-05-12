@@ -83,7 +83,7 @@ describe('config defaults from real std atom .orb files', () => {
         );
         expect(defaults).toBeDefined();
         expect(defaults).toMatchObject({
-            totalPages: 10,
+            pageSize: 10,
             event: 'PAGE',
         });
     });

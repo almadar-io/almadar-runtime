@@ -98,9 +98,13 @@ describe('std-list offline preview — loading INIT emits ListItemLoaded', () =>
         expect((payload.data[2] as { name: string }).name).toBe('user-created');
     });
 
-    it('bindings is updated in-place so @entity.X can read the fetched rows', async () => {
+    it('fetch does NOT mutate bindings — consumers read via bus event payload', async () => {
+        // Contract: no implicit entity binding. fetch emits its result as a
+        // bus event; bindings is only mutated by explicit (set @entity.X Y)
+        // in a transition. If you want @entity.X to be populated after a
+        // fetch, the trait must listen for the *Loaded event and (set ...).
         const persistence = buildSeeded(5);
-        const bus = { events: [] as Array<{ event: string; payload?: unknown }>, emit() { /* noop */ } };
+        const bus = { events: [] as Array<{ event: string; payload?: unknown }>, emit(e: string, p?: unknown) { this.events.push({ event: e, payload: p }); } };
         const bindings = { payload: {}, entity: undefined } as BindingContext;
         const handlers = createServerEffectHandlers({
             persistence,
@@ -118,10 +122,10 @@ describe('std-list offline preview — loading INIT emits ListItemLoaded', () =>
             } as EffectContext,
         });
         await exec.executeAll([FETCH_EFFECT as never]);
-        expect(Array.isArray((bindings as { ListItem?: unknown }).ListItem)).toBe(true);
-        expect(((bindings as { ListItem: unknown[] }).ListItem).length).toBe(5);
-        // entity alias: the fetched type equals entityType, so bindings.entity
-        // is merged with the rows too. That's what `@entity.name` reads.
-        expect(Array.isArray((bindings as { entity?: unknown }).entity)).toBe(true);
+        expect((bindings as { ListItem?: unknown }).ListItem).toBeUndefined();
+        expect(bindings.entity).toBeUndefined();
+        const loaded = bus.events.find((e) => e.event === 'ListItemLoaded');
+        expect(loaded, 'ListItemLoaded carries the result instead').toBeDefined();
+        expect((loaded!.payload as { data: unknown[] }).data).toHaveLength(5);
     });
 });

@@ -88,8 +88,10 @@ describe('createServerEffectHandlers — fetch reads persistence', () => {
             entityType: 'ListItem',
         });
         const result = await h.fetch!('ListItem', undefined);
-        expect(Array.isArray(result)).toBe(true);
-        expect(result).toHaveLength(3);
+        expect(result).not.toBeNull();
+        expect(Array.isArray(result!.rows)).toBe(true);
+        expect(result!.rows).toHaveLength(3);
+        expect(result!.total).toBe(3);
     });
 
     it('persist.create appends, fetch sees the new row', async () => {
@@ -101,8 +103,10 @@ describe('createServerEffectHandlers — fetch reads persistence', () => {
             entityType: 'ListItem',
         });
         await h.persist!('create', 'ListItem', { name: 'added', status: 'active' });
-        const rows = (await h.fetch!('ListItem', undefined)) as unknown[];
-        expect(rows).toHaveLength(2);
+        const result = await h.fetch!('ListItem', undefined);
+        expect(result).not.toBeNull();
+        expect(result!.rows).toHaveLength(2);
+        expect(result!.total).toBe(2);
     });
 });
 
