@@ -21,7 +21,7 @@ const log = createLogger('almadar:runtime:eventbus');
  *
  * // Subscribe
  * const unsub = bus.on('ORDER_CONFIRMED', (event) => {
- *   console.log('Order confirmed:', event.payload);
+ *   log.debug('order-confirmed', { orderId: event.payload?.orderId });
  * });
  *
  * // Emit

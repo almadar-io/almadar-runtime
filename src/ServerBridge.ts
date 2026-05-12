@@ -31,7 +31,10 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '@almadar/logger';
 import type { IEventBus, RuntimeEvent, EventPayload } from "./types.js";
+
+const log = createLogger('almadar:runtime:server-bridge');
 
 // ============================================================================
 // Types
@@ -402,14 +405,12 @@ export class ServerBridge {
   ): void {
     if (!this.config.debug && level === "debug") return;
 
-    const prefix = "[ServerBridge]";
-    const logFn =
-      level === "error"
-        ? console.error
-        : level === "warn"
-          ? console.warn
-          : console.log;
-    logFn(prefix, message, data !== undefined ? data : "");
+    const meta = data === undefined
+      ? {}
+      : data instanceof Error
+        ? { error: data }
+        : { detail: typeof data === 'string' ? data : JSON.stringify(data) };
+    log[level](message, meta);
   }
 }
 

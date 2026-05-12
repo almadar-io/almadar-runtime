@@ -145,7 +145,10 @@ export function createServerEffectHandlers(
   const handlers: EffectHandlers = {
     emit: (event, eventPayload, emitSource) => {
       if (debug) {
-        console.log(`[ServerEffectHandlers] emit ${event}`, eventPayload);
+        effectLog.debug('emit', {
+          event,
+          payloadKeys: eventPayload ? Object.keys(eventPayload).join(',') : '',
+        });
       }
       const stamp = emitSource ?? source;
       eventBus.emit(event, eventPayload, stamp);
@@ -392,9 +395,7 @@ export function createServerEffectHandlers(
             ...paramsEcho,
           } as EntityRow;
           if (debug) {
-            console.warn(
-              `[ServerEffectHandlers] call-service not configured: ${service}.${action} — using mock result`,
-            );
+            effectLog.warn('call-service-not-configured-using-mock', { service, action });
           }
         }
         record({
@@ -447,10 +448,10 @@ export function createServerEffectHandlers(
               try {
                 return Boolean(evaluate(predicate, ctx));
               } catch (err) {
-                console.error(
-                  `[ServerEffectHandlers] fetch filter eval error for ${fetchEntityType}:`,
-                  err,
-                );
+                effectLog.error('fetch-filter-eval-error', {
+                  entityType: fetchEntityType,
+                  error: err instanceof Error ? err : String(err),
+                });
                 return false;
               }
             });
@@ -469,10 +470,10 @@ export function createServerEffectHandlers(
         }
         return result === null ? null : { rows: result, total };
       } catch (err) {
-        console.error(
-          `[ServerEffectHandlers] fetch error for ${fetchEntityType}:`,
-          err,
-        );
+        effectLog.error('fetch-error', {
+          entityType: fetchEntityType,
+          error: err instanceof Error ? err : String(err),
+        });
         return null;
       }
     },

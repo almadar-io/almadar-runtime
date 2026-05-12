@@ -134,6 +134,9 @@ const renderLog = createLogger("almadar:runtime:render-ui");
 // dispatch. Pairs with the UI-side `almadar:runtime:cross-orbital` channel
 // in OrbPreview / ServerBridge / SlotsContext.
 const xOrbitalLog = createLogger("almadar:runtime:cross-orbital");
+const persistLog = createLogger("almadar:runtime:persist");
+const registerLog = createLogger("almadar:runtime:register");
+const dynamicLog = createLogger("almadar:runtime:dynamic");
 // Note: `LocalPersistenceAdapter` is re-exported from `index.ts`, not from
 // here. Keeping a value re-export here would force tsup to inline the
 // adapter into `OrbitalServerRuntime.js`'s bundle, defeating the
@@ -569,7 +572,7 @@ export class OrbitalServerRuntime {
         debug: config.debug,
       });
       if (config.debug) {
-        console.log('[OrbitalRuntime] Using mock persistence with faker data');
+        persistLog.debug('mock:init', { adapter: 'MockPersistenceAdapter' });
       }
     } else {
       this.persistence = config.persistence || new InMemoryPersistence();
@@ -648,15 +651,11 @@ export class OrbitalServerRuntime {
         scopedPaths: this.config.loaderConfig?.scopedPaths,
       });
       if (this.config.debug) {
-        console.log(
-          `[OrbitalRuntime] Default loader constructed: basePath=${basePath} stdLibPath=${stdLibPath}`,
-        );
+        registerLog.debug('loader:constructed', { basePath, stdLibPath });
       }
     } catch (err) {
       if (this.config.debug) {
-        console.warn(
-          `[OrbitalRuntime] Could not auto-construct loader: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        registerLog.warn('loader:construct-failed', { error: err instanceof Error ? err : String(err) });
       }
     }
   }
@@ -682,7 +681,7 @@ export class OrbitalServerRuntime {
    */
   async register(schema: OrbitalSchema): Promise<void> {
     if (this.config.debug) {
-      console.log(`[OrbitalRuntime] Registering schema: ${schema.name}`);
+      registerLog.debug('register:schema', { name: schema.name });
     }
 
     // Auto-preprocess if the schema has unresolved imports and we have (or
@@ -693,7 +692,7 @@ export class OrbitalServerRuntime {
       await this.ensureLoader();
       if (this.loader) {
         if (this.config.debug) {
-          console.log(`[OrbitalRuntime] Schema has uses/refs — auto-preprocessing`);
+          registerLog.debug('register:auto-preprocessing', { name: schema.name });
         }
         const result = await preprocessSchema(schema, {
           basePath: this.config.loaderConfig?.basePath || process.cwd(),
@@ -717,9 +716,7 @@ export class OrbitalServerRuntime {
           ...result.data.eventNamespaces,
         };
       } else if (this.config.debug) {
-        console.warn(
-          `[OrbitalRuntime] Schema has uses/refs but no loader available — proceeding without preprocessing. Cross-orbital trait refs will be empty.`,
-        );
+        registerLog.warn('register:no-loader', { name: schema.name });
       }
     }
 
@@ -747,7 +744,7 @@ export class OrbitalServerRuntime {
    */
   registerSync(schema: OrbitalSchema): void {
     if (this.config.debug) {
-      console.log(`[OrbitalRuntime] Registering schema (sync): ${schema.name}`);
+      registerLog.debug('register:schema-sync', { name: schema.name });
     }
 
     for (const orbital of schema.orbitals) {
@@ -863,7 +860,7 @@ export class OrbitalServerRuntime {
     const cached = this.preprocessedCache.get(cacheKey);
     if (cached) {
       if (this.config.debug) {
-        console.log(`[OrbitalRuntime] Using cached preprocessed schema: ${schema.name}`);
+        registerLog.debug('preprocess:cache-hit', { name: schema.name });
       }
       this.register(cached.schema);
       this.entitySharingMap = { ...this.entitySharingMap, ...cached.entitySharing };
@@ -877,7 +874,7 @@ export class OrbitalServerRuntime {
     }
 
     if (this.config.debug) {
-      console.log(`[OrbitalRuntime] Preprocessing schema: ${schema.name}`);
+      registerLog.debug('preprocess:start', { name: schema.name });
     }
 
     // Preprocess schema
@@ -1028,29 +1025,33 @@ export class OrbitalServerRuntime {
     if (entity?.name && entity.instances && Array.isArray(entity.instances)) {
       const instances = entity.instances;
       if (instances.length > 0) {
-        console.log(`[OrbitalRuntime] Seeding ${instances.length} instances for ${entity.name} from schema`);
-        
+        persistLog.debug('seed:start', { entity: entity.name, count: instances.length });
+
         // Seed each instance (await to ensure they're created)
         const results = await Promise.all(
           instances.map(async (instance) => {
             try {
               const result = await this.persistence.create(entity.name, instance);
-              console.log(`[OrbitalRuntime] Seeded instance: ${instance.id || 'no-id'}`);
+              persistLog.debug('seed:instance', { entity: entity.name, id: instance.id ?? 'no-id' });
               return result;
             } catch (err) {
-              console.error(`[OrbitalRuntime] Failed to seed instance ${instance.id}:`, err);
+              persistLog.error('seed:instance-error', {
+                entity: entity.name,
+                id: instance.id,
+                error: err instanceof Error ? err : String(err),
+              });
               return null;
             }
           })
         );
-        
+
         const successCount = results.filter(r => r !== null).length;
-        console.log(`[OrbitalRuntime] Seeded ${successCount}/${instances.length} ${entity.name} instances from schema`);
+        persistLog.debug('seed:done', { entity: entity.name, success: successCount, total: instances.length });
       }
     } else if (this.config.mode === 'mock' && this.persistence instanceof MockPersistenceAdapter) {
       // Fall back to mock data generation if no instances defined
       if (this.config.debug) {
-        console.log(`[OrbitalRuntime] No instances in schema, generating mock data for ${entity?.name}`);
+        persistLog.debug('mock:generate', { entity: entity?.name });
       }
       if (entity?.name && entity.fields) {
         const fields = entity.fields
@@ -1066,7 +1067,7 @@ export class OrbitalServerRuntime {
           }));
         this.persistence.registerEntity({ name: entity.name, fields });
         if (this.config.debug) {
-          console.log(`[OrbitalRuntime] Seeded mock data for entity: ${entity.name}, count: ${this.persistence.count(entity.name)}`);
+          persistLog.debug('mock:seeded', { entity: entity.name, count: this.persistence.count(entity.name) });
         }
       }
     }
@@ -1108,17 +1109,19 @@ export class OrbitalServerRuntime {
           }));
         this.persistence.registerEntity({ name: auxEntity.name, fields: auxFields });
         if (this.config.debug) {
-          console.log(
-            `[OrbitalRuntime] Seeded mock data for auxiliary entity: ${auxEntity.name}, count: ${this.persistence.count(auxEntity.name)}`,
-          );
+          persistLog.debug('mock:seeded-auxiliary', {
+            entity: auxEntity.name,
+            count: this.persistence.count(auxEntity.name),
+          });
         }
       }
     }
 
     if (this.config.debug) {
-      console.log(
-        `[OrbitalRuntime] Registered orbital: ${orbital.name} with ${(orbital.traits || []).length} trait(s)`,
-      );
+      registerLog.debug('register:orbital', {
+        name: orbital.name,
+        traitCount: (orbital.traits || []).length,
+      });
     }
   }
 
@@ -1129,7 +1132,10 @@ export class OrbitalServerRuntime {
     // Create a synchronous version by using a promise that we don't await
     // For truly async registration, use the async register() method
     this.registerOrbitalAsync(orbital).catch((err) => {
-      console.error(`[OrbitalRuntime] Failed to register orbital:`, err);
+      registerLog.error('register:failed', {
+        name: orbital.name,
+        error: err instanceof Error ? err : String(err),
+      });
     });
   }
 
@@ -1164,9 +1170,13 @@ export class OrbitalServerRuntime {
             // Source filter: skip if the emit doesn't match our declared scope.
             if (!matcher(event.source)) return;
             if (this.config.debug) {
-              console.log(
-                `[OrbitalRuntime] ${orbitalName}.${trait.name} received: ${listener.event} (from ${event.source?.orbital ?? '?'}.${event.source?.trait ?? '?'})`,
-              );
+              xOrbitalLog.debug('listen:received', () => ({
+                receiverOrbital: orbitalName,
+                receiverTrait: trait.name,
+                event: listener.event,
+                sourceOrbital: event.source?.orbital ?? '?',
+                sourceTrait: event.source?.trait ?? '?',
+              }));
             }
 
             // Apply payload mapping
@@ -1238,9 +1248,7 @@ export class OrbitalServerRuntime {
     }
 
     if (this.config.debug && this.tickBindings.length > 0) {
-      console.log(
-        `[OrbitalRuntime] Registered ${this.tickBindings.length} tick(s)`,
-      );
+      registerLog.debug('register:ticks', { count: this.tickBindings.length });
     }
   }
 
@@ -1265,9 +1273,12 @@ export class OrbitalServerRuntime {
     }
 
     if (this.config.debug) {
-      console.log(
-        `[OrbitalRuntime] Registering tick: ${orbitalName}.${traitName}.${tick.name} (${intervalMs}ms)`,
-      );
+      registerLog.debug('register:tick', {
+        orbital: orbitalName,
+        trait: traitName,
+        tick: tick.name,
+        intervalMs,
+      });
     }
 
     const timerId = setInterval(async () => {
@@ -1289,9 +1300,7 @@ export class OrbitalServerRuntime {
   private parseIntervalString(interval: string): number {
     const match = interval.match(/^(\d+)(ms|s|m|h)?$/);
     if (!match) {
-      console.warn(
-        `[OrbitalRuntime] Invalid interval format: ${interval}, defaulting to 1000ms`,
-      );
+      registerLog.warn('register:tick-invalid-interval', { interval, defaultMs: 1000 });
       return 1000;
     }
 
@@ -1334,9 +1343,12 @@ export class OrbitalServerRuntime {
       }
 
       if (this.config.debug && entities.length > 0) {
-        console.log(
-          `[OrbitalRuntime] Tick ${orbitalName}.${traitName}.${tick.name}: processing ${entities.length} entities`,
-        );
+        effectLog.debug('tick:processing', () => ({
+          orbital: orbitalName,
+          trait: traitName,
+          tick: tick.name,
+          entityCount: entities.length,
+        }));
       }
 
       for (const entity of entities) {
@@ -1358,17 +1370,19 @@ export class OrbitalServerRuntime {
 
             if (!guardPasses) {
               if (this.config.debug) {
-                console.log(
-                  `[OrbitalRuntime] Tick ${tick.name}: guard failed for entity ${entity.id}`,
-                );
+                effectLog.debug('tick:guard-failed', () => ({
+                  tick: tick.name,
+                  entityId: typeof entity.id === 'string' ? entity.id : undefined,
+                }));
               }
               continue;
             }
           } catch (error) {
-            console.error(
-              `[OrbitalRuntime] Tick ${tick.name}: guard evaluation error for entity ${entity.id}:`,
-              error,
-            );
+            effectLog.error('tick:guard-error', {
+              tick: tick.name,
+              entityId: typeof entity.id === 'string' ? entity.id : undefined,
+              error: error instanceof Error ? error : String(error),
+            });
             continue;
           }
         }
@@ -1392,17 +1406,18 @@ export class OrbitalServerRuntime {
           );
 
           if (this.config.debug) {
-            console.log(
-              `[OrbitalRuntime] Tick ${tick.name}: executed effects for entity ${entity.id}`,
-            );
+            effectLog.debug('tick:effects-executed', () => ({
+              tick: tick.name,
+              entityId: typeof entity.id === 'string' ? entity.id : undefined,
+            }));
           }
         }
       }
     } catch (error) {
-      console.error(
-        `[OrbitalRuntime] Tick ${tick.name} execution error:`,
-        error,
-      );
+      effectLog.error('tick:execute-error', {
+        tick: tick.name,
+        error: error instanceof Error ? error : String(error),
+      });
     }
   }
 
@@ -1643,7 +1658,11 @@ export class OrbitalServerRuntime {
       : results;
 
     if (this.config.debug && activeTraits) {
-      console.log(`[OrbitalRuntime] Filtering traits: ${results.length} total, ${filteredResults.length} active (${activeTraits.join(', ')})`);
+      busLog.debug('dispatch:filter-traits', () => ({
+        total: results.length,
+        active: filteredResults.length,
+        activeTraits: activeTraits.join(','),
+      }));
     }
 
     // Execute effects only for active traits
@@ -1759,7 +1778,12 @@ export class OrbitalServerRuntime {
     const handlers: EffectHandlers = {
       emit: (event, eventPayload, source) => {
         if (this.config.debug) {
-          console.log(`[OrbitalRuntime] Emitting: ${event}`, eventPayload, source);
+          busLog.debug('emit:dispatch', () => ({
+            event,
+            payloadJson: JSON.stringify(eventPayload ?? null),
+            sourceOrbital: source?.orbital,
+            sourceTrait: source?.trait,
+          }));
         }
         // Forward the source stamp to the bus. If the caller didn't supply
         // one (legacy callers), synthesize one from the handler's lexical
@@ -2009,9 +2033,7 @@ export class OrbitalServerRuntime {
               ...paramsEcho,
             } as EntityRow;
           } else {
-            console.warn(
-              `[OrbitalRuntime] call-service not configured: ${service}.${action}`,
-            );
+            effectLog.warn('call-service:not-configured', { service, action });
           }
 
           effectResults.push({
@@ -2078,10 +2100,10 @@ export class OrbitalServerRuntime {
                 try {
                   return Boolean(evaluate(predicate, ctx));
                 } catch (err) {
-                  console.error(
-                    `[OrbitalServerRuntime] fetch filter eval error for ${fetchEntityType}:`,
-                    err,
-                  );
+                  effectLog.error('fetch:filter-eval-error', {
+                    entityType: fetchEntityType,
+                    error: err instanceof Error ? err : String(err),
+                  });
                   return false;
                 }
               });
@@ -2113,7 +2135,10 @@ export class OrbitalServerRuntime {
             ? null
             : { rows: result, total };
         } catch (error) {
-          console.error(`[OrbitalRuntime] Fetch error for ${fetchEntityType}:`, error);
+          effectLog.error('fetch:error', {
+            entityType: fetchEntityType,
+            error: error instanceof Error ? error : String(error),
+          });
           return null;
         }
       },
@@ -2125,7 +2150,10 @@ export class OrbitalServerRuntime {
         try {
           return await handlers.fetch!(refEntityType, options);
         } catch (error) {
-          console.error(`[OrbitalRuntime] ref error for ${refEntityType}:`, error);
+          effectLog.error('ref:error', {
+            entityType: refEntityType,
+            error: error instanceof Error ? error : String(error),
+          });
           return null;
         }
       },
@@ -2241,7 +2269,7 @@ export class OrbitalServerRuntime {
       watch: (_watchEntityType, _watchOptions) => {
         // Watch is a no-op on server. Client subscribes to real-time updates.
         if (this.config.debug) {
-          console.log(`[OrbitalRuntime] watch is a no-op on server: ${_watchEntityType}`);
+          effectLog.debug('watch:noop-server', { entityType: _watchEntityType });
         }
       },
 
@@ -2318,20 +2346,20 @@ export class OrbitalServerRuntime {
 
       notify: (message, type) => {
         if (this.config.debug) {
-          console.log(`[OrbitalRuntime] Notification (${type}): ${message}`);
+          effectLog.info('notify', { type, message });
         }
         // Forward notify to client as a client effect
         pushClientEffect(['notify', message, { type }]);
       },
 
       log: (message, level) => {
-        const logFn =
-          level === "error"
-            ? console.error
-            : level === "warn"
-              ? console.warn
-              : console.log;
-        logFn(`[OrbitalRuntime] ${message}`);
+        if (level === 'error') {
+          dynamicLog.error(message);
+        } else if (level === 'warn') {
+          dynamicLog.warn(message);
+        } else {
+          dynamicLog.debug(message);
+        }
       },
 
       // Allow custom handlers to override
@@ -2519,7 +2547,10 @@ export class OrbitalServerRuntime {
               }
             }
             if (this.config.debug) {
-              console.log(`[OrbitalRuntime] Cascade deleted ${affectedRecords.length} ${referringEntityType} records`);
+              persistLog.debug('cascade-delete', {
+                count: affectedRecords.length,
+                entityType: referringEntityType,
+              });
             }
             break;
 
@@ -2539,7 +2570,11 @@ export class OrbitalServerRuntime {
               }
             }
             if (this.config.debug) {
-              console.log(`[OrbitalRuntime] Nullified ${field.name} on ${affectedRecords.length} ${referringEntityType} records`);
+              persistLog.debug('nullify', {
+                field: field.name,
+                count: affectedRecords.length,
+                entityType: referringEntityType,
+              });
             }
             break;
         }
@@ -2558,7 +2593,11 @@ export class OrbitalServerRuntime {
     const maxDepth = 2;
     if (depth >= maxDepth || visited.has(entityType)) {
       if (this.config.debug) {
-        console.log(`[OrbitalRuntime] Skipping populateRelations for ${entityType}: depth=${depth}, visited=${visited.has(entityType)}`);
+        persistLog.debug('populate:skip', {
+          entityType,
+          depth,
+          visited: visited.has(entityType),
+        });
       }
       return;
     }
@@ -2582,7 +2621,7 @@ export class OrbitalServerRuntime {
 
     if (!entityFields) {
       if (this.config.debug) {
-        console.warn(`[OrbitalRuntime] No entity definition found for ${entityType}`);
+        persistLog.warn('populate:no-entity-def', { entityType });
       }
       return;
     }
@@ -2600,7 +2639,7 @@ export class OrbitalServerRuntime {
 
       if (!relationField?.relation?.entity) {
         if (this.config.debug) {
-          console.warn(`[OrbitalRuntime] No relation field found for '${includeField}' on ${entityType}`);
+          persistLog.warn('populate:no-relation-field', { includeField, entityType });
         }
         continue;
       }
@@ -2637,7 +2676,10 @@ export class OrbitalServerRuntime {
           }
         } catch (error) {
           if (this.config.debug) {
-            console.error(`[OrbitalRuntime] Error fetching related ${relatedEntityType}:`, error);
+            persistLog.error('populate:fetch-related-error', {
+              entityType: relatedEntityType,
+              error: error instanceof Error ? error : String(error),
+            });
           }
         }
       }
@@ -2676,7 +2718,11 @@ export class OrbitalServerRuntime {
       }
 
       if (this.config.debug) {
-        console.log(`[OrbitalRuntime] Populated '${populatedFieldName}' on ${entities.length} ${entityType} entities`);
+        persistLog.debug('populate:done', {
+          field: populatedFieldName,
+          count: entities.length,
+          entityType,
+        });
       }
     }
   }

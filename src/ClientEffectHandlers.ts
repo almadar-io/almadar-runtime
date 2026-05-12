@@ -7,7 +7,10 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '@almadar/logger';
 import type { EffectHandlers, EventPayload, PatternProps } from './types.js';
+
+const log = createLogger('almadar:runtime:effects:client');
 
 // ============================================================================
 // Types
@@ -87,15 +90,15 @@ export function createClientEffectHandlers(
         },
 
         persist: async () => {
-            console.warn('[ClientEffectHandlers] persist is server-side only, ignored on client');
+            log.warn('persist-server-side-only');
         },
 
         set: () => {
-            console.warn('[ClientEffectHandlers] set is server-side only, ignored on client');
+            log.warn('set-server-side-only');
         },
 
         callService: async () => {
-            console.warn('[ClientEffectHandlers] callService is server-side only, ignored on client');
+            log.warn('call-service-server-side-only');
             return {};
         },
 
@@ -108,11 +111,11 @@ export function createClientEffectHandlers(
         },
 
         navigate: navigate ?? ((path: string) => {
-            console.warn('[ClientEffectHandlers] No navigate handler, ignoring:', path);
+            log.warn('navigate-no-handler', { path });
         }),
 
         notify: notify ?? ((msg: string, type?: string) => {
-            console.log(`[ClientEffectHandlers] notify (${type}):`, msg);
+            log.debug('notify', { type: type ?? null, message: msg });
         }),
     };
 }

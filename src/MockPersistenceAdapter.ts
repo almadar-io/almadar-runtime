@@ -150,7 +150,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     const store = this.getStore(entityName);
 
     if (this.config.debug) {
-      console.log(`[MockPersistence] Seeding ${instances.length} ${entityName} from schema instances...`);
+      mockLog.debug('seeding-from-instances', { count: instances.length, entity: entityName });
     }
 
     for (const instance of instances) {
@@ -173,7 +173,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     const normalized = entityName.toLowerCase();
 
     if (this.config.debug) {
-      console.log(`[MockPersistence] Seeding ${count} ${entityName}...`);
+      mockLog.debug('seeding', { count, entity: entityName });
     }
 
     const generated: Array<{ id: string; updatedAt: string }> = [];

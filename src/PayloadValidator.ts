@@ -125,11 +125,13 @@ export interface PayloadMismatch {
  * ```ts
  * const mismatches = validatePayloadShapes(traits, emitsMap);
  * for (const m of mismatches) {
- *   console.warn(
- *     `Trait "${m.listenerTrait}" references @payload.${m.referencedField} ` +
- *     `for event "${m.event}" but emitter "${m.emitterTrait}" only declares: ` +
- *     `${m.availableFields.join(', ')}`
- *   );
+ *   log.warn('payload-mismatch', {
+ *     listenerTrait: m.listenerTrait,
+ *     emitterTrait: m.emitterTrait,
+ *     event: m.event,
+ *     referencedField: m.referencedField,
+ *     availableFields: m.availableFields.join(','),
+ *   });
  * }
  * ```
  */

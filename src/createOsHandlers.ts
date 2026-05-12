@@ -13,8 +13,11 @@
 import * as fs from "fs";
 import * as net from "net";
 import { execSync } from "child_process";
+import { createLogger } from '@almadar/logger';
 import type { EventPayload, OsEmitConfig } from './types.js';
 import type { EffectHandlers } from "./types.js";
+
+const log = createLogger('almadar:runtime:os-handlers');
 
 // ============================================================================
 // Types
@@ -194,7 +197,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
             error: err instanceof Error ? err.message : String(err),
           });
         }
-        console.warn("[os/watch-files] Failed to start watcher:", err);
+        log.warn('watch-files-failed-to-start', { error: err instanceof Error ? err : String(err) });
       }
     },
 
@@ -231,7 +234,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
 
     osWatchPort: (port: number, protocol: string, emit?: OsEmitConfig) => {
       if (protocol !== "tcp") {
-        console.warn(`[os/watch-port] Only TCP is supported, got: ${protocol}`);
+        log.warn('watch-port-only-tcp-supported', { protocol });
         return;
       }
 
@@ -279,10 +282,10 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
       // For the interpreted runtime, log a warning.
       if (!httpWatchActive) {
         httpWatchActive = true;
-        console.warn(
-          `[os/watch-http] HTTP interception is only supported in compiled mode. ` +
-          `Pattern: ${urlPattern}${method ? `, method: ${method}` : ""}`,
-        );
+        log.warn('watch-http-compiled-only', {
+          pattern: urlPattern,
+          method: method ?? null,
+        });
       }
     },
 
@@ -296,7 +299,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
             error: err instanceof Error ? err.message : String(err),
           });
         }
-        console.warn("[os/watch-cron] Invalid expression:", err);
+        log.warn('watch-cron-invalid-expression', { error: err instanceof Error ? err : String(err) });
         return;
       }
 
@@ -339,7 +342,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
             error: err instanceof Error ? err.message : String(err),
           });
         }
-        console.warn(`[os/watch-signal] Cannot listen for ${sig}:`, err);
+        log.warn('watch-signal-cannot-listen', { signal: sig, error: err instanceof Error ? err : String(err) });
       }
     },
 

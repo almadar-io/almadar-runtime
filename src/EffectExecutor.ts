@@ -216,7 +216,7 @@ export class EffectExecutor {
         const parsed = parseEffect(effect);
         if (!parsed) {
             if (this.debug) {
-                console.warn('[EffectExecutor] Invalid effect format:', effect);
+                effectLog.warn('invalid-effect-format', () => ({ effectJson: JSON.stringify(effect ?? null) }));
             }
             return;
         }
@@ -290,15 +290,17 @@ export class EffectExecutor {
         effectLog.debug('execute', { operator, argCount: resolvedArgs.length, context: this.context.traitName });
 
         if (this.debug) {
-            console.log('[EffectExecutor] Executing:', operator, resolvedArgs);
+            effectLog.debug('executing', () => ({ operator, argsJson: JSON.stringify(resolvedArgs) }));
         }
 
         try {
             await this.dispatch(operator, resolvedArgs);
             effectLog.debug('execute:result', { operator, success: true });
         } catch (error) {
-            effectLog.warn('execute:error', { operator, error: error instanceof Error ? error.message : String(error) });
-            console.error('[EffectExecutor] Error executing effect:', operator, error);
+            effectLog.error('execute:error', {
+                operator,
+                error: error instanceof Error ? error : String(error),
+            });
             throw error;
         }
     }
@@ -786,7 +788,7 @@ export class EffectExecutor {
                 } else {
                     // Watch is a no-op on server - just log in debug mode
                     if (this.debug) {
-                        console.log('[EffectExecutor] watch is a no-op on server:', args[0]);
+                        effectLog.debug('watch:noop-server', { entityType: typeof args[0] === 'string' ? args[0] : undefined });
                     }
                 }
                 break;
@@ -834,7 +836,10 @@ export class EffectExecutor {
                     const data = args[2];
                     this.handlers.log(message, level, data);
                 } else {
-                    console.log(args[0], args.slice(1));
+                    effectLog.debug('log:fallback', () => ({
+                        message: typeof args[0] === 'string' ? args[0] : JSON.stringify(args[0] ?? null),
+                        extraJson: JSON.stringify(args.slice(1)),
+                    }));
                 }
                 break;
             }
@@ -881,7 +886,9 @@ export class EffectExecutor {
                     const type = (args[1] as 'success' | 'error' | 'warning' | 'info') || 'info';
                     this.handlers.notify(message, type);
                 } else {
-                    console.log(`[Notify:${args[1] || 'info'}] ${args[0]}`);
+                    const category = typeof args[1] === 'string' ? args[1] : 'info';
+                    const message = typeof args[0] === 'string' ? args[0] : JSON.stringify(args[0] ?? null);
+                    effectLog.info('notify', { category, message });
                 }
                 break;
             }
@@ -1061,7 +1068,7 @@ export class EffectExecutor {
 
             default: {
                 if (this.debug) {
-                    console.warn('[EffectExecutor] Unknown operator:', operator);
+                    effectLog.warn('unknown-operator', { operator });
                 }
             }
         }
@@ -1069,9 +1076,7 @@ export class EffectExecutor {
 
     private logUnsupported(operator: string): void {
         if (this.debug) {
-            console.warn(
-                `[EffectExecutor] Effect "${operator}" not supported on this platform`
-            );
+            effectLog.warn('unsupported-on-platform', { operator });
         }
     }
 }

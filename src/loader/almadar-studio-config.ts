@@ -13,8 +13,11 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '@almadar/logger';
 import type { UnifiedLoaderOptions } from "./schema-loader.js";
 import { isElectron } from "./schema-loader.js";
+
+const log = createLogger('almadar:runtime:studio-config');
 
 // ============================================================================
 // Types
@@ -272,7 +275,13 @@ export async function createAlmadarLoaderOptions(
   const resolved = await resolveAlmadarPaths(config);
 
   if (config.debug) {
-    console.log("[AlmadarStudio] Resolved paths:", resolved);
+    log.debug('resolved-paths', {
+      workspacePath: resolved.workspacePath,
+      stdLibPath: resolved.stdLibPath,
+      stdLibAvailable: resolved.stdLibAvailable,
+      stdLibFallbackUrl: resolved.stdLibFallbackUrl,
+      scopedPaths: resolved.scopedPaths,
+    });
   }
 
   // Determine std library path (local or URL fallback)

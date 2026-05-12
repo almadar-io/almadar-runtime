@@ -36,7 +36,7 @@ const smLog = createLogger('almadar:runtime:sm');
 export function findInitialState(trait: TraitDefinition): string {
     // Guard against missing or empty states array
     if (!trait.states || trait.states.length === 0) {
-        console.warn(`[StateMachine] Trait "${trait.name}" has no states defined, using "unknown"`);
+        smLog.warn('trait-has-no-states', { trait: trait.name });
         return 'unknown';
     }
     const markedInitial = trait.states.find((s) => s.isInitial)?.name;
@@ -266,11 +266,12 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
         } catch (error) {
             if (guardMode === 'strict') {
                 // RCG-02: In strict mode, guard errors block the transition
-                console.error(
-                    `[StateMachineCore] Guard error blocks transition ` +
-                    `${traitState.currentState}→${transition.to} (${normalizedEvent}):`,
-                    error
-                );
+                smLog.error('guard-error-blocks-transition', {
+                    from: traitState.currentState,
+                    to: transition.to,
+                    event: normalizedEvent,
+                    error: error instanceof Error ? error : String(error),
+                });
                 return {
                     executed: false,
                     newState: traitState.currentState,
@@ -285,7 +286,9 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
                 };
             }
             // Permissive mode: log and allow (treat as guard pass).
-            console.error('[StateMachineCore] Guard evaluation error:', error);
+            smLog.error('guard-evaluation-error', {
+                error: error instanceof Error ? error : String(error),
+            });
             return {
                 executed: true,
                 newState: transition.to,
