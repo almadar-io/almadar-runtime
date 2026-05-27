@@ -203,16 +203,28 @@ function interpolateString(value: string, ctx: EvaluationContext): unknown {
 
 /**
  * Check if a string is a pure binding (no embedded text).
+ *
+ * Accepts bracket-index segments anywhere in the path —
+ * `@config.sections[0].bullets`, `@payload.rows[2]`, etc. — so the
+ * binding is fully consumed by `resolveBinding` instead of falling
+ * through to `interpolateEmbeddedBindings` which would stop at the
+ * first `[`, partially resolve, and string-concat the suffix.
  */
 function isPureBinding(value: string): boolean {
-    return /^@[\w]+(?:\.[\w]+)*$/.test(value);
+    return /^@[\w]+(?:\[\d+\])*(?:\.[\w]+(?:\[\d+\])*)*$/.test(value);
 }
 
 /**
  * Interpolate embedded bindings in a string.
  */
 function interpolateEmbeddedBindings(value: string, ctx: EvaluationContext): string {
-    return value.replace(/@[\w]+(?:\.[\w]+)*/g, (match) => {
+    // Match bindings with optional bracket-index segments
+    // (`@config.sections[0].bullets`, `@payload.rows[2]`) so the regex
+    // captures the WHOLE binding before delegating to resolveBinding —
+    // pre-fix the regex stopped at the first `[`, which left the
+    // suffix dangling and string-concatenated junk onto the resolved
+    // prefix (the SplitSection `bullets` crash).
+    return value.replace(/@[\w]+(?:\[\d+\])*(?:\.[\w]+(?:\[\d+\])*)*/g, (match) => {
         // Client-only bindings round-trip verbatim; see CLIENT_ONLY_BINDING_ROOTS.
         if (isClientOnlyBinding(match)) {
             return match;
