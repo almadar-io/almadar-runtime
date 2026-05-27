@@ -56,6 +56,17 @@ export interface LoaderOptions {
   /** Standard library root path */
   stdLibPath?: string;
 
+  /**
+   * Additional roots searched for `std/behaviors/*` imports after `stdLibPath`.
+   * After the v16.0.0 package split, domain behaviors (app/, game/, marketing/,
+   * probes/, service/) moved from `@almadar/std` to `@almadar-io/behaviors`.
+   * Callers can pass that package's root here so cross-package `uses` resolve.
+   *
+   * If omitted, the loader auto-detects a sibling `@almadar-io/behaviors`
+   * next to `stdLibPath` in node_modules at construction time.
+   */
+  behaviorsLibPaths?: string[];
+
   /** Scoped package roots (e.g., { "@game-lib": "/path/to/lib" }) */
   scopedPaths?: Record<string, string>;
 
@@ -175,6 +186,7 @@ export class ExternalOrbitalLoader {
   constructor(options: LoaderOptions) {
     this.options = {
       stdLibPath: options.stdLibPath ?? "",
+      behaviorsLibPaths: options.behaviorsLibPaths ?? autoDetectBehaviorsLibPaths(options.stdLibPath),
       scopedPaths: options.scopedPaths ?? {},
       allowOutsideBasePath: options.allowOutsideBasePath ?? false,
       ...options,
@@ -335,7 +347,7 @@ export class ExternalOrbitalLoader {
    * compiler's `embedded.rs` resolves std paths.
    */
   private resolveStdPath(importPath: string): LoadResult<string> {
-    if (!this.options.stdLibPath) {
+    if (!this.options.stdLibPath && this.options.behaviorsLibPaths.length === 0) {
       return {
         success: false,
         error: `Standard library path not configured. Cannot load: ${importPath}`,
@@ -343,51 +355,54 @@ export class ExternalOrbitalLoader {
     }
 
     // std/behaviors/<name> → extract <name>.
-    // `relativePath` shape is `behaviors/<name>` or `behaviors/<name>.orb`.
     const relativePath = importPath.slice(4); // strip "std/"
     const name = relativePath
       .replace(/^behaviors\//, "")
       .replace(/\.orb$/, "");
 
-    const normalizedStdLib = path.normalize(this.options.stdLibPath);
-    const topics = ["core", "agent", "game", "service", "app", "probes"] as const;
+    const topics = ["core", "core-variations", "agent", "game", "service", "app", "probes", "marketing"] as const;
     const tiers = ["atoms", "molecules", "organisms"] as const;
-    const candidates: string[] = [];
 
-    // Primary: topic/tier layout (std 7.11+).
-    for (const topic of topics) {
+    // Build candidate list across all configured roots: std first, then any
+    // companion package (@almadar-io/behaviors). For each root we try the
+    // canonical topic/tier layout, plus two legacy fallbacks for very old
+    // std layouts. Each (root, candidate) pair is path-traversal-guarded.
+    const roots: string[] = [];
+    if (this.options.stdLibPath) roots.push(path.normalize(this.options.stdLibPath));
+    for (const p of this.options.behaviorsLibPaths) {
+      const norm = path.normalize(p);
+      if (!roots.includes(norm)) roots.push(norm);
+    }
+
+    let totalCandidates = 0;
+    for (const root of roots) {
+      const candidates: string[] = [];
+      for (const topic of topics) {
+        for (const tier of tiers) {
+          candidates.push(path.join(root, "behaviors", "registry", topic, tier, `${name}.orb`));
+        }
+      }
+      // Back-compat: pre-topic flat-tier layout (std 6.1–7.10).
       for (const tier of tiers) {
-        candidates.push(
-          path.join(normalizedStdLib, "behaviors", "registry", topic, tier, `${name}.orb`),
-        );
+        candidates.push(path.join(root, "behaviors", "registry", tier, `${name}.orb`));
       }
-    }
+      // Oldest back-compat: flat `<root>/behaviors/<name>.orb`.
+      candidates.push(path.join(root, relativePath.endsWith(".orb") ? relativePath : `${relativePath}.orb`));
+      totalCandidates += candidates.length;
 
-    // Back-compat: pre-topic flat-tier layout (std 6.1–7.10).
-    for (const tier of tiers) {
-      candidates.push(
-        path.join(normalizedStdLib, "behaviors", "registry", tier, `${name}.orb`),
-      );
-    }
-
-    // Oldest back-compat: flat `<stdLibPath>/behaviors/<name>.orb`.
-    const legacyPath = path.join(normalizedStdLib, relativePath.endsWith(".orb") ? relativePath : `${relativePath}.orb`);
-    candidates.push(legacyPath);
-
-    for (const candidate of candidates) {
-      const normalized = path.normalize(candidate);
-      // Validate within stdLib (path traversal guard)
-      if (!normalized.startsWith(normalizedStdLib)) {
-        continue;
-      }
-      if (fs.existsSync(normalized)) {
-        return { success: true, data: normalized };
+      for (const candidate of candidates) {
+        const normalized = path.normalize(candidate);
+        // Path-traversal guard: each candidate must stay within its own root
+        if (!normalized.startsWith(root)) continue;
+        if (fs.existsSync(normalized)) {
+          return { success: true, data: normalized };
+        }
       }
     }
 
     return {
       success: false,
-      error: `std behavior not found in registry: ${importPath} (tried ${candidates.length} locations under ${normalizedStdLib})`,
+      error: `std behavior not found in registry: ${importPath} (tried ${totalCandidates} locations across ${roots.length} root(s): ${roots.join(", ")})`,
     };
   }
 
@@ -565,4 +580,61 @@ export function parseImportPath(importPath: string): { path: string; fragment?: 
     path: importPath.slice(0, hashIndex),
     fragment: importPath.slice(hashIndex + 1),
   };
+}
+
+/**
+ * Auto-detect a sibling `@almadar-io/behaviors` next to `@almadar/std`.
+ *
+ * After the v16.0.0 split, domain behaviors live in a companion package.
+ * When a caller passes `stdLibPath` pointing at an installed `@almadar/std`,
+ * the io package is usually a sibling in the same node_modules layout:
+ *
+ *   <pkg>/node_modules/.pnpm/@almadar+std@x.y.z/node_modules/@almadar/std
+ *   <pkg>/node_modules/.pnpm/@almadar-io+behaviors@a.b.c/node_modules/@almadar-io/behaviors
+ *
+ * or the simpler hoisted form:
+ *
+ *   <pkg>/node_modules/@almadar/std
+ *   <pkg>/node_modules/@almadar-io/behaviors
+ *
+ * We walk up from `stdLibPath` looking for either layout and return every
+ * `behaviors/registry/` directory we find. Callers can override by passing
+ * `behaviorsLibPaths` explicitly.
+ */
+function autoDetectBehaviorsLibPaths(stdLibPath: string | undefined): string[] {
+  if (!stdLibPath) return [];
+  const found: string[] = [];
+  try {
+    // Walk up to the nearest `node_modules` ancestor
+    let dir = path.normalize(stdLibPath);
+    for (let i = 0; i < 10; i++) {
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      // Hoisted layout: <…>/node_modules/@almadar/std → check sibling
+      if (path.basename(parent) === "@almadar" && path.basename(path.dirname(parent)) === "node_modules") {
+        const nm = path.dirname(parent);
+        const ioPath = path.join(nm, "@almadar-io", "behaviors");
+        if (fs.existsSync(path.join(ioPath, "behaviors", "registry"))) found.push(ioPath);
+      }
+      // pnpm layout: <…>/.pnpm/@almadar+std@x.y.z/node_modules/@almadar/std
+      if (path.basename(parent) === ".pnpm") {
+        const pnpmRoot = parent;
+        try {
+          for (const entry of fs.readdirSync(pnpmRoot)) {
+            if (!entry.startsWith("@almadar-io+behaviors@")) continue;
+            const ioPath = path.join(pnpmRoot, entry, "node_modules", "@almadar-io", "behaviors");
+            if (fs.existsSync(path.join(ioPath, "behaviors", "registry"))) found.push(ioPath);
+          }
+        } catch {
+          // unreadable .pnpm dir — skip
+        }
+        break;
+      }
+      dir = parent;
+    }
+  } catch {
+    // Filesystem access failed (read-only mount, missing perms) — return what
+    // we have. Explicit `behaviorsLibPaths` override remains available.
+  }
+  return found;
 }
