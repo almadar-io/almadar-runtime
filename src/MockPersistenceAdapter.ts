@@ -10,7 +10,7 @@
 import { faker } from '@faker-js/faker';
 import type { PersistenceAdapter } from './OrbitalServerRuntime.js';
 import type { EntityRow } from './types.js';
-import type { FieldValue } from '@almadar/core';
+import type { EntityField, FieldValue } from '@almadar/core';
 import { createLogger } from '@almadar/logger';
 
 const mockLog = createLogger('almadar:runtime:mock');
@@ -38,23 +38,21 @@ const SEED_REFERENCE_TIMESTAMP = '2024-01-01T00:00:00.000Z';
 // Types
 // ============================================================================
 
-export interface EntityField {
-  name: string;
-  type: string;
-  required?: boolean;
-  values?: string[]; // For enum types
-  default?: unknown;
-  /** Validation format: email/url/phone/date/datetime/uuid. Drives mock-value shape without name heuristics. */
-  format?: 'email' | 'url' | 'phone' | 'date' | 'datetime' | 'uuid' | 'image' | 'avatar' | 'thumbnail';
-  /** Element schema for `type: 'array'`. When omitted, arrays default to []. Mirrors `ArrayEntityField.items` in @almadar/core. */
-  items?: EntityField;
-  /** Property schemas for `type: 'object'` (or array-of-object via `items.properties`). Mirrors `EntityFieldBase.properties` in @almadar/core. */
-  properties?: Record<string, EntityField>;
-}
+// EntityField is the canonical discriminated union from @almadar/core
+// (re-exported here so existing consumers don't break). All variant-specific
+// fields (`items`, `properties`, `relation`, `values`, `format`) live on the
+// canonical type — no local shadow shape.
+export type { EntityField };
+
+/** EntityField narrowed to require `name`. The canonical type makes `name`
+ *  optional (it's omitted on nested `items` / `properties` descriptors), but
+ *  the seed loop iterates by name. Callers filter for name-having fields
+ *  at the registerEntity boundary. */
+type NamedEntityField = EntityField & { name: string };
 
 export interface EntitySchema {
   name: string;
-  fields: EntityField[];
+  fields: NamedEntityField[];
   /** Pre-authored instance data from the schema (used instead of faker generation) */
   seedData?: EntityRow[];
 }
@@ -145,6 +143,68 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       const count = seedCount ?? this.config.defaultSeedCount ?? 6;
       this.seed(schema.name, schema.fields, count);
     }
+
+    // Phase 9.6.A: re-link relation fields across ALL registered entities.
+    // Relations may point at entities registered before OR after this one;
+    // a global pass after each registration is cheap (O(rows × fields)) and
+    // keeps relation arrays in sync with whichever stores currently exist.
+    this.linkRelationFields();
+  }
+
+  /**
+   * Walk every row of every registered entity and fill in `type: "relation"`
+   * fields with real IDs from the target entity's store. Without this pass,
+   * relation fields stay as placeholder `[]` / `""` and `populateRelations`
+   * in OrbitalServerRuntime has nothing to hydrate — catalog/preview demos
+   * of nested-tree atoms (e.g. std-thread-comments-linear with ThreadPost.
+   * replies → [ThreadPost]) render empty reply cards.
+   *
+   * For self-referential relations, each row gets 2–4 sibling IDs (excluding
+   * self). For cross-entity relations, IDs are picked from the target store.
+   * The runtime caps recursion at depth=2 in `populateRelations`, so
+   * grandparent-of-self cycles render two levels deep then stop.
+   */
+  linkRelationFields(): void {
+    for (const [normalizedName, schema] of this.schemas) {
+      const store = this.stores.get(normalizedName);
+      if (!store) continue;
+      // Narrow to RelationEntityField (with required `relation` config) via the
+      // canonical discriminator. The `f is NamedEntityField & { type: "relation" }`
+      // predicate is what makes `field.relation` typed in the loop below — no
+      // record-access casts, no unknown narrowing.
+      const relationFields = schema.fields.filter(
+        (f): f is NamedEntityField & { type: 'relation'; relation: { entity: string; cardinality?: string; field?: string } } =>
+          f.type === 'relation',
+      );
+      if (relationFields.length === 0) continue;
+      for (const row of store.values()) {
+        for (const field of relationFields) {
+          const targetStore = this.stores.get(field.relation.entity.toLowerCase());
+          if (!targetStore || targetStore.size === 0) continue;
+          // Eligible IDs: every id in the target store, minus this row's own id
+          // (only when target === self entity) so a comment doesn't list itself
+          // as its own reply.
+          const selfId = row['id'] as string | undefined;
+          const sameStore = targetStore === store;
+          const eligible: string[] = [];
+          for (const id of targetStore.keys()) {
+            if (sameStore && id === selfId) continue;
+            eligible.push(id);
+          }
+          if (eligible.length === 0) continue;
+          const cardinality = field.relation.cardinality ?? 'many';
+          if (cardinality === 'one' || cardinality === 'many-to-one') {
+            row[field.name] = faker.helpers.arrayElement(eligible) as FieldValue;
+          } else {
+            // many / one-to-many / many-to-many → pick 2–4 IDs
+            const pickCount = Math.min(eligible.length, faker.number.int({ min: 2, max: 4 }));
+            row[field.name] = faker.helpers
+              .shuffle(eligible.slice())
+              .slice(0, pickCount) as FieldValue;
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -213,6 +273,10 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     };
 
     for (const field of fields) {
+      // Skip nameless nested-descriptor fields (canonical EntityField allows
+      // `name?` on inner items/properties; the top-level seed loop only
+      // iterates real named fields).
+      if (!field.name) continue;
       if (field.name === 'id' || field.name === 'createdAt' || field.name === 'updatedAt') {
         continue;
       }
@@ -241,13 +305,17 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     // date placeholder defaults like `name = ""` would otherwise paint
     // every seeded row with the same literal.
     const fieldTypeLc = field.type.toLowerCase();
+    // `values` is on ScalarEntityField + EnumEntityField only. Narrow via
+    // the discriminator instead of casting to `unknown` so we keep canonical
+    // type safety end-to-end.
+    const values = 'values' in field ? field.values : undefined;
     mockLog.debug('field:generate', {
       entityName,
       fieldName: field.name,
       fieldType: fieldTypeLc,
-      hasValues: !!field.values?.length,
-      valuesCount: field.values?.length ?? 0,
-      values: field.values?.length ? field.values.join(',') : null,
+      hasValues: !!values?.length,
+      valuesCount: values?.length ?? 0,
+      values: values?.length ? values.join(',') : null,
       format: field.format ?? null,
       hasDefault: field.default !== undefined,
     });
@@ -263,7 +331,13 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     // card that didn't match any test expectation. Deterministic seed
     // data is more valuable than random-nil stress; callers who want
     // nil-testing should construct that scenario explicitly.
-    switch (fieldTypeLc) {
+    //
+    // Switch on the canonical `field.type` (not the lowercased local var) so
+    // each case narrows `field` to its discriminated-union variant — e.g.
+    // `case 'array'` gives us `ArrayEntityField` with typed `items`, `case
+    // 'relation'` gives `RelationEntityField` with typed `relation`. No
+    // `unknown`/record-typed access needed.
+    switch (field.type) {
       case 'string':
         return this.generateStringValue(entityName, field, index);
 
@@ -279,13 +353,18 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         return this.generateDateValue(field);
 
       case 'enum':
+        // After narrowing, field is EnumEntityField with required values. The
+        // optional check is defensive in case canonical changes shape.
         if (field.values && field.values.length > 0) {
           return faker.helpers.arrayElement(field.values);
         }
         return null;
 
       case 'relation':
-        return null; // Relations need special handling
+        // Placeholder — filled in by `linkRelationFields` after the seed pass
+        // (target entity's store may not exist yet at field-generation time).
+        // many-cardinality → empty array slot; one-cardinality → empty string slot.
+        return field.relation?.cardinality === 'one' ? '' : [];
 
       case 'array':
         return this.generateArrayValue(entityName, field, index, depth);
@@ -308,20 +387,23 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * behavior.
    */
   private generateArrayValue(entityName: string, field: EntityField, index: number, depth = 0): FieldValue {
-    if (!field.items) return [];
+    if (field.type !== 'array' || !field.items) return [];
     // Stop recursing on self-referential types (e.g. Comment.replies: [Comment]).
     // Without this guard, faker would loop forever materialising replies-of-
     // replies-of-replies until the call stack blows.
     if (depth >= MockPersistenceAdapter.MAX_NESTED_DEPTH) return [];
     const count = faker.number.int({ min: 3, max: 5 });
     const out: FieldValue[] = [];
+    const elementName = field.name ?? 'item';
     for (let i = 0; i < count; i++) {
       // Synthesize a child EntityField for the element. Each iteration gets a
       // fresh `index` so per-element string generators don't repeat verbatim.
-      const elementField: EntityField = {
+      // The spread preserves the discriminator on `items` (string/object/array/…)
+      // so generateFieldValue's switch narrows correctly.
+      const elementField = {
         ...field.items,
-        name: `${field.name}[${i}]`,
-      };
+        name: `${elementName}[${i}]`,
+      } as EntityField;
       out.push(this.generateFieldValue(entityName, elementField, index * 10 + i, depth + 1));
     }
     return out as FieldValue;
@@ -341,7 +423,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       // The nested schema may omit `name` (it's implied by the parent key)
       // — synthesize one so downstream string generators that read `field.name`
       // have something to log against.
-      const childField: EntityField = { ...propField, name: propName };
+      const childField = { ...propField, name: propName } as EntityField;
       out[propName] = this.generateFieldValue(entityName, childField, index, depth + 1);
     }
     return out as FieldValue;
@@ -355,9 +437,17 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * declare `format: "email"`; if they need an enum, they declare `values: [...]`.
    */
   private generateStringValue(entityName: string, field: EntityField, _index: number): string {
-    if (field.values && field.values.length > 0) {
-      return faker.helpers.arrayElement(field.values);
+    // `values` exists on Scalar + Enum variants only. Narrow via canonical
+    // discriminator so the access is type-safe without a record cast.
+    const values = 'values' in field ? field.values : undefined;
+    if (values && values.length > 0) {
+      return faker.helpers.arrayElement(values);
     }
+    // `field.name` is optional on the canonical EntityField (nested item/
+    // property descriptors omit it). Top-level seed loop filters those out,
+    // so name is set here in practice — but the type system needs the
+    // explicit fallback to satisfy strict-null checks.
+    const fieldName = field.name ?? 'field';
     switch (field.format) {
       case 'email': return faker.internet.email();
       case 'url': return faker.internet.url();
@@ -368,13 +458,13 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       case 'image':
       case 'avatar':
       case 'thumbnail':
-        return picsumUrl(entityName, field.name);
+        return picsumUrl(entityName, fieldName);
     }
     // Field-name fallback for image-bearing string fields. Authors who haven't
     // (yet) annotated `format: "image"` still get a real photo from Picsum
     // rather than a `faker.lorem.words(2)` sentence that breaks data-grid
     // imageField rendering. Heuristic is narrow + clearly named.
-    const lname = field.name.toLowerCase();
+    const lname = fieldName.toLowerCase();
     if (
       lname === 'image' ||
       lname === 'imageurl' ||
@@ -395,7 +485,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       lname === 'banner' ||
       lname === 'bannerurl'
     ) {
-      return picsumUrl(entityName, field.name);
+      return picsumUrl(entityName, fieldName);
     }
     const value = faker.lorem.words(2);
     mockLog.debug('field:fallback-lorem', () => ({
