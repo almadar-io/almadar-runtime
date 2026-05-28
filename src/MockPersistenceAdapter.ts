@@ -46,6 +46,10 @@ export interface EntityField {
   default?: unknown;
   /** Validation format: email/url/phone/date/datetime/uuid. Drives mock-value shape without name heuristics. */
   format?: 'email' | 'url' | 'phone' | 'date' | 'datetime' | 'uuid' | 'image' | 'avatar' | 'thumbnail';
+  /** Element schema for `type: 'array'`. When omitted, arrays default to []. Mirrors `ArrayEntityField.items` in @almadar/core. */
+  items?: EntityField;
+  /** Property schemas for `type: 'object'` (or array-of-object via `items.properties`). Mirrors `EntityFieldBase.properties` in @almadar/core. */
+  properties?: Record<string, EntityField>;
 }
 
 export interface EntitySchema {
@@ -276,14 +280,58 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         return null; // Relations need special handling
 
       case 'array':
-        return [];
+        return this.generateArrayValue(entityName, field, index);
       case 'object':
-        return null;
+        return this.generateObjectValue(entityName, field, index);
 
       default:
         // Treat unknown types as strings
         return this.generateStringValue(entityName, field, index);
     }
+  }
+
+  /**
+   * Generate 3–5 elements for an array field. When `items` describes an
+   * object shape (the common case for `tiles: [KpiTile]`-style declarations),
+   * each element is recursively mock-generated against `items.properties`.
+   * When `items` describes a scalar, each element uses the scalar generator
+   * for that type. When `items` is missing (legacy `[object] = []` declarations
+   * with no element schema), falls back to an empty array — the historical
+   * behavior.
+   */
+  private generateArrayValue(entityName: string, field: EntityField, index: number): FieldValue {
+    if (!field.items) return [];
+    const count = faker.number.int({ min: 3, max: 5 });
+    const out: FieldValue[] = [];
+    for (let i = 0; i < count; i++) {
+      // Synthesize a child EntityField for the element. Each iteration gets a
+      // fresh `index` so per-element string generators don't repeat verbatim.
+      const elementField: EntityField = {
+        ...field.items,
+        name: `${field.name}[${i}]`,
+      };
+      out.push(this.generateFieldValue(entityName, elementField, index * 10 + i));
+    }
+    return out as FieldValue;
+  }
+
+  /**
+   * Generate a single object value with each declared property populated
+   * by faker. Walks `properties` and recursively delegates to
+   * `generateFieldValue` per property so nested objects-of-arrays-of-objects
+   * compose correctly.
+   */
+  private generateObjectValue(entityName: string, field: EntityField, index: number): FieldValue {
+    if (!field.properties) return null;
+    const out: Record<string, FieldValue> = {};
+    for (const [propName, propField] of Object.entries(field.properties)) {
+      // The nested schema may omit `name` (it's implied by the parent key)
+      // — synthesize one so downstream string generators that read `field.name`
+      // have something to log against.
+      const childField: EntityField = { ...propField, name: propName };
+      out[propName] = this.generateFieldValue(entityName, childField, index);
+    }
+    return out as FieldValue;
   }
 
   /**

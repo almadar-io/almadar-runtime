@@ -163,6 +163,7 @@ import type {
   OrbitalSchema,
   OrbitalDefinition,
   Entity,
+  EntityField,
   Trait,
   TraitTick,
   TraitConfig,
@@ -523,6 +524,57 @@ interface TickBinding {
   traitName: string;
   tick: RuntimeTraitTick;
   timerId: ReturnType<typeof setInterval>;
+}
+
+// EntityField shape understood by MockPersistenceAdapter. Mirrors the
+// adapter's interface; declared here to avoid a cross-module type leak.
+type MockEntityField = {
+  name: string;
+  type: string;
+  required?: boolean;
+  values?: string[];
+  default?: unknown;
+  format?: 'email' | 'url' | 'phone' | 'date' | 'datetime' | 'uuid' | 'image' | 'avatar' | 'thumbnail';
+  items?: MockEntityField;
+  properties?: Record<string, MockEntityField>;
+};
+
+/**
+ * Map a canonical @almadar/core EntityField into the slim shape
+ * MockPersistenceAdapter consumes. Critically, this carries `items` and
+ * `properties` through so arrays-of-objects and nested object fields can
+ * be faker-populated; the prior mapping dropped both and every array
+ * field came out as `[]`. Recursive so nested array/object schemas
+ * propagate to any depth.
+ */
+function mapFieldForMock(f: EntityField & { name: string }): MockEntityField {
+  // Read variant-specific fields off a record-typed view; @almadar/core's
+  // EntityField is a discriminated union whose `items` / `properties` /
+  // `format` live on only some branches.
+  const rec = f as unknown as Record<string, unknown>;
+  const out: MockEntityField = {
+    name: f.name,
+    type: rec['type'] as string,
+  };
+  if (typeof rec['required'] === 'boolean') out.required = rec['required'];
+  if (Array.isArray(rec['values'])) out.values = rec['values'] as string[];
+  if (rec['default'] !== undefined) out.default = rec['default'];
+  if (typeof rec['format'] === 'string') out.format = rec['format'] as MockEntityField['format'];
+  const items = rec['items'];
+  if (items && typeof items === 'object' && 'type' in (items as Record<string, unknown>)) {
+    out.items = mapFieldForMock({ name: '', ...(items as Record<string, unknown>) } as EntityField & { name: string });
+  }
+  const properties = rec['properties'];
+  if (properties && typeof properties === 'object' && !Array.isArray(properties)) {
+    const propsOut: Record<string, MockEntityField> = {};
+    for (const [k, v] of Object.entries(properties as Record<string, unknown>)) {
+      if (v && typeof v === 'object' && 'type' in (v as Record<string, unknown>)) {
+        propsOut[k] = mapFieldForMock({ name: k, ...(v as Record<string, unknown>) } as EntityField & { name: string });
+      }
+    }
+    if (Object.keys(propsOut).length > 0) out.properties = propsOut;
+  }
+  return out;
 }
 
 export class OrbitalServerRuntime {
@@ -1058,13 +1110,7 @@ export class OrbitalServerRuntime {
           .filter((f): f is typeof f & { name: string } =>
             typeof f.name === 'string' && f.name.length > 0,
           )
-          .map((f) => ({
-            name: f.name,
-            type: f.type,
-            required: f.required,
-            values: f.values,
-            default: f.default,
-          }));
+          .map((f) => mapFieldForMock(f));
         this.persistence.registerEntity({ name: entity.name, fields });
         if (this.config.debug) {
           persistLog.debug('mock:seeded', { entity: entity.name, count: this.persistence.count(entity.name) });
@@ -1100,13 +1146,7 @@ export class OrbitalServerRuntime {
           .filter((f): f is typeof f & { name: string } =>
             typeof f.name === 'string' && f.name.length > 0,
           )
-          .map((f) => ({
-            name: f.name,
-            type: f.type,
-            required: f.required,
-            values: f.values,
-            default: f.default,
-          }));
+          .map((f) => mapFieldForMock(f));
         this.persistence.registerEntity({ name: auxEntity.name, fields: auxFields });
         if (this.config.debug) {
           persistLog.debug('mock:seeded-auxiliary', {
@@ -1485,13 +1525,7 @@ export class OrbitalServerRuntime {
           .filter((f): f is typeof f & { name: string } =>
             typeof f.name === 'string' && f.name.length > 0,
           )
-          .map((f) => ({
-            name: f.name,
-            type: f.type,
-            required: f.required,
-            values: f.values,
-            default: f.default,
-          }));
+          .map((f) => mapFieldForMock(f));
         this.persistence.registerEntity({ name: entity.name, fields });
       }
     }
