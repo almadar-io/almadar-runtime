@@ -222,10 +222,18 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     return item;
   }
 
+  /** Max nesting depth for recursive array/object schemas (e.g. a Comment
+   *  entity whose `replies: [Comment]` field references itself). Without
+   *  this guard, generateArrayValue → generateObjectValue → generateArray…
+   *  recurses until stack overflow on every recursive type. Three levels
+   *  is enough to render a useful thread depth (parent → reply → sub-reply)
+   *  in catalog/preview without blowing the fixture. */
+  private static MAX_NESTED_DEPTH = 3;
+
   /**
    * Generate a mock value for a field based on its schema.
    */
-  private generateFieldValue(entityName: string, field: EntityField, index: number): FieldValue {
+  private generateFieldValue(entityName: string, field: EntityField, index: number, depth = 0): FieldValue {
     // Mock-seed default policy: numeric fields preserve their declared
     // default (so `tokenCount : number = 0` stays 0), every other type
     // falls through to faker. Mirrors the gate in the compiled-path
@@ -280,9 +288,9 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         return null; // Relations need special handling
 
       case 'array':
-        return this.generateArrayValue(entityName, field, index);
+        return this.generateArrayValue(entityName, field, index, depth);
       case 'object':
-        return this.generateObjectValue(entityName, field, index);
+        return this.generateObjectValue(entityName, field, index, depth);
 
       default:
         // Treat unknown types as strings
@@ -299,8 +307,12 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * with no element schema), falls back to an empty array — the historical
    * behavior.
    */
-  private generateArrayValue(entityName: string, field: EntityField, index: number): FieldValue {
+  private generateArrayValue(entityName: string, field: EntityField, index: number, depth = 0): FieldValue {
     if (!field.items) return [];
+    // Stop recursing on self-referential types (e.g. Comment.replies: [Comment]).
+    // Without this guard, faker would loop forever materialising replies-of-
+    // replies-of-replies until the call stack blows.
+    if (depth >= MockPersistenceAdapter.MAX_NESTED_DEPTH) return [];
     const count = faker.number.int({ min: 3, max: 5 });
     const out: FieldValue[] = [];
     for (let i = 0; i < count; i++) {
@@ -310,7 +322,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         ...field.items,
         name: `${field.name}[${i}]`,
       };
-      out.push(this.generateFieldValue(entityName, elementField, index * 10 + i));
+      out.push(this.generateFieldValue(entityName, elementField, index * 10 + i, depth + 1));
     }
     return out as FieldValue;
   }
@@ -321,15 +333,16 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * `generateFieldValue` per property so nested objects-of-arrays-of-objects
    * compose correctly.
    */
-  private generateObjectValue(entityName: string, field: EntityField, index: number): FieldValue {
+  private generateObjectValue(entityName: string, field: EntityField, index: number, depth = 0): FieldValue {
     if (!field.properties) return null;
+    if (depth >= MockPersistenceAdapter.MAX_NESTED_DEPTH) return null;
     const out: Record<string, FieldValue> = {};
     for (const [propName, propField] of Object.entries(field.properties)) {
       // The nested schema may omit `name` (it's implied by the parent key)
       // — synthesize one so downstream string generators that read `field.name`
       // have something to log against.
       const childField: EntityField = { ...propField, name: propName };
-      out[propName] = this.generateFieldValue(entityName, childField, index);
+      out[propName] = this.generateFieldValue(entityName, childField, index, depth + 1);
     }
     return out as FieldValue;
   }
