@@ -79,7 +79,7 @@ function resolveField(field: EntityField): ResolvedField {
     validation: extra.validation || (enumValues ? { enum: enumValues } : undefined),
     values: enumValues,
     enumValues: enumValues, // Also provide enumValues for compatibility
-    relation: field.relation,
+    relation: field.type === 'relation' ? field.relation : undefined,
   };
 }
 

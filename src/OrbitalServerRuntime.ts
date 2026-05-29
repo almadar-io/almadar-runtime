@@ -2673,6 +2673,23 @@ export class OrbitalServerRuntime {
         ? includeField.slice(0, -2)
         : includeField;
 
+      // Self-referential relations (target entity === source entity, e.g.
+      // ThreadPost.replies : [ThreadPost]) would otherwise attach LIVE store
+      // rows that also appear in `entities` and get hydrated themselves —
+      // producing mutual object references (A.replies→B, B.replies→A) that make
+      // `res.json()` throw "Converting circular structure to JSON" → 500. Attach
+      // a shallow clone instead, and for the self-referential case neutralize the
+      // child's own back-pointer field so hydrated children are leaves (one level
+      // of hydration, no cycle).
+      const isSelfRef = relatedEntityType === entityType;
+      const hydrateClone = (id: string): EntityRow | undefined => {
+        const related = relatedEntities.get(id);
+        if (!related) return undefined;
+        const copy: EntityRow = { ...related };
+        if (isSelfRef) copy[foreignKeyField] = [];
+        return copy;
+      };
+
       for (const entity of entities) {
         const fkValue = entity[foreignKeyField];
         // Population attaches related EntityRow objects to the entity at runtime.
@@ -2680,7 +2697,7 @@ export class OrbitalServerRuntime {
         if (cardinality === 'one' || cardinality === 'many-to-one') {
           if (typeof fkValue === 'string' && relatedEntities.has(fkValue)) {
             Object.defineProperty(entity, populatedFieldName, {
-              value: relatedEntities.get(fkValue),
+              value: hydrateClone(fkValue),
               writable: true, enumerable: true, configurable: true,
             });
           }
@@ -2688,12 +2705,12 @@ export class OrbitalServerRuntime {
           if (Array.isArray(fkValue)) {
             const fkIds = (fkValue as string[]).filter((id): id is string => typeof id === 'string');
             Object.defineProperty(entity, populatedFieldName, {
-              value: fkIds.map(id => relatedEntities.get(id)).filter(Boolean),
+              value: fkIds.map(hydrateClone).filter(Boolean),
               writable: true, enumerable: true, configurable: true,
             });
           } else if (typeof fkValue === 'string' && relatedEntities.has(fkValue)) {
             Object.defineProperty(entity, populatedFieldName, {
-              value: [relatedEntities.get(fkValue)],
+              value: [hydrateClone(fkValue)],
               writable: true, enumerable: true, configurable: true,
             });
           }
