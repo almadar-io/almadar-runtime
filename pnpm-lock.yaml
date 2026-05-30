@@ -19,14 +19,14 @@ importers:
         version: 1.3.0
       '@almadar/std':
         specifier: '>=7.2.4'
-        version: 16.4.1
+        version: 16.10.0
       '@faker-js/faker':
         specifier: ^9.3.0
         version: 9.9.0
     devDependencies:
       '@almadar/eslint-plugin':
         specifier: '>=2.7.0'
-        version: 2.8.1(eslint@10.0.0)
+        version: 2.8.2(eslint@10.0.0)
       '@types/express':
         specifier: ^5.0.0
         version: 5.0.6
@@ -57,14 +57,11 @@ packages:
   '@almadar/core@8.8.2':
     resolution: {integrity: sha512-vc9TbpCIdxzF3DgfS6MDGDNMhJUSEB5JbyDbn60hkuIYi8UbxK4brH8TEwF+2wKV9vaX5yHmPj2XJXaNS3bm2w==}
 
-  '@almadar/core@9.1.1':
-    resolution: {integrity: sha512-+yKxFEb3zY3+OSBfNKS2YualG15EVA1xlV0hyU8JCIqBqykm+4KQqzIsHoFT973dqSltTB40V7S1PxfapKUSMw==}
-
   '@almadar/core@9.2.0':
     resolution: {integrity: sha512-bwJuC9UEJCY0IXroPZ+A4F8P0tklPtr8O19PnUaZITGpehqkoEyYNxQHKfrw3ehNkWjhPBScGzyathiwJR+mpA==}
 
-  '@almadar/eslint-plugin@2.8.1':
-    resolution: {integrity: sha512-DaWThhbtFMT/IrqEyc+XADrhAqTjc+jeSO9CeiSJKs0+UoBDuNLZNhLy1kiXT61XdHSxCNZD7jjjtHbXbe59+g==}
+  '@almadar/eslint-plugin@2.8.2':
+    resolution: {integrity: sha512-iQGH5MdsfcEPGUeImgS3XBWLfBRc0uO9+0Kyy87WQf/nc4hUoAEPxov5C/JAYe1tLoL34dLBIyKDm/SFeYPBsA==}
     peerDependencies:
       eslint: '>=8.0.0'
 
@@ -74,11 +71,11 @@ packages:
   '@almadar/logger@1.3.0':
     resolution: {integrity: sha512-6WhnbfjQqHEy2hoRlvZM0RYr8trAra5t82IhOOIRPIoc2/jbpoIqINZ/dGlbndoa3g1aC+4LrdH35H0TzKdEhw==}
 
-  '@almadar/patterns@2.30.13':
-    resolution: {integrity: sha512-BkrFgdnfGCSxVBHA/TSlc58cvfqSNN+Gowbhb0u9EtU98Cu5Zwqhn/CP0At9O+x+/Qkx4Q87LvJjgbf5jjnVcg==}
+  '@almadar/patterns@2.31.0':
+    resolution: {integrity: sha512-EiFmNlJ+Q+RvgHpq8miyl4BhGNBgj3GSQpkVk2TMxmjlmULKqEkNnlJ+PBGuPjYM0U+n1FWbq7Y5MmjBvthQiw==}
 
-  '@almadar/std@16.4.1':
-    resolution: {integrity: sha512-edbrIG4Hlh3p8cnmZ+2uL+XQ1eBdZazGp0BXIXuKnh5Qoen+TCZQhQ2eOt9AI6GUsHKk9CDw4oXf9LG+1gxSNw==}
+  '@almadar/std@16.10.0':
+    resolution: {integrity: sha512-cALQZaY5DYh0HhL6m1i8HgIWyiT8M1o0tWZjJBUsw5yqnsr8Jyg0HGyjYsgtOWCd3maMFnjnWW01Zn6LurNJVw==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -994,8 +991,8 @@ packages:
     resolution: {integrity: sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==}
     engines: {node: '>= 0.4'}
 
-  hasown@2.0.3:
-    resolution: {integrity: sha512-ej4AhfhfL2Q2zpMmLo7U1Uv9+PyhIZpgQLGT1F9miIGmiCJIoCgSmczFdrc97mWT4kVY72KA+WnnhJ5pghSvSg==}
+  hasown@2.0.4:
+    resolution: {integrity: sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==}
     engines: {node: '>= 0.4'}
 
   http-errors@2.0.1:
@@ -1511,38 +1508,33 @@ snapshots:
 
   '@almadar/core@8.8.2':
     dependencies:
-      '@almadar/patterns': 2.30.13
-      zod: 3.25.76
-
-  '@almadar/core@9.1.1':
-    dependencies:
-      '@almadar/patterns': 2.30.13
+      '@almadar/patterns': 2.31.0
       zod: 3.25.76
 
   '@almadar/core@9.2.0':
     dependencies:
-      '@almadar/patterns': 2.30.13
+      '@almadar/patterns': 2.31.0
       zod: 3.25.76
 
-  '@almadar/eslint-plugin@2.8.1(eslint@10.0.0)':
+  '@almadar/eslint-plugin@2.8.2(eslint@10.0.0)':
     dependencies:
       eslint: 10.0.0
       jsonc-eslint-parser: 3.1.0
 
   '@almadar/evaluator@2.12.0':
     dependencies:
-      '@almadar/core': 9.1.1
-      '@almadar/std': 16.4.1
+      '@almadar/core': 9.2.0
+      '@almadar/std': 16.10.0
 
   '@almadar/logger@1.3.0':
     dependencies:
-      '@almadar/core': 9.1.1
+      '@almadar/core': 9.2.0
 
-  '@almadar/patterns@2.30.13':
+  '@almadar/patterns@2.31.0':
     dependencies:
-      '@almadar/core': 9.1.1
+      '@almadar/core': 9.2.0
 
-  '@almadar/std@16.4.1':
+  '@almadar/std@16.10.0':
     dependencies:
       '@almadar/core': 8.8.2
 
@@ -2330,7 +2322,7 @@ snapshots:
       get-proto: 1.0.1
       gopd: 1.2.0
       has-symbols: 1.1.0
-      hasown: 2.0.3
+      hasown: 2.0.4
       math-intrinsics: 1.1.0
 
   get-proto@1.0.1:
@@ -2346,7 +2338,7 @@ snapshots:
 
   has-symbols@1.1.0: {}
 
-  hasown@2.0.3:
+  hasown@2.0.4:
     dependencies:
       function-bind: 1.1.2
 

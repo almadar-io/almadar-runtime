@@ -35,6 +35,7 @@ import {
   parseEntityRef,
   parsePageRef,
   parseImportedTraitRef,
+  isInlineTrait,
 } from "@almadar/core";
 import type {
   LoaderOptions,
@@ -572,12 +573,23 @@ export class ReferenceResolver {
     const warnings: string[] = [];
     const importChain = chain ?? { push: () => null, pop: () => {}, clone() { return this; } } as ImportChainLike;
 
-    // Step 1: Resolve imports
-    const importsResult = await this.resolveImports(
-      orbital.uses ?? [],
-      sourcePath,
-      importChain
-    );
+    // Step 1: Resolve imports.
+    //
+    // Skip external loading when the orbital is ALREADY fully resolved — i.e.
+    // every trait is an inline definition. A schema produced by `orbital
+    // resolve` (the canonical Rust resolver) has all trait refs inlined yet
+    // deliberately keeps `uses` as the import-provenance record. Re-loading
+    // those imports here is redundant and re-introduces external-loader
+    // failures (e.g. std behaviors not found at the runtime's lookup paths)
+    // even though nothing in the orbital still references them. Skipping the
+    // load leaves `uses` intact (no information lost) and makes preprocessing
+    // idempotent over an already-resolved schema.
+    const traitsList = orbital.traits ?? [];
+    const alreadyResolved =
+      traitsList.length > 0 && traitsList.every((t) => isInlineTrait(t));
+    const importsResult = alreadyResolved
+      ? { success: true as const, data: { orbitals: new Map<string, ResolvedImport>() }, warnings: [] as string[] }
+      : await this.resolveImports(orbital.uses ?? [], sourcePath, importChain);
     if (!importsResult.success) {
       return { success: false, errors: importsResult.errors };
     }
