@@ -12,7 +12,7 @@
 
 import * as fs from "fs";
 import * as net from "net";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { createLogger } from '@almadar/logger';
 import type { EventPayload, OsEmitConfig } from './types.js';
 import type { EffectHandlers } from "./types.js";
@@ -203,6 +203,12 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
 
     osWatchProcess: (name: string, subcommand?: string, emit?: OsEmitConfig) => {
       const searchTerm = subcommand ? `${name} ${subcommand}` : name;
+      // execFileSync below runs pgrep with no shell, so searchTerm can never inject
+      // a command; this guard additionally rejects pathological / metacharacter input.
+      if (!/^[\w .\-/:@]+$/.test(searchTerm)) {
+        log.warn('watch-process-invalid-name', { searchTerm });
+        return;
+      }
       let wasRunning = false;
       // Both start + exit transitions share one event name when emit.on_message
       // is configured (consumers discriminate on the payload's `process` field).
@@ -212,7 +218,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
       const interval = setInterval(() => {
         let isRunning = false;
         try {
-          const result = execSync(`pgrep -f "${searchTerm}" 2>/dev/null`, {
+          const result = execFileSync("pgrep", ["-f", searchTerm], {
             encoding: "utf-8",
             stdio: ["pipe", "pipe", "pipe"],
           });
