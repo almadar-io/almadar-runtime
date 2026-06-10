@@ -158,6 +158,12 @@ import type {
   EvaluationContextExtensions,
   RuntimeRenderPattern,
 } from "./types.js";
+import { collectDeclaredConfigDefaults } from "./config-defaults.js";
+// Backward-compat: `collectDeclaredConfigDefaults` used to live here. The package
+// index now re-exports it from the browser-safe `./config-defaults.js` (so it
+// doesn't drag this node-only module into a browser bundle), but keep the
+// original export site for existing importers (tests, server consumers).
+export { collectDeclaredConfigDefaults };
 import type {
   FieldValue,
   OrbitalSchema,
@@ -474,26 +480,6 @@ import { InMemoryPersistence } from "./PersistenceAdapter.js";
  * Mirrors the compiled path's `DEFAULT_<TRAIT>_CONFIG` constant
  * emitted by `backend.rs` Solution-1.
  */
-export function collectDeclaredConfigDefaults(
-  trait: { config?: import('@almadar/core').DeclaredTraitConfig } | undefined,
-): TraitConfig | undefined {
-  if (!trait) return undefined;
-  const schema = trait.config;
-  if (!schema || typeof schema !== 'object') return undefined;
-  const defaults: Record<string, TraitConfigValue> = {};
-  let hasAny = false;
-  for (const [key, field] of Object.entries(schema)) {
-    if (field && typeof field === 'object' && !Array.isArray(field) && 'default' in field) {
-      const def = (field as { default?: TraitConfigValue }).default;
-      if (def !== undefined) {
-        defaults[key] = def;
-        hasAny = true;
-      }
-    }
-  }
-  return hasAny ? defaults : undefined;
-}
-
 function needsPreprocessing(schema: OrbitalSchema): boolean {
   for (const orbital of schema.orbitals) {
     const uses = (orbital as { uses?: unknown[] }).uses;

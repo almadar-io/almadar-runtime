@@ -15,7 +15,11 @@ import {
     createMinimalContext,
     type EvaluationContext,
 } from '@almadar/evaluator';
-import { isKnownOperator } from '@almadar/std';
+// Import from the browser-safe `@almadar/std/registry` subpath (pure operator
+// metadata) rather than the `@almadar/std` index — the index also bundles the
+// node-only registry LOADER (createRequire/fs/path), which has no place in the
+// runtime interpreter that ships to the renderer.
+import { isKnownStdOperator as isKnownOperator } from '@almadar/std/registry';
 import type { BindingContext, EntityRow, PatternProps, EvaluationContextExtensions } from './types.js';
 import { createLogger } from '@almadar/logger';
 
