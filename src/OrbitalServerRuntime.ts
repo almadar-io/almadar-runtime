@@ -524,6 +524,7 @@ export class OrbitalServerRuntime {
   private entitySharingMap: EntitySharingMap = {};
   private eventNamespaceMap: EventNamespaceMap = {};
   private osHandlers: OsHandlerResult | null = null;
+  private osHandlersPromise: Promise<void> | null = null;
   private localPersistence: PersistenceAdapter | null = null;
   private resolvedSchema: OrbitalSchema | null = null;
 
@@ -573,22 +574,47 @@ export class OrbitalServerRuntime {
       this.localPersistence = new LocalPersistenceAdapter(config.localStorageRoot);
     }
 
-    // Auto-wire OS handlers (server-side only). Same eval-require trick —
-    // `./createOsHandlers.js` pulls fs/net/child_process and would otherwise
-    // poison the browser-side dependency graph.
-    if (isNodeEnv()) {
-      const { createOsHandlers } = nodeRequire<{ createOsHandlers: typeof CreateOsHandlersFn }>(`./createOsHandlers${_nodeRequireExt}`);
-      this.osHandlers = createOsHandlers({
-        emitEvent: (type, payload) => this.eventBus.emit(type, payload),
-      });
-    } else {
-      this.osHandlers = { handlers: {}, cleanup: () => {} };
+    // OS handlers (fs/net/child_process effects) are wired lazily on the first
+    // event via ensureOsHandlers(). They live in the ESM-only
+    // `./createOsHandlers.js`; the package is `type: module`, so a synchronous
+    // require() of it throws ERR_REQUIRE_ESM in a Node consumer. A dynamic
+    // import() loads it cleanly AND keeps it out of the browser graph
+    // (isNodeEnv-guarded, lazy chunk) — same goal as the old eval-require, but
+    // without the CJS hazard. Default to empty handlers until then.
+    this.osHandlers = { handlers: {}, cleanup: () => {} };
+  }
+
+  /**
+   * Lazily wire the OS-level effect handlers (fs/net/child_process), merging
+   * them UNDER any user-provided handlers. Deferred out of the constructor
+   * because `./createOsHandlers.js` is ESM and `require()`-ing it from a
+   * `type: module` package throws ERR_REQUIRE_ESM — so it is dynamic-import()ed
+   * here on the first event. Node-only, idempotent (single shared load), and a
+   * no-op in the browser (the import never runs behind the isNodeEnv guard).
+   */
+  private async ensureOsHandlers(): Promise<void> {
+    if (!isNodeEnv()) return;
+    if (!this.osHandlersPromise) {
+      this.osHandlersPromise = (async () => {
+        // Literal `.js` specifier (NOT the `_nodeRequireExt` template used by
+        // the CJS nodeRequire calls): a template literal makes tsup emit a
+        // __glob helper keyed by the source `.ts`, which then misses at dist
+        // runtime (ext resolves to `.js`) and throws "Module not found in
+        // bundle". A literal `import()` resolves the real dist `.js` in Node
+        // and Vite/vitest maps `.js`→`.ts` source automatically.
+        const { createOsHandlers } = (await import('./createOsHandlers.js')) as {
+          createOsHandlers: typeof CreateOsHandlersFn;
+        };
+        this.osHandlers = createOsHandlers({
+          emitEvent: (type, payload) => this.eventBus.emit(type, payload),
+        });
+        this.config.effectHandlers = {
+          ...this.osHandlers.handlers,
+          ...this.config.effectHandlers,
+        };
+      })();
     }
-    // Merge OS handlers under user-provided handlers (user can override)
-    this.config.effectHandlers = {
-      ...this.osHandlers.handlers,
-      ...this.config.effectHandlers,
-    };
+    return this.osHandlersPromise;
   }
 
   /**
@@ -1477,6 +1503,10 @@ export class OrbitalServerRuntime {
     orbitalName: string,
     request: OrbitalEventRequest,
   ): Promise<OrbitalEventResponse> {
+    // Wire OS-level effect handlers before any effect runs (no-op after the
+    // first call / in the browser). Lazy because their source is ESM-only.
+    await this.ensureOsHandlers();
+
     const registered = this.orbitals.get(orbitalName);
     if (!registered) {
       return {
