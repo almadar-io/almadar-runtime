@@ -478,6 +478,29 @@ export function createServerEffectHandlers(
       }
     },
 
+    fetchStream: async (streamEntityType, options, onChunk) => {
+      // Default implementation: load all rows and call onChunk per row.
+      // Real streaming (SSE/LLM) is wired by the server runtime via the
+      // streaming SSE endpoint added in B2. This fallback keeps orbital-verify
+      // and test environments working without a live SSE transport.
+      try {
+        const rows = await persistence.list(streamEntityType);
+        const matched = options?.id
+          ? rows.filter(r => r['id'] === options.id)
+          : rows;
+        for (const row of matched) {
+          onChunk(row);
+        }
+        return matched;
+      } catch (err) {
+        effectLog.error('fetch-stream-error', {
+          entityType: streamEntityType,
+          error: err instanceof Error ? err : String(err),
+        });
+        return null;
+      }
+    },
+
     ref: async (refEntityType, options) => {
       // `ref` = `fetch` for mock/dev runtimes; real server uses the same
       // underlying persistence read, the difference (reactive subscription

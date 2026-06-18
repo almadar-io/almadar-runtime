@@ -228,6 +228,21 @@ export interface EffectHandlers {
         }
     ) => Promise<FetchResult | null>;
 
+    /** Stream an LLM or HTTP response (server only).
+     *
+     * Calls `onChunk` per incoming chunk; resolves with the final aggregated
+     * result on completion. The executor fires `emit.on_message` per chunk and
+     * `emit.success` on resolution. `null` means stream failed before any chunk.
+     */
+    fetchStream?: (
+        entityType: string,
+        options: {
+            id?: string;
+            filter?: unknown;
+        } | undefined,
+        onChunk: (chunk: unknown) => void,
+    ) => Promise<unknown>;
+
     /** Spawn a new entity instance */
     spawn?: (entityType: string, props?: EntityRow) => void;
 
@@ -510,7 +525,7 @@ export interface TransitionObserver {
  */
 export const HANDLER_MANIFEST: Record<ExecutionEnvironment, string[]> = {
     client: ["render-ui", "render", "navigate", "notify", "emit", "set", "log", "ref", "deref", "watch"],
-    server: ["persist", "fetch", "call-service", "emit", "set", "spawn", "despawn", "log", "ref", "deref", "swap!", "atomic", "os/watch-files", "os/watch-process", "os/watch-port", "os/watch-http", "os/watch-cron", "os/watch-signal", "os/watch-env", "os/debounce"],
+    server: ["persist", "fetch", "fetch-stream", "call-service", "emit", "set", "spawn", "despawn", "log", "ref", "deref", "swap!", "atomic", "os/watch-files", "os/watch-process", "os/watch-port", "os/watch-http", "os/watch-cron", "os/watch-signal", "os/watch-env", "os/debounce"],
     test: [
         "render-ui", "render", "navigate", "notify", "emit", "set",
         "persist", "fetch", "call-service", "spawn", "despawn", "log",

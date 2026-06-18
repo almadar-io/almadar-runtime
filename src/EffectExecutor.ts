@@ -182,6 +182,7 @@ export class EffectExecutor {
             'set': this.handlers.set,
             'call-service': this.handlers.callService,
             'fetch': this.handlers.fetch,
+            'fetch-stream': this.handlers.fetchStream,
             'spawn': this.handlers.spawn,
             'despawn': this.handlers.despawn,
             'render-ui': this.handlers.renderUI,
@@ -707,6 +708,33 @@ export class EffectExecutor {
                     }
                 } else {
                     this.logUnsupported('fetch');
+                }
+                break;
+            }
+
+            case 'fetch-stream': {
+                if (this.handlers.fetchStream) {
+                    const streamEntityType = args[0] as string;
+                    const rawStreamOpt = args[1];
+                    const streamOptions = typeof rawStreamOpt === 'object' && rawStreamOpt !== null
+                        ? rawStreamOpt as { id?: string; filter?: unknown }
+                        : undefined;
+                    const streamEmitCfg = this.extractEmitConfig(rawStreamOpt);
+                    try {
+                        const result = await this.handlers.fetchStream(
+                            streamEntityType,
+                            streamOptions,
+                            (chunk) => {
+                                this.emitSuccess(streamEmitCfg, 'on_message', { chunk });
+                            },
+                        );
+                        this.emitSuccess(streamEmitCfg, 'success', { data: result });
+                    } catch (err) {
+                        this.emitFailure(streamEmitCfg, err);
+                        throw err;
+                    }
+                } else {
+                    this.logUnsupported('fetch-stream');
                 }
                 break;
             }
