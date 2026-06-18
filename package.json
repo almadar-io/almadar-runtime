@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "6.9.5",
+  "version": "6.10.0",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -9,6 +9,7 @@
   "browser": {
     "express": false,
     "module": false,
+    "@almadar/server": false,
     "./dist/createOsHandlers.js": false,
     "./dist/LocalPersistenceAdapter.js": false
   },
@@ -54,6 +55,7 @@
     "@almadar/core": "^9.2.0",
     "@almadar/evaluator": ">=2.9.2",
     "@almadar/logger": "^1.0.0",
+    "@almadar/server": "^2.14.2",
     "@almadar/std": ">=7.2.4",
     "@faker-js/faker": "^9.3.0"
   },

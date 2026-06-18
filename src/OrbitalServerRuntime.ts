@@ -141,6 +141,7 @@ const dynamicLog = createLogger("almadar:runtime:dynamic");
 // here. Keeping a value re-export here would force tsup to inline the
 // adapter into `OrbitalServerRuntime.js`'s bundle, defeating the
 // type-only-import-plus-eval-require strategy described above.
+import type { SSEEvent } from '@almadar/server';
 import {
   interpolateProps,
   createContextFromBindings,
@@ -2818,22 +2819,62 @@ export class OrbitalServerRuntime {
     router.post(
       "/:orbital/events",
       async (req: Request, res: Response, next: NextFunction) => {
+        const wantsStream =
+          req.query['stream'] === 'true' ||
+          (req.headers['accept'] ?? '').includes('text/event-stream');
+
+        if (!wantsStream) {
+          try {
+            const orbitalName = req.params.orbital as string;
+            const firebaseUser = (req as Request & { firebaseUser?: OrbitalEventRequest["user"] }).firebaseUser;
+            const user = firebaseUser ? {
+              ...firebaseUser,
+              displayName: (firebaseUser.name as string | undefined) ?? firebaseUser.displayName,
+            } : undefined;
+            const result = await this.processOrbitalEvent(orbitalName, { ...req.body, user });
+            res.json(result);
+          } catch (error) {
+            next(error);
+          }
+          return;
+        }
+
+        // SSE streaming path. processOrbitalEvent is synchronous (buffer-then-flush).
+        // True incremental push requires a kernel-level observable hook — flagged for B3.
+        // Dynamic import keeps @almadar/server (ESM, Node-only) out of browser bundles.
+        const { setupSSE, sendSSEEvent, sendSSEDone, closeSSE } =
+          (await import('@almadar/server')) as {
+            setupSSE: (res: import('http').ServerResponse) => void;
+            sendSSEEvent: (res: import('http').ServerResponse, ev: SSEEvent) => void;
+            sendSSEDone: (res: import('http').ServerResponse) => void;
+            closeSSE: (res: import('http').ServerResponse) => void;
+          };
+        setupSSE(res);
         try {
           const orbitalName = req.params.orbital as string;
-          // Extract user from request (set by authenticateFirebase middleware)
           const firebaseUser = (req as Request & { firebaseUser?: OrbitalEventRequest["user"] }).firebaseUser;
           const user = firebaseUser ? {
             ...firebaseUser,
             displayName: (firebaseUser.name as string | undefined) ?? firebaseUser.displayName,
           } : undefined;
 
-          const result = await this.processOrbitalEvent(orbitalName, {
-            ...req.body,
-            user,
-          });
-          res.json(result);
+          const result = await this.processOrbitalEvent(orbitalName, { ...req.body, user });
+          const ts = Date.now();
+
+          for (const emitted of result.emittedEvents) {
+            sendSSEEvent(res, { type: 'event', data: emitted, timestamp: ts });
+          }
+          for (const effect of result.clientEffects ?? []) {
+            sendSSEEvent(res, { type: 'effect', data: effect, timestamp: ts });
+          }
+          sendSSEEvent(res, { type: 'complete', data: result, timestamp: ts });
+          sendSSEDone(res);
+          closeSSE(res);
         } catch (error) {
-          next(error);
+          const message = error instanceof Error ? error.message : String(error);
+          sendSSEEvent(res, { type: 'error', data: { message }, timestamp: Date.now() });
+          sendSSEDone(res);
+          closeSSE(res);
         }
       },
     );

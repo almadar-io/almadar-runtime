@@ -24,5 +24,5 @@ export default defineConfig({
   // Top-level Node-only deps that must stay external so any consumer
   // (Node Express server, browser bundler) handles them correctly.
   // Browser bundlers substitute via the package.json `browser` field.
-  external: ['express', 'fs', 'fs/promises', 'path', 'net', 'child_process', 'url', 'module'],
+  external: ['express', '@almadar/server', 'fs', 'fs/promises', 'path', 'net', 'child_process', 'url', 'module'],
 });
