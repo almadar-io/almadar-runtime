@@ -1499,10 +1499,16 @@ export class OrbitalServerRuntime {
 
   /**
    * Process an event for an orbital
+   *
+   * @param onPush - Optional incremental-push callback. Called immediately
+   * when an event is emitted or a client effect fires, before the promise
+   * resolves. Used by the SSE streaming path to write items to the
+   * response as they arrive rather than buffering and flushing at the end.
    */
   async processOrbitalEvent(
     orbitalName: string,
     request: OrbitalEventRequest,
+    onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void,
   ): Promise<OrbitalEventResponse> {
     // Wire OS-level effect handlers before any effect runs (no-op after the
     // first call / in the browser). Lazy because their source is ESM-only.
@@ -1681,6 +1687,7 @@ export class OrbitalServerRuntime {
           effectResults,
           user,
           clientEffectsByTrait,
+          onPush,
         );
       }
     }
@@ -1758,6 +1765,7 @@ export class OrbitalServerRuntime {
     effectResults: EffectResult[],
     user?: OrbitalEventRequest["user"],
     clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>,
+    onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void,
   ): Promise<void> {
     const entityType = registered.entity.name;
 
@@ -1769,6 +1777,7 @@ export class OrbitalServerRuntime {
     const pushClientEffect = (effect: ClientEffectTuple): void => {
       clientEffects.push(effect);
       clientEffectsByTrait?.push({ traitName, effect });
+      onPush?.({ type: 'effect', data: effect });
     };
 
     // Forward refs - assigned after construction, used by fetch/atomic handlers
@@ -1793,7 +1802,9 @@ export class OrbitalServerRuntime {
           trait: traitName,
         };
         this.eventBus.emit(event, eventPayload, stamp);
-        emittedEvents.push({ event, payload: eventPayload, source: stamp });
+        const emittedItem = { event, payload: eventPayload, source: stamp };
+        emittedEvents.push(emittedItem);
+        onPush?.({ type: 'event', data: emittedItem });
         effectLog.debug("emit:push", {
           event,
           cumulativeEmittedCount: emittedEvents.length,
@@ -2839,9 +2850,10 @@ export class OrbitalServerRuntime {
           return;
         }
 
-        // SSE streaming path. processOrbitalEvent is synchronous (buffer-then-flush).
-        // True incremental push requires a kernel-level observable hook — flagged for B3.
-        // Dynamic import keeps @almadar/server (ESM, Node-only) out of browser bundles.
+        // SSE streaming path — true incremental: each emitted event or client
+        // effect is written to the stream immediately via onPush as it fires,
+        // before processOrbitalEvent resolves. Dynamic import keeps
+        // @almadar/server (ESM, Node-only) out of browser bundles.
         const { setupSSE, sendSSEEvent, sendSSEDone, closeSSE } =
           (await import('@almadar/server')) as {
             setupSSE: (res: import('http').ServerResponse) => void;
@@ -2858,16 +2870,11 @@ export class OrbitalServerRuntime {
             displayName: (firebaseUser.name as string | undefined) ?? firebaseUser.displayName,
           } : undefined;
 
-          const result = await this.processOrbitalEvent(orbitalName, { ...req.body, user });
-          const ts = Date.now();
+          const result = await this.processOrbitalEvent(orbitalName, { ...req.body, user }, (item) => {
+            sendSSEEvent(res, { type: item.type, data: item.data, timestamp: Date.now() });
+          });
 
-          for (const emitted of result.emittedEvents) {
-            sendSSEEvent(res, { type: 'event', data: emitted, timestamp: ts });
-          }
-          for (const effect of result.clientEffects ?? []) {
-            sendSSEEvent(res, { type: 'effect', data: effect, timestamp: ts });
-          }
-          sendSSEEvent(res, { type: 'complete', data: result, timestamp: ts });
+          sendSSEEvent(res, { type: 'complete', data: result, timestamp: Date.now() });
           sendSSEDone(res);
           closeSSE(res);
         } catch (error) {
