@@ -183,6 +183,7 @@ export class EffectExecutor {
             'call-service': this.handlers.callService,
             'fetch': this.handlers.fetch,
             'fetch-stream': this.handlers.fetchStream,
+            'send-server': this.handlers.sendServer,
             'spawn': this.handlers.spawn,
             'despawn': this.handlers.despawn,
             'render-ui': this.handlers.renderUI,
@@ -832,6 +833,17 @@ export class EffectExecutor {
                     for (const inner of atomicEffects) {
                         await this.execute(inner);
                     }
+                }
+                break;
+            }
+
+            case 'send-server': {
+                if (this.handlers.sendServer) {
+                    const sendEvent = args[0] as string;
+                    const sendPayload = args[1] as EventPayload | undefined;
+                    this.handlers.sendServer(sendEvent, sendPayload);
+                } else {
+                    this.logUnsupported('send-server');
                 }
                 break;
             }

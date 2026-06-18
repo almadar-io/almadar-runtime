@@ -249,6 +249,13 @@ export interface EffectHandlers {
     /** Despawn (delete) an entity instance */
     despawn?: (entityId: string) => void;
 
+    /** Send an orbital event to the server over WebSocket (client-only).
+     *
+     * Produces the wire message `{ type: 'ORBITAL_EVENT', payload: { orbital, event, payload, entityId? } }`
+     * which `setupEventBroadcast` decodes → server bus → `processOrbitalEvent`.
+     */
+    sendServer?: (event: string, payload?: EventPayload) => void;
+
     // Platform-specific handlers (optional)
 
     /** Render UI to a slot (client only). `pattern` is the post-interpolation
@@ -524,12 +531,12 @@ export interface TransitionObserver {
  * Maps execution environments to their available effect handlers.
  */
 export const HANDLER_MANIFEST: Record<ExecutionEnvironment, string[]> = {
-    client: ["render-ui", "render", "navigate", "notify", "emit", "set", "log", "ref", "deref", "watch"],
+    client: ["render-ui", "render", "navigate", "notify", "emit", "set", "log", "ref", "deref", "watch", "send-server"],
     server: ["persist", "fetch", "fetch-stream", "call-service", "emit", "set", "spawn", "despawn", "log", "ref", "deref", "swap!", "atomic", "os/watch-files", "os/watch-process", "os/watch-port", "os/watch-http", "os/watch-cron", "os/watch-signal", "os/watch-env", "os/debounce"],
     test: [
         "render-ui", "render", "navigate", "notify", "emit", "set",
         "persist", "fetch", "call-service", "spawn", "despawn", "log",
-        "ref", "deref", "swap!", "watch", "atomic",
+        "ref", "deref", "swap!", "watch", "atomic", "send-server",
     ],
     ssr: ["render-ui", "render", "fetch", "emit", "set", "log", "ref", "deref"],
 };

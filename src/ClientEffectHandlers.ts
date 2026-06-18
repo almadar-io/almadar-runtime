@@ -46,16 +46,83 @@ export interface CreateClientEffectHandlersOptions {
     navigate?: (path: string, params?: { [key: string]: string }) => void;
     /** Notify function for notification effects */
     notify?: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;
+    /**
+     * Send-server handler for `send-server` effects.
+     * When omitted, defaults to a lazy WebSocket transport connecting to the
+     * server's `/ws/events` endpoint. The handler produces the server wire
+     * message `{ type: 'ORBITAL_EVENT', payload: { orbital, event, payload } }`
+     * that `setupEventBroadcast` decodes.
+     *
+     * Pass a custom function here to override the transport (e.g. in tests or
+     * when the WS URL differs from the default).
+     *
+     * `orbitalName` is injected at call time by the EffectContext when available.
+     */
+    sendServer?: (event: string, payload?: EventPayload) => void;
+    /** Orbital name used to stamp the WS message (used by the default transport) */
+    orbitalName?: string;
 }
 
 // ============================================================================
 // Factory
 // ============================================================================
 
+// ============================================================================
+// WS Transport (lazy singleton per page-load)
+// ============================================================================
+
+/** Lazily-opened WebSocket to the server's /ws/events endpoint. */
+let _ws: WebSocket | null = null;
+let _wsQueue: string[] = [];
+
+function getOrOpenWs(): WebSocket | null {
+    if (typeof WebSocket === 'undefined' || typeof location === 'undefined') return null;
+    if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) {
+        return _ws;
+    }
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${protocol}//${location.host}/ws/events`;
+    try {
+        _ws = new WebSocket(url);
+        _ws.addEventListener('open', () => {
+            const queued = _wsQueue.splice(0);
+            for (const msg of queued) {
+                _ws!.send(msg);
+            }
+        });
+        _ws.addEventListener('error', () => {
+            _ws = null;
+        });
+        _ws.addEventListener('close', () => {
+            _ws = null;
+        });
+    } catch {
+        _ws = null;
+    }
+    return _ws;
+}
+
+function sendServerEvent(orbital: string, event: string, payload?: EventPayload): void {
+    const msg = JSON.stringify({
+        type: 'ORBITAL_EVENT',
+        payload: { orbital, event, payload: payload ?? null },
+    });
+    const ws = getOrOpenWs();
+    if (!ws) {
+        log.warn('send-server:no-ws', { event });
+        return;
+    }
+    if (ws.readyState === WebSocket.OPEN) {
+        ws.send(msg);
+    } else {
+        _wsQueue.push(msg);
+    }
+}
+
 /**
  * Create client-side effect handlers for trait state machine execution.
  *
- * Client handles: emit, renderUI, navigate, notify
+ * Client handles: emit, renderUI, navigate, notify, sendServer
  * Server handles: persist, set, callService (logged as warnings on client)
  *
  * @example
@@ -74,7 +141,7 @@ export interface CreateClientEffectHandlersOptions {
 export function createClientEffectHandlers(
     options: CreateClientEffectHandlersOptions
 ): EffectHandlers {
-    const { eventBus, slotSetter, navigate, notify } = options;
+    const { eventBus, slotSetter, navigate, notify, sendServer, orbitalName = '' } = options;
 
     return {
         emit: (event: string, payload?: EventPayload) => {
@@ -116,6 +183,10 @@ export function createClientEffectHandlers(
 
         notify: notify ?? ((msg: string, type?: string) => {
             log.debug('notify', { type: type ?? null, message: msg });
+        }),
+
+        sendServer: sendServer ?? ((event: string, payload?: EventPayload) => {
+            sendServerEvent(orbitalName, event, payload);
         }),
     };
 }
