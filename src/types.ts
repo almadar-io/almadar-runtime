@@ -379,6 +379,14 @@ export interface BindingContext {
     state?: string;
     /** Trait-level state/config */
     config?: ConfigContext;
+    /**
+     * Local variables introduced by a `let` form, keyed by bare name and
+     * referenced via `@<name>` (the canonical evaluator convention — same as
+     * `createChildContext` in `@almadar/evaluator`). Carried on the context so
+     * a `let` body's effects resolve their value expressions against the
+     * `let`-bound locals.
+     */
+    locals?: Map<string, unknown>;
     /** Additional custom bindings */
     [key: string]: unknown;
 }

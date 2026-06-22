@@ -207,7 +207,7 @@ export class EffectExecutor {
             }
         }
         // Compound operators are always available
-        registered.push('do', 'when');
+        registered.push('do', 'when', 'let', 'if');
         return registered;
     }
 
@@ -225,10 +225,16 @@ export class EffectExecutor {
 
         const { operator, args } = parsed;
 
-        // Compound operators ('do', 'when') contain nested effects as arguments.
-        // Skip resolveArgs for these — each nested effect will be resolved
-        // individually when this.execute() recurses into it via dispatch().
-        const isCompound = operator === 'do' || operator === 'when';
+        // Compound operators ('do', 'when', 'let', 'if') contain nested
+        // effects / unresolved expressions as arguments. Skip resolveArgs for
+        // these — the handler evaluates the condition / binding values through
+        // the canonical evaluator itself and recurses into nested effects via
+        // this.execute(), which resolves each one against the right context.
+        const isCompound =
+            operator === 'do' ||
+            operator === 'when' ||
+            operator === 'let' ||
+            operator === 'if';
 
         // `set` with an `@entity.<field>` path literal uses that first arg as a
         // binding PATH, not as a value to resolve. Skip interpolating args[0] so
@@ -351,7 +357,11 @@ export class EffectExecutor {
 
             const start = Date.now();
             const { operator, args: rawArgs } = parsed;
-            const isCompound = operator === 'do' || operator === 'when';
+            const isCompound =
+                operator === 'do' ||
+                operator === 'when' ||
+                operator === 'let' ||
+                operator === 'if';
             const resolvedArgs = isCompound
                 ? rawArgs
                 : resolveArgs(rawArgs, this.bindings, this.strictBindings, this.contextExtensions);
@@ -958,6 +968,65 @@ export class EffectExecutor {
                 } else if (elseEffect) {
                     await this.execute(elseEffect);
                 }
+                break;
+            }
+
+            case 'if': {
+                // Conditional effect form: ['if', cond, thenEffect, elseEffect].
+                // The Rust path lowers an `if`-shaped tick the same way (a
+                // single top-level `if` whose branches are effects). The
+                // condition is an EXPRESSION — resolve it through the canonical
+                // evaluator; the branches are nested effects, executed via
+                // this.execute() so each routes through its own handler (a
+                // `set` branch still mutates the entity store).
+                const ctx = createContextFromBindings(this.bindings, false, this.contextExtensions);
+                const cond = interpolateValue(args[0], ctx);
+                const branch = cond ? args[1] : args[2];
+                // A non-array branch (e.g. the `else` literal `true` in
+                // roguelike's stairs `if`) is a no-op — only effect arrays run.
+                if (Array.isArray(branch)) {
+                    await this.execute(branch);
+                }
+                break;
+            }
+
+            case 'let': {
+                // Lexical-scope effect form: ['let', [[name, valueExpr], ...], body].
+                // Each binding VALUE is an EXPRESSION evaluated through the
+                // canonical evaluator against the accumulating local scope
+                // (later bindings can reference earlier ones via `@<name>`);
+                // the body is an EFFECT (or `do` of effects) executed with the
+                // locals in scope so its `set`/`render-ui` value expressions
+                // resolve `@<name>`. Locals are keyed by bare name and read
+                // back via `@<name>` — the same convention as the evaluator's
+                // own `createChildContext` (`ctx.locals.has(root)`).
+                const rawBindings = args[0];
+                const body = args[1];
+                const locals = new Map<string, unknown>(this.bindings.locals);
+                const pairs: Array<[string, unknown]> = Array.isArray(rawBindings)
+                    ? (rawBindings as unknown[]).flatMap((b) =>
+                        Array.isArray(b) && typeof b[0] === 'string'
+                            ? [[b[0], b[1]] as [string, unknown]]
+                            : [],
+                    )
+                    : Object.entries(rawBindings as { [k: string]: unknown });
+                for (const [name, valueExpr] of pairs) {
+                    const ctx = createContextFromBindings(
+                        { ...this.bindings, locals },
+                        false,
+                        this.contextExtensions,
+                    );
+                    locals.set(name, interpolateValue(valueExpr, ctx));
+                }
+                const bodyExecutor = new EffectExecutor({
+                    handlers: this.handlers,
+                    bindings: { ...this.bindings, locals },
+                    context: this.context,
+                    debug: this.debug,
+                    strictBindings: this.strictBindings,
+                    contextExtensions: this.contextExtensions,
+                });
+                await bodyExecutor.execute(body);
                 break;
             }
 

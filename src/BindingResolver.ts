@@ -391,6 +391,13 @@ export function createContextFromBindings(
     if (bindings.config) {
         ctx.config = bindings.config;
     }
+    // Carry `let`-bound locals onto the evaluator context so `@<name>`
+    // references inside the `let` body resolve. Mirrors the evaluator's own
+    // `createChildContext(parent, locals)` — same Map shape, same lookup path
+    // in `resolveBinding` (`ctx.locals?.has(root)`).
+    if (bindings.locals) {
+        ctx.locals = bindings.locals;
+    }
     // V2 Phase 6: the `@EntityName.field` cross-entity binding path via
     // `ctx.singletons` is gone. Cross-trait data flow routes through the
     // event bus (listen on an `[external]` Event<T> emit and read via
