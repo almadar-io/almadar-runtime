@@ -319,8 +319,14 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       format: field.format ?? null,
       hasDefault: field.default !== undefined,
     });
-    const isNumeric = fieldTypeLc === 'number' || fieldTypeLc === 'integer';
-    if (isNumeric && field.default !== undefined) {
+    // Honor a declared default for ANY type when present. UI-factory entities seed
+    // MEANINGFUL defaults (e.g. `features = ["Item","Item 2"]`, `hero = { … }`,
+    // `name = "Name"`) that should render verbatim in the demo. The old numeric-only
+    // gate discarded object/array/string defaults and synthesized faker values instead
+    // — leaving authored content unrendered and, for array fields, producing a non-array
+    // faker value that crashed the consumer's `.map`. Domain entities with no declared
+    // default still fall through to faker below.
+    if (field.default !== undefined) {
       return field.default as FieldValue;
     }
 
