@@ -18,6 +18,7 @@ import type {
 import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
+import type { FieldValue, SExpr } from '@almadar/core';
 import { createLogger } from '@almadar/logger';
 
 const effectLog = createLogger('almadar:runtime:effects');
@@ -504,7 +505,7 @@ export class EffectExecutor {
                 const entity: EntityRow | undefined = this.bindings.entity;
                 let entityId: string | undefined;
                 let field: string;
-                let value: unknown;
+                let value: FieldValue;
                 let emitCfg: EmitConfig | undefined;
 
                 // Distinguish path-based (`@entity.<field>`) from explicit 4-elem forms.
@@ -515,7 +516,7 @@ export class EffectExecutor {
                 if (typeof args[0] === 'string' && (args[0] as string).startsWith('@entity.')) {
                     const path = args[0] as string;
                     field = path.slice('@entity.'.length);
-                    value = args[1];
+                    value = args[1] as FieldValue;
                     emitCfg = this.extractEmitConfig(args[2]);
                     entityId = typeof entity?.['id'] === 'string' ? (entity['id'] as string) : undefined;
                     // Auto-seed entity.id from @payload.id when the trait's
@@ -573,7 +574,7 @@ export class EffectExecutor {
                 } else {
                     entityId = args[0] as string;
                     field = args[1] as string;
-                    value = args[2];
+                    value = args[2] as FieldValue;
                     emitCfg = this.extractEmitConfig(args[3]);
                 }
 
@@ -835,11 +836,11 @@ export class EffectExecutor {
 
             case 'atomic': {
                 if (this.handlers.atomic) {
-                    const atomicEffects = args as unknown[];
+                    const atomicEffects = args as SExpr[];
                     await this.handlers.atomic(atomicEffects);
                 } else {
                     // Fallback: execute inner effects sequentially
-                    const atomicEffects = args as unknown[];
+                    const atomicEffects = args as SExpr[];
                     for (const inner of atomicEffects) {
                         await this.execute(inner);
                     }

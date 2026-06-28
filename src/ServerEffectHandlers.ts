@@ -96,7 +96,7 @@ export interface CreateServerEffectHandlersOptions {
     service: string,
     action: string,
     params: unknown,
-  ) => Promise<unknown>;
+  ) => Promise<EventPayload | null>;
   /** Verbose logging. */
   debug?: boolean;
 }
@@ -362,7 +362,7 @@ export function createServerEffectHandlers(
 
     callService: async (service, action, params) => {
       try {
-        let result: unknown = null;
+        let result: EventPayload | null = null;
         if (consumerCallService) {
           result = await consumerCallService(service, action, params);
         } else {

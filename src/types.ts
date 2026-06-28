@@ -18,6 +18,8 @@ import type {
     BusEventListener,
     Unsubscribe as CoreUnsubscribe,
     PatternConfig,
+    SExpr,
+    FieldValue,
 } from '@almadar/core';
 
 // ============================================================================
@@ -132,7 +134,7 @@ export interface TransitionResult {
     /** Previous state before transition */
     previousState: string;
     /** Effects to execute (empty if guard failed or no transition found) */
-    effects: unknown[];
+    effects: SExpr[];
     /** The transition that was executed (undefined if none) */
     transition?: {
         from: string;
@@ -154,11 +156,11 @@ export interface TraitDefinition {
         to: string;
         event: string;
         guard?: unknown;
-        effects?: unknown[];
+        effects?: SExpr[];
         /** Compensating transition when effects fail (RCG-04) */
         onEffectError?: {
             to: string;
-            effects?: unknown[];
+            effects?: SExpr[];
         };
     }>;
     /** Cross-trait event listeners (optional) */
@@ -199,14 +201,14 @@ export interface EffectHandlers {
     ) => Promise<void>;
 
     /** Set a field value on an entity */
-    set: (entityId: string, field: string, value: unknown) => void;
+    set: (entityId: string, field: string, value: FieldValue) => void;
 
     /** Call an external service */
     callService: (
         service: string,
         action: string,
         params?: ServiceParams
-    ) => Promise<unknown>;
+    ) => Promise<EventPayload | null>;
 
     /** Fetch entity data (server only) - returns data for client-side rendering.
      *
@@ -315,7 +317,7 @@ export interface EffectHandlers {
 
     /** Atomic: execute inner effects as a transaction */
     atomic?: (
-        effects: unknown[],
+        effects: SExpr[],
     ) => Promise<void>;
 
     // === Composition handlers (compile-time, optional) ===
