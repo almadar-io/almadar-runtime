@@ -95,7 +95,7 @@ export interface CreateServerEffectHandlersOptions {
   callService?: (
     service: string,
     action: string,
-    params: unknown,
+    params?: ServiceParams,
   ) => Promise<EventPayload | null>;
   /** Verbose logging. */
   debug?: boolean;
