@@ -92,7 +92,7 @@ export type {
 // merge in OrbitalServerRuntime.executeEffects. Lives in the browser-safe
 // `./config-defaults.js` (NOT OrbitalServerRuntime.js, which top-level-imports
 // node `module`) precisely so this browser consumer doesn't pull node code.
-export { collectDeclaredConfigDefaults } from "./config-defaults.js";
+export { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults } from "./config-defaults.js";
 
 // Storage contract + in-memory default — extracted from OrbitalServerRuntime
 // so browser-side mock runtimes can use the same adapter interface.

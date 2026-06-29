@@ -159,7 +159,7 @@ import type {
   EvaluationContextExtensions,
   RuntimeRenderPattern,
 } from "./types.js";
-import { collectDeclaredConfigDefaults } from "./config-defaults.js";
+import { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults } from "./config-defaults.js";
 // Backward-compat: `collectDeclaredConfigDefaults` used to live here. The package
 // index now re-exports it from the browser-safe `./config-defaults.js` (so it
 // doesn't drag this node-only module into a browser bundle), but keep the
@@ -283,9 +283,9 @@ export interface RegisteredOrbital {
   entityData: Map<string, EntityRow>; // entityId -> data
   /**
    * Per-trait scalar state set by `(set @entity.X Y)`. Mirrors compiled's
-   * `state.fields`. The trait's `@entity` binding resolves from this map
-   * during effect interpolation. Initial empty; mutated only by the `set`
-   * effect handler. No implicit seeding from persistence.
+   * `state.fields`. The trait's `@entity` binding is a three-layer merge:
+   * declared entity field defaults < persistence entityData < this map.
+   * Mutated only by the `set` effect handler.
    */
   traitFieldStates: Map<string, EntityRow>;
 }
@@ -2417,13 +2417,22 @@ export class OrbitalServerRuntime {
       bindings.config = { ...(declaredDefaults ?? {}), ...(callSiteOverride ?? {}) };
     }
 
-    // `@entity` resolves to the per-trait scalar state populated by
-    // explicit `(set @entity.X Y)` effects. No implicit seeding from
-    // persistence — if the schema author didn't `(set)` a field, it
-    // stays undefined and render-ui shows nothing.
+    // `@entity` resolves to a three-layer merge (outermost wins):
+    //   1. Declared entity field defaults (schema `default:` values)  — base
+    //   2. entityData from persistence (already in bindings.entity above)     — middle
+    //   3. Explicit `(set @entity.X Y)` scalar state (traitFieldStates)       — top
+    // Without layer 1, behaviors that render `@entity.title` on first load
+    // (before any event fires a `(set)`) see undefined → blank UI even though
+    // the entity schema declares a sensible default. Mirrors the `@config`
+    // merge applied above (declared defaults < call-site override). RC-2.
+    const entityFieldDefaults = collectDeclaredEntityDefaults(registered.entity);
     const traitFieldState = registered.traitFieldStates.get(traitName);
-    if (traitFieldState) {
-      bindings.entity = traitFieldState;
+    if (entityFieldDefaults || traitFieldState) {
+      bindings.entity = {
+        ...(entityFieldDefaults ?? {}),
+        ...(bindings.entity ?? {}),
+        ...(traitFieldState ?? {}),
+      };
     }
 
     // Add initial named entity binding

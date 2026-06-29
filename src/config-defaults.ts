@@ -4,7 +4,7 @@
  * imports (`module`/`createRequire`, the external loader) into a browser bundle.
  * This file has zero node dependencies (types only, from `@almadar/core`).
  */
-import type { TraitConfig, TraitConfigValue, DeclaredTraitConfig } from '@almadar/core';
+import type { TraitConfig, TraitConfigValue, DeclaredTraitConfig, Entity, EntityRow, FieldValue } from '@almadar/core';
 
 /**
  * Walk a trait's declared `config { }` schema and return the flat
@@ -27,6 +27,30 @@ export function collectDeclaredConfigDefaults(
         defaults[key] = def;
         hasAny = true;
       }
+    }
+  }
+  return hasAny ? defaults : undefined;
+}
+
+/**
+ * Walk an entity's `fields` array and return a flat `{ fieldName: default, … }`
+ * map. Seeds the `@entity` binding context with declared field defaults before
+ * any explicit `(set @entity.X Y)` effect or fetched persistence data is merged
+ * on top. Mirrors `collectDeclaredConfigDefaults` for the entity axis.
+ *
+ * Precedence (outermost wins): `traitFieldState` (set effects) > `entityData`
+ * (persistence row) > returned defaults (declared schema defaults).
+ */
+export function collectDeclaredEntityDefaults(
+  entity: Entity | undefined,
+): EntityRow | undefined {
+  if (!entity) return undefined;
+  const defaults: EntityRow = {};
+  let hasAny = false;
+  for (const field of entity.fields) {
+    if (field.name !== undefined && 'default' in field && field.default !== undefined) {
+      defaults[field.name] = field.default as FieldValue;
+      hasAny = true;
     }
   }
   return hasAny ? defaults : undefined;
