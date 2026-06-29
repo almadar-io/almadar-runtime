@@ -16,10 +16,18 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { collectDeclaredConfigDefaults } from '../src/OrbitalServerRuntime.js';
 
-const STD_REGISTRY = path.resolve(
-    __dirname,
-    '../../../packages/almadar-std/behaviors/registry',
-);
+function resolveStdRegistry(): string {
+    try {
+        return path.join(
+            path.dirname(require.resolve('@almadar/std/package.json')),
+            'behaviors/registry',
+        );
+    } catch {
+        // monorepo fallback
+        return path.resolve(__dirname, '../../../packages/almadar-std/behaviors/registry');
+    }
+}
+const STD_REGISTRY = resolveStdRegistry();
 
 interface OrbTrait {
     name: string;
