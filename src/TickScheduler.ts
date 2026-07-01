@@ -1,0 +1,125 @@
+/**
+ * TickScheduler — a single coalesced clock for every registered tick.
+ *
+ * Replaces "one independent timer per tick" with ONE requestAnimationFrame
+ * accumulator loop (falling back to a single ~60fps `setInterval` where rAF
+ * isn't available, e.g. Node/SSR) that walks every registered tick each pass
+ * and fires whichever one(s) have crossed their own interval — so ticks due
+ * in the same pass commit together instead of on independent, uncoordinated
+ * timers. Framework-light: no React, usable from `OrbitalServerRuntime`
+ * (this package) and from `@almadar/ui`'s `useTraitStateMachine` alike.
+ *
+ * @packageDocumentation
+ */
+
+/** Sentinel: an interval of 0 (or less) means "fire on every pass" (a frame-interval tick). */
+const EVERY_PASS = 0;
+
+interface ScheduledTick {
+  intervalMs: number;
+  accumulatedMs: number;
+  lastTimestamp: number | null;
+  onDue: () => void;
+}
+
+export interface TickHandle {
+  /** Stop just this tick; the shared loop keeps running for any others still registered. */
+  stop(): void;
+}
+
+/**
+ * Coalesced tick scheduler. One instance drives every tick registered on it
+ * through a single shared clock.
+ */
+export class TickScheduler {
+  private ticks = new Map<number, ScheduledTick>();
+  private nextId = 1;
+  private running = false;
+  private frameHandle: number | ReturnType<typeof setInterval> | null = null;
+  private readonly hasRaf: boolean;
+
+  constructor() {
+    this.hasRaf =
+      typeof requestAnimationFrame === 'function' && typeof cancelAnimationFrame === 'function';
+  }
+
+  /**
+   * Register a tick. `intervalMs <= 0` means "every pass" (a frame-interval
+   * tick, matching LOLO's `interval: "frame"`). Returns a handle to stop
+   * just this tick.
+   */
+  add(intervalMs: number, onDue: () => void): TickHandle {
+    const id = this.nextId++;
+    this.ticks.set(id, {
+      intervalMs: intervalMs > 0 ? intervalMs : EVERY_PASS,
+      accumulatedMs: 0,
+      lastTimestamp: null,
+      onDue,
+    });
+    this.ensureRunning();
+    return {
+      stop: () => {
+        this.ticks.delete(id);
+        this.maybeStop();
+      },
+    };
+  }
+
+  /** Stop every tick and the shared loop. */
+  stopAll(): void {
+    this.ticks.clear();
+    this.maybeStop();
+  }
+
+  private ensureRunning(): void {
+    if (this.running) return;
+    this.running = true;
+    if (this.hasRaf) {
+      const loop = (timestamp: number) => {
+        if (!this.running) return;
+        this.advance(timestamp);
+        this.frameHandle = requestAnimationFrame(loop);
+      };
+      this.frameHandle = requestAnimationFrame(loop);
+    } else {
+      this.frameHandle = setInterval(() => this.advance(Date.now()), 16);
+    }
+  }
+
+  private maybeStop(): void {
+    if (this.ticks.size > 0 || !this.running) return;
+    this.running = false;
+    if (this.frameHandle !== null) {
+      if (this.hasRaf) {
+        cancelAnimationFrame(this.frameHandle as number);
+      } else {
+        clearInterval(this.frameHandle as ReturnType<typeof setInterval>);
+      }
+      this.frameHandle = null;
+    }
+  }
+
+  private advance(timestamp: number): void {
+    for (const tick of this.ticks.values()) {
+      if (tick.intervalMs <= EVERY_PASS) {
+        tick.onDue();
+        continue;
+      }
+      if (tick.lastTimestamp === null) {
+        tick.lastTimestamp = timestamp;
+        continue;
+      }
+      tick.accumulatedMs += timestamp - tick.lastTimestamp;
+      tick.lastTimestamp = timestamp;
+      while (tick.accumulatedMs >= tick.intervalMs) {
+        tick.accumulatedMs -= tick.intervalMs;
+        tick.onDue();
+      }
+    }
+  }
+}
+
+/** Construct a new, independent `TickScheduler`. */
+export function createTickScheduler(): TickScheduler {
+  return new TickScheduler();
+}

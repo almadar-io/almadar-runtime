@@ -38,6 +38,9 @@ export { HANDLER_MANIFEST } from "./types.js";
 // EventBus
 export { EventBus } from "./EventBus.js";
 
+// TickScheduler — coalesced tick clock, client-safe (falls back off rAF in Node/SSR)
+export { TickScheduler, createTickScheduler, type TickHandle } from "./TickScheduler.js";
+
 // BindingResolver
 export {
   interpolateProps,

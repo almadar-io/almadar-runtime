@@ -46,6 +46,7 @@ import type {
   NextFunction,
 } from "express";
 import { EventBus } from "./EventBus.js";
+import { createTickScheduler, type TickHandle, type TickScheduler } from "./TickScheduler.js";
 import {
   StateMachineManager,
   processEvent,
@@ -510,7 +511,7 @@ interface TickBinding {
   orbitalName: string;
   traitName: string;
   tick: RuntimeTraitTick;
-  timerId: ReturnType<typeof setInterval>;
+  handle: TickHandle;
 }
 
 export class OrbitalServerRuntime {
@@ -520,6 +521,10 @@ export class OrbitalServerRuntime {
   private persistence: PersistenceAdapter;
   private listenerCleanups: Array<() => void> = [];
   private tickBindings: TickBinding[] = [];
+  // One coalesced clock for every tick this runtime registers — replaces
+  // "one setInterval per tick" with a single accumulator loop so ticks due
+  // in the same pass fire together instead of on independent timers.
+  private readonly tickScheduler: TickScheduler = createTickScheduler();
   private loader: SchemaLoader | null = null;
   private preprocessedCache = new Map<string, PreprocessedSchema>();
   private entitySharingMap: EntitySharingMap = {};
@@ -1283,15 +1288,15 @@ export class OrbitalServerRuntime {
       });
     }
 
-    const timerId = setInterval(async () => {
-      await this.executeTick(orbitalName, traitName, tick, registered);
-    }, intervalMs);
+    const handle = this.tickScheduler.add(intervalMs, () => {
+      void this.executeTick(orbitalName, traitName, tick, registered);
+    });
 
     this.tickBindings.push({
       orbitalName,
       traitName,
       tick,
-      timerId,
+      handle,
     });
   }
 
@@ -1428,7 +1433,7 @@ export class OrbitalServerRuntime {
    */
   private cleanupTicks(): void {
     for (const binding of this.tickBindings) {
-      clearInterval(binding.timerId);
+      binding.handle.stop();
     }
     this.tickBindings = [];
   }
