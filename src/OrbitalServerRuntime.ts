@@ -56,12 +56,10 @@ import {
 } from "./StateMachineCore.js";
 import { EffectExecutor } from "./EffectExecutor.js";
 import { createLogger } from '@almadar/logger';
-// Same treatment for `LocalPersistenceAdapter` (uses `fs`, `path`) and
-// `createOsHandlers` (uses `fs`, `net`, `child_process`). The runtime
-// auto-wires both in the constructor's Node-only branch — guarded by
-// `isNodeEnv()` — and the eval-require keeps the imports out of the
+// Same treatment for `createOsHandlers` (uses `fs`, `net`, `child_process`).
+// The runtime auto-wires it in the constructor's Node-only branch — guarded
+// by `isNodeEnv()` — and the eval-require keeps the import out of the
 // browser bundle entirely.
-import type { LocalPersistenceAdapter as LocalPersistenceAdapterType } from "./LocalPersistenceAdapter.js";
 import type {
   createOsHandlers as CreateOsHandlersFn,
   OsHandlerResult,
@@ -114,14 +112,6 @@ function nodeRequire<T = unknown>(modulePath: string): T {
   return _resolvedNodeRequire(modulePath) as T;
 }
 
-/**
- * Pick the module-spec extension to use with `nodeRequire`. In Vitest /
- * source mode, `import.meta.url` ends in `.ts` and the dist `.js` files
- * don't exist; in production dist runs, the spec must be `.js`. Detecting
- * via `import.meta.url` keeps both paths working without test-mode flags.
- */
-const _nodeRequireExt = import.meta.url.endsWith('.ts') ? '.ts' : '.js';
-
 const effectLog = createLogger("almadar:runtime:effects");
 const busLog = createLogger("almadar:runtime:bus");
 // Render-ui-side observability for the runtime path. Lit up via
@@ -140,10 +130,6 @@ const xOrbitalLog = createLogger("almadar:runtime:cross-orbital");
 const persistLog = createLogger("almadar:runtime:persist");
 const registerLog = createLogger("almadar:runtime:register");
 const dynamicLog = createLogger("almadar:runtime:dynamic");
-// Note: `LocalPersistenceAdapter` is re-exported from `index.ts`, not from
-// here. Keeping a value re-export here would force tsup to inline the
-// adapter into `OrbitalServerRuntime.js`'s bundle, defeating the
-// type-only-import-plus-eval-require strategy described above.
 import type { SSEEvent } from '@almadar/server';
 import {
   interpolateProps,
@@ -415,11 +401,6 @@ export interface OrbitalServerRuntimeConfig {
    */
   namespaceEvents?: boolean;
   /**
-   * Root directory for `persistence: "local"` entities.
-   * Default: ~/.orb/data/
-   */
-  localStorageRoot?: string;
-  /**
    * Additional fields to spread onto every EvaluationContext.
    * Use this to inject module contexts (e.g., { agent: AgentContext }).
    * The evaluator dispatches agent/* operators to ctx.agent.
@@ -533,7 +514,6 @@ export class OrbitalServerRuntime {
   private eventNamespaceMap: EventNamespaceMap = {};
   private osHandlers: OsHandlerResult | null = null;
   private osHandlersPromise: Promise<void> | null = null;
-  private localPersistence: PersistenceAdapter | null = null;
   private resolvedSchema: OrbitalSchema | null = null;
 
   constructor(config: OrbitalServerRuntimeConfig = {}) {
@@ -574,14 +554,6 @@ export class OrbitalServerRuntime {
       this.persistence = config.persistence || new InMemoryPersistence();
     }
 
-    // Initialize local persistence adapter for persistence: "local" entities.
-    // Node-only — eval-require so the dist bundle has no static reference
-    // to `./LocalPersistenceAdapter.js` (and its `fs`/`path` imports).
-    if (config.localStorageRoot && isNodeEnv()) {
-      const { LocalPersistenceAdapter } = nodeRequire<{ LocalPersistenceAdapter: new (root: string) => LocalPersistenceAdapterType }>(`./LocalPersistenceAdapter${_nodeRequireExt}`);
-      this.localPersistence = new LocalPersistenceAdapter(config.localStorageRoot);
-    }
-
     // OS handlers (fs/net/child_process effects) are wired lazily on the first
     // event via ensureOsHandlers(). They live in the ESM-only
     // `./createOsHandlers.js`; the package is `type: module`, so a synchronous
@@ -604,8 +576,7 @@ export class OrbitalServerRuntime {
     if (!isNodeEnv()) return;
     if (!this.osHandlersPromise) {
       this.osHandlersPromise = (async () => {
-        // Literal `.js` specifier (NOT the `_nodeRequireExt` template used by
-        // the CJS nodeRequire calls): a template literal makes tsup emit a
+        // Literal `.js` specifier: a template literal makes tsup emit a
         // __glob helper keyed by the source `.ts`, which then misses at dist
         // runtime (ext resolves to `.js`) and throws "Module not found in
         // bundle". A literal `import()` resolves the real dist `.js` in Node

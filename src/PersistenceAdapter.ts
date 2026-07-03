@@ -20,7 +20,6 @@ import type { EntityRow } from "./types.js";
  *   supplied to `OrbitalServerRuntime`.
  * - `MockPersistenceAdapter` — in-memory with faker-generated seed data
  *   for realistic preview content.
- * - `LocalPersistenceAdapter` — localStorage-backed, browser-safe.
  * - Consumer-provided (e.g. Firestore, Postgres) for production servers.
  */
 export interface PersistenceAdapter {

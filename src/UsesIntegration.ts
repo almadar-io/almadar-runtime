@@ -61,7 +61,7 @@ export interface EntitySharingMap {
     /** The entity name */
     entityName: string;
     /** Persistence type */
-    persistence: "persistent" | "runtime" | "singleton";
+    persistence: "persistent" | "runtime";
     /** Whether this entity is shared with other orbitals */
     isShared: boolean;
     /** Source orbital if imported */
@@ -159,7 +159,7 @@ export async function preprocessSchema(
 
     // Build entity sharing info
     const persistence = resolvedOrbital.entitySource?.persistence ??
-      (resolvedOrbital.entity.persistence as "persistent" | "runtime" | "singleton" | undefined) ??
+      (resolvedOrbital.entity.persistence as "persistent" | "runtime" | undefined) ??
       "persistent";
 
     entitySharing[orbitalName] = {
@@ -269,7 +269,6 @@ export async function preprocessSchema(
  *
  * - `persistent` entities share the same collection
  * - `runtime` entities get isolated collections per orbital
- * - `singleton` entities share a single-record collection
  */
 export function getIsolatedCollectionName(
   orbitalName: string,

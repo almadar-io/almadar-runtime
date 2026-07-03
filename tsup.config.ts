@@ -5,15 +5,13 @@ export default defineConfig({
     'src/index.ts',
     'src/OrbitalServerRuntime.ts',
     'src/ServerBridge.ts',
-    // Node-only modules: separate entries so dist emits standalone
-    // `createOsHandlers.js` and `LocalPersistenceAdapter.js` files.
-    // OrbitalServerRuntime loads them via the eval-require helper at
-    // runtime — needs the file to exist as a separate path. Browser
-    // bundlers stub these via the package.json `browser` field path
-    // mappings; the helper is never invoked in browsers (gated by
-    // `isNodeEnv()`).
+    // Node-only module: separate entry so dist emits a standalone
+    // `createOsHandlers.js` file. OrbitalServerRuntime loads it via
+    // dynamic import() at runtime — needs the file to exist as a
+    // separate path. The browser stubs it via the package.json `browser`
+    // field path mapping; the import is never invoked in browsers (gated
+    // by `isNodeEnv()`).
     'src/createOsHandlers.ts',
-    'src/LocalPersistenceAdapter.ts',
   ],
   format: ['esm'],
   dts: true,

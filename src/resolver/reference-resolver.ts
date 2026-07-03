@@ -90,7 +90,7 @@ export interface ResolvedOrbital {
   /** Whether entity was referenced from an import */
   entitySource?: {
     alias: string;
-    persistence: "persistent" | "runtime" | "singleton";
+    persistence: "persistent" | "runtime";
   };
 
   /** Resolved traits (references expanded) */
@@ -706,7 +706,7 @@ export class ReferenceResolver {
     imports: ResolvedImports
   ): ResolveResult<{
     entity: Entity;
-    source?: { alias: string; persistence: "persistent" | "runtime" | "singleton" };
+    source?: { alias: string; persistence: "persistent" | "runtime" };
   }> {
     // EntityCall (Phase F): synthesize a placeholder Entity from the call shape.
     // Full inlining is the compiler's job; this resolver returns the local view.
@@ -779,7 +779,7 @@ export class ReferenceResolver {
         entity: importedEntity,
         source: {
           alias: parsed.alias,
-          persistence: persistence as "persistent" | "runtime" | "singleton",
+          persistence: persistence as "persistent" | "runtime",
         },
       },
       warnings: [],
