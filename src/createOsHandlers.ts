@@ -16,6 +16,7 @@ import { execFileSync } from "child_process";
 import { createLogger } from '@almadar/logger';
 import type { EventPayload, OsEmitConfig } from './types.js';
 import type { EffectHandlers } from "./types.js";
+import { parseCron, cronMatches, cronMinuteKey, type CronFields } from './cron.js';
 
 const log = createLogger('almadar:runtime:os-handlers');
 
@@ -68,62 +69,6 @@ function globToRegex(glob: string): RegExp {
     i++;
   }
   return new RegExp("^" + regex + "$");
-}
-
-// ============================================================================
-// Cron Parsing (5-field standard: min hour day month weekday)
-// ============================================================================
-
-interface CronFields {
-  minute: Set<number>;
-  hour: Set<number>;
-  day: Set<number>;
-  month: Set<number>;
-  weekday: Set<number>;
-}
-
-function parseCronField(field: string, min: number, max: number): Set<number> {
-  const values = new Set<number>();
-  for (const part of field.split(",")) {
-    if (part === "*") {
-      for (let i = min; i <= max; i++) values.add(i);
-    } else if (part.includes("/")) {
-      const [range, stepStr] = part.split("/");
-      const step = parseInt(stepStr, 10);
-      const start = range === "*" ? min : parseInt(range, 10);
-      for (let i = start; i <= max; i += step) values.add(i);
-    } else if (part.includes("-")) {
-      const [lo, hi] = part.split("-").map(Number);
-      for (let i = lo; i <= hi; i++) values.add(i);
-    } else {
-      values.add(parseInt(part, 10));
-    }
-  }
-  return values;
-}
-
-function parseCron(expression: string): CronFields {
-  const parts = expression.trim().split(/\s+/);
-  if (parts.length !== 5) {
-    throw new Error(`Invalid cron expression (expected 5 fields): ${expression}`);
-  }
-  return {
-    minute: parseCronField(parts[0], 0, 59),
-    hour: parseCronField(parts[1], 0, 23),
-    day: parseCronField(parts[2], 1, 31),
-    month: parseCronField(parts[3], 1, 12),
-    weekday: parseCronField(parts[4], 0, 6),
-  };
-}
-
-function cronMatches(fields: CronFields, date: Date): boolean {
-  return (
-    fields.minute.has(date.getMinutes()) &&
-    fields.hour.has(date.getHours()) &&
-    fields.day.has(date.getDate()) &&
-    fields.month.has(date.getMonth() + 1) &&
-    fields.weekday.has(date.getDay())
-  );
 }
 
 // ============================================================================
@@ -314,8 +259,7 @@ export function createOsHandlers(ctx: OsHandlerContext): OsHandlerResult {
 
       const interval = setInterval(() => {
         const now = new Date();
-        const minuteKey = now.getFullYear() * 1e8 + now.getMonth() * 1e6 +
-          now.getDate() * 1e4 + now.getHours() * 100 + now.getMinutes();
+        const minuteKey = cronMinuteKey(now);
 
         if (minuteKey !== lastFired && cronMatches(fields, now)) {
           lastFired = minuteKey;

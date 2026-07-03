@@ -12,15 +12,34 @@
  * @packageDocumentation
  */
 
+import { parseCron, cronMatches, cronMinuteKey, type CronFields } from './cron.js';
+
 /** Sentinel: an interval of 0 (or less) means "fire on every pass" (a frame-interval tick). */
 const EVERY_PASS = 0;
 
-interface ScheduledTick {
+/** Cron ticks only need calendar-minute resolution — check at most once a second per tick. */
+const CRON_CHECK_INTERVAL_MS = 1000;
+
+interface IntervalTick {
+  kind: 'interval';
   intervalMs: number;
   accumulatedMs: number;
   lastTimestamp: number | null;
   onDue: () => void;
 }
+
+interface CronTick {
+  kind: 'cron';
+  fields: CronFields;
+  /** ms since the last cron-match check, throttled to CRON_CHECK_INTERVAL_MS. */
+  accumulatedMs: number;
+  lastTimestamp: number | null;
+  /** Calendar-minute key of the last fire, so a match isn't re-fired all through that minute. */
+  lastFiredMinuteKey: number;
+  onDue: () => void;
+}
+
+type ScheduledTick = IntervalTick | CronTick;
 
 export interface TickHandle {
   /** Stop just this tick; the shared loop keeps running for any others still registered. */
@@ -51,9 +70,37 @@ export class TickScheduler {
   add(intervalMs: number, onDue: () => void): TickHandle {
     const id = this.nextId++;
     this.ticks.set(id, {
+      kind: 'interval',
       intervalMs: intervalMs > 0 ? intervalMs : EVERY_PASS,
       accumulatedMs: 0,
       lastTimestamp: null,
+      onDue,
+    });
+    this.ensureRunning();
+    return {
+      stop: () => {
+        this.ticks.delete(id);
+        this.maybeStop();
+      },
+    };
+  }
+
+  /**
+   * Register a cron-scheduled tick (`ticks { ... every "0 9 * * *" }`).
+   * Fires at most once per matching calendar minute — the same dedup shape
+   * `os/watch-cron` uses. Throws if `expression` isn't a valid 5-field cron
+   * string; callers on a path the compiler has already validated (e.g.
+   * generated code) won't hit this, but a raw runtime value might.
+   */
+  addCron(expression: string, onDue: () => void): TickHandle {
+    const fields = parseCron(expression);
+    const id = this.nextId++;
+    this.ticks.set(id, {
+      kind: 'cron',
+      fields,
+      accumulatedMs: CRON_CHECK_INTERVAL_MS, // check on the first pass, not after a full second
+      lastTimestamp: null,
+      lastFiredMinuteKey: -1,
       onDue,
     });
     this.ensureRunning();
@@ -101,6 +148,10 @@ export class TickScheduler {
 
   private advance(timestamp: number): void {
     for (const tick of this.ticks.values()) {
+      if (tick.kind === 'cron') {
+        this.advanceCron(tick, timestamp);
+        continue;
+      }
       if (tick.intervalMs <= EVERY_PASS) {
         tick.onDue();
         continue;
@@ -115,6 +166,25 @@ export class TickScheduler {
         tick.accumulatedMs -= tick.intervalMs;
         tick.onDue();
       }
+    }
+  }
+
+  /** Cron ticks check calendar-match at most once a second, deduped per matching minute. */
+  private advanceCron(tick: CronTick, timestamp: number): void {
+    if (tick.lastTimestamp === null) {
+      tick.lastTimestamp = timestamp;
+      return;
+    }
+    tick.accumulatedMs += timestamp - tick.lastTimestamp;
+    tick.lastTimestamp = timestamp;
+    if (tick.accumulatedMs < CRON_CHECK_INTERVAL_MS) return;
+    tick.accumulatedMs = 0;
+
+    const now = new Date();
+    const minuteKey = cronMinuteKey(now);
+    if (minuteKey !== tick.lastFiredMinuteKey && cronMatches(tick.fields, now)) {
+      tick.lastFiredMinuteKey = minuteKey;
+      tick.onDue();
     }
   }
 }

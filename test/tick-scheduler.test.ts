@@ -118,4 +118,72 @@ describe('TickScheduler', () => {
         scheduler.stopAll();
         expect(pendingFrameCount()).toBe(0);
     });
+
+    describe('addCron', () => {
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('fires only on a matching calendar minute, not every check', () => {
+            // 2026-01-01 09:00:00 is a Thursday — "0 9 * * *" fires daily at 9:00.
+            vi.setSystemTime(new Date(2026, 0, 1, 9, 0, 0));
+            const scheduler = createTickScheduler();
+            const onDue = vi.fn();
+            scheduler.addCron('0 9 * * *', onDue);
+
+            tickFrame(0); // establish lastTimestamp, no check yet
+            tickFrame(1000); // first 1s check window — matches
+            expect(onDue).toHaveBeenCalledTimes(1);
+
+            // Still within the same matching minute — must not re-fire.
+            tickFrame(1000);
+            tickFrame(1000);
+            expect(onDue).toHaveBeenCalledTimes(1);
+
+            scheduler.stopAll();
+        });
+
+        it('does not fire on a non-matching minute', () => {
+            vi.setSystemTime(new Date(2026, 0, 1, 10, 30, 0));
+            const scheduler = createTickScheduler();
+            const onDue = vi.fn();
+            scheduler.addCron('0 9 * * *', onDue);
+
+            tickFrame(0);
+            tickFrame(1000);
+            tickFrame(1000);
+            expect(onDue).not.toHaveBeenCalled();
+
+            scheduler.stopAll();
+        });
+
+        it('fires again once the calendar minute advances to the next match', () => {
+            vi.setSystemTime(new Date(2026, 0, 1, 9, 0, 0));
+            const scheduler = createTickScheduler();
+            const onDue = vi.fn();
+            scheduler.addCron('*/5 * * * *', onDue); // every 5 minutes
+
+            tickFrame(0);
+            tickFrame(1000);
+            expect(onDue).toHaveBeenCalledTimes(1);
+
+            // Advance real + fake system clock together to the next 5-minute mark.
+            vi.setSystemTime(new Date(2026, 0, 1, 9, 5, 0));
+            tickFrame(1000);
+            expect(onDue).toHaveBeenCalledTimes(2);
+
+            scheduler.stopAll();
+        });
+
+        it('throws on an invalid cron expression instead of silently misbehaving', () => {
+            const scheduler = createTickScheduler();
+            expect(() => scheduler.addCron('not a cron', vi.fn())).toThrow(
+                /Invalid cron expression/,
+            );
+        });
+    });
 });

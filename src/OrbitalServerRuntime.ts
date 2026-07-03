@@ -47,6 +47,8 @@ import type {
 } from "express";
 import { EventBus } from "./EventBus.js";
 import { createTickScheduler, type TickHandle, type TickScheduler } from "./TickScheduler.js";
+import { isValidCronExpression } from "./cron.js";
+import { parseDurationString } from "./duration.js";
 import {
   StateMachineManager,
   processEvent,
@@ -1268,13 +1270,37 @@ export class OrbitalServerRuntime {
     tick: RuntimeTraitTick,
     registered: RegisteredOrbital,
   ): void {
+    // A cron-shaped string ("0 9 * * *") schedules on calendar matches, not
+    // a fixed millisecond delay — route it to the scheduler's cron mode
+    // instead of forcing it through parseIntervalString (which used to
+    // silently default a cron string to 1000ms).
+    if (typeof tick.interval === "string" && isValidCronExpression(tick.interval)) {
+      if (this.config.debug) {
+        registerLog.debug('register:tick-cron', {
+          orbital: orbitalName,
+          trait: traitName,
+          tick: tick.name,
+          expression: tick.interval,
+        });
+      }
+      const handle = this.tickScheduler.addCron(tick.interval, () => {
+        void this.executeTick(orbitalName, traitName, tick, registered);
+      });
+      this.tickBindings.push({ orbitalName, traitName, tick, handle });
+      return;
+    }
+
     // Determine interval in milliseconds
     let intervalMs: number;
     if (typeof tick.interval === "number") {
       intervalMs = tick.interval;
     } else if (typeof tick.interval === "string") {
-      // Parse cron-like interval strings (e.g., '5s', '1m', '1h')
-      intervalMs = this.parseIntervalString(tick.interval);
+      // Parse a duration string (e.g., '5s', '1m', '1h'). A string that's
+      // neither this shape nor a valid cron expression (already checked
+      // above) is an authoring mistake — this throws rather than silently
+      // defaulting to some fallback ms, so it surfaces loudly instead of
+      // ticking at a value the author never wrote.
+      intervalMs = parseDurationString(tick.interval);
     } else {
       intervalMs = 1000; // Default to 1 second
     }
@@ -1298,34 +1324,6 @@ export class OrbitalServerRuntime {
       tick,
       handle,
     });
-  }
-
-  /**
-   * Parse interval string to milliseconds
-   * Supports: '5s', '1m', '1h', '30000' (ms)
-   */
-  private parseIntervalString(interval: string): number {
-    const match = interval.match(/^(\d+)(ms|s|m|h)?$/);
-    if (!match) {
-      registerLog.warn('register:tick-invalid-interval', { interval, defaultMs: 1000 });
-      return 1000;
-    }
-
-    const value = parseInt(match[1], 10);
-    const unit = match[2] || "ms";
-
-    switch (unit) {
-      case "ms":
-        return value;
-      case "s":
-        return value * 1000;
-      case "m":
-        return value * 60 * 1000;
-      case "h":
-        return value * 60 * 60 * 1000;
-      default:
-        return value;
-    }
   }
 
   /**

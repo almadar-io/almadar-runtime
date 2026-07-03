@@ -41,6 +41,19 @@ export { EventBus } from "./EventBus.js";
 // TickScheduler — coalesced tick clock, client-safe (falls back off rAF in Node/SSR)
 export { TickScheduler, createTickScheduler, type TickHandle } from "./TickScheduler.js";
 
+// Cron — the one canonical cron parser/matcher every tick-scheduling engine delegates to
+export {
+  parseCron,
+  parseCronField,
+  isValidCronExpression,
+  cronMatches,
+  cronMinuteKey,
+  type CronFields,
+} from "./cron.js";
+
+// Duration strings ('5s'/'1m'/'1h') — the other tick-interval shape, alongside cron
+export { parseDurationString, isValidDurationString } from "./duration.js";
+
 // BindingResolver
 export {
   interpolateProps,
