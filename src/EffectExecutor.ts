@@ -19,9 +19,13 @@ import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
 import type { FieldValue, SExpr } from '@almadar/core';
-import { createLogger } from '@almadar/logger';
+import { createLogger, setNamespaceLevel } from '@almadar/logger';
 
 const effectLog = createLogger('almadar:runtime:effects');
+// Per-operator firehose: logs every effect execute/result, so a running
+// `ticks` loop emits hundreds/sec. Default its floor to WARN; opt back in with
+// setNamespaceLevel('almadar:runtime:effects', 'DEBUG').
+setNamespaceLevel('almadar:runtime:effects', 'WARN');
 
 // ============================================================================
 // Types

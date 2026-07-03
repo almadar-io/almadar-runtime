@@ -21,9 +21,13 @@ import {
 // runtime interpreter that ships to the renderer.
 import { isKnownStdOperator as isKnownOperator } from '@almadar/std/registry';
 import type { BindingContext, EntityRow, PatternProps, EvaluationContextExtensions } from './types.js';
-import { createLogger } from '@almadar/logger';
+import { createLogger, setNamespaceLevel } from '@almadar/logger';
 
 const bindLog = createLogger('almadar:runtime:bindings');
+// Per-eval firehose: logs every binding resolve + sexpr eval, so a running
+// `ticks` loop emits hundreds/sec. Default its floor to WARN; opt back in with
+// setNamespaceLevel('almadar:runtime:bindings', 'DEBUG').
+setNamespaceLevel('almadar:runtime:bindings', 'WARN');
 // See OrbitalServerRuntime — same `almadar:runtime:render-ui` namespace,
 // instantiated here so interpolation of pattern objects can report
 // whether the resolved row reference matches what arrived in ctx.
