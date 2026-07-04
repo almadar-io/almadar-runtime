@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "6.23.0",
+  "version": "6.24.0",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -75,7 +75,8 @@
     "express": "^5.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "turbo": "^2.8.17"
   },
   "repository": {
     "type": "git",
@@ -89,5 +90,6 @@
     "orbital",
     "interpreter"
   ],
-  "homepage": "https://github.com/almadar-io/almadar#readme"
+  "homepage": "https://github.com/almadar-io/almadar#readme",
+  "packageManager": "pnpm@10.30.3"
 }
