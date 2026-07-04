@@ -148,7 +148,7 @@ import type {
   EvaluationContextExtensions,
   RuntimeRenderPattern,
 } from "./types.js";
-import { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults } from "./config-defaults.js";
+import { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults, normalizeCallSiteConfigToValues } from "./config-defaults.js";
 // Backward-compat: `collectDeclaredConfigDefaults` used to live here. The package
 // index now re-exports it from the browser-safe `./config-defaults.js` (so it
 // doesn't drag this node-only module into a browser bundle), but keep the
@@ -948,8 +948,9 @@ export class OrbitalServerRuntime {
           config?: TraitConfig;
         };
         const inner = wrapper._resolved;
-        if (wrapper.config && inner?.name) {
-          configByTrait.set(inner.name, wrapper.config);
+        const normalizedConfig = normalizeCallSiteConfigToValues(wrapper.config);
+        if (normalizedConfig && inner?.name) {
+          configByTrait.set(inner.name, normalizedConfig);
         }
         return inner;
       }
