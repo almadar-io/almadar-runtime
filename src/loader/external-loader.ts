@@ -382,6 +382,18 @@ export class ExternalOrbitalLoader {
           candidates.push(path.join(root, "behaviors", "registry", topic, tier, `${name}.orb`));
         }
       }
+      // UI family layout: behaviors/registry/ui/<family>/{atoms,molecules,organisms}/<name>.orb
+      const uiRoot = path.join(root, "behaviors", "registry", "ui");
+      if (fs.existsSync(uiRoot)) {
+        const families = fs.readdirSync(uiRoot, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name);
+        for (const family of families) {
+          for (const tier of tiers) {
+            candidates.push(path.join(uiRoot, family, tier, `${name}.orb`));
+          }
+        }
+      }
       // Back-compat: pre-topic flat-tier layout (std 6.1–7.10).
       for (const tier of tiers) {
         candidates.push(path.join(root, "behaviors", "registry", tier, `${name}.orb`));

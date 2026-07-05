@@ -178,6 +178,10 @@ export function createClientEffectHandlers(
         },
 
         navigate: navigate ?? ((path: string) => {
+            if (typeof window !== 'undefined' && /^https?:\/\//.test(path)) {
+                window.location.href = path;
+                return;
+            }
             log.warn('navigate-no-handler', { path });
         }),
 
