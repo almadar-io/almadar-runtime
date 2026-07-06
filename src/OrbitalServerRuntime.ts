@@ -64,6 +64,11 @@ import type {
   createOsHandlers as CreateOsHandlersFn,
   OsHandlerResult,
 } from "./createOsHandlers.js";
+import type {
+  createAgentSubstrateHandlers as CreateAgentSubstrateHandlersFn,
+  AgentSubstrateHandlerResult,
+  SubstrateServices,
+} from "./createAgentSubstrateHandlers.js";
 import {
   validateEventPayload,
   formatPayloadValidationError,
@@ -406,6 +411,12 @@ export interface OrbitalServerRuntimeConfig {
    * The evaluator dispatches agent/* operators to ctx.agent.
    */
   contextExtensions?: EvaluationContextExtensions;
+  /**
+   * Substrate service implementations for effect-position operators
+   * (compose/compose-all, behavior/instantiate, validate/validate, etc.).
+   * @almadar-io/rabit injects these at runtime; tests can inject mocks.
+   */
+  substrateServices?: SubstrateServices;
 }
 
 /**
@@ -514,6 +525,8 @@ export class OrbitalServerRuntime {
   private eventNamespaceMap: EventNamespaceMap = {};
   private osHandlers: OsHandlerResult | null = null;
   private osHandlersPromise: Promise<void> | null = null;
+  private substrateHandlers: AgentSubstrateHandlerResult | null = null;
+  private substrateHandlersPromise: Promise<void> | null = null;
   private resolvedSchema: OrbitalSchema | null = null;
 
   constructor(config: OrbitalServerRuntimeConfig = {}) {
@@ -594,6 +607,31 @@ export class OrbitalServerRuntime {
       })();
     }
     return this.osHandlersPromise;
+  }
+
+  /**
+   * Lazily wire the agent substrate effect handlers (compose/behavior/
+   * validate/lolo), merging them UNDER any user-provided handlers.
+   * Same deferred-import pattern as ensureOsHandlers.
+   */
+  private async ensureAgentSubstrateHandlers(): Promise<void> {
+    if (!isNodeEnv()) return;
+    if (!this.substrateHandlersPromise) {
+      this.substrateHandlersPromise = (async () => {
+        const { createAgentSubstrateHandlers } = (await import('./createAgentSubstrateHandlers.js')) as {
+          createAgentSubstrateHandlers: typeof CreateAgentSubstrateHandlersFn;
+        };
+        this.substrateHandlers = createAgentSubstrateHandlers({
+          emitEvent: (type, payload) => this.eventBus.emit(type, payload),
+          services: this.config.substrateServices ?? {},
+        });
+        this.config.effectHandlers = {
+          ...this.substrateHandlers.handlers,
+          ...this.config.effectHandlers,
+        };
+      })();
+    }
+    return this.substrateHandlersPromise;
   }
 
   /**
@@ -1439,6 +1477,11 @@ export class OrbitalServerRuntime {
       this.osHandlers.cleanup();
       this.osHandlers = null;
     }
+
+    if (this.substrateHandlers) {
+      this.substrateHandlers.cleanup();
+      this.substrateHandlers = null;
+    }
   }
 
   /**
@@ -1485,9 +1528,9 @@ export class OrbitalServerRuntime {
     request: OrbitalEventRequest,
     onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void,
   ): Promise<OrbitalEventResponse> {
-    // Wire OS-level effect handlers before any effect runs (no-op after the
-    // first call / in the browser). Lazy because their source is ESM-only.
+    // Wire OS-level + substrate effect handlers before any effect runs.
     await this.ensureOsHandlers();
+    await this.ensureAgentSubstrateHandlers();
 
     const registered = this.orbitals.get(orbitalName);
     if (!registered) {

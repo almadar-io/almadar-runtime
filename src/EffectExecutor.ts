@@ -1180,6 +1180,74 @@ export class EffectExecutor {
                 break;
             }
 
+            // === Agent substrate operators (server-side, effect-position) ===
+
+            case 'compose/compose-all': {
+                if (this.handlers.substrateComposeAll) {
+                    const config = args[0] as { appName: string; orbitals: unknown[]; layoutStrategy?: string };
+                    await this.handlers.substrateComposeAll(config);
+                } else {
+                    this.logUnsupported('compose/compose-all');
+                }
+                break;
+            }
+
+            case 'compose/compose-children': {
+                if (this.handlers.substrateComposeChildren) {
+                    const parentName = args[0] as string;
+                    const children = args[1] as unknown[];
+                    await this.handlers.substrateComposeChildren(parentName, children);
+                } else {
+                    this.logUnsupported('compose/compose-children');
+                }
+                break;
+            }
+
+            case 'behavior/instantiate': {
+                if (this.handlers.substrateInstantiate) {
+                    const parentName = args[0] as string;
+                    const behavior = args[1] as string;
+                    const params = args.length > 2 ? args[2] : undefined;
+                    await this.handlers.substrateInstantiate(parentName, behavior, params);
+                } else {
+                    this.logUnsupported('behavior/instantiate');
+                }
+                break;
+            }
+
+            case 'behavior/call': {
+                if (this.handlers.substrateCall) {
+                    const behavior = args[0] as string;
+                    const method = args[1] as string;
+                    const params = args.length > 2 ? args[2] : undefined;
+                    await this.handlers.substrateCall(behavior, method, params);
+                } else {
+                    this.logUnsupported('behavior/call');
+                }
+                break;
+            }
+
+            case 'validate/validate': {
+                if (this.handlers.substrateValidate) {
+                    const orbitalName = args[0] as string;
+                    await this.handlers.substrateValidate(orbitalName);
+                } else {
+                    this.logUnsupported('validate/validate');
+                }
+                break;
+            }
+
+            case 'lolo/emit-body': {
+                if (this.handlers.substrateEmitBody) {
+                    const orbitalName = args[0] as string;
+                    const loloSource = args[1] as string;
+                    await this.handlers.substrateEmitBody(orbitalName, loloSource);
+                } else {
+                    this.logUnsupported('lolo/emit-body');
+                }
+                break;
+            }
+
             default: {
                 if (this.debug) {
                     effectLog.warn('unknown-operator', { operator });

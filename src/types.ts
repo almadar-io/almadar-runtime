@@ -20,6 +20,12 @@ import type {
     PatternConfig,
     SExpr,
     FieldValue,
+    LlmContext,
+    WorkspaceContext,
+    SessionContext,
+    MemoryContext,
+    TraceContext,
+    IntegrationContext,
 } from '@almadar/core';
 
 // ============================================================================
@@ -356,6 +362,23 @@ export interface EffectHandlers {
     osWatchEnv?: (variable: string, emit?: OsEmitConfig) => void;
     /** Configure debounce for an OS event type */
     osDebounce?: (ms: number, eventType: string) => void;
+
+    // === Agent substrate handlers (server-side only) ===
+    // These back the effect-position substrate operators that fire events
+    // and return typed ServiceCallResult members.
+
+    /** compose/compose-all — compose multiple orbitals into one schema */
+    substrateComposeAll?: (config: { appName: string; orbitals: unknown[]; layoutStrategy?: string }) => Promise<unknown>;
+    /** compose/compose-children — compose children under a parent */
+    substrateComposeChildren?: (parentName: string, children: unknown[]) => Promise<unknown>;
+    /** behavior/instantiate — instantiate a behavior at runtime (meta `uses`) */
+    substrateInstantiate?: (parentName: string, behavior: string, params?: unknown) => Promise<unknown>;
+    /** behavior/call — call a method on an instantiated behavior */
+    substrateCall?: (behavior: string, method: string, params?: unknown) => Promise<unknown>;
+    /** validate/validate — validate an orbital, fires VALIDATED_OK/ERROR */
+    substrateValidate?: (orbitalName: string) => Promise<unknown>;
+    /** lolo/emit-body — emit lolo source for an orbital */
+    substrateEmitBody?: (orbitalName: string, loloSource: string) => Promise<unknown>;
 }
 
 /**
@@ -494,6 +517,13 @@ export interface RuntimeConfig {
 export interface EvaluationContextExtensions {
     /** Agent context for agent/* operators (memory, LLM, tools, session) */
     agent?: AgentContext;
+    /** Substrate contexts for the new operator namespaces */
+    llm?: LlmContext;
+    workspace?: WorkspaceContext;
+    session?: SessionContext;
+    memory?: MemoryContext;
+    trace?: TraceContext;
+    integration?: IntegrationContext;
 }
 
 // ============================================================================
