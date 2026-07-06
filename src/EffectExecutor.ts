@@ -18,7 +18,7 @@ import type {
 import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
-import type { FieldValue, SExpr } from '@almadar/core';
+import type { FieldValue, SExpr, Orbital, TraitConfig } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
 import type { SExpressionEvaluator } from '@almadar/evaluator';
 import { SExpressionEvaluator as EvaluatorInstance } from '@almadar/evaluator';
@@ -1217,7 +1217,7 @@ export class EffectExecutor {
 
             case 'compose/compose-all': {
                 if (this.handlers.substrateComposeAll) {
-                    const config = args[0] as { appName: string; orbitals: unknown[]; layoutStrategy?: string };
+                    const config = args[0] as { appName: string; orbitals: Orbital[]; layoutStrategy?: string };
                     await this.handlers.substrateComposeAll(config);
                 } else {
                     this.logUnsupported('compose/compose-all');
@@ -1228,7 +1228,7 @@ export class EffectExecutor {
             case 'compose/compose-children': {
                 if (this.handlers.substrateComposeChildren) {
                     const parentName = args[0] as string;
-                    const children = args[1] as unknown[];
+                    const children = args[1] as Orbital[];
                     await this.handlers.substrateComposeChildren(parentName, children);
                 } else {
                     this.logUnsupported('compose/compose-children');
@@ -1240,7 +1240,7 @@ export class EffectExecutor {
                 if (this.handlers.substrateInstantiate) {
                     const parentName = args[0] as string;
                     const behavior = args[1] as string;
-                    const params = args.length > 2 ? args[2] : undefined;
+                    const params = args.length > 2 ? args[2] as TraitConfig : undefined;
                     await this.handlers.substrateInstantiate(parentName, behavior, params);
                 } else {
                     this.logUnsupported('behavior/instantiate');
@@ -1252,7 +1252,7 @@ export class EffectExecutor {
                 if (this.handlers.substrateCall) {
                     const behavior = args[0] as string;
                     const method = args[1] as string;
-                    const params = args.length > 2 ? args[2] : undefined;
+                    const params = args.length > 2 ? args[2] as TraitConfig : undefined;
                     await this.handlers.substrateCall(behavior, method, params);
                 } else {
                     this.logUnsupported('behavior/call');

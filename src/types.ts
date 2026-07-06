@@ -26,6 +26,8 @@ import type {
     MemoryContext,
     TraceContext,
     IntegrationContext,
+    Orbital,
+    ServiceCallResult,
 } from '@almadar/core';
 
 // ============================================================================
@@ -368,17 +370,17 @@ export interface EffectHandlers {
     // and return typed ServiceCallResult members.
 
     /** compose/compose-all — compose multiple orbitals into one schema */
-    substrateComposeAll?: (config: { appName: string; orbitals: unknown[]; layoutStrategy?: string }) => Promise<unknown>;
+    substrateComposeAll?: (config: { appName: string; orbitals: Orbital[]; layoutStrategy?: string }) => Promise<ServiceCallResult | null>;
     /** compose/compose-children — compose children under a parent */
-    substrateComposeChildren?: (parentName: string, children: unknown[]) => Promise<unknown>;
+    substrateComposeChildren?: (parentName: string, children: Orbital[]) => Promise<ServiceCallResult | null>;
     /** behavior/instantiate — instantiate a behavior at runtime (meta `uses`) */
-    substrateInstantiate?: (parentName: string, behavior: string, params?: unknown) => Promise<unknown>;
+    substrateInstantiate?: (parentName: string, behavior: string, params?: TraitConfig) => Promise<ServiceCallResult | null>;
     /** behavior/call — call a method on an instantiated behavior */
-    substrateCall?: (behavior: string, method: string, params?: unknown) => Promise<unknown>;
+    substrateCall?: (behavior: string, method: string, params?: TraitConfig) => Promise<ServiceCallResult | null>;
     /** validate/validate — validate an orbital, fires VALIDATED_OK/ERROR */
-    substrateValidate?: (orbitalName: string) => Promise<unknown>;
+    substrateValidate?: (orbitalName: string) => Promise<ServiceCallResult | null>;
     /** lolo/emit-body — emit lolo source for an orbital */
-    substrateEmitBody?: (orbitalName: string, loloSource: string) => Promise<unknown>;
+    substrateEmitBody?: (orbitalName: string, loloSource: string) => Promise<ServiceCallResult | null>;
 }
 
 /**
