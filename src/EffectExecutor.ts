@@ -20,6 +20,8 @@ import { interpolateValue, createContextFromBindings } from './BindingResolver.j
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
 import type { FieldValue, SExpr } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
+import type { SExpressionEvaluator } from '@almadar/evaluator';
+import { SExpressionEvaluator as EvaluatorInstance } from '@almadar/evaluator';
 
 const effectLog = createLogger('almadar:runtime:effects');
 // Per-operator firehose: logs every effect execute/result, so a running
@@ -47,8 +49,12 @@ export interface EffectExecutorOptions {
     strictBindings?: boolean;
     /** Additional fields to spread onto EvaluationContext (e.g., { agent: AgentContext }) */
     contextExtensions?: EvaluationContextExtensions;
+    /** Evaluator for resolving nested S-expression values in `set` (e.g., substrate operators) */
+    evaluator?: SExpressionEvaluator;
 }
 
+// ============================================================================
+// Types
 // ============================================================================
 // Effect Parsing
 // ============================================================================
@@ -119,6 +125,7 @@ export class EffectExecutor {
     private debug: boolean;
     private strictBindings: boolean;
     private contextExtensions?: EvaluationContextExtensions;
+    private evaluator?: SExpressionEvaluator;
 
     constructor(options: EffectExecutorOptions) {
         this.handlers = options.handlers;
@@ -127,6 +134,17 @@ export class EffectExecutor {
         this.debug = options.debug ?? false;
         this.strictBindings = options.strictBindings ?? false;
         this.contextExtensions = options.contextExtensions;
+        this.evaluator = options.evaluator;
+    }
+
+    private _evaluator?: EvaluatorInstance;
+
+    private getEvaluator(): SExpressionEvaluator {
+        if (this.evaluator) return this.evaluator;
+        if (!this._evaluator) {
+            this._evaluator = new EvaluatorInstance();
+        }
+        return this._evaluator;
     }
 
     // ==========================================================================
@@ -279,7 +297,22 @@ export class EffectExecutor {
         } else if (isSetPathForm) {
             const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
             // Preserve args[0] (the @entity.<path> literal); resolve the rest.
-            resolvedArgs = [args[0], ...args.slice(1).map((a) => interpolateValue(a, ctx))];
+            // S-expression values (arrays like ['llm/generate', ...]) are
+            // evaluated through the evaluator so substrate operators can
+            // capture results: (set @entity.x (llm/generate @entity.prompt))
+            const resolvedRest: unknown[] = [];
+            for (const a of args.slice(1)) {
+                if (Array.isArray(a) && a.length > 0 && typeof a[0] === 'string') {
+                    let result: unknown = this.getEvaluator().evaluate(a as SExpr, ctx);
+                    if (result instanceof Promise) {
+                        result = await result;
+                    }
+                    resolvedRest.push(result);
+                } else {
+                    resolvedRest.push(interpolateValue(a, ctx));
+                }
+            }
+            resolvedArgs = [args[0], ...resolvedRest];
         } else if (isFetchLike) {
             const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
             const opts = args[1] as FetchOptions;
@@ -1249,7 +1282,23 @@ export class EffectExecutor {
             }
 
             default: {
-                if (this.debug) {
+                // Value-position substrate operators (llm/*, workspace/*,
+                // session/*, memory/*, trace/*, integration/*) used as
+                // standalone top-level effects are evaluated through the
+                // evaluator. The return value is discarded (fire-and-forget).
+                // To capture the result, nest inside set:
+                //   (set @entity.response (llm/generate @entity.prompt))
+                if (operator.includes('/')) {
+                    const ctx = createContextFromBindings(
+                        this.bindings, this.strictBindings, this.contextExtensions,
+                    );
+                    const result = this.getEvaluator().evaluate(
+                        [operator, ...args] as SExpr, ctx,
+                    );
+                    if (result instanceof Promise) {
+                        await result;
+                    }
+                } else if (this.debug) {
                     effectLog.warn('unknown-operator', { operator });
                 }
             }
