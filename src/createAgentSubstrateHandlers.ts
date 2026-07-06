@@ -21,15 +21,15 @@
 
 import { createLogger } from '@almadar/logger';
 import type { EventPayload, EffectHandlers } from './types.js';
-import type { ServiceCallResult } from '@almadar/core';
+import type { ServiceCallResult, JsonValue } from '@almadar/core';
 
 const log = createLogger('almadar:runtime:substrate-handlers');
 
 export interface SubstrateServices {
-    composeAll?: (config: { appName: string; orbitals: unknown[]; layoutStrategy?: string }) => Promise<ServiceCallResult>;
-    composeChildren?: (parentName: string, children: unknown[]) => Promise<ServiceCallResult>;
-    instantiate?: (parentName: string, behavior: string, params?: unknown) => Promise<ServiceCallResult>;
-    call?: (behavior: string, method: string, params?: unknown) => Promise<ServiceCallResult>;
+    composeAll?: (config: { appName: string; orbitals: JsonValue[]; layoutStrategy?: string }) => Promise<ServiceCallResult>;
+    composeChildren?: (parentName: string, children: JsonValue[]) => Promise<ServiceCallResult>;
+    instantiate?: (parentName: string, behavior: string, params?: JsonValue) => Promise<ServiceCallResult>;
+    call?: (behavior: string, method: string, params?: JsonValue) => Promise<ServiceCallResult>;
     validate?: (orbitalName: string) => Promise<ServiceCallResult>;
     emitBody?: (orbitalName: string, loloSource: string) => Promise<ServiceCallResult>;
 }
