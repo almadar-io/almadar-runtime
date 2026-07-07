@@ -331,8 +331,81 @@ export class ExternalOrbitalLoader {
       return { success: true, data: importPath };
     }
 
+    // Behavior-package registry: a bare `<package>/<behavior-name>` import
+    // (e.g. `almadar-behaviors/rpg-hero`) resolves to the emitted
+    // `<root>/behaviors/registry/.../<name>.orb`. Mirrors the compiled-path
+    // loader; std stays handled above.
+    if (
+      importPath.includes("/") &&
+      !importPath.startsWith("./") &&
+      !importPath.startsWith("../") &&
+      !importPath.startsWith("@") &&
+      !importPath.startsWith("std/")
+    ) {
+      const name = importPath
+        .slice(importPath.lastIndexOf("/") + 1)
+        .replace(/\.orb$/, "");
+      const result = this.resolveBehaviorInRegistries(name);
+      if (result.success) {
+        return result;
+      }
+    }
+
     // Default: treat as relative to base path
     return this.resolveRelativePath(`./${importPath}`, fromPath);
+  }
+
+  /**
+   * Resolve a bare behavior name by recursively searching each configured
+   * registry root (`stdLibPath` + `behaviorsLibPaths`) for a file named
+   * `<name>.orb` anywhere under `<root>/behaviors/registry/`. Each candidate
+   * is path-traversal-guarded against its root.
+   */
+  private resolveBehaviorInRegistries(name: string): LoadResult<string> {
+    const roots: string[] = [];
+    if (this.options.stdLibPath) roots.push(path.normalize(this.options.stdLibPath));
+    for (const p of this.options.behaviorsLibPaths) {
+      const norm = path.normalize(p);
+      if (!roots.includes(norm)) roots.push(norm);
+    }
+    const target = `${name}.orb`;
+    for (const root of roots) {
+      const registryRoot = path.join(root, "behaviors", "registry");
+      if (!fs.existsSync(registryRoot)) continue;
+      const found = this.findFileRecursive(registryRoot, target, root);
+      if (found) return { success: true, data: found };
+    }
+    return {
+      success: false,
+      error: `Behavior not found in registries: ${name} (searched ${roots.length} root(s): ${roots.join(", ")})`,
+    };
+  }
+
+  /** Depth-first recursive search for `target` filename under `dir`, guarded
+   * to stay within `root`. Returns the normalized absolute path on hit. */
+  private findFileRecursive(
+    dir: string,
+    target: string,
+    root: string
+  ): string | undefined {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return undefined;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const normalized = path.normalize(full);
+      if (!normalized.startsWith(root)) continue;
+      if (entry.isDirectory()) {
+        const hit = this.findFileRecursive(full, target, root);
+        if (hit) return hit;
+      } else if (entry.name === target) {
+        return normalized;
+      }
+    }
+    return undefined;
   }
 
   /**
