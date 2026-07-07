@@ -1,0 +1,1063 @@
+{
+  "description": "Stress-tests array/map array/filter array/find array/reduce array/sum array/includes array/len array/concat and str ops on entity collection fields.",
+  "name": "op-collection",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": [],
+            "items": {
+              "properties": {
+                "name": {
+                  "name": "name",
+                  "required": true,
+                  "type": "string"
+                },
+                "price": {
+                  "name": "price",
+                  "required": true,
+                  "type": "number"
+                },
+                "qty": {
+                  "name": "qty",
+                  "required": true,
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "name": "items",
+            "type": "array"
+          },
+          {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "name": "tags",
+            "type": "array"
+          },
+          {
+            "default": 0.0,
+            "name": "total",
+            "type": "number"
+          }
+        ],
+        "name": "OpCollectionData",
+        "persistence": "runtime",
+        "shared": true
+      },
+      "name": "OpCollectionOrbital",
+      "pages": [
+        {
+          "name": "OpCollectionPage",
+          "path": "/op-collection",
+          "traits": [
+            {
+              "ref": "OpCollection"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "lifecycle",
+          "config": {
+            "extraTags": {
+              "default": [
+                "NEW"
+              ],
+              "items": {
+                "type": "string"
+              },
+              "type": "[string]"
+            },
+            "running": {
+              "default": true,
+              "type": "boolean"
+            },
+            "seedItems": {
+              "default": [],
+              "items": {
+                "properties": {
+                  "name": {
+                    "name": "name",
+                    "required": true,
+                    "type": "string"
+                  },
+                  "price": {
+                    "name": "price",
+                    "required": true,
+                    "type": "number"
+                  },
+                  "qty": {
+                    "name": "qty",
+                    "required": true,
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "[LineItem]"
+            },
+            "seedTags": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "[string]"
+            }
+          },
+          "emits": [
+            {
+              "event": "TOTAL_CALCULATED",
+              "payloadSchema": [
+                {
+                  "name": "gross",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "discount",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "net",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "itemCount",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "ITEM_FOUND",
+              "payloadSchema": [
+                {
+                  "name": "item",
+                  "properties": [
+                    {
+                      "name": "price",
+                      "required": true,
+                      "type": "number"
+                    },
+                    {
+                      "name": "qty",
+                      "required": true,
+                      "type": "number"
+                    },
+                    {
+                      "name": "name",
+                      "required": true,
+                      "type": "string"
+                    }
+                  ],
+                  "required": true,
+                  "type": "object"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "ITEM_NOT_FOUND",
+              "payloadSchema": [
+                {
+                  "name": "target",
+                  "required": true,
+                  "type": "string"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "QTY_SUMMED",
+              "payloadSchema": [
+                {
+                  "name": "total",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "EXPENSIVE_COUNTED",
+              "payloadSchema": [
+                {
+                  "name": "count",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "TAGS_MERGED",
+              "payloadSchema": [
+                {
+                  "name": "summary",
+                  "required": true,
+                  "type": "string"
+                },
+                {
+                  "name": "urgent",
+                  "required": true,
+                  "type": "boolean"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "PRICE_STATS",
+              "payloadSchema": [
+                {
+                  "name": "min",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "max",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "avg",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "TAG_SEARCH_RESULT",
+              "payloadSchema": [
+                {
+                  "name": "results",
+                  "required": true,
+                  "type": "string"
+                },
+                {
+                  "name": "count",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            }
+          ],
+          "entityContract": {
+            "provides": [
+              "items",
+              "tags",
+              "total"
+            ],
+            "requires": []
+          },
+          "entityRebindable": true,
+          "linkedEntity": "OpCollectionData",
+          "name": "OpCollection",
+          "stateMachine": {
+            "events": [
+              {
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "key": "CALC_TOTAL",
+                "name": "Calc Total"
+              },
+              {
+                "key": "FIND_ITEM",
+                "name": "Find Item",
+                "payloadSchema": [
+                  {
+                    "name": "targetName",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "SUM_QTY",
+                "name": "Sum Qty"
+              },
+              {
+                "key": "COUNT_EXPENSIVE",
+                "name": "Count Expensive",
+                "payloadSchema": [
+                  {
+                    "name": "threshold",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "MERGE_TAGS",
+                "name": "Merge Tags"
+              },
+              {
+                "key": "PRICE_STATS",
+                "name": "Price Stats",
+                "payloadSchema": [
+                  {
+                    "name": "min",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "max",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "avg",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "TAG_SEARCH",
+                "name": "Tag Search",
+                "payloadSchema": [
+                  {
+                    "name": "searchTerm",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "TOTAL_CALCULATED",
+                "name": "Total Calculated",
+                "payloadSchema": [
+                  {
+                    "name": "gross",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "discount",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "net",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "itemCount",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "ITEM_FOUND",
+                "name": "Item Found",
+                "payloadSchema": [
+                  {
+                    "name": "item",
+                    "properties": [
+                      {
+                        "name": "price",
+                        "required": true,
+                        "type": "number"
+                      },
+                      {
+                        "name": "qty",
+                        "required": true,
+                        "type": "number"
+                      },
+                      {
+                        "name": "name",
+                        "required": true,
+                        "type": "string"
+                      }
+                    ],
+                    "required": true,
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "key": "ITEM_NOT_FOUND",
+                "name": "Item Not Found",
+                "payloadSchema": [
+                  {
+                    "name": "target",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "QTY_SUMMED",
+                "name": "Qty Summed",
+                "payloadSchema": [
+                  {
+                    "name": "total",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "EXPENSIVE_COUNTED",
+                "name": "Expensive Counted",
+                "payloadSchema": [
+                  {
+                    "name": "count",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "TAGS_MERGED",
+                "name": "Tags Merged",
+                "payloadSchema": [
+                  {
+                    "name": "summary",
+                    "required": true,
+                    "type": "string"
+                  },
+                  {
+                    "name": "urgent",
+                    "required": true,
+                    "type": "boolean"
+                  }
+                ]
+              },
+              {
+                "key": "TAG_SEARCH_RESULT",
+                "name": "Tag Search Result",
+                "payloadSchema": [
+                  {
+                    "name": "results",
+                    "required": true,
+                    "type": "string"
+                  },
+                  {
+                    "name": "count",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "active"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.items",
+                    "@config.seedItems"
+                  ],
+                  [
+                    "set",
+                    "@entity.tags",
+                    "@config.seedTags"
+                  ],
+                  [
+                    "set",
+                    "@entity.total",
+                    0.0
+                  ]
+                ],
+                "event": "INIT",
+                "from": "active",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "gross",
+                        [
+                          "array/sum",
+                          [
+                            "array/map",
+                            "@entity.items",
+                            [
+                              "fn",
+                              "it",
+                              [
+                                "*",
+                                [
+                                  "object/get",
+                                  "@it",
+                                  "price"
+                                ],
+                                [
+                                  "object/get",
+                                  "@it",
+                                  "qty"
+                                ]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "expensiveCount",
+                          [
+                            "array/len",
+                            [
+                              "array/filter",
+                              "@entity.items",
+                              [
+                                "fn",
+                                "it",
+                                [
+                                  ">",
+                                  [
+                                    "object/get",
+                                    "@it",
+                                    "price"
+                                  ],
+                                  10.0
+                                ]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "let",
+                        [
+                          [
+                            "discount",
+                            [
+                              "if",
+                              [
+                                ">",
+                                "@expensiveCount",
+                                2.0
+                              ],
+                              [
+                                "math/floor",
+                                [
+                                  "*",
+                                  "@gross",
+                                  0.1
+                                ]
+                              ],
+                              0.0
+                            ]
+                          ]
+                        ],
+                        [
+                          "let",
+                          [
+                            [
+                              "net",
+                              [
+                                "-",
+                                "@gross",
+                                "@discount"
+                              ]
+                            ]
+                          ],
+                          [
+                            "do",
+                            [
+                              "set",
+                              "@entity.total",
+                              "@net"
+                            ],
+                            [
+                              "emit",
+                              "TOTAL_CALCULATED",
+                              {
+                                "discount": "@discount",
+                                "gross": "@gross",
+                                "itemCount": [
+                                  "array/len",
+                                  "@entity.items"
+                                ],
+                                "net": "@net"
+                              }
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "CALC_TOTAL",
+                "from": "active",
+                "guard": [
+                  "and",
+                  "@config.running",
+                  [
+                    ">",
+                    [
+                      "array/len",
+                      "@entity.items"
+                    ],
+                    0.0
+                  ]
+                ],
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "found",
+                        [
+                          "array/find",
+                          "@entity.items",
+                          [
+                            "fn",
+                            "it",
+                            [
+                              "==",
+                              [
+                                "object/get",
+                                "@it",
+                                "name"
+                              ],
+                              "@payload.targetName"
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "if",
+                      [
+                        "!=",
+                        "@found",
+                        null
+                      ],
+                      [
+                        "emit",
+                        "ITEM_FOUND",
+                        {
+                          "item": "@found"
+                        }
+                      ],
+                      [
+                        "emit",
+                        "ITEM_NOT_FOUND",
+                        {
+                          "target": "@payload.targetName"
+                        }
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "FIND_ITEM",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "totalQty",
+                        [
+                          "array/reduce",
+                          "@entity.items",
+                          0.0,
+                          [
+                            "fn",
+                            [
+                              "acc",
+                              "it"
+                            ],
+                            [
+                              "+",
+                              "@acc",
+                              [
+                                "object/get",
+                                "@it",
+                                "qty"
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "QTY_SUMMED",
+                      {
+                        "total": "@totalQty"
+                      }
+                    ]
+                  ]
+                ],
+                "event": "SUM_QTY",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "expensive",
+                        [
+                          "array/filter",
+                          "@entity.items",
+                          [
+                            "fn",
+                            "it",
+                            [
+                              "and",
+                              [
+                                ">",
+                                [
+                                  "object/get",
+                                  "@it",
+                                  "price"
+                                ],
+                                "@payload.threshold"
+                              ],
+                              [
+                                ">=",
+                                [
+                                  "object/get",
+                                  "@it",
+                                  "qty"
+                                ],
+                                1.0
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "EXPENSIVE_COUNTED",
+                      {
+                        "count": [
+                          "array/len",
+                          "@expensive"
+                        ]
+                      }
+                    ]
+                  ]
+                ],
+                "event": "COUNT_EXPENSIVE",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "upper",
+                        [
+                          "array/map",
+                          "@entity.tags",
+                          [
+                            "fn",
+                            "t",
+                            [
+                              "str/upper",
+                              "@t"
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "hasUrgent",
+                          [
+                            "array/includes",
+                            "@upper",
+                            "URGENT"
+                          ]
+                        ]
+                      ],
+                      [
+                        "let",
+                        [
+                          [
+                            "merged",
+                            [
+                              "array/concat",
+                              "@upper",
+                              "@config.extraTags"
+                            ]
+                          ]
+                        ],
+                        [
+                          "let",
+                          [
+                            [
+                              "summary",
+                              [
+                                "str/concat",
+                                "Order: ",
+                                "@entity.id",
+                                " items=",
+                                [
+                                  "if",
+                                  "@hasUrgent",
+                                  "urgent",
+                                  "normal"
+                                ]
+                              ]
+                            ]
+                          ],
+                          [
+                            "do",
+                            [
+                              "set",
+                              "@entity.tags",
+                              "@merged"
+                            ],
+                            [
+                              "emit",
+                              "TAGS_MERGED",
+                              {
+                                "summary": "@summary",
+                                "urgent": "@hasUrgent"
+                              }
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "MERGE_TAGS",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "prices",
+                        [
+                          "array/map",
+                          "@entity.items",
+                          [
+                            "fn",
+                            "it",
+                            [
+                              "object/get",
+                              "@it",
+                              "price"
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "totalPrice",
+                          [
+                            "array/reduce",
+                            "@prices",
+                            0.0,
+                            [
+                              "fn",
+                              [
+                                "acc",
+                                "x"
+                              ],
+                              [
+                                "+",
+                                "@acc",
+                                "@x"
+                              ]
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "let",
+                        [
+                          [
+                            "count",
+                            [
+                              "array/len",
+                              "@prices"
+                            ]
+                          ]
+                        ],
+                        [
+                          "let",
+                          [
+                            [
+                              "avg",
+                              [
+                                "/",
+                                "@totalPrice",
+                                "@count"
+                              ]
+                            ]
+                          ],
+                          [
+                            "emit",
+                            "PRICE_STATS",
+                            {
+                              "avg": "@avg",
+                              "max": "@totalPrice",
+                              "min": 0.0
+                            }
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "PRICE_STATS",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "lowerTags",
+                        [
+                          "array/map",
+                          "@entity.tags",
+                          [
+                            "fn",
+                            "t",
+                            [
+                              "str/lower",
+                              "@t"
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "matched",
+                          [
+                            "array/filter",
+                            "@lowerTags",
+                            [
+                              "fn",
+                              "t",
+                              [
+                                "str/includes",
+                                "@t",
+                                "@payload.searchTerm"
+                              ]
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "let",
+                        [
+                          [
+                            "joined",
+                            [
+                              "array/reduce",
+                              "@matched",
+                              "",
+                              [
+                                "fn",
+                                [
+                                  "acc",
+                                  "t"
+                                ],
+                                [
+                                  "if",
+                                  [
+                                    "==",
+                                    "@acc",
+                                    ""
+                                  ],
+                                  "@t",
+                                  [
+                                    "str/concat",
+                                    "@acc",
+                                    ",",
+                                    "@t"
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ],
+                        [
+                          "emit",
+                          "TAG_SEARCH_RESULT",
+                          {
+                            "count": [
+                              "array/len",
+                              "@matched"
+                            ],
+                            "results": "@joined"
+                          }
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "TAG_SEARCH",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}

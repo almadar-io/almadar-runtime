@@ -1,0 +1,300 @@
+{
+  "description": "Raw truthiness guards (no == true wrapping) — gap candidates if validator rejects.",
+  "name": "guard-raw-truthiness",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": true,
+            "name": "flag",
+            "type": "boolean"
+          },
+          {
+            "default": 42.0,
+            "name": "num",
+            "type": "number"
+          },
+          {
+            "default": 0.0,
+            "name": "zeroNum",
+            "type": "number"
+          },
+          {
+            "default": "",
+            "name": "probeTag",
+            "type": "string"
+          }
+        ],
+        "name": "RawRecord",
+        "persistence": "runtime"
+      },
+      "name": "GuardRawOrbital",
+      "pages": [
+        {
+          "name": "GuardRawTruthinessPage",
+          "path": "/guard-raw-truthiness",
+          "traits": [
+            {
+              "ref": "GuardRawTruthiness"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "interaction",
+          "config": {
+            "threshold": {
+              "default": 0.0,
+              "type": "number"
+            }
+          },
+          "emits": [
+            {
+              "event": "RawResult",
+              "payloadSchema": [
+                {
+                  "name": "probe",
+                  "type": "string"
+                },
+                {
+                  "name": "fired",
+                  "type": "boolean"
+                }
+              ],
+              "scope": "external"
+            }
+          ],
+          "linkedEntity": "RawRecord",
+          "name": "GuardRawTruthiness",
+          "scope": "instance",
+          "stateMachine": {
+            "events": [
+              {
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "key": "RawBool",
+                "name": "Raw bool"
+              },
+              {
+                "key": "RawCompare",
+                "name": "Raw compare"
+              },
+              {
+                "key": "RawAnd",
+                "name": "Raw and"
+              },
+              {
+                "key": "RawOr",
+                "name": "Raw or"
+              },
+              {
+                "key": "RawNot",
+                "name": "Raw not"
+              },
+              {
+                "key": "RawResult",
+                "name": "Raw result",
+                "payloadSchema": [
+                  {
+                    "name": "probe",
+                    "type": "string"
+                  },
+                  {
+                    "name": "fired",
+                    "type": "boolean"
+                  }
+                ]
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "idle"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "render-ui",
+                    "main",
+                    {
+                      "children": [
+                        {
+                          "content": "guard-raw-truthiness idle",
+                          "type": "typography",
+                          "variant": "h2"
+                        }
+                      ],
+                      "type": "stack"
+                    }
+                  ],
+                  [
+                    "set",
+                    "@entity.flag",
+                    true
+                  ],
+                  [
+                    "set",
+                    "@entity.num",
+                    42.0
+                  ],
+                  [
+                    "set",
+                    "@entity.zeroNum",
+                    0.0
+                  ]
+                ],
+                "event": "INIT",
+                "from": "idle",
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "raw-bool"
+                  ],
+                  [
+                    "emit",
+                    "RawResult",
+                    {
+                      "fired": true,
+                      "probe": "raw-bool"
+                    }
+                  ]
+                ],
+                "event": "RawBool",
+                "from": "idle",
+                "guard": "@entity.flag",
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "raw-compare"
+                  ],
+                  [
+                    "emit",
+                    "RawResult",
+                    {
+                      "fired": true,
+                      "probe": "raw-compare"
+                    }
+                  ]
+                ],
+                "event": "RawCompare",
+                "from": "idle",
+                "guard": [
+                  ">",
+                  "@entity.num",
+                  0.0
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "raw-and"
+                  ],
+                  [
+                    "emit",
+                    "RawResult",
+                    {
+                      "fired": true,
+                      "probe": "raw-and"
+                    }
+                  ]
+                ],
+                "event": "RawAnd",
+                "from": "idle",
+                "guard": [
+                  "and",
+                  [
+                    ">",
+                    "@entity.num",
+                    0.0
+                  ],
+                  "@entity.flag"
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "raw-or"
+                  ],
+                  [
+                    "emit",
+                    "RawResult",
+                    {
+                      "fired": true,
+                      "probe": "raw-or"
+                    }
+                  ]
+                ],
+                "event": "RawOr",
+                "from": "idle",
+                "guard": [
+                  "or",
+                  [
+                    ">",
+                    "@entity.zeroNum",
+                    0.0
+                  ],
+                  "@entity.flag"
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "raw-not"
+                  ],
+                  [
+                    "emit",
+                    "RawResult",
+                    {
+                      "fired": true,
+                      "probe": "raw-not"
+                    }
+                  ]
+                ],
+                "event": "RawNot",
+                "from": "idle",
+                "guard": [
+                  "not",
+                  [
+                    ">",
+                    "@entity.zeroNum",
+                    0.0
+                  ]
+                ],
+                "to": "idle"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}

@@ -1,0 +1,300 @@
+{
+  "description": "Stress every @-binding in one transition: entity, payload, config, now, state, let, fn param.",
+  "name": "bind-matrix",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": "active",
+            "name": "status",
+            "type": "string"
+          },
+          {
+            "default": 0.0,
+            "name": "count",
+            "type": "number"
+          },
+          {
+            "default": 0.0,
+            "name": "total",
+            "type": "number"
+          },
+          {
+            "default": [
+              "a",
+              "bb",
+              "ccc"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "name": "tags",
+            "type": "array"
+          },
+          {
+            "default": 0.0,
+            "name": "lastUpdate",
+            "type": "number"
+          },
+          {
+            "default": 0.0,
+            "name": "tagSum",
+            "type": "number"
+          },
+          {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "name": "upperTags",
+            "type": "array"
+          }
+        ],
+        "name": "BindRecord",
+        "persistence": "runtime"
+      },
+      "name": "BindMatrixOrbital",
+      "pages": [
+        {
+          "name": "BindMatrixPage",
+          "path": "/bind-matrix",
+          "traits": [
+            {
+              "ref": "BindMatrix"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "interaction",
+          "config": {
+            "channel": {
+              "default": "direct",
+              "type": "string"
+            },
+            "unitPrice": {
+              "default": 10.0,
+              "type": "number"
+            }
+          },
+          "emits": [
+            {
+              "event": "Logged",
+              "payloadSchema": [
+                {
+                  "name": "amount",
+                  "type": "number"
+                },
+                {
+                  "name": "at",
+                  "type": "number"
+                },
+                {
+                  "name": "via",
+                  "type": "string"
+                }
+              ],
+              "scope": "external"
+            }
+          ],
+          "linkedEntity": "BindRecord",
+          "name": "BindMatrix",
+          "scope": "instance",
+          "stateMachine": {
+            "events": [
+              {
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "key": "Inc",
+                "name": "Inc",
+                "payloadSchema": [
+                  {
+                    "name": "amount",
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "Logged",
+                "name": "Logged",
+                "payloadSchema": [
+                  {
+                    "name": "amount",
+                    "type": "number"
+                  },
+                  {
+                    "name": "at",
+                    "type": "number"
+                  },
+                  {
+                    "name": "via",
+                    "type": "string"
+                  }
+                ]
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "idle"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.tags",
+                    [
+                      "a",
+                      "bb",
+                      "ccc"
+                    ]
+                  ],
+                  [
+                    "render-ui",
+                    "main",
+                    {
+                      "children": [
+                        {
+                          "content": "bind-matrix idle",
+                          "type": "typography",
+                          "variant": "h2"
+                        }
+                      ],
+                      "type": "stack"
+                    }
+                  ]
+                ],
+                "event": "INIT",
+                "from": "idle",
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "render-ui",
+                    "main",
+                    {
+                      "children": [
+                        {
+                          "content": "bind-matrix counted",
+                          "type": "typography",
+                          "variant": "h2"
+                        }
+                      ],
+                      "type": "stack"
+                    }
+                  ],
+                  [
+                    "let",
+                    [
+                      [
+                        "newCount",
+                        [
+                          "+",
+                          "@entity.count",
+                          "@payload.amount"
+                        ]
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "upperTags",
+                          [
+                            "array/map",
+                            "@entity.tags",
+                            [
+                              "fn",
+                              "t",
+                              [
+                                "str/upper",
+                                "t"
+                              ]
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "do",
+                        [
+                          "set",
+                          "@entity.count",
+                          "newCount"
+                        ],
+                        [
+                          "set",
+                          "@entity.total",
+                          [
+                            "*",
+                            "newCount",
+                            "@config.unitPrice"
+                          ]
+                        ],
+                        [
+                          "set",
+                          "@entity.lastUpdate",
+                          "@now"
+                        ],
+                        [
+                          "set",
+                          "@entity.tagSum",
+                          [
+                            "array/sum",
+                            "@entity.tags"
+                          ]
+                        ],
+                        [
+                          "set",
+                          "@entity.upperTags",
+                          "upperTags"
+                        ],
+                        [
+                          "emit",
+                          "Logged",
+                          {
+                            "amount": "@payload.amount",
+                            "at": "@now",
+                            "via": "@config.channel"
+                          }
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "Inc",
+                "from": "idle",
+                "guard": [
+                  "and",
+                  [
+                    "==",
+                    "@state",
+                    "active"
+                  ],
+                  [
+                    ">",
+                    "@payload.amount",
+                    0.0
+                  ]
+                ],
+                "to": "idle"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}

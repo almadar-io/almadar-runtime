@@ -1,0 +1,627 @@
+{
+  "description": "Deep-nested AI: enemies find nearest player via reduce over filtered array with double object/get access, then clamp-stepped toward target.",
+  "name": "nest-ai",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": [],
+            "items": {
+              "properties": {
+                "health": {
+                  "name": "health",
+                  "required": false,
+                  "type": "number"
+                },
+                "id": {
+                  "name": "id",
+                  "required": true,
+                  "type": "string"
+                },
+                "position": {
+                  "name": "position",
+                  "properties": {
+                    "x": {
+                      "name": "x",
+                      "required": true,
+                      "type": "number"
+                    },
+                    "y": {
+                      "name": "y",
+                      "required": true,
+                      "type": "number"
+                    }
+                  },
+                  "required": false,
+                  "type": "object"
+                },
+                "team": {
+                  "name": "team",
+                  "required": false,
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "name": "units",
+            "type": "array"
+          },
+          {
+            "default": 0.0,
+            "name": "tick",
+            "type": "number"
+          }
+        ],
+        "name": "NestAiData",
+        "persistence": "runtime"
+      },
+      "name": "NestAiOrbital",
+      "pages": [
+        {
+          "name": "NestAiPage",
+          "path": "/nest-ai",
+          "traits": [
+            {
+              "ref": "NestAi"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "lifecycle",
+          "config": {
+            "gridW": {
+              "default": 10.0,
+              "description": "Column count for x clamp",
+              "label": "Grid Width",
+              "tier": "domain",
+              "type": "number"
+            },
+            "running": {
+              "default": true,
+              "description": "Toggle AI tick",
+              "label": "Running",
+              "tier": "domain",
+              "type": "boolean"
+            },
+            "units": {
+              "default": [],
+              "description": "Seed units array",
+              "items": {
+                "properties": {
+                  "health": {
+                    "name": "health",
+                    "required": false,
+                    "type": "number"
+                  },
+                  "id": {
+                    "name": "id",
+                    "required": true,
+                    "type": "string"
+                  },
+                  "position": {
+                    "name": "position",
+                    "properties": {
+                      "x": {
+                        "name": "x",
+                        "required": true,
+                        "type": "number"
+                      },
+                      "y": {
+                        "name": "y",
+                        "required": true,
+                        "type": "number"
+                      }
+                    },
+                    "required": false,
+                    "type": "object"
+                  },
+                  "team": {
+                    "name": "team",
+                    "required": false,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "label": "Initial Units",
+              "tier": "domain",
+              "type": "[Unit]"
+            }
+          },
+          "emits": [
+            {
+              "description": "Scan effect per living player each tick",
+              "event": "BURST",
+              "payloadSchema": [
+                {
+                  "name": "particles",
+                  "type": "[Fx]"
+                }
+              ],
+              "scope": "external",
+              "tier": "domain"
+            },
+            {
+              "description": "Summary counts after AI step",
+              "event": "STATUS",
+              "payloadSchema": [
+                {
+                  "name": "tick",
+                  "type": "number"
+                },
+                {
+                  "name": "alive",
+                  "type": "number"
+                }
+              ],
+              "scope": "external",
+              "tier": "domain"
+            }
+          ],
+          "entityContract": {
+            "provides": [
+              "tick",
+              "units"
+            ],
+            "requires": []
+          },
+          "entityRebindable": true,
+          "linkedEntity": "NestAiData",
+          "name": "NestAi",
+          "stateMachine": {
+            "events": [
+              {
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "description": "Scan effect per living player each tick",
+                "key": "BURST",
+                "name": "Burst",
+                "payloadSchema": [
+                  {
+                    "name": "particles",
+                    "type": "[Fx]"
+                  }
+                ],
+                "tier": "domain"
+              },
+              {
+                "description": "Summary counts after AI step",
+                "key": "STATUS",
+                "name": "Status",
+                "payloadSchema": [
+                  {
+                    "name": "tick",
+                    "type": "number"
+                  },
+                  {
+                    "name": "alive",
+                    "type": "number"
+                  }
+                ],
+                "tier": "domain"
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "active"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.units",
+                    "@config.units"
+                  ]
+                ],
+                "event": "INIT",
+                "from": "active",
+                "to": "active"
+              }
+            ]
+          },
+          "ticks": [
+            {
+              "effects": [
+                [
+                  "emit",
+                  "BURST",
+                  {
+                    "particles": [
+                      "array/map",
+                      [
+                        "array/filter",
+                        "@entity.units",
+                        [
+                          "fn",
+                          "u",
+                          [
+                            "and",
+                            [
+                              "==",
+                              "@u.team",
+                              "player"
+                            ],
+                            [
+                              ">",
+                              "@u.health",
+                              0.0
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "fn",
+                        "u",
+                        {
+                          "id": [
+                            "str/concat",
+                            "fx-",
+                            "@u.id"
+                          ],
+                          "kind": "scan",
+                          "message": "?",
+                          "ttl": 2.0,
+                          "x": [
+                            "object/get",
+                            [
+                              "object/get",
+                              "@u",
+                              "position"
+                            ],
+                            "x"
+                          ],
+                          "y": [
+                            "object/get",
+                            [
+                              "object/get",
+                              "@u",
+                              "position"
+                            ],
+                            "y"
+                          ]
+                        }
+                      ]
+                    ]
+                  }
+                ],
+                [
+                  "set",
+                  "@entity.units",
+                  [
+                    "array/map",
+                    "@entity.units",
+                    [
+                      "fn",
+                      "u",
+                      [
+                        "if",
+                        [
+                          "and",
+                          [
+                            "==",
+                            "@u.team",
+                            "enemy"
+                          ],
+                          [
+                            ">",
+                            "@u.health",
+                            0.0
+                          ]
+                        ],
+                        [
+                          "let",
+                          [
+                            [
+                              "target",
+                              [
+                                "array/reduce",
+                                [
+                                  "array/filter",
+                                  "@entity.units",
+                                  [
+                                    "fn",
+                                    "p",
+                                    [
+                                      "and",
+                                      [
+                                        "==",
+                                        "@p.team",
+                                        "player"
+                                      ],
+                                      [
+                                        ">",
+                                        "@p.health",
+                                        0.0
+                                      ]
+                                    ]
+                                  ]
+                                ],
+                                null,
+                                [
+                                  "fn",
+                                  [
+                                    "nearest",
+                                    "p"
+                                  ],
+                                  [
+                                    "if",
+                                    [
+                                      "or",
+                                      [
+                                        "==",
+                                        "@nearest",
+                                        null
+                                      ],
+                                      [
+                                        "<",
+                                        [
+                                          "grid/manhattan-distance",
+                                          [
+                                            "object/get",
+                                            "@u",
+                                            "position"
+                                          ],
+                                          [
+                                            "object/get",
+                                            "@p",
+                                            "position"
+                                          ]
+                                        ],
+                                        [
+                                          "grid/manhattan-distance",
+                                          [
+                                            "object/get",
+                                            "@u",
+                                            "position"
+                                          ],
+                                          [
+                                            "object/get",
+                                            "@nearest",
+                                            "position"
+                                          ]
+                                        ]
+                                      ]
+                                    ],
+                                    "@p",
+                                    "@nearest"
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ],
+                          [
+                            "if",
+                            [
+                              "==",
+                              "@target",
+                              null
+                            ],
+                            "@u",
+                            [
+                              "let",
+                              [
+                                [
+                                  "nx",
+                                  [
+                                    "math/clamp",
+                                    [
+                                      "+",
+                                      [
+                                        "object/get",
+                                        [
+                                          "object/get",
+                                          "@u",
+                                          "position"
+                                        ],
+                                        "x"
+                                      ],
+                                      [
+                                        "math/sign",
+                                        [
+                                          "-",
+                                          [
+                                            "object/get",
+                                            [
+                                              "object/get",
+                                              "@target",
+                                              "position"
+                                            ],
+                                            "x"
+                                          ],
+                                          [
+                                            "object/get",
+                                            [
+                                              "object/get",
+                                              "@u",
+                                              "position"
+                                            ],
+                                            "x"
+                                          ]
+                                        ]
+                                      ]
+                                    ],
+                                    0.0,
+                                    [
+                                      "-",
+                                      "@config.gridW",
+                                      1.0
+                                    ]
+                                  ]
+                                ]
+                              ],
+                              [
+                                "object/merge",
+                                "@u",
+                                {
+                                  "position": {
+                                    "x": "@nx",
+                                    "y": [
+                                      "object/get",
+                                      [
+                                        "object/get",
+                                        "@u",
+                                        "position"
+                                      ],
+                                      "y"
+                                    ]
+                                  }
+                                }
+                              ]
+                            ]
+                          ]
+                        ],
+                        "@u"
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "set",
+                  "@entity.units",
+                  [
+                    "array/map",
+                    "@entity.units",
+                    [
+                      "fn",
+                      "u",
+                      [
+                        "if",
+                        [
+                          "and",
+                          [
+                            "==",
+                            "@u.team",
+                            "player"
+                          ],
+                          [
+                            ">",
+                            "@u.health",
+                            0.0
+                          ]
+                        ],
+                        [
+                          "if",
+                          [
+                            ">",
+                            [
+                              "array/len",
+                              [
+                                "array/filter",
+                                "@entity.units",
+                                [
+                                  "fn",
+                                  "e",
+                                  [
+                                    "and",
+                                    [
+                                      "==",
+                                      "@e.team",
+                                      "enemy"
+                                    ],
+                                    [
+                                      ">",
+                                      "@e.health",
+                                      0.0
+                                    ],
+                                    [
+                                      "==",
+                                      [
+                                        "grid/manhattan-distance",
+                                        [
+                                          "object/get",
+                                          "@e",
+                                          "position"
+                                        ],
+                                        [
+                                          "object/get",
+                                          "@u",
+                                          "position"
+                                        ]
+                                      ],
+                                      1.0
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ],
+                            0.0
+                          ],
+                          [
+                            "object/merge",
+                            "@u",
+                            {
+                              "health": [
+                                "math/max",
+                                0.0,
+                                [
+                                  "-",
+                                  "@u.health",
+                                  1.0
+                                ]
+                              ]
+                            }
+                          ],
+                          "@u"
+                        ],
+                        "@u"
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "set",
+                  "@entity.tick",
+                  [
+                    "+",
+                    "@entity.tick",
+                    1.0
+                  ]
+                ],
+                [
+                  "emit",
+                  "STATUS",
+                  {
+                    "alive": [
+                      "array/len",
+                      [
+                        "array/filter",
+                        "@entity.units",
+                        [
+                          "fn",
+                          "u",
+                          [
+                            ">",
+                            "@u.health",
+                            0.0
+                          ]
+                        ]
+                      ]
+                    ],
+                    "tick": "@entity.tick"
+                  }
+                ]
+              ],
+              "guard": "@config.running",
+              "interval": 1000.0,
+              "name": "aiTick"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}

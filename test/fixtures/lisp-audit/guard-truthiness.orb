@@ -1,0 +1,773 @@
+{
+  "description": "Guard truthiness edge cases: boolean, number, string, array, object, null, short-circuit, missing field.",
+  "name": "guard-truthiness",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": true,
+            "name": "flag",
+            "type": "boolean"
+          },
+          {
+            "default": 42.0,
+            "name": "a",
+            "type": "number"
+          },
+          {
+            "default": 0.0,
+            "name": "b",
+            "type": "number"
+          },
+          {
+            "default": [
+              "x"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "name": "arr",
+            "type": "array"
+          },
+          {
+            "default": {},
+            "name": "obj",
+            "type": "object"
+          },
+          {
+            "name": "missing",
+            "type": "string"
+          },
+          {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "name": "emptyArr",
+            "type": "array"
+          },
+          {
+            "default": {},
+            "name": "emptyObj",
+            "type": "object"
+          },
+          {
+            "default": "",
+            "name": "probeTag",
+            "type": "string"
+          }
+        ],
+        "name": "TruthRecord",
+        "persistence": "runtime"
+      },
+      "name": "GuardTruthinessOrbital",
+      "pages": [
+        {
+          "name": "GuardTruthinessPage",
+          "path": "/guard-truthiness",
+          "traits": [
+            {
+              "ref": "GuardTruthiness"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "interaction",
+          "config": {
+            "threshold": {
+              "default": 0.0,
+              "type": "number"
+            }
+          },
+          "emits": [
+            {
+              "event": "GuardResult",
+              "payloadSchema": [
+                {
+                  "name": "probe",
+                  "type": "string"
+                },
+                {
+                  "name": "passed",
+                  "type": "boolean"
+                }
+              ],
+              "scope": "external"
+            }
+          ],
+          "linkedEntity": "TruthRecord",
+          "name": "GuardTruthiness",
+          "scope": "instance",
+          "stateMachine": {
+            "events": [
+              {
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "key": "BoolTrue",
+                "name": "Bool true"
+              },
+              {
+                "key": "BoolFalse",
+                "name": "Bool false"
+              },
+              {
+                "key": "NumNonZero",
+                "name": "Num non zero"
+              },
+              {
+                "key": "NumZero",
+                "name": "Num zero"
+              },
+              {
+                "key": "ArrNonEmpty",
+                "name": "Arr non empty"
+              },
+              {
+                "key": "ArrEmpty",
+                "name": "Arr empty"
+              },
+              {
+                "key": "ObjNonEmpty",
+                "name": "Obj non empty"
+              },
+              {
+                "key": "ObjEmpty",
+                "name": "Obj empty"
+              },
+              {
+                "key": "NullCheck",
+                "name": "Null check"
+              },
+              {
+                "key": "AndBoth",
+                "name": "And both"
+              },
+              {
+                "key": "AndFirst",
+                "name": "And first"
+              },
+              {
+                "key": "OrFirst",
+                "name": "Or first"
+              },
+              {
+                "key": "OrBoth",
+                "name": "Or both"
+              },
+              {
+                "key": "NotTrue",
+                "name": "Not true"
+              },
+              {
+                "key": "NotFalse",
+                "name": "Not false"
+              },
+              {
+                "key": "StrNonEmpty",
+                "name": "Str non empty"
+              },
+              {
+                "key": "GuardResult",
+                "name": "Guard result",
+                "payloadSchema": [
+                  {
+                    "name": "probe",
+                    "type": "string"
+                  },
+                  {
+                    "name": "passed",
+                    "type": "boolean"
+                  }
+                ]
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "idle"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "render-ui",
+                    "main",
+                    {
+                      "children": [
+                        {
+                          "content": "guard-truthiness idle",
+                          "type": "typography",
+                          "variant": "h2"
+                        }
+                      ],
+                      "type": "stack"
+                    }
+                  ],
+                  [
+                    "set",
+                    "@entity.flag",
+                    true
+                  ],
+                  [
+                    "set",
+                    "@entity.a",
+                    42.0
+                  ],
+                  [
+                    "set",
+                    "@entity.b",
+                    0.0
+                  ],
+                  [
+                    "set",
+                    "@entity.arr",
+                    [
+                      "x"
+                    ]
+                  ],
+                  [
+                    "set",
+                    "@entity.obj",
+                    {
+                      "k": 1.0
+                    }
+                  ],
+                  [
+                    "set",
+                    "@entity.emptyArr",
+                    []
+                  ],
+                  [
+                    "set",
+                    "@entity.emptyObj",
+                    {}
+                  ],
+                  [
+                    "set",
+                    "@entity.missing",
+                    ""
+                  ]
+                ],
+                "event": "INIT",
+                "from": "idle",
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "bool-true"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "bool-true"
+                    }
+                  ]
+                ],
+                "event": "BoolTrue",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  "@entity.flag",
+                  true
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "bool-false"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "bool-false"
+                    }
+                  ]
+                ],
+                "event": "BoolFalse",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  "@entity.flag",
+                  false
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "num-nonzero"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "num-nonzero"
+                    }
+                  ]
+                ],
+                "event": "NumNonZero",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    ">",
+                    "@entity.a",
+                    0.0
+                  ],
+                  true
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "num-zero"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "num-zero"
+                    }
+                  ]
+                ],
+                "event": "NumZero",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    "==",
+                    "@entity.b",
+                    0.0
+                  ],
+                  true
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "arr-nonempty"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "arr-nonempty"
+                    }
+                  ]
+                ],
+                "event": "ArrNonEmpty",
+                "from": "idle",
+                "guard": [
+                  ">",
+                  [
+                    "array/len",
+                    "@entity.arr"
+                  ],
+                  0.0
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "arr-empty"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "arr-empty"
+                    }
+                  ]
+                ],
+                "event": "ArrEmpty",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    "array/len",
+                    "@entity.emptyArr"
+                  ],
+                  0.0
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "obj-nonempty"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "obj-nonempty"
+                    }
+                  ]
+                ],
+                "event": "ObjNonEmpty",
+                "from": "idle",
+                "guard": [
+                  ">",
+                  [
+                    "array/len",
+                    [
+                      "object/keys",
+                      "@entity.obj"
+                    ]
+                  ],
+                  0.0
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "obj-empty"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "obj-empty"
+                    }
+                  ]
+                ],
+                "event": "ObjEmpty",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    "array/len",
+                    [
+                      "object/keys",
+                      "@entity.emptyObj"
+                    ]
+                  ],
+                  0.0
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "null-check"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "null-check"
+                    }
+                  ]
+                ],
+                "event": "NullCheck",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    "str/len",
+                    "@entity.missing"
+                  ],
+                  0.0
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "and-both"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "and-both"
+                    }
+                  ]
+                ],
+                "event": "AndBoth",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    "and",
+                    [
+                      ">",
+                      "@entity.a",
+                      0.0
+                    ],
+                    [
+                      ">",
+                      [
+                        "array/len",
+                        "@entity.arr"
+                      ],
+                      0.0
+                    ]
+                  ],
+                  true
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "and-first-falsy"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "and-first-falsy"
+                    }
+                  ]
+                ],
+                "event": "AndFirst",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    "and",
+                    [
+                      ">",
+                      "@entity.b",
+                      0.0
+                    ],
+                    [
+                      ">",
+                      "@entity.a",
+                      0.0
+                    ]
+                  ],
+                  true
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "or-first-truthy"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "or-first-truthy"
+                    }
+                  ]
+                ],
+                "event": "OrFirst",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    "or",
+                    [
+                      ">",
+                      "@entity.a",
+                      0.0
+                    ],
+                    [
+                      ">",
+                      "@entity.b",
+                      0.0
+                    ]
+                  ],
+                  true
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "or-both-falsy"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "or-both-falsy"
+                    }
+                  ]
+                ],
+                "event": "OrBoth",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    "or",
+                    [
+                      ">",
+                      "@entity.b",
+                      0.0
+                    ],
+                    [
+                      ">",
+                      [
+                        "array/len",
+                        "@entity.emptyArr"
+                      ],
+                      0.0
+                    ]
+                  ],
+                  true
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "not-truthy"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "not-truthy"
+                    }
+                  ]
+                ],
+                "event": "NotTrue",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    "not",
+                    [
+                      ">",
+                      "@entity.a",
+                      0.0
+                    ]
+                  ],
+                  false
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "not-falsy"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "not-falsy"
+                    }
+                  ]
+                ],
+                "event": "NotFalse",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    "not",
+                    [
+                      ">",
+                      "@entity.b",
+                      0.0
+                    ]
+                  ],
+                  true
+                ],
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.probeTag",
+                    "str-nonempty"
+                  ],
+                  [
+                    "emit",
+                    "GuardResult",
+                    {
+                      "passed": true,
+                      "probe": "str-nonempty"
+                    }
+                  ]
+                ],
+                "event": "StrNonEmpty",
+                "from": "idle",
+                "guard": [
+                  ">",
+                  [
+                    "str/len",
+                    "@entity.id"
+                  ],
+                  0.0
+                ],
+                "to": "idle"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}

@@ -1,0 +1,1131 @@
+{
+  "description": "Probes namespaced operators suspected of broken TS emit — each used in a real guard or effect to maximize validator coverage.",
+  "name": "op-divergence-probes",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 0.0,
+            "name": "x",
+            "type": "number"
+          },
+          {
+            "default": 0.0,
+            "name": "y",
+            "type": "number"
+          },
+          {
+            "default": 100.0,
+            "name": "hp",
+            "type": "number"
+          },
+          {
+            "default": 0.0,
+            "name": "gold",
+            "type": "number"
+          },
+          {
+            "default": [],
+            "items": {
+              "properties": {
+                "category": {
+                  "name": "category",
+                  "required": true,
+                  "type": "string"
+                },
+                "name": {
+                  "name": "name",
+                  "required": true,
+                  "type": "string"
+                },
+                "price": {
+                  "name": "price",
+                  "required": true,
+                  "type": "number"
+                },
+                "qty": {
+                  "name": "qty",
+                  "required": true,
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "name": "items",
+            "type": "array"
+          },
+          {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "name": "tags",
+            "type": "array"
+          },
+          {
+            "default": "",
+            "name": "createdAt",
+            "type": "string"
+          }
+        ],
+        "name": "OpDivergenceProbesData",
+        "persistence": "runtime",
+        "shared": true
+      },
+      "name": "OpDivergenceProbesOrbital",
+      "pages": [
+        {
+          "name": "OpDivergenceProbesPage",
+          "path": "/op-divergence-probes",
+          "traits": [
+            {
+              "ref": "OpDivergenceProbes"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "lifecycle",
+          "config": {
+            "maxRoll": {
+              "default": 6.0,
+              "type": "number"
+            },
+            "maxX": {
+              "default": 100.0,
+              "type": "number"
+            },
+            "minRoll": {
+              "default": 1.0,
+              "type": "number"
+            },
+            "running": {
+              "default": true,
+              "type": "boolean"
+            },
+            "seedItems": {
+              "default": [],
+              "items": {
+                "properties": {
+                  "category": {
+                    "name": "category",
+                    "required": true,
+                    "type": "string"
+                  },
+                  "name": {
+                    "name": "name",
+                    "required": true,
+                    "type": "string"
+                  },
+                  "price": {
+                    "name": "price",
+                    "required": true,
+                    "type": "number"
+                  },
+                  "qty": {
+                    "name": "qty",
+                    "required": true,
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "[Item]"
+            },
+            "seedTags": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "[string]"
+            },
+            "speed": {
+              "default": 2.0,
+              "type": "number"
+            }
+          },
+          "emits": [
+            {
+              "event": "PROBE_RESULT",
+              "payloadSchema": [
+                {
+                  "name": "key",
+                  "required": true,
+                  "type": "string"
+                },
+                {
+                  "name": "value",
+                  "required": true,
+                  "type": "string"
+                }
+              ],
+              "scope": "external"
+            }
+          ],
+          "entityContract": {
+            "provides": [
+              "gold",
+              "hp",
+              "items",
+              "tags",
+              "x",
+              "y"
+            ],
+            "requires": []
+          },
+          "entityRebindable": true,
+          "linkedEntity": "OpDivergenceProbesData",
+          "name": "OpDivergenceProbes",
+          "stateMachine": {
+            "events": [
+              {
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "key": "PROBE_GROUP_BY",
+                "name": "Probe Group By"
+              },
+              {
+                "key": "PROBE_FIND_INDEX",
+                "name": "Probe Find Index",
+                "payloadSchema": [
+                  {
+                    "name": "itemName",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_INDEX_OF",
+                "name": "Probe Index Of",
+                "payloadSchema": [
+                  {
+                    "name": "targetTag",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_HYPOT",
+                "name": "Probe Hypot",
+                "payloadSchema": [
+                  {
+                    "name": "dx",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "dy",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_WRAP",
+                "name": "Probe Wrap"
+              },
+              {
+                "key": "PROBE_APPROACH",
+                "name": "Probe Approach",
+                "payloadSchema": [
+                  {
+                    "name": "target",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_RANDOM_INT",
+                "name": "Probe Random Int"
+              },
+              {
+                "key": "PROBE_REPLACE_ALL",
+                "name": "Probe Replace All",
+                "payloadSchema": [
+                  {
+                    "name": "input",
+                    "required": true,
+                    "type": "string"
+                  },
+                  {
+                    "name": "old",
+                    "required": true,
+                    "type": "string"
+                  },
+                  {
+                    "name": "new",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_STARTS_WITH",
+                "name": "Probe Starts With",
+                "payloadSchema": [
+                  {
+                    "name": "prefix",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_ENDS_WITH",
+                "name": "Probe Ends With",
+                "payloadSchema": [
+                  {
+                    "name": "suffix",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_PAD_START",
+                "name": "Probe Pad Start",
+                "payloadSchema": [
+                  {
+                    "name": "targetLen",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "padChar",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_DEEP_MERGE",
+                "name": "Probe Deep Merge",
+                "payloadSchema": [
+                  {
+                    "name": "overrides",
+                    "required": true,
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_MAP_VALUES",
+                "name": "Probe Map Values",
+                "payloadSchema": [
+                  {
+                    "name": "obj",
+                    "required": true,
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_AABB_OVERLAP",
+                "name": "Probe Aabb Overlap",
+                "payloadSchema": [
+                  {
+                    "name": "rectA",
+                    "required": true,
+                    "type": "Rect"
+                  },
+                  {
+                    "name": "rectB",
+                    "required": true,
+                    "type": "Rect"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_POINT_IN_RECT",
+                "name": "Probe Point In Rect",
+                "payloadSchema": [
+                  {
+                    "name": "point",
+                    "required": true,
+                    "type": "object"
+                  },
+                  {
+                    "name": "rect",
+                    "required": true,
+                    "type": "Rect"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_IS_BEFORE",
+                "name": "Probe Is Before",
+                "payloadSchema": [
+                  {
+                    "name": "compareDate",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_IS_AFTER",
+                "name": "Probe Is After",
+                "payloadSchema": [
+                  {
+                    "name": "compareDate",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_VALIDATE_REQUIRED",
+                "name": "Probe Validate Required"
+              },
+              {
+                "key": "PROBE_VALIDATE_PATTERN",
+                "name": "Probe Validate Pattern",
+                "payloadSchema": [
+                  {
+                    "name": "regex",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_FORMAT_NUMBER",
+                "name": "Probe Format Number",
+                "payloadSchema": [
+                  {
+                    "name": "decimals",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "PROBE_RESULT",
+                "name": "Probe Result",
+                "payloadSchema": [
+                  {
+                    "name": "key",
+                    "required": true,
+                    "type": "string"
+                  },
+                  {
+                    "name": "value",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "active"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.hp",
+                    100.0
+                  ],
+                  [
+                    "set",
+                    "@entity.gold",
+                    0.0
+                  ],
+                  [
+                    "set",
+                    "@entity.x",
+                    0.0
+                  ],
+                  [
+                    "set",
+                    "@entity.y",
+                    0.0
+                  ],
+                  [
+                    "set",
+                    "@entity.items",
+                    "@config.seedItems"
+                  ],
+                  [
+                    "set",
+                    "@entity.tags",
+                    "@config.seedTags"
+                  ],
+                  [
+                    "set",
+                    "@entity.createdAt",
+                    [
+                      "time/format",
+                      [
+                        "time/now"
+                      ],
+                      "yyyy-MM-dd"
+                    ]
+                  ]
+                ],
+                "event": "INIT",
+                "from": "active",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "groups",
+                        [
+                          "array/groupBy",
+                          "@entity.items",
+                          [
+                            "fn",
+                            "it",
+                            [
+                              "object/get",
+                              "@it",
+                              "category"
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "groupBy",
+                        "value": "ok"
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_GROUP_BY",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "idx",
+                        [
+                          "array/findIndex",
+                          "@entity.items",
+                          [
+                            "fn",
+                            "it",
+                            [
+                              "==",
+                              [
+                                "object/get",
+                                "@it",
+                                "name"
+                              ],
+                              "@payload.itemName"
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "findIndex",
+                        "value": "ok"
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_FIND_INDEX",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "idx",
+                        [
+                          "array/indexOf",
+                          "@entity.tags",
+                          "@payload.targetTag"
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "indexOf",
+                        "value": "ok"
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_INDEX_OF",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "dist",
+                        [
+                          "math/hypot",
+                          "@payload.dx",
+                          "@payload.dy"
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "hypot",
+                        "value": "ok"
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_HYPOT",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "wrapped",
+                        [
+                          "math/wrap",
+                          "@entity.x",
+                          0.0,
+                          "@config.maxX"
+                        ]
+                      ]
+                    ],
+                    [
+                      "do",
+                      [
+                        "set",
+                        "@entity.x",
+                        "@wrapped"
+                      ],
+                      [
+                        "emit",
+                        "PROBE_RESULT",
+                        {
+                          "key": "wrap",
+                          "value": "ok"
+                        }
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "PROBE_WRAP",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "approached",
+                        [
+                          "math/approach",
+                          "@entity.x",
+                          "@payload.target",
+                          "@config.speed"
+                        ]
+                      ]
+                    ],
+                    [
+                      "do",
+                      [
+                        "set",
+                        "@entity.x",
+                        "@approached"
+                      ],
+                      [
+                        "emit",
+                        "PROBE_RESULT",
+                        {
+                          "key": "approach",
+                          "value": "ok"
+                        }
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "PROBE_APPROACH",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "roll",
+                        [
+                          "math/randomInt",
+                          "@config.minRoll",
+                          "@config.maxRoll"
+                        ]
+                      ]
+                    ],
+                    [
+                      "do",
+                      [
+                        "set",
+                        "@entity.gold",
+                        [
+                          "+",
+                          "@entity.gold",
+                          "@roll"
+                        ]
+                      ],
+                      [
+                        "emit",
+                        "PROBE_RESULT",
+                        {
+                          "key": "randomInt",
+                          "value": "ok"
+                        }
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "PROBE_RANDOM_INT",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "clean",
+                        [
+                          "str/replaceAll",
+                          "@payload.input",
+                          "@payload.old",
+                          "@payload.new"
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "replaceAll",
+                        "value": "@clean"
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_REPLACE_ALL",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "emit",
+                    "PROBE_RESULT",
+                    {
+                      "key": "startsWith",
+                      "value": "yes"
+                    }
+                  ]
+                ],
+                "event": "PROBE_STARTS_WITH",
+                "from": "active",
+                "guard": [
+                  "and",
+                  "@config.running",
+                  [
+                    "str/startsWith",
+                    "@entity.id",
+                    "@payload.prefix"
+                  ]
+                ],
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "emit",
+                    "PROBE_RESULT",
+                    {
+                      "key": "endsWith",
+                      "value": "yes"
+                    }
+                  ]
+                ],
+                "event": "PROBE_ENDS_WITH",
+                "from": "active",
+                "guard": [
+                  "and",
+                  "@config.running",
+                  [
+                    "str/endsWith",
+                    "@entity.id",
+                    "@payload.suffix"
+                  ]
+                ],
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "padded",
+                        [
+                          "str/padStart",
+                          "@entity.id",
+                          "@payload.targetLen",
+                          "@payload.padChar"
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "padStart",
+                        "value": "@padded"
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_PAD_START",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "merged",
+                        [
+                          "object/deepMerge",
+                          "@entity",
+                          "@payload.overrides"
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "deepMerge",
+                        "value": "ok"
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_DEEP_MERGE",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "mapped",
+                        [
+                          "object/mapValues",
+                          "@payload.obj",
+                          [
+                            "fn",
+                            "v",
+                            [
+                              "str/upper",
+                              "@v"
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "mapValues",
+                        "value": "ok"
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_MAP_VALUES",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "overlaps",
+                        [
+                          "geo/aabb-overlap",
+                          "@payload.rectA",
+                          "@payload.rectB"
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "aabb-overlap",
+                        "value": [
+                          "if",
+                          "@overlaps",
+                          "yes",
+                          "no"
+                        ]
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_AABB_OVERLAP",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "inside",
+                        [
+                          "geo/point-in-rect",
+                          "@payload.point",
+                          "@payload.rect"
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "point-in-rect",
+                        "value": [
+                          "if",
+                          "@inside",
+                          "yes",
+                          "no"
+                        ]
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_POINT_IN_RECT",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "emit",
+                    "PROBE_RESULT",
+                    {
+                      "key": "isBefore",
+                      "value": "yes"
+                    }
+                  ]
+                ],
+                "event": "PROBE_IS_BEFORE",
+                "from": "active",
+                "guard": [
+                  "and",
+                  "@config.running",
+                  [
+                    "time/isBefore",
+                    "@entity.createdAt",
+                    "@payload.compareDate"
+                  ]
+                ],
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "emit",
+                    "PROBE_RESULT",
+                    {
+                      "key": "isAfter",
+                      "value": "yes"
+                    }
+                  ]
+                ],
+                "event": "PROBE_IS_AFTER",
+                "from": "active",
+                "guard": [
+                  "and",
+                  "@config.running",
+                  [
+                    "time/isAfter",
+                    "@entity.createdAt",
+                    "@payload.compareDate"
+                  ]
+                ],
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "valid",
+                        [
+                          "validate/required",
+                          "@entity.id"
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "validateRequired",
+                        "value": [
+                          "if",
+                          "@valid",
+                          "pass",
+                          "fail"
+                        ]
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_VALIDATE_REQUIRED",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "matches",
+                        [
+                          "validate/pattern",
+                          "@entity.id",
+                          "@payload.regex"
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "validatePattern",
+                        "value": [
+                          "if",
+                          "@matches",
+                          "pass",
+                          "fail"
+                        ]
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_VALIDATE_PATTERN",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "formatted",
+                        [
+                          "format/number",
+                          "@entity.gold",
+                          "@payload.decimals"
+                        ]
+                      ]
+                    ],
+                    [
+                      "emit",
+                      "PROBE_RESULT",
+                      {
+                        "key": "formatNumber",
+                        "value": "@formatted"
+                      }
+                    ]
+                  ]
+                ],
+                "event": "PROBE_FORMAT_NUMBER",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}

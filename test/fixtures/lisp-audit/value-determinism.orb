@@ -1,0 +1,275 @@
+{
+  "description": "Pure deterministic value computations for cross-path runtime-vs-compiled comparison.",
+  "name": "value-determinism",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 0.0,
+            "name": "n",
+            "type": "number"
+          },
+          {
+            "default": "",
+            "name": "s",
+            "type": "string"
+          },
+          {
+            "default": [
+              1.0,
+              2.0,
+              3.0,
+              6.0,
+              8.0,
+              10.0
+            ],
+            "items": {
+              "type": "number"
+            },
+            "name": "arr",
+            "type": "array"
+          },
+          {
+            "default": {},
+            "name": "obj",
+            "type": "object"
+          }
+        ],
+        "name": "ValueRecord",
+        "persistence": "runtime"
+      },
+      "name": "ValueDeterminismOrbital",
+      "pages": [
+        {
+          "name": "ValueDeterminismPage",
+          "path": "/value-determinism",
+          "traits": [
+            {
+              "ref": "ValueDeterminism"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "interaction",
+          "config": {
+            "base": {
+              "default": 10.0,
+              "type": "number"
+            },
+            "label": {
+              "default": "base",
+              "type": "string"
+            }
+          },
+          "emits": [
+            {
+              "event": "Computed",
+              "payloadSchema": [
+                {
+                  "name": "n",
+                  "type": "number"
+                },
+                {
+                  "name": "s",
+                  "type": "string"
+                }
+              ],
+              "scope": "external"
+            }
+          ],
+          "linkedEntity": "ValueRecord",
+          "name": "ValueDeterminism",
+          "scope": "instance",
+          "stateMachine": {
+            "events": [
+              {
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "key": "Compute",
+                "name": "Compute"
+              },
+              {
+                "key": "Computed",
+                "name": "Computed",
+                "payloadSchema": [
+                  {
+                    "name": "n",
+                    "type": "number"
+                  },
+                  {
+                    "name": "s",
+                    "type": "string"
+                  }
+                ]
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "idle"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "render-ui",
+                    "main",
+                    {
+                      "children": [
+                        {
+                          "content": "value-determinism idle",
+                          "type": "typography",
+                          "variant": "h2"
+                        }
+                      ],
+                      "type": "stack"
+                    }
+                  ],
+                  [
+                    "set",
+                    "@entity.arr",
+                    [
+                      1.0,
+                      2.0,
+                      3.0,
+                      6.0,
+                      8.0,
+                      10.0
+                    ]
+                  ],
+                  [
+                    "set",
+                    "@entity.obj",
+                    {
+                      "label": "init"
+                    }
+                  ]
+                ],
+                "event": "INIT",
+                "from": "idle",
+                "to": "idle"
+              },
+              {
+                "effects": [
+                  [
+                    "render-ui",
+                    "main",
+                    {
+                      "children": [
+                        {
+                          "content": "value-determinism computed",
+                          "type": "typography",
+                          "variant": "h2"
+                        }
+                      ],
+                      "type": "stack"
+                    }
+                  ],
+                  [
+                    "set",
+                    "@entity.n",
+                    [
+                      "+",
+                      [
+                        "*",
+                        3.0,
+                        4.0
+                      ],
+                      [
+                        "-",
+                        10.0,
+                        6.0
+                      ]
+                    ]
+                  ],
+                  [
+                    "set",
+                    "@entity.s",
+                    [
+                      "str/concat",
+                      "a",
+                      "b",
+                      "c"
+                    ]
+                  ],
+                  [
+                    "set",
+                    "@entity.arr",
+                    [
+                      "array/map",
+                      [
+                        "array/filter",
+                        "@entity.arr",
+                        [
+                          "fn",
+                          "x",
+                          [
+                            ">",
+                            "x",
+                            5.0
+                          ]
+                        ]
+                      ],
+                      [
+                        "fn",
+                        "x",
+                        [
+                          "*",
+                          "x",
+                          "x"
+                        ]
+                      ]
+                    ]
+                  ],
+                  [
+                    "set",
+                    "@entity.obj",
+                    [
+                      "object/merge",
+                      "@entity.obj",
+                      {
+                        "updated": "@now"
+                      }
+                    ]
+                  ],
+                  [
+                    "emit",
+                    "Computed",
+                    {
+                      "n": "@entity.n",
+                      "s": "@entity.s"
+                    }
+                  ]
+                ],
+                "event": "Compute",
+                "from": "idle",
+                "guard": [
+                  "==",
+                  [
+                    "math/max",
+                    3.0,
+                    7.0
+                  ],
+                  7.0
+                ],
+                "to": "idle"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}

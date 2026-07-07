@@ -1,0 +1,941 @@
+{
+  "description": "Deep-let physics step: 21-level nested let chain with clamped velocity, AABB collision, hazard/goal detection, and a deep if-ladder.",
+  "name": "nest-deeplet",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 0.0,
+            "name": "score",
+            "type": "number"
+          },
+          {
+            "default": 3.0,
+            "name": "lives",
+            "type": "number"
+          },
+          {
+            "default": "none",
+            "name": "outcome",
+            "type": "string",
+            "values": [
+              "none",
+              "won",
+              "lost"
+            ]
+          },
+          {
+            "default": {
+              "grounded": false,
+              "height": 40.0,
+              "vx": 0.0,
+              "vy": 0.0,
+              "width": 28.0,
+              "x": 10.0,
+              "y": 300.0
+            },
+            "name": "player",
+            "properties": {
+              "grounded": {
+                "name": "grounded",
+                "required": false,
+                "type": "boolean"
+              },
+              "height": {
+                "name": "height",
+                "required": true,
+                "type": "number"
+              },
+              "vx": {
+                "name": "vx",
+                "required": false,
+                "type": "number"
+              },
+              "vy": {
+                "name": "vy",
+                "required": false,
+                "type": "number"
+              },
+              "width": {
+                "name": "width",
+                "required": true,
+                "type": "number"
+              },
+              "x": {
+                "name": "x",
+                "required": true,
+                "type": "number"
+              },
+              "y": {
+                "name": "y",
+                "required": true,
+                "type": "number"
+              }
+            },
+            "type": "object"
+          },
+          {
+            "default": [],
+            "items": {
+              "properties": {
+                "id": {
+                  "name": "id",
+                  "required": true,
+                  "type": "string"
+                },
+                "kind": {
+                  "name": "kind",
+                  "required": true,
+                  "type": "string"
+                },
+                "message": {
+                  "name": "message",
+                  "required": false,
+                  "type": "string"
+                },
+                "ttl": {
+                  "name": "ttl",
+                  "required": true,
+                  "type": "number"
+                },
+                "x": {
+                  "name": "x",
+                  "required": true,
+                  "type": "number"
+                },
+                "y": {
+                  "name": "y",
+                  "required": true,
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "name": "particles",
+            "type": "array"
+          },
+          {
+            "default": 800.0,
+            "name": "worldW",
+            "type": "number"
+          },
+          {
+            "default": 400.0,
+            "name": "worldH",
+            "type": "number"
+          }
+        ],
+        "name": "DeepLetState",
+        "persistence": "runtime"
+      },
+      "name": "NestDeepLetOrbital",
+      "pages": [
+        {
+          "name": "NestDeepLetPage",
+          "path": "/nest-deeplet",
+          "traits": [
+            {
+              "ref": "NestDeepLet"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "lifecycle",
+          "config": {
+            "gravity": {
+              "default": 0.5,
+              "description": "vy delta per tick",
+              "label": "Gravity",
+              "tier": "domain",
+              "type": "number"
+            },
+            "jumpStr": {
+              "default": 10.0,
+              "description": "vy impulse magnitude",
+              "label": "Jump Strength",
+              "tier": "domain",
+              "type": "number"
+            },
+            "maxFall": {
+              "default": 16.0,
+              "description": "Terminal velocity",
+              "label": "Max Fall Speed",
+              "tier": "domain",
+              "type": "number"
+            },
+            "platforms": {
+              "default": [
+                {
+                  "height": 32.0,
+                  "kind": "ground",
+                  "width": 800.0,
+                  "x": 0.0,
+                  "y": 368.0
+                },
+                {
+                  "height": 16.0,
+                  "kind": "platform",
+                  "width": 120.0,
+                  "x": 300.0,
+                  "y": 280.0
+                },
+                {
+                  "height": 16.0,
+                  "kind": "hazard",
+                  "width": 100.0,
+                  "x": 600.0,
+                  "y": 200.0
+                },
+                {
+                  "height": 28.0,
+                  "kind": "goal",
+                  "width": 60.0,
+                  "x": 700.0,
+                  "y": 140.0
+                }
+              ],
+              "description": "Static platform list for collision checks",
+              "items": {
+                "properties": {
+                  "height": {
+                    "name": "height",
+                    "required": true,
+                    "type": "number"
+                  },
+                  "kind": {
+                    "name": "kind",
+                    "required": false,
+                    "type": "string",
+                    "values": [
+                      "ground",
+                      "platform",
+                      "hazard",
+                      "goal"
+                    ]
+                  },
+                  "width": {
+                    "name": "width",
+                    "required": true,
+                    "type": "number"
+                  },
+                  "x": {
+                    "name": "x",
+                    "required": true,
+                    "type": "number"
+                  },
+                  "y": {
+                    "name": "y",
+                    "required": true,
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "label": "Platforms",
+              "tier": "domain",
+              "type": "[Platform]"
+            },
+            "worldH": {
+              "default": 400.0,
+              "description": "World height in pixels",
+              "label": "World Height",
+              "tier": "domain",
+              "type": "number"
+            },
+            "worldW": {
+              "default": 800.0,
+              "description": "World width in pixels",
+              "label": "World Width",
+              "tier": "domain",
+              "type": "number"
+            }
+          },
+          "emits": [
+            {
+              "description": "Emitted when outcome becomes won or lost",
+              "event": "GAME_OVER",
+              "payloadSchema": [
+                {
+                  "name": "result",
+                  "required": true,
+                  "type": "string"
+                }
+              ],
+              "scope": "external",
+              "tier": "domain"
+            }
+          ],
+          "entityContract": {
+            "provides": [
+              "lives",
+              "outcome",
+              "particles",
+              "player",
+              "score",
+              "worldH",
+              "worldW"
+            ],
+            "requires": []
+          },
+          "entityRebindable": true,
+          "linkedEntity": "DeepLetState",
+          "name": "NestDeepLet",
+          "stateMachine": {
+            "events": [
+              {
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "description": "Emitted when outcome becomes won or lost",
+                "key": "GAME_OVER",
+                "name": "Game Over",
+                "payloadSchema": [
+                  {
+                    "name": "result",
+                    "required": true,
+                    "type": "string"
+                  }
+                ],
+                "tier": "domain"
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "playing"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.score",
+                    0.0
+                  ],
+                  [
+                    "set",
+                    "@entity.lives",
+                    3.0
+                  ],
+                  [
+                    "set",
+                    "@entity.outcome",
+                    "none"
+                  ],
+                  [
+                    "set",
+                    "@entity.particles",
+                    []
+                  ],
+                  [
+                    "set",
+                    "@entity.player",
+                    {
+                      "grounded": false,
+                      "height": 40.0,
+                      "vx": 0.0,
+                      "vy": 0.0,
+                      "width": 28.0,
+                      "x": 10.0,
+                      "y": 300.0
+                    }
+                  ],
+                  [
+                    "set",
+                    "@entity.worldW",
+                    "@config.worldW"
+                  ],
+                  [
+                    "set",
+                    "@entity.worldH",
+                    "@config.worldH"
+                  ]
+                ],
+                "event": "INIT",
+                "from": "playing",
+                "to": "playing"
+              }
+            ]
+          },
+          "ticks": [
+            {
+              "effects": [
+                [
+                  "let",
+                  [
+                    [
+                      "vy1",
+                      [
+                        "math/clamp",
+                        [
+                          "+",
+                          "@entity.player.vy",
+                          "@config.gravity"
+                        ],
+                        [
+                          "-",
+                          0.0,
+                          "@config.jumpStr"
+                        ],
+                        "@config.maxFall"
+                      ]
+                    ],
+                    [
+                      "px1",
+                      [
+                        "math/clamp",
+                        [
+                          "+",
+                          "@entity.player.x",
+                          "@entity.player.vx"
+                        ],
+                        0.0,
+                        [
+                          "-",
+                          "@entity.worldW",
+                          "@entity.player.width"
+                        ]
+                      ]
+                    ],
+                    [
+                      "pw",
+                      "@entity.player.width"
+                    ],
+                    [
+                      "ph",
+                      "@entity.player.height"
+                    ]
+                  ],
+                  [
+                    "let",
+                    [
+                      [
+                        "py1",
+                        [
+                          "+",
+                          "@entity.player.y",
+                          "@vy1"
+                        ]
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "rect",
+                          {
+                            "h": "@ph",
+                            "w": "@pw",
+                            "x": "@px1",
+                            "y": "@py1"
+                          }
+                        ]
+                      ],
+                      [
+                        "let",
+                        [
+                          [
+                            "platHit",
+                            [
+                              "array/find",
+                              "@config.platforms",
+                              [
+                                "fn",
+                                "p",
+                                [
+                                  "and",
+                                  [
+                                    "!=",
+                                    [
+                                      "object/get",
+                                      "@p",
+                                      "kind"
+                                    ],
+                                    "goal"
+                                  ],
+                                  [
+                                    "geo/aabb-overlap",
+                                    "@rect",
+                                    {
+                                      "h": "@p.height",
+                                      "w": "@p.width",
+                                      "x": "@p.x",
+                                      "y": "@p.y"
+                                    }
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ],
+                        [
+                          "let",
+                          [
+                            [
+                              "hazardHit",
+                              [
+                                "array/find",
+                                "@config.platforms",
+                                [
+                                  "fn",
+                                  "p",
+                                  [
+                                    "and",
+                                    [
+                                      "==",
+                                      [
+                                        "object/get",
+                                        "@p",
+                                        "kind"
+                                      ],
+                                      "hazard"
+                                    ],
+                                    [
+                                      "geo/aabb-overlap",
+                                      "@rect",
+                                      {
+                                        "h": "@p.height",
+                                        "w": "@p.width",
+                                        "x": "@p.x",
+                                        "y": "@p.y"
+                                      }
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ],
+                          [
+                            "let",
+                            [
+                              [
+                                "goalHit",
+                                [
+                                  "array/find",
+                                  "@config.platforms",
+                                  [
+                                    "fn",
+                                    "p",
+                                    [
+                                      "and",
+                                      [
+                                        "==",
+                                        [
+                                          "object/get",
+                                          "@p",
+                                          "kind"
+                                        ],
+                                        "goal"
+                                      ],
+                                      [
+                                        "geo/aabb-overlap",
+                                        "@rect",
+                                        {
+                                          "h": "@p.height",
+                                          "w": "@p.width",
+                                          "x": "@p.x",
+                                          "y": "@p.y"
+                                        }
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ],
+                            [
+                              "let",
+                              [
+                                [
+                                  "hitY",
+                                  [
+                                    "object/get",
+                                    "@platHit",
+                                    "y",
+                                    "@entity.worldH"
+                                  ]
+                                ]
+                              ],
+                              [
+                                "let",
+                                [
+                                  [
+                                    "landed",
+                                    [
+                                      "and",
+                                      [
+                                        "!=",
+                                        "@platHit",
+                                        null
+                                      ],
+                                      [
+                                        ">",
+                                        "@vy1",
+                                        0.0
+                                      ]
+                                    ]
+                                  ]
+                                ],
+                                [
+                                  "let",
+                                  [
+                                    [
+                                      "py2",
+                                      [
+                                        "if",
+                                        "@landed",
+                                        [
+                                          "-",
+                                          "@hitY",
+                                          "@ph"
+                                        ],
+                                        "@py1"
+                                      ]
+                                    ]
+                                  ],
+                                  [
+                                    "let",
+                                    [
+                                      [
+                                        "vy2",
+                                        [
+                                          "if",
+                                          "@landed",
+                                          0.0,
+                                          "@vy1"
+                                        ]
+                                      ]
+                                    ],
+                                    [
+                                      "let",
+                                      [
+                                        [
+                                          "atFloor",
+                                          [
+                                            ">=",
+                                            [
+                                              "+",
+                                              "@py2",
+                                              "@ph"
+                                            ],
+                                            "@entity.worldH"
+                                          ]
+                                        ]
+                                      ],
+                                      [
+                                        "let",
+                                        [
+                                          [
+                                            "py3",
+                                            [
+                                              "if",
+                                              "@atFloor",
+                                              [
+                                                "-",
+                                                "@entity.worldH",
+                                                "@ph"
+                                              ],
+                                              "@py2"
+                                            ]
+                                          ]
+                                        ],
+                                        [
+                                          "let",
+                                          [
+                                            [
+                                              "vy3",
+                                              [
+                                                "if",
+                                                "@atFloor",
+                                                0.0,
+                                                "@vy2"
+                                              ]
+                                            ]
+                                          ],
+                                          [
+                                            "let",
+                                            [
+                                              [
+                                                "grounded",
+                                                [
+                                                  "or",
+                                                  "@landed",
+                                                  "@atFloor"
+                                                ]
+                                              ]
+                                            ],
+                                            [
+                                              "let",
+                                              [
+                                                [
+                                                  "fell",
+                                                  [
+                                                    "and",
+                                                    "@atFloor",
+                                                    [
+                                                      "==",
+                                                      "@landed",
+                                                      false
+                                                    ]
+                                                  ]
+                                                ]
+                                              ],
+                                              [
+                                                "let",
+                                                [
+                                                  [
+                                                    "damaged",
+                                                    [
+                                                      "or",
+                                                      [
+                                                        "!=",
+                                                        "@hazardHit",
+                                                        null
+                                                      ],
+                                                      "@fell"
+                                                    ]
+                                                  ]
+                                                ],
+                                                [
+                                                  "let",
+                                                  [
+                                                    [
+                                                      "livesLeft",
+                                                      [
+                                                        "-",
+                                                        "@entity.lives",
+                                                        1.0
+                                                      ]
+                                                    ]
+                                                  ],
+                                                  [
+                                                    "let",
+                                                    [
+                                                      [
+                                                        "newOutcome",
+                                                        [
+                                                          "if",
+                                                          [
+                                                            "!=",
+                                                            "@goalHit",
+                                                            null
+                                                          ],
+                                                          "won",
+                                                          [
+                                                            "if",
+                                                            [
+                                                              "and",
+                                                              "@damaged",
+                                                              [
+                                                                "<=",
+                                                                "@livesLeft",
+                                                                0.0
+                                                              ]
+                                                            ],
+                                                            "lost",
+                                                            "none"
+                                                          ]
+                                                        ]
+                                                      ]
+                                                    ],
+                                                    [
+                                                      "let",
+                                                      [
+                                                        [
+                                                          "dmgFx",
+                                                          [
+                                                            "if",
+                                                            [
+                                                              "and",
+                                                              "@damaged",
+                                                              [
+                                                                "==",
+                                                                "@newOutcome",
+                                                                "none"
+                                                              ]
+                                                            ],
+                                                            [
+                                                              {
+                                                                "id": [
+                                                                  "str/concat",
+                                                                  "dmg-",
+                                                                  "@entity.lives"
+                                                                ],
+                                                                "kind": "damage",
+                                                                "message": "-1",
+                                                                "ttl": 15.0,
+                                                                "x": "@px1",
+                                                                "y": "@py3"
+                                                              }
+                                                            ],
+                                                            []
+                                                          ]
+                                                        ]
+                                                      ],
+                                                      [
+                                                        "let",
+                                                        [
+                                                          [
+                                                            "winFx",
+                                                            [
+                                                              "if",
+                                                              [
+                                                                "==",
+                                                                "@newOutcome",
+                                                                "won"
+                                                              ],
+                                                              [
+                                                                {
+                                                                  "id": "win-0",
+                                                                  "kind": "win",
+                                                                  "message": "GOAL!",
+                                                                  "ttl": 30.0,
+                                                                  "x": "@px1",
+                                                                  "y": "@py3"
+                                                                }
+                                                              ],
+                                                              []
+                                                            ]
+                                                          ]
+                                                        ],
+                                                        [
+                                                          "let",
+                                                          [
+                                                            [
+                                                              "mergedFx",
+                                                              [
+                                                                "array/concat",
+                                                                "@entity.particles",
+                                                                [
+                                                                  "array/concat",
+                                                                  "@dmgFx",
+                                                                  "@winFx"
+                                                                ]
+                                                              ]
+                                                            ]
+                                                          ],
+                                                          [
+                                                            "do",
+                                                            [
+                                                              "set",
+                                                              "@entity.player",
+                                                              [
+                                                                "object/merge",
+                                                                "@entity.player",
+                                                                {
+                                                                  "grounded": "@grounded",
+                                                                  "vy": "@vy3",
+                                                                  "x": "@px1",
+                                                                  "y": "@py3"
+                                                                }
+                                                              ]
+                                                            ],
+                                                            [
+                                                              "set",
+                                                              "@entity.outcome",
+                                                              "@newOutcome"
+                                                            ],
+                                                            [
+                                                              "set",
+                                                              "@entity.score",
+                                                              [
+                                                                "+",
+                                                                "@entity.score",
+                                                                [
+                                                                  "if",
+                                                                  [
+                                                                    "!=",
+                                                                    "@goalHit",
+                                                                    null
+                                                                  ],
+                                                                  200.0,
+                                                                  0.0
+                                                                ]
+                                                              ]
+                                                            ],
+                                                            [
+                                                              "set",
+                                                              "@entity.lives",
+                                                              [
+                                                                "if",
+                                                                [
+                                                                  "and",
+                                                                  "@damaged",
+                                                                  [
+                                                                    "==",
+                                                                    "@newOutcome",
+                                                                    "none"
+                                                                  ]
+                                                                ],
+                                                                "@livesLeft",
+                                                                "@entity.lives"
+                                                              ]
+                                                            ],
+                                                            [
+                                                              "set",
+                                                              "@entity.particles",
+                                                              "@mergedFx"
+                                                            ]
+                                                          ]
+                                                        ]
+                                                      ]
+                                                    ]
+                                                  ]
+                                                ]
+                                              ]
+                                            ]
+                                          ]
+                                        ]
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "if",
+                  [
+                    "!=",
+                    "@entity.outcome",
+                    "none"
+                  ],
+                  [
+                    "emit",
+                    "GAME_OVER",
+                    {
+                      "result": "@entity.outcome"
+                    }
+                  ],
+                  null
+                ]
+              ],
+              "guard": [
+                "==",
+                "@entity.outcome",
+                "none"
+              ],
+              "interval": 16.0,
+              "name": "physicsTick"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}

@@ -1,0 +1,986 @@
+{
+  "description": "Stress-tests if let do when fn nesting, multi-arg fns, and complex guard expressions with and/or/not.",
+  "name": "op-control-flow",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 0.0,
+            "name": "value",
+            "type": "number"
+          },
+          {
+            "default": [],
+            "items": {
+              "properties": {
+                "x": {
+                  "name": "x",
+                  "required": true,
+                  "type": "number"
+                },
+                "y": {
+                  "name": "y",
+                  "required": true,
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "name": "points",
+            "type": "array"
+          },
+          {
+            "default": "",
+            "name": "label",
+            "type": "string"
+          },
+          {
+            "default": true,
+            "name": "active",
+            "type": "boolean"
+          }
+        ],
+        "name": "OpControlFlowData",
+        "persistence": "runtime",
+        "shared": true
+      },
+      "name": "OpControlFlowOrbital",
+      "pages": [
+        {
+          "name": "OpControlFlowPage",
+          "path": "/op-control-flow",
+          "traits": [
+            {
+              "ref": "OpControlFlow"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "lifecycle",
+          "config": {
+            "factor": {
+              "default": 2.0,
+              "type": "number"
+            },
+            "running": {
+              "default": true,
+              "type": "boolean"
+            },
+            "seedPoints": {
+              "default": [],
+              "items": {
+                "properties": {
+                  "x": {
+                    "name": "x",
+                    "required": true,
+                    "type": "number"
+                  },
+                  "y": {
+                    "name": "y",
+                    "required": true,
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "[Point]"
+            },
+            "seedValue": {
+              "default": 42.0,
+              "type": "number"
+            }
+          },
+          "emits": [
+            {
+              "event": "NESTED_RESULT",
+              "payloadSchema": [
+                {
+                  "name": "value",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "label",
+                  "required": true,
+                  "type": "string"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "FN_RESULT",
+              "payloadSchema": [
+                {
+                  "name": "sumX",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "sumY",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "doubledCount",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "filteredCount",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "GUARD_RESULT",
+              "payloadSchema": [
+                {
+                  "name": "value",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "label",
+                  "required": true,
+                  "type": "string"
+                },
+                {
+                  "name": "id",
+                  "required": true,
+                  "type": "string"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "WHEN_FIRED",
+              "payloadSchema": [
+                {
+                  "name": "value",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "DEEP_NEST_RESULT",
+              "payloadSchema": [
+                {
+                  "name": "x",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "final",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "count",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "OR_CHAIN_RESULT",
+              "payloadSchema": [
+                {
+                  "name": "value",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "label",
+                  "required": true,
+                  "type": "string"
+                }
+              ],
+              "scope": "external"
+            }
+          ],
+          "entityContract": {
+            "provides": [
+              "active",
+              "label",
+              "points",
+              "value"
+            ],
+            "requires": []
+          },
+          "entityRebindable": true,
+          "linkedEntity": "OpControlFlowData",
+          "name": "OpControlFlow",
+          "stateMachine": {
+            "events": [
+              {
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "key": "NESTED_LET_IF_DO",
+                "name": "Nested Let If Do"
+              },
+              {
+                "key": "LET_WITH_FNS",
+                "name": "Let With Fns"
+              },
+              {
+                "key": "COMPLEX_GUARD",
+                "name": "Complex Guard"
+              },
+              {
+                "key": "WHEN_TEST",
+                "name": "When Test"
+              },
+              {
+                "key": "DEEPLY_NESTED",
+                "name": "Deeply Nested",
+                "payloadSchema": [
+                  {
+                    "name": "a",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "b",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "c",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "GUARD_OR_CHAIN",
+                "name": "Guard Or Chain"
+              },
+              {
+                "key": "NESTED_RESULT",
+                "name": "Nested Result",
+                "payloadSchema": [
+                  {
+                    "name": "value",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "label",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "FN_RESULT",
+                "name": "Fn Result",
+                "payloadSchema": [
+                  {
+                    "name": "sumX",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "sumY",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "doubledCount",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "filteredCount",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "GUARD_RESULT",
+                "name": "Guard Result",
+                "payloadSchema": [
+                  {
+                    "name": "value",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "label",
+                    "required": true,
+                    "type": "string"
+                  },
+                  {
+                    "name": "id",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "key": "WHEN_FIRED",
+                "name": "When Fired",
+                "payloadSchema": [
+                  {
+                    "name": "value",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "DEEP_NEST_RESULT",
+                "name": "Deep Nest Result",
+                "payloadSchema": [
+                  {
+                    "name": "x",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "final",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "count",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "OR_CHAIN_RESULT",
+                "name": "Or Chain Result",
+                "payloadSchema": [
+                  {
+                    "name": "value",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "label",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "active"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.value",
+                    "@config.seedValue"
+                  ],
+                  [
+                    "set",
+                    "@entity.points",
+                    "@config.seedPoints"
+                  ],
+                  [
+                    "set",
+                    "@entity.label",
+                    ""
+                  ],
+                  [
+                    "set",
+                    "@entity.active",
+                    true
+                  ]
+                ],
+                "event": "INIT",
+                "from": "active",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "threshold",
+                        50.0
+                      ],
+                      [
+                        "multiplier",
+                        2.0
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "scaled",
+                          [
+                            "if",
+                            [
+                              ">",
+                              "@entity.value",
+                              "@threshold"
+                            ],
+                            [
+                              "do",
+                              [
+                                "set",
+                                "@entity.label",
+                                "high"
+                              ],
+                              [
+                                "*",
+                                "@entity.value",
+                                "@multiplier"
+                              ]
+                            ],
+                            [
+                              "do",
+                              [
+                                "set",
+                                "@entity.label",
+                                "low"
+                              ],
+                              "@entity.value"
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "do",
+                        [
+                          "set",
+                          "@entity.value",
+                          "@scaled"
+                        ],
+                        [
+                          "emit",
+                          "NESTED_RESULT",
+                          {
+                            "label": "@entity.label",
+                            "value": "@scaled"
+                          }
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "NESTED_LET_IF_DO",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "factor",
+                        "@config.factor"
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "doubled",
+                          [
+                            "array/map",
+                            "@entity.points",
+                            [
+                              "fn",
+                              "pt",
+                              [
+                                "*",
+                                [
+                                  "object/get",
+                                  "@pt",
+                                  "x"
+                                ],
+                                "@factor"
+                              ]
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "let",
+                        [
+                          [
+                            "filtered",
+                            [
+                              "array/filter",
+                              "@entity.points",
+                              [
+                                "fn",
+                                "pt",
+                                [
+                                  "and",
+                                  [
+                                    ">",
+                                    [
+                                      "object/get",
+                                      "@pt",
+                                      "x"
+                                    ],
+                                    0.0
+                                  ],
+                                  [
+                                    ">",
+                                    [
+                                      "object/get",
+                                      "@pt",
+                                      "y"
+                                    ],
+                                    0.0
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ],
+                        [
+                          "let",
+                          [
+                            [
+                              "sumX",
+                              [
+                                "array/reduce",
+                                "@entity.points",
+                                0.0,
+                                [
+                                  "fn",
+                                  [
+                                    "acc",
+                                    "pt"
+                                  ],
+                                  [
+                                    "+",
+                                    "@acc",
+                                    [
+                                      "object/get",
+                                      "@pt",
+                                      "x"
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ],
+                          [
+                            "let",
+                            [
+                              [
+                                "sumY",
+                                [
+                                  "array/reduce",
+                                  "@entity.points",
+                                  0.0,
+                                  [
+                                    "fn",
+                                    [
+                                      "acc",
+                                      "pt"
+                                    ],
+                                    [
+                                      "+",
+                                      "@acc",
+                                      [
+                                        "object/get",
+                                        "@pt",
+                                        "y"
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ],
+                            [
+                              "emit",
+                              "FN_RESULT",
+                              {
+                                "doubledCount": [
+                                  "array/len",
+                                  "@doubled"
+                                ],
+                                "filteredCount": [
+                                  "array/len",
+                                  "@filtered"
+                                ],
+                                "sumX": "@sumX",
+                                "sumY": "@sumY"
+                              }
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "LET_WITH_FNS",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "emit",
+                    "GUARD_RESULT",
+                    {
+                      "id": "@entity.id",
+                      "label": "@entity.label",
+                      "value": "@entity.value"
+                    }
+                  ]
+                ],
+                "event": "COMPLEX_GUARD",
+                "from": "active",
+                "guard": [
+                  "and",
+                  [
+                    "or",
+                    [
+                      "and",
+                      [
+                        ">",
+                        "@entity.value",
+                        10.0
+                      ],
+                      [
+                        "not",
+                        [
+                          "==",
+                          "@entity.label",
+                          ""
+                        ]
+                      ]
+                    ],
+                    [
+                      "and",
+                      [
+                        "<=",
+                        "@entity.value",
+                        10.0
+                      ],
+                      [
+                        ">",
+                        [
+                          "array/len",
+                          "@entity.points"
+                        ],
+                        0.0
+                      ]
+                    ]
+                  ],
+                  [
+                    "not",
+                    [
+                      "==",
+                      "@entity.id",
+                      ""
+                    ]
+                  ],
+                  [
+                    "or",
+                    "@entity.active",
+                    [
+                      "!=",
+                      "@entity.value",
+                      -1.0
+                    ]
+                  ]
+                ],
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "when",
+                    [
+                      ">",
+                      "@entity.value",
+                      0.0
+                    ],
+                    [
+                      "do",
+                      [
+                        "set",
+                        "@entity.label",
+                        "positive"
+                      ],
+                      [
+                        "set",
+                        "@entity.value",
+                        [
+                          "math/floor",
+                          [
+                            "/",
+                            "@entity.value",
+                            2.0
+                          ]
+                        ]
+                      ],
+                      [
+                        "emit",
+                        "WHEN_FIRED",
+                        {
+                          "value": "@entity.value"
+                        }
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "WHEN_TEST",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "x",
+                        [
+                          "if",
+                          [
+                            "and",
+                            [
+                              ">",
+                              "@payload.a",
+                              0.0
+                            ],
+                            [
+                              "or",
+                              [
+                                "<",
+                                "@payload.b",
+                                10.0
+                              ],
+                              [
+                                "!=",
+                                "@payload.c",
+                                0.0
+                              ]
+                            ]
+                          ],
+                          [
+                            "do",
+                            [
+                              "let",
+                              [
+                                [
+                                  "tmp",
+                                  [
+                                    "*",
+                                    "@payload.a",
+                                    "@payload.b"
+                                  ]
+                                ]
+                              ],
+                              [
+                                "math/max",
+                                "@tmp",
+                                [
+                                  "-",
+                                  "@payload.c",
+                                  5.0
+                                ]
+                              ]
+                            ]
+                          ],
+                          0.0
+                        ]
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "results",
+                          [
+                            "array/map",
+                            "@entity.points",
+                            [
+                              "fn",
+                              "pt",
+                              [
+                                "let",
+                                [
+                                  [
+                                    "y",
+                                    [
+                                      "*",
+                                      [
+                                        "object/get",
+                                        "@pt",
+                                        "x"
+                                      ],
+                                      "@x"
+                                    ]
+                                  ]
+                                ],
+                                [
+                                  "let",
+                                  [
+                                    [
+                                      "clamped",
+                                      [
+                                        "math/clamp",
+                                        "@y",
+                                        0.0,
+                                        100.0
+                                      ]
+                                    ]
+                                  ],
+                                  [
+                                    "math/min",
+                                    "@clamped",
+                                    [
+                                      "*",
+                                      "@entity.value",
+                                      2.0
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "let",
+                        [
+                          [
+                            "final",
+                            [
+                              "array/reduce",
+                              "@results",
+                              0.0,
+                              [
+                                "fn",
+                                [
+                                  "acc",
+                                  "v"
+                                ],
+                                [
+                                  "+",
+                                  "@acc",
+                                  "@v"
+                                ]
+                              ]
+                            ]
+                          ]
+                        ],
+                        [
+                          "do",
+                          [
+                            "set",
+                            "@entity.value",
+                            "@final"
+                          ],
+                          [
+                            "emit",
+                            "DEEP_NEST_RESULT",
+                            {
+                              "count": [
+                                "array/len",
+                                "@results"
+                              ],
+                              "final": "@final",
+                              "x": "@x"
+                            }
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "DEEPLY_NESTED",
+                "from": "active",
+                "guard": "@config.running",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "emit",
+                    "OR_CHAIN_RESULT",
+                    {
+                      "label": "@entity.label",
+                      "value": "@entity.value"
+                    }
+                  ]
+                ],
+                "event": "GUARD_OR_CHAIN",
+                "from": "active",
+                "guard": [
+                  "or",
+                  [
+                    "and",
+                    [
+                      ">",
+                      "@entity.value",
+                      100.0
+                    ],
+                    [
+                      "<",
+                      "@entity.value",
+                      200.0
+                    ]
+                  ],
+                  [
+                    "and",
+                    [
+                      "==",
+                      "@entity.label",
+                      "max"
+                    ],
+                    [
+                      ">=",
+                      [
+                        "array/len",
+                        "@entity.points"
+                      ],
+                      5.0
+                    ]
+                  ],
+                  [
+                    "not",
+                    "@entity.active"
+                  ]
+                ],
+                "to": "active"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}

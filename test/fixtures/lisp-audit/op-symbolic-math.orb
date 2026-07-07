@@ -1,0 +1,1016 @@
+{
+  "description": "Stress-tests symbolic + - * / % == != < <= > >= and or not plus namespaced math/vector ops in guards and effects.",
+  "name": "op-symbolic-math",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 100.0,
+            "name": "hp",
+            "type": "number"
+          },
+          {
+            "default": 100.0,
+            "name": "maxHp",
+            "type": "number"
+          },
+          {
+            "default": 50.0,
+            "name": "x",
+            "type": "number"
+          },
+          {
+            "default": 50.0,
+            "name": "y",
+            "type": "number"
+          },
+          {
+            "default": 0.0,
+            "name": "vx",
+            "type": "number"
+          },
+          {
+            "default": 0.0,
+            "name": "vy",
+            "type": "number"
+          },
+          {
+            "default": 100.0,
+            "name": "targetX",
+            "type": "number"
+          },
+          {
+            "default": 5.0,
+            "name": "defense",
+            "type": "number"
+          },
+          {
+            "default": 0.0,
+            "name": "score",
+            "type": "number"
+          },
+          {
+            "default": 0.0,
+            "name": "checkpoint",
+            "type": "number"
+          }
+        ],
+        "name": "OpSymbolicMathData",
+        "persistence": "runtime",
+        "shared": true
+      },
+      "name": "OpSymbolicMathOrbital",
+      "pages": [
+        {
+          "name": "OpSymbolicMathPage",
+          "path": "/op-symbolic-math",
+          "traits": [
+            {
+              "ref": "OpSymbolicMath"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "lifecycle",
+          "config": {
+            "alpha": {
+              "default": 0.1,
+              "type": "number"
+            },
+            "checkpoints": {
+              "default": [
+                "a",
+                "b",
+                "c"
+              ],
+              "items": {
+                "type": "string"
+              },
+              "type": "[string]"
+            },
+            "lapBonus": {
+              "default": 500.0,
+              "type": "number"
+            },
+            "maxMoveThreshold": {
+              "default": 100.0,
+              "type": "number"
+            },
+            "maxX": {
+              "default": 200.0,
+              "type": "number"
+            },
+            "maxY": {
+              "default": 200.0,
+              "type": "number"
+            },
+            "minMoveThreshold": {
+              "default": 0.0,
+              "type": "number"
+            },
+            "running": {
+              "default": true,
+              "type": "boolean"
+            },
+            "scoreMultiplier": {
+              "default": 1.0,
+              "type": "number"
+            },
+            "startDefense": {
+              "default": 5.0,
+              "type": "number"
+            },
+            "startHp": {
+              "default": 100.0,
+              "type": "number"
+            },
+            "startX": {
+              "default": 50.0,
+              "type": "number"
+            },
+            "startY": {
+              "default": 50.0,
+              "type": "number"
+            },
+            "vecScale": {
+              "default": 1.5,
+              "type": "number"
+            }
+          },
+          "emits": [
+            {
+              "event": "DAMAGED",
+              "payloadSchema": [
+                {
+                  "name": "hp",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "damage",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "LAP_COMPLETE",
+              "payloadSchema": [
+                {
+                  "name": "score",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "FULL_HP",
+              "payloadSchema": [
+                {
+                  "name": "hp",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            },
+            {
+              "event": "GUARD_PASSED",
+              "payloadSchema": [
+                {
+                  "name": "hp",
+                  "required": true,
+                  "type": "number"
+                },
+                {
+                  "name": "score",
+                  "required": true,
+                  "type": "number"
+                }
+              ],
+              "scope": "external"
+            }
+          ],
+          "entityContract": {
+            "provides": [
+              "checkpoint",
+              "defense",
+              "hp",
+              "maxHp",
+              "score",
+              "targetX",
+              "vx",
+              "vy",
+              "x",
+              "y"
+            ],
+            "requires": []
+          },
+          "entityRebindable": true,
+          "linkedEntity": "OpSymbolicMathData",
+          "name": "OpSymbolicMath",
+          "stateMachine": {
+            "events": [
+              {
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "key": "HIT",
+                "name": "Hit",
+                "payloadSchema": [
+                  {
+                    "name": "amount",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "MOVE",
+                "name": "Move",
+                "payloadSchema": [
+                  {
+                    "name": "dx",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "dy",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "VECTOR_ADD",
+                "name": "Vector Add",
+                "payloadSchema": [
+                  {
+                    "name": "ax",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "ay",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "CHECKPOINT",
+                "name": "Checkpoint"
+              },
+              {
+                "key": "HEAL",
+                "name": "Heal",
+                "payloadSchema": [
+                  {
+                    "name": "amount",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "GUARD_STRESS",
+                "name": "Guard Stress"
+              },
+              {
+                "key": "DAMAGED",
+                "name": "Damaged",
+                "payloadSchema": [
+                  {
+                    "name": "hp",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "damage",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "LAP_COMPLETE",
+                "name": "Lap Complete",
+                "payloadSchema": [
+                  {
+                    "name": "score",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "FULL_HP",
+                "name": "Full Hp",
+                "payloadSchema": [
+                  {
+                    "name": "hp",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "key": "GUARD_PASSED",
+                "name": "Guard Passed",
+                "payloadSchema": [
+                  {
+                    "name": "hp",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "score",
+                    "required": true,
+                    "type": "number"
+                  }
+                ]
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "active"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.hp",
+                    "@config.startHp"
+                  ],
+                  [
+                    "set",
+                    "@entity.maxHp",
+                    "@config.startHp"
+                  ],
+                  [
+                    "set",
+                    "@entity.x",
+                    "@config.startX"
+                  ],
+                  [
+                    "set",
+                    "@entity.y",
+                    "@config.startY"
+                  ],
+                  [
+                    "set",
+                    "@entity.defense",
+                    "@config.startDefense"
+                  ],
+                  [
+                    "set",
+                    "@entity.score",
+                    0.0
+                  ],
+                  [
+                    "set",
+                    "@entity.checkpoint",
+                    0.0
+                  ],
+                  [
+                    "set",
+                    "@entity.targetX",
+                    "@config.maxX"
+                  ]
+                ],
+                "event": "INIT",
+                "from": "active",
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "rawDmg",
+                        "@payload.amount"
+                      ],
+                      [
+                        "defense",
+                        "@entity.defense"
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "dmg",
+                          [
+                            "math/max",
+                            [
+                              "-",
+                              "@rawDmg",
+                              "@defense"
+                            ],
+                            0.0
+                          ]
+                        ]
+                      ],
+                      [
+                        "do",
+                        [
+                          "set",
+                          "@entity.hp",
+                          [
+                            "math/max",
+                            0.0,
+                            [
+                              "-",
+                              "@entity.hp",
+                              "@dmg"
+                            ]
+                          ]
+                        ],
+                        [
+                          "set",
+                          "@entity.score",
+                          [
+                            "+",
+                            "@entity.score",
+                            [
+                              "math/floor",
+                              [
+                                "/",
+                                "@dmg",
+                                2.0
+                              ]
+                            ]
+                          ]
+                        ],
+                        [
+                          "emit",
+                          "DAMAGED",
+                          {
+                            "damage": "@dmg",
+                            "hp": "@entity.hp"
+                          }
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "HIT",
+                "from": "active",
+                "guard": [
+                  "and",
+                  "@config.running",
+                  [
+                    ">",
+                    "@entity.hp",
+                    0.0
+                  ],
+                  [
+                    "not",
+                    [
+                      "==",
+                      "@payload.amount",
+                      0.0
+                    ]
+                  ]
+                ],
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "newX",
+                        [
+                          "math/clamp",
+                          [
+                            "+",
+                            "@entity.x",
+                            "@payload.dx"
+                          ],
+                          0.0,
+                          "@config.maxX"
+                        ]
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "newY",
+                          [
+                            "math/clamp",
+                            [
+                              "+",
+                              "@entity.y",
+                              "@payload.dy"
+                            ],
+                            0.0,
+                            "@config.maxY"
+                          ]
+                        ]
+                      ],
+                      [
+                        "let",
+                        [
+                          [
+                            "ddx",
+                            [
+                              "-",
+                              "@newX",
+                              "@entity.x"
+                            ]
+                          ],
+                          [
+                            "ddy",
+                            [
+                              "-",
+                              "@newY",
+                              "@entity.y"
+                            ]
+                          ]
+                        ],
+                        [
+                          "let",
+                          [
+                            [
+                              "dist",
+                              [
+                                "math/sqrt",
+                                [
+                                  "+",
+                                  [
+                                    "*",
+                                    "@ddx",
+                                    "@ddx"
+                                  ],
+                                  [
+                                    "*",
+                                    "@ddy",
+                                    "@ddy"
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ],
+                          [
+                            "let",
+                            [
+                              [
+                                "lerpedX",
+                                [
+                                  "math/lerp",
+                                  "@entity.x",
+                                  "@entity.targetX",
+                                  "@config.alpha"
+                                ]
+                              ]
+                            ],
+                            [
+                              "do",
+                              [
+                                "set",
+                                "@entity.x",
+                                "@newX"
+                              ],
+                              [
+                                "set",
+                                "@entity.y",
+                                "@newY"
+                              ],
+                              [
+                                "set",
+                                "@entity.vx",
+                                "@ddx"
+                              ],
+                              [
+                                "set",
+                                "@entity.vy",
+                                "@ddy"
+                              ],
+                              [
+                                "if",
+                                [
+                                  "and",
+                                  [
+                                    ">",
+                                    "@dist",
+                                    "@config.minMoveThreshold"
+                                  ],
+                                  [
+                                    "<=",
+                                    "@dist",
+                                    "@config.maxMoveThreshold"
+                                  ]
+                                ],
+                                [
+                                  "set",
+                                  "@entity.score",
+                                  [
+                                    "+",
+                                    "@entity.score",
+                                    [
+                                      "math/floor",
+                                      [
+                                        "*",
+                                        "@dist",
+                                        "@config.scoreMultiplier"
+                                      ]
+                                    ]
+                                  ]
+                                ],
+                                true
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "MOVE",
+                "from": "active",
+                "guard": [
+                  "and",
+                  "@config.running",
+                  [
+                    ">",
+                    "@entity.hp",
+                    0.0
+                  ],
+                  [
+                    "or",
+                    [
+                      ">",
+                      "@payload.dx",
+                      0.0
+                    ],
+                    [
+                      "<",
+                      "@payload.dx",
+                      0.0
+                    ],
+                    [
+                      ">",
+                      "@payload.dy",
+                      0.0
+                    ],
+                    [
+                      "<",
+                      "@payload.dy",
+                      0.0
+                    ]
+                  ]
+                ],
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "scaled",
+                        [
+                          "vec/scale",
+                          {
+                            "x": "@payload.ax",
+                            "y": "@payload.ay"
+                          },
+                          "@config.vecScale"
+                        ]
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "sum",
+                          [
+                            "vec/add",
+                            {
+                              "x": "@entity.x",
+                              "y": "@entity.y"
+                            },
+                            "@scaled"
+                          ]
+                        ]
+                      ],
+                      [
+                        "do",
+                        [
+                          "set",
+                          "@entity.x",
+                          [
+                            "math/clamp",
+                            [
+                              "object/get",
+                              "@sum",
+                              "x"
+                            ],
+                            0.0,
+                            "@config.maxX"
+                          ]
+                        ],
+                        [
+                          "set",
+                          "@entity.y",
+                          [
+                            "math/clamp",
+                            [
+                              "object/get",
+                              "@sum",
+                              "y"
+                            ],
+                            0.0,
+                            "@config.maxY"
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "VECTOR_ADD",
+                "from": "active",
+                "guard": [
+                  "and",
+                  "@config.running",
+                  [
+                    ">",
+                    "@entity.hp",
+                    0.0
+                  ],
+                  [
+                    "not",
+                    [
+                      "and",
+                      [
+                        "==",
+                        "@payload.ax",
+                        0.0
+                      ],
+                      [
+                        "==",
+                        "@payload.ay",
+                        0.0
+                      ]
+                    ]
+                  ]
+                ],
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "count",
+                        [
+                          "array/len",
+                          "@config.checkpoints"
+                        ]
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "next",
+                          [
+                            "math/mod",
+                            [
+                              "+",
+                              "@entity.checkpoint",
+                              1.0
+                            ],
+                            "@count"
+                          ]
+                        ]
+                      ],
+                      [
+                        "do",
+                        [
+                          "set",
+                          "@entity.checkpoint",
+                          "@next"
+                        ],
+                        [
+                          "if",
+                          [
+                            "==",
+                            "@next",
+                            0.0
+                          ],
+                          [
+                            "do",
+                            [
+                              "set",
+                              "@entity.score",
+                              [
+                                "+",
+                                "@entity.score",
+                                "@config.lapBonus"
+                              ]
+                            ],
+                            [
+                              "emit",
+                              "LAP_COMPLETE",
+                              {
+                                "score": "@entity.score"
+                              }
+                            ]
+                          ],
+                          true
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "CHECKPOINT",
+                "from": "active",
+                "guard": [
+                  "and",
+                  "@config.running",
+                  [
+                    ">",
+                    "@entity.hp",
+                    0.0
+                  ]
+                ],
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "let",
+                    [
+                      [
+                        "missing",
+                        [
+                          "-",
+                          "@entity.maxHp",
+                          "@entity.hp"
+                        ]
+                      ]
+                    ],
+                    [
+                      "let",
+                      [
+                        [
+                          "actual",
+                          [
+                            "math/min",
+                            "@payload.amount",
+                            "@missing"
+                          ]
+                        ]
+                      ],
+                      [
+                        "do",
+                        [
+                          "set",
+                          "@entity.hp",
+                          [
+                            "+",
+                            "@entity.hp",
+                            "@actual"
+                          ]
+                        ],
+                        [
+                          "if",
+                          [
+                            "==",
+                            "@entity.hp",
+                            "@entity.maxHp"
+                          ],
+                          [
+                            "emit",
+                            "FULL_HP",
+                            {
+                              "hp": "@entity.hp"
+                            }
+                          ],
+                          true
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "event": "HEAL",
+                "from": "active",
+                "guard": [
+                  "and",
+                  "@config.running",
+                  [
+                    ">=",
+                    "@entity.hp",
+                    1.0
+                  ],
+                  [
+                    "<",
+                    "@entity.hp",
+                    "@entity.maxHp"
+                  ]
+                ],
+                "to": "active"
+              },
+              {
+                "effects": [
+                  [
+                    "emit",
+                    "GUARD_PASSED",
+                    {
+                      "hp": "@entity.hp",
+                      "score": "@entity.score"
+                    }
+                  ]
+                ],
+                "event": "GUARD_STRESS",
+                "from": "active",
+                "guard": [
+                  "and",
+                  [
+                    "or",
+                    [
+                      "and",
+                      [
+                        ">",
+                        "@entity.hp",
+                        50.0
+                      ],
+                      [
+                        "not",
+                        [
+                          "==",
+                          "@entity.score",
+                          0.0
+                        ]
+                      ]
+                    ],
+                    [
+                      "and",
+                      [
+                        "<=",
+                        "@entity.hp",
+                        50.0
+                      ],
+                      [
+                        ">",
+                        "@entity.score",
+                        100.0
+                      ]
+                    ]
+                  ],
+                  [
+                    ">=",
+                    "@entity.x",
+                    0.0
+                  ],
+                  [
+                    ">=",
+                    "@entity.y",
+                    0.0
+                  ],
+                  [
+                    "<=",
+                    "@entity.x",
+                    "@config.maxX"
+                  ],
+                  [
+                    "<=",
+                    "@entity.y",
+                    "@config.maxY"
+                  ],
+                  [
+                    "!=",
+                    "@entity.checkpoint",
+                    -1.0
+                  ]
+                ],
+                "to": "active"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}

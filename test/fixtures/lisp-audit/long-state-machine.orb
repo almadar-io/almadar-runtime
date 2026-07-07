@@ -1,0 +1,934 @@
+{
+  "description": "Order fulfillment lifecycle with 15 states, 31 transitions, 5 tick timers, and cancel/refund/return branching.",
+  "name": "long-state-machine",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": [],
+            "items": {
+              "properties": {
+                "price": {
+                  "name": "price",
+                  "required": true,
+                  "type": "number"
+                },
+                "qty": {
+                  "name": "qty",
+                  "required": true,
+                  "type": "number"
+                },
+                "sku": {
+                  "name": "sku",
+                  "required": true,
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "name": "items",
+            "type": "array"
+          },
+          {
+            "default": 0.0,
+            "name": "total",
+            "type": "number"
+          },
+          {
+            "default": "",
+            "name": "paymentRef",
+            "type": "string"
+          },
+          {
+            "default": "",
+            "name": "carrier",
+            "type": "string"
+          },
+          {
+            "default": "",
+            "name": "trackingCode",
+            "type": "string"
+          },
+          {
+            "default": "",
+            "name": "reason",
+            "type": "string"
+          },
+          {
+            "default": 0.0,
+            "name": "refundAmount",
+            "type": "number"
+          },
+          {
+            "default": 0.0,
+            "name": "timer",
+            "type": "number"
+          }
+        ],
+        "name": "OrderFulfillment",
+        "persistence": "runtime"
+      },
+      "name": "LongStateMachineOrbital",
+      "pages": [
+        {
+          "name": "LongStateMachinePage",
+          "path": "/long-state-machine",
+          "traits": [
+            {
+              "ref": "OrderLifecycle"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "lifecycle",
+          "config": {
+            "cancelReason": {
+              "default": "",
+              "description": "Reason for cancellation",
+              "label": "Cancel Reason",
+              "tier": "domain",
+              "type": "string"
+            },
+            "items": {
+              "default": [],
+              "description": "Order line items",
+              "items": {
+                "properties": {
+                  "price": {
+                    "name": "price",
+                    "required": true,
+                    "type": "number"
+                  },
+                  "qty": {
+                    "name": "qty",
+                    "required": true,
+                    "type": "number"
+                  },
+                  "sku": {
+                    "name": "sku",
+                    "required": true,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "label": "Items",
+              "tier": "domain",
+              "type": "[OrderItem]"
+            },
+            "refundAmt": {
+              "default": 0.0,
+              "description": "Refund amount to process",
+              "label": "Refund Amount",
+              "tier": "domain",
+              "type": "number"
+            },
+            "returnReason": {
+              "default": "",
+              "description": "Reason for return request",
+              "label": "Return Reason",
+              "tier": "domain",
+              "type": "string"
+            },
+            "total": {
+              "default": 0.0,
+              "description": "Order total amount",
+              "label": "Total",
+              "tier": "domain",
+              "type": "number"
+            }
+          },
+          "emits": [
+            {
+              "description": "Fired when countdown timer reaches zero",
+              "event": "TIMER_EXPIRED",
+              "payloadSchema": [
+                {
+                  "name": "dummy",
+                  "type": "string"
+                }
+              ],
+              "scope": "external",
+              "tier": "domain"
+            },
+            {
+              "description": "External cancel signal",
+              "event": "ORDER_CANCEL",
+              "payloadSchema": [
+                {
+                  "name": "orderId",
+                  "required": true,
+                  "type": "string"
+                }
+              ],
+              "scope": "external",
+              "tier": "domain"
+            },
+            {
+              "description": "External refund signal",
+              "event": "ORDER_REFUND",
+              "payloadSchema": [
+                {
+                  "name": "orderId",
+                  "required": true,
+                  "type": "string"
+                }
+              ],
+              "scope": "external",
+              "tier": "domain"
+            },
+            {
+              "description": "Order completed successfully",
+              "event": "ORDER_COMPLETE",
+              "payloadSchema": [
+                {
+                  "name": "orderId",
+                  "required": true,
+                  "type": "string"
+                }
+              ],
+              "scope": "external",
+              "tier": "domain"
+            },
+            {
+              "description": "Payment received with reference",
+              "event": "PAY",
+              "payloadSchema": [
+                {
+                  "name": "paymentRef",
+                  "type": "string"
+                }
+              ],
+              "scope": "external",
+              "tier": "domain"
+            },
+            {
+              "description": "Shipment with carrier and tracking",
+              "event": "SHIP",
+              "payloadSchema": [
+                {
+                  "name": "carrier",
+                  "type": "string"
+                },
+                {
+                  "name": "trackingCode",
+                  "type": "string"
+                }
+              ],
+              "scope": "external",
+              "tier": "domain"
+            },
+            {
+              "description": "Delivery confirmation",
+              "event": "DELIVER",
+              "payloadSchema": [
+                {
+                  "name": "carrier",
+                  "type": "string"
+                },
+                {
+                  "name": "trackingCode",
+                  "type": "string"
+                }
+              ],
+              "scope": "external",
+              "tier": "domain"
+            }
+          ],
+          "entityContract": {
+            "provides": [
+              "carrier",
+              "items",
+              "paymentRef",
+              "reason",
+              "refundAmount",
+              "timer",
+              "total",
+              "trackingCode"
+            ],
+            "requires": []
+          },
+          "entityRebindable": true,
+          "linkedEntity": "OrderFulfillment",
+          "name": "OrderLifecycle",
+          "stateMachine": {
+            "events": [
+              {
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "key": "SUBMIT",
+                "name": "Submit"
+              },
+              {
+                "key": "CANCEL",
+                "name": "Cancel"
+              },
+              {
+                "description": "Payment received with reference",
+                "key": "PAY",
+                "name": "Pay",
+                "payloadSchema": [
+                  {
+                    "name": "paymentRef",
+                    "type": "string"
+                  }
+                ],
+                "tier": "domain"
+              },
+              {
+                "key": "TIMEOUT",
+                "name": "Timeout"
+              },
+              {
+                "key": "CONFIRM",
+                "name": "Confirm"
+              },
+              {
+                "key": "PICK",
+                "name": "Pick"
+              },
+              {
+                "key": "PACK",
+                "name": "Pack"
+              },
+              {
+                "description": "Shipment with carrier and tracking",
+                "key": "SHIP",
+                "name": "Ship",
+                "payloadSchema": [
+                  {
+                    "name": "carrier",
+                    "type": "string"
+                  },
+                  {
+                    "name": "trackingCode",
+                    "type": "string"
+                  }
+                ],
+                "tier": "domain"
+              },
+              {
+                "description": "Delivery confirmation",
+                "key": "DELIVER",
+                "name": "Deliver",
+                "payloadSchema": [
+                  {
+                    "name": "carrier",
+                    "type": "string"
+                  },
+                  {
+                    "name": "trackingCode",
+                    "type": "string"
+                  }
+                ],
+                "tier": "domain"
+              },
+              {
+                "key": "RETURN_REQ",
+                "name": "Return Req"
+              },
+              {
+                "key": "COMPLETE",
+                "name": "Complete"
+              },
+              {
+                "key": "RECEIVE_RET",
+                "name": "Receive Ret"
+              },
+              {
+                "key": "REFUND_DONE",
+                "name": "Refund Done"
+              },
+              {
+                "key": "ARCHIVE",
+                "name": "Archive"
+              },
+              {
+                "description": "Fired when countdown timer reaches zero",
+                "key": "TIMER_EXPIRED",
+                "name": "Timer Expired",
+                "payloadSchema": [
+                  {
+                    "name": "dummy",
+                    "type": "string"
+                  }
+                ],
+                "tier": "domain"
+              },
+              {
+                "description": "External cancel signal",
+                "key": "ORDER_CANCEL",
+                "name": "Order Cancel",
+                "payloadSchema": [
+                  {
+                    "name": "orderId",
+                    "required": true,
+                    "type": "string"
+                  }
+                ],
+                "tier": "domain"
+              },
+              {
+                "description": "External refund signal",
+                "key": "ORDER_REFUND",
+                "name": "Order Refund",
+                "payloadSchema": [
+                  {
+                    "name": "orderId",
+                    "required": true,
+                    "type": "string"
+                  }
+                ],
+                "tier": "domain"
+              },
+              {
+                "description": "Order completed successfully",
+                "key": "ORDER_COMPLETE",
+                "name": "Order Complete",
+                "payloadSchema": [
+                  {
+                    "name": "orderId",
+                    "required": true,
+                    "type": "string"
+                  }
+                ],
+                "tier": "domain"
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "created"
+              },
+              {
+                "name": "pending"
+              },
+              {
+                "name": "paid"
+              },
+              {
+                "name": "confirmed"
+              },
+              {
+                "name": "picked"
+              },
+              {
+                "name": "packed"
+              },
+              {
+                "name": "shipped"
+              },
+              {
+                "name": "delivered"
+              },
+              {
+                "name": "returning"
+              },
+              {
+                "name": "refunding"
+              },
+              {
+                "name": "expired"
+              },
+              {
+                "name": "cancelled"
+              },
+              {
+                "name": "refunded"
+              },
+              {
+                "name": "returned"
+              },
+              {
+                "name": "completed"
+              },
+              {
+                "name": "archived"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.total",
+                    0.0
+                  ],
+                  [
+                    "set",
+                    "@entity.paymentRef",
+                    ""
+                  ],
+                  [
+                    "set",
+                    "@entity.carrier",
+                    ""
+                  ],
+                  [
+                    "set",
+                    "@entity.trackingCode",
+                    ""
+                  ],
+                  [
+                    "set",
+                    "@entity.reason",
+                    ""
+                  ],
+                  [
+                    "set",
+                    "@entity.refundAmount",
+                    0.0
+                  ],
+                  [
+                    "set",
+                    "@entity.timer",
+                    0.0
+                  ]
+                ],
+                "event": "INIT",
+                "from": "created",
+                "to": "created"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.total",
+                    "@config.total"
+                  ],
+                  [
+                    "set",
+                    "@entity.items",
+                    "@config.items"
+                  ]
+                ],
+                "event": "SUBMIT",
+                "from": "created",
+                "to": "pending"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.reason",
+                    "@config.cancelReason"
+                  ]
+                ],
+                "event": "CANCEL",
+                "from": "created",
+                "to": "cancelled"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.paymentRef",
+                    "@payload.paymentRef"
+                  ]
+                ],
+                "event": "PAY",
+                "from": "pending",
+                "to": "paid"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.reason",
+                    "payment-timeout"
+                  ]
+                ],
+                "event": "TIMEOUT",
+                "from": "pending",
+                "to": "expired"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.reason",
+                    "@config.cancelReason"
+                  ]
+                ],
+                "event": "CANCEL",
+                "from": "pending",
+                "to": "cancelled"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.timer",
+                    0.0
+                  ]
+                ],
+                "event": "CONFIRM",
+                "from": "paid",
+                "to": "confirmed"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.refundAmount",
+                    "@entity.total"
+                  ],
+                  [
+                    "set",
+                    "@entity.reason",
+                    "buyer-remorse"
+                  ]
+                ],
+                "event": "CANCEL",
+                "from": "paid",
+                "to": "refunding"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.timer",
+                    0.0
+                  ]
+                ],
+                "event": "PICK",
+                "from": "confirmed",
+                "to": "picked"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.refundAmount",
+                    "@entity.total"
+                  ],
+                  [
+                    "set",
+                    "@entity.reason",
+                    "pre-shipment-cancel"
+                  ]
+                ],
+                "event": "CANCEL",
+                "from": "confirmed",
+                "to": "refunding"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.timer",
+                    0.0
+                  ]
+                ],
+                "event": "PACK",
+                "from": "picked",
+                "to": "packed"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.carrier",
+                    "@payload.carrier"
+                  ],
+                  [
+                    "set",
+                    "@entity.trackingCode",
+                    "@payload.trackingCode"
+                  ]
+                ],
+                "event": "SHIP",
+                "from": "packed",
+                "to": "shipped"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.carrier",
+                    "@payload.carrier"
+                  ],
+                  [
+                    "set",
+                    "@entity.trackingCode",
+                    "@payload.trackingCode"
+                  ]
+                ],
+                "event": "DELIVER",
+                "from": "shipped",
+                "to": "delivered"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.reason",
+                    "@config.returnReason"
+                  ]
+                ],
+                "event": "RETURN_REQ",
+                "from": "shipped",
+                "to": "returning"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.timer",
+                    0.0
+                  ]
+                ],
+                "event": "COMPLETE",
+                "from": "delivered",
+                "to": "completed"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.reason",
+                    "@config.returnReason"
+                  ]
+                ],
+                "event": "RETURN_REQ",
+                "from": "delivered",
+                "to": "returning"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.timer",
+                    0.0
+                  ]
+                ],
+                "event": "RECEIVE_RET",
+                "from": "returning",
+                "to": "returned"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.refundAmount",
+                    "@config.refundAmt"
+                  ],
+                  [
+                    "set",
+                    "@entity.timer",
+                    0.0
+                  ]
+                ],
+                "event": "REFUND_DONE",
+                "from": "refunding",
+                "to": "refunded"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.timer",
+                    0.0
+                  ]
+                ],
+                "event": "ARCHIVE",
+                "from": "expired",
+                "to": "archived"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.timer",
+                    0.0
+                  ]
+                ],
+                "event": "ARCHIVE",
+                "from": "cancelled",
+                "to": "archived"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.timer",
+                    0.0
+                  ]
+                ],
+                "event": "ARCHIVE",
+                "from": "refunded",
+                "to": "archived"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.refundAmount",
+                    "@entity.total"
+                  ]
+                ],
+                "event": "REFUND_DONE",
+                "from": "returned",
+                "to": "refunded"
+              },
+              {
+                "effects": [
+                  [
+                    "set",
+                    "@entity.timer",
+                    0.0
+                  ]
+                ],
+                "event": "ARCHIVE",
+                "from": "completed",
+                "to": "archived"
+              },
+              {
+                "event": "INIT",
+                "from": "archived",
+                "to": "archived"
+              }
+            ]
+          },
+          "ticks": [
+            {
+              "effects": [
+                [
+                  "set",
+                  "@entity.timer",
+                  0.0
+                ]
+              ],
+              "guard": [
+                "==",
+                "@entity.timer",
+                0.0
+              ],
+              "interval": 1000.0,
+              "name": "idleTick"
+            },
+            {
+              "effects": [
+                [
+                  "set",
+                  "@entity.timer",
+                  [
+                    "-",
+                    "@entity.timer",
+                    1.0
+                  ]
+                ],
+                [
+                  "if",
+                  [
+                    "==",
+                    "@entity.timer",
+                    0.0
+                  ],
+                  [
+                    "emit",
+                    "TIMER_EXPIRED",
+                    {
+                      "dummy": ""
+                    }
+                  ],
+                  null
+                ]
+              ],
+              "guard": [
+                ">",
+                "@entity.timer",
+                0.0
+              ],
+              "interval": 1000.0,
+              "name": "countdownTick"
+            },
+            {
+              "effects": [
+                [
+                  "set",
+                  "@entity.timer",
+                  0.0
+                ]
+              ],
+              "guard": [
+                "==",
+                "@entity.timer",
+                0.0
+              ],
+              "interval": 10000.0,
+              "name": "pendingReminder"
+            },
+            {
+              "effects": [
+                [
+                  "set",
+                  "@entity.timer",
+                  [
+                    "-",
+                    "@entity.timer",
+                    1.0
+                  ]
+                ]
+              ],
+              "guard": [
+                ">",
+                "@entity.timer",
+                0.0
+              ],
+              "interval": 2000.0,
+              "name": "packingProgress"
+            },
+            {
+              "effects": [
+                [
+                  "set",
+                  "@entity.timer",
+                  [
+                    "-",
+                    "@entity.timer",
+                    1.0
+                  ]
+                ],
+                [
+                  "if",
+                  [
+                    "==",
+                    "@entity.timer",
+                    0.0
+                  ],
+                  [
+                    "emit",
+                    "TIMER_EXPIRED",
+                    {
+                      "dummy": ""
+                    }
+                  ],
+                  null
+                ]
+              ],
+              "guard": [
+                ">",
+                "@entity.timer",
+                0.0
+              ],
+              "interval": 5000.0,
+              "name": "shippingProgress"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}
