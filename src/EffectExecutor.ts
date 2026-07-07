@@ -515,6 +515,44 @@ export class EffectExecutor {
         };
     }
 
+    /**
+     * Run a substrate (async) effect and dispatch the author's `emit.success`
+     * / `emit.failure` bus event when configured. Mirrors the compiled-path
+     * generic substrate dispatch (server.rs): uniform `{ result }` payload on
+     * success, `{ error }` on failure.
+     *
+     * When no `emit` config is present (fire-and-forget call) the op still runs
+     * but no event is dispatched and errors propagate (legacy behavior).
+     */
+    private async runSubstrate(
+        invoke: () => Promise<unknown>,
+        emitCfg: EmitConfig | undefined,
+    ): Promise<void> {
+        if (!emitCfg) {
+            await invoke();
+            return;
+        }
+        try {
+            const result = await invoke();
+            this.emitSuccess(emitCfg, 'success', { result: result ?? null });
+        } catch (err) {
+            this.emitFailure(emitCfg, err);
+        }
+    }
+
+    /**
+     * Separate a trailing `{ emit: {...} }` options object from positional
+     * substrate-op args. Returns `[positionalArgs, emitConfig]`.
+     */
+    private splitSubstrateEmit(
+        args: unknown[],
+    ): [unknown[], EmitConfig | undefined] {
+        const emitCfg = args.length > 0
+            ? this.extractEmitConfig(args[args.length - 1])
+            : undefined;
+        return emitCfg ? [args.slice(0, -1), emitCfg] : [args, undefined];
+    }
+
     // ==========================================================================
     // Effect Dispatch
     // ==========================================================================
@@ -1214,90 +1252,119 @@ export class EffectExecutor {
             }
 
             // === Agent substrate operators (server-side, effect-position) ===
+            //
+            // Each honours a trailing `{ emit: { success, failure } }` options
+            // object (mirrors fetch/persist/call-service): on success the
+            // author's `emit.success` event fires with a uniform `{ result }`
+            // payload so `?result` captures the return value; on failure the
+            // `emit.failure` event fires with `{ error }`. Without an emit
+            // config the call is fire-and-forget (legacy).
 
             case 'compose/compose-all': {
-                if (this.handlers.substrateComposeAll) {
-                    const config = args[0] as { appName: string; orbitals: Orbital[]; layoutStrategy?: string };
-                    await this.handlers.substrateComposeAll(config);
-                } else {
-                    this.logUnsupported('compose/compose-all');
-                }
+                const [positional, emitCfg] = this.splitSubstrateEmit(args);
+                const config = positional[0] as { appName: string; orbitals: Orbital[]; layoutStrategy?: string };
+                await this.runSubstrate(async () => {
+                    if (!this.handlers.substrateComposeAll) {
+                        this.logUnsupported('compose/compose-all');
+                        return null;
+                    }
+                    return this.handlers.substrateComposeAll(config);
+                }, emitCfg);
                 break;
             }
 
             case 'compose/compose-children': {
-                if (this.handlers.substrateComposeChildren) {
-                    const parentName = args[0] as string;
-                    const children = args[1] as Orbital[];
-                    await this.handlers.substrateComposeChildren(parentName, children);
-                } else {
-                    this.logUnsupported('compose/compose-children');
-                }
+                const [positional, emitCfg] = this.splitSubstrateEmit(args);
+                const parentName = positional[0] as string;
+                const children = positional[1] as Orbital[];
+                await this.runSubstrate(async () => {
+                    if (!this.handlers.substrateComposeChildren) {
+                        this.logUnsupported('compose/compose-children');
+                        return null;
+                    }
+                    return this.handlers.substrateComposeChildren(parentName, children);
+                }, emitCfg);
                 break;
             }
 
             case 'behavior/instantiate': {
-                if (this.handlers.substrateInstantiate) {
-                    const parentName = args[0] as string;
-                    const behavior = args[1] as string;
-                    const params = args.length > 2 ? args[2] as TraitConfig : undefined;
-                    await this.handlers.substrateInstantiate(parentName, behavior, params);
-                } else {
-                    this.logUnsupported('behavior/instantiate');
-                }
+                const [positional, emitCfg] = this.splitSubstrateEmit(args);
+                const parentName = positional[0] as string;
+                const behavior = positional[1] as string;
+                const params = positional.length > 2 ? positional[2] as TraitConfig : undefined;
+                await this.runSubstrate(async () => {
+                    if (!this.handlers.substrateInstantiate) {
+                        this.logUnsupported('behavior/instantiate');
+                        return null;
+                    }
+                    return this.handlers.substrateInstantiate(parentName, behavior, params);
+                }, emitCfg);
                 break;
             }
 
             case 'behavior/call': {
-                if (this.handlers.substrateCall) {
-                    const behavior = args[0] as string;
-                    const method = args[1] as string;
-                    const params = args.length > 2 ? args[2] as TraitConfig : undefined;
-                    await this.handlers.substrateCall(behavior, method, params);
-                } else {
-                    this.logUnsupported('behavior/call');
-                }
+                const [positional, emitCfg] = this.splitSubstrateEmit(args);
+                const behavior = positional[0] as string;
+                const method = positional[1] as string;
+                const params = positional.length > 2 ? positional[2] as TraitConfig : undefined;
+                await this.runSubstrate(async () => {
+                    if (!this.handlers.substrateCall) {
+                        this.logUnsupported('behavior/call');
+                        return null;
+                    }
+                    return this.handlers.substrateCall(behavior, method, params);
+                }, emitCfg);
                 break;
             }
 
             case 'validate/validate': {
-                if (this.handlers.substrateValidate) {
-                    const orbitalName = args[0] as string;
-                    await this.handlers.substrateValidate(orbitalName);
-                } else {
-                    this.logUnsupported('validate/validate');
-                }
+                const [positional, emitCfg] = this.splitSubstrateEmit(args);
+                const orbitalName = positional[0] as string;
+                await this.runSubstrate(async () => {
+                    if (!this.handlers.substrateValidate) {
+                        this.logUnsupported('validate/validate');
+                        return null;
+                    }
+                    return this.handlers.substrateValidate(orbitalName);
+                }, emitCfg);
                 break;
             }
 
             case 'lolo/emit-body': {
-                if (this.handlers.substrateEmitBody) {
-                    const orbitalName = args[0] as string;
-                    const loloSource = args[1] as string;
-                    await this.handlers.substrateEmitBody(orbitalName, loloSource);
-                } else {
-                    this.logUnsupported('lolo/emit-body');
-                }
+                const [positional, emitCfg] = this.splitSubstrateEmit(args);
+                const orbitalName = positional[0] as string;
+                const loloSource = positional[1] as string;
+                await this.runSubstrate(async () => {
+                    if (!this.handlers.substrateEmitBody) {
+                        this.logUnsupported('lolo/emit-body');
+                        return null;
+                    }
+                    return this.handlers.substrateEmitBody(orbitalName, loloSource);
+                }, emitCfg);
                 break;
             }
 
             default: {
-                // Value-position substrate operators (llm/*, workspace/*,
-                // session/*, memory/*, trace/*, integration/*) used as
-                // standalone top-level effects are evaluated through the
-                // evaluator. The return value is discarded (fire-and-forget).
-                // To capture the result, nest inside set:
-                //   (set @entity.response (llm/generate @entity.prompt))
+                // Namespaced value-position substrate operators
+                // (llm/*, memory/*, session/*, workspace/*, trace/*,
+                // integration/*) used as standalone top-level effects. The op
+                // is evaluated (performing its side effect) and, when a
+                // trailing `{ emit: {...} }` is present, the author's
+                // `emit.success` / `emit.failure` event fires with the uniform
+                // `{ result }` / `{ error }` payload so `?result` captures the
+                // return value. Without an emit config the call is
+                // fire-and-forget (legacy).
                 if (operator.includes('/')) {
-                    const ctx = createContextFromBindings(
-                        this.bindings, this.strictBindings, this.contextExtensions,
-                    );
-                    const result = this.getEvaluator().evaluate(
-                        [operator, ...args] as SExpr, ctx,
-                    );
-                    if (result instanceof Promise) {
-                        await result;
-                    }
+                    const [positional, emitCfg] = this.splitSubstrateEmit(args);
+                    await this.runSubstrate(async () => {
+                        const ctx = createContextFromBindings(
+                            this.bindings, this.strictBindings, this.contextExtensions,
+                        );
+                        const result = this.getEvaluator().evaluate(
+                            [operator, ...positional] as SExpr, ctx,
+                        );
+                        return result instanceof Promise ? await result : result;
+                    }, emitCfg);
                 } else if (this.debug) {
                     effectLog.warn('unknown-operator', { operator });
                 }

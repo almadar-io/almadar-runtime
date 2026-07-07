@@ -51,9 +51,10 @@ export function createAgentSubstrateHandlers(ctx: AgentSubstrateHandlerContext):
                 log.warn('compose-all service not registered');
                 return null;
             }
-            const result = await ctx.services.composeAll(config);
-            ctx.emitEvent('COMPOSED_ALL', { appName: config.appName, orbitalCount: config.orbitals.length });
-            return result;
+            // Success/failure events are dispatched by EffectExecutor via the
+            // author's `emit:` config (uniform `{ result }` payload); this
+            // handler only performs the invocation and returns the value.
+            return ctx.services.composeAll(config);
         },
 
         substrateComposeChildren: async (parentName, children) => {
@@ -61,9 +62,7 @@ export function createAgentSubstrateHandlers(ctx: AgentSubstrateHandlerContext):
                 log.warn('compose-children service not registered');
                 return null;
             }
-            const result = await ctx.services.composeChildren(parentName, children);
-            ctx.emitEvent('COMPOSED_CHILDREN', { parentName, childCount: children.length });
-            return result;
+            return ctx.services.composeChildren(parentName, children);
         },
 
         substrateInstantiate: async (parentName, behavior, params) => {
@@ -71,9 +70,7 @@ export function createAgentSubstrateHandlers(ctx: AgentSubstrateHandlerContext):
                 log.warn('instantiate service not registered');
                 return null;
             }
-            const result = await ctx.services.instantiate(parentName, behavior, params);
-            ctx.emitEvent('BEHAVIOR_INSTANTIATED', { parentName, behavior });
-            return result;
+            return ctx.services.instantiate(parentName, behavior, params);
         },
 
         substrateCall: async (behavior, method) => {
@@ -81,9 +78,7 @@ export function createAgentSubstrateHandlers(ctx: AgentSubstrateHandlerContext):
                 log.warn('call service not registered');
                 return null;
             }
-            const result = await ctx.services.call(behavior, method);
-            ctx.emitEvent('BEHAVIOR_CALLED', { behavior, method });
-            return result;
+            return ctx.services.call(behavior, method);
         },
 
         substrateValidate: async (orbitalName) => {
@@ -91,9 +86,7 @@ export function createAgentSubstrateHandlers(ctx: AgentSubstrateHandlerContext):
                 log.warn('validate service not registered');
                 return null;
             }
-            const result = await ctx.services.validate(orbitalName);
-            ctx.emitEvent('VALIDATED', { orbitalName });
-            return result;
+            return ctx.services.validate(orbitalName);
         },
 
         substrateEmitBody: async (orbitalName) => {
@@ -101,9 +94,7 @@ export function createAgentSubstrateHandlers(ctx: AgentSubstrateHandlerContext):
                 log.warn('emit-body service not registered');
                 return null;
             }
-            const result = await ctx.services.emitBody(orbitalName, '');
-            ctx.emitEvent('LOLO_EMITTED', { orbitalName });
-            return result;
+            return ctx.services.emitBody(orbitalName, '');
         },
     };
 

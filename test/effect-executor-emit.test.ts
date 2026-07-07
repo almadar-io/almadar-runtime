@@ -47,6 +47,10 @@ function makeContext(): {
             rows: [{ id: opts?.id ?? 'none', reactive: true }],
             total: 1,
         })),
+        substrateComposeAll: vi.fn(async (config: { appName: string }) => ({
+            composed: true,
+            appName: config.appName,
+        })),
     };
     const bindings: BindingContext = {
         entity: { id: 'ent-1' } as unknown as BindingContext['entity'],
@@ -354,6 +358,60 @@ describe('set: — in-memory mirror without entity id (G46)', () => {
         await executor.execute(['set', '@entity.notificationType', '@payload.notificationType']);
         expect(bindings.entity?.message).toBe('m');
         expect(bindings.entity?.notificationType).toBe('success');
+    });
+});
+
+// ============================================================================
+// Substrate operators (effect-position) — emit.success/failure wiring
+// ============================================================================
+
+describe('emit: — substrate operators (effect-position)', () => {
+    it('compose/compose-all fires emit.success with uniform { result }', async () => {
+        const { emit, executor } = makeContext();
+        await executor.execute([
+            'compose/compose-all',
+            { appName: 'demo', orbitals: [] },
+            { emit: { success: 'COMPOSED', failure: 'COMPOSE_FAILED' } },
+        ]);
+        const successCalls = emit.mock.calls.filter(([e]) => e === 'COMPOSED');
+        expect(successCalls).toHaveLength(1);
+        // Uniform { result } payload so `?result` captures the return value.
+        expect(successCalls[0][1]).toMatchObject({
+            result: { composed: true, appName: 'demo' },
+        });
+    });
+
+    it('compose/compose-all fires emit.failure with { error } on handler throw', async () => {
+        const emit = vi.fn();
+        const executor = new EffectExecutor({
+            handlers: {
+                emit,
+                persist: vi.fn(async () => undefined),
+                set: vi.fn(),
+                substrateComposeAll: vi.fn(async () => {
+                    throw new Error('boom');
+                }),
+            },
+            bindings: {},
+            context: { traitName: 'T', state: 's', transition: 's->s' },
+        });
+        await executor.execute([
+            'compose/compose-all',
+            { appName: 'demo', orbitals: [] },
+            { emit: { success: 'COMPOSED', failure: 'COMPOSE_FAILED' } },
+        ]);
+        const failCalls = emit.mock.calls.filter(([e]) => e === 'COMPOSE_FAILED');
+        expect(failCalls).toHaveLength(1);
+        expect(failCalls[0][1]).toMatchObject({ error: 'boom' });
+    });
+
+    it('compose/compose-all without emit config is fire-and-forget (no events)', async () => {
+        const { emit, executor } = makeContext();
+        await executor.execute([
+            'compose/compose-all',
+            { appName: 'demo', orbitals: [] },
+        ]);
+        expect(emit).not.toHaveBeenCalled();
     });
 });
 
