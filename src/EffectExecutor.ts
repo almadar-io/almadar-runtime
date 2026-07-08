@@ -29,6 +29,12 @@ const effectLog = createLogger('almadar:runtime:effects');
 // setNamespaceLevel('almadar:runtime:effects', 'DEBUG').
 setNamespaceLevel('almadar:runtime:effects', 'WARN');
 
+// Persist hot-path observability lives on its own namespace (no WARN floor) so
+// the dispatch / emit-config / emit-fired / error boundary lines always reach
+// the run log — a persist failure can be triaged without re-instrumenting.
+// Filter with ALMADAR_DEBUG=almadar:runtime:persist (or '' to silence).
+const persistLog = createLogger('almadar:runtime:persist');
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -688,14 +694,14 @@ export class EffectExecutor {
                 const emitCfg = last && typeof last === 'object' && !Array.isArray(last) && 'emit' in (last as object)
                     ? this.extractEmitConfig(last)
                     : undefined;
-                effectLog.debug('persist:dispatch', {
+                persistLog.debug('persist:dispatch', {
                     action,
                     argCount: args.length,
                     argTypes: args.map((a) => Array.isArray(a) ? 'array' : a === null ? 'null' : typeof a).join(','),
                     traitName: this.context.traitName,
                     transition: this.context.transition,
                 });
-                effectLog.debug('persist:emit-config', {
+                persistLog.debug('persist:emit-config', {
                     action,
                     hasEmitCfg: emitCfg !== undefined,
                     success: emitCfg?.success,
@@ -706,14 +712,14 @@ export class EffectExecutor {
                         // Batch mode: ["persist", "batch", [...operations]]
                         const operations = args[1] as unknown[];
                         await this.handlers.persist('batch', '', { operations } as EntityRow);
-                        effectLog.debug('persist:success', {
+                        persistLog.debug('persist:success', {
                             action,
                             entityType: 'batch',
                             opCount: operations.length,
                             willEmit: emitCfg?.success,
                         });
                         this.emitSuccess(emitCfg, 'success', operations);
-                        effectLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
+                        persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
                     } else {
                         const entityType = args[1] as string;
                         const data = args[2] as EntityRow | undefined;
@@ -724,17 +730,17 @@ export class EffectExecutor {
                         const dataId = typeof data === 'string'
                             ? data
                             : (data && typeof data === 'object' ? ((data as { id?: unknown }).id as string | undefined) : undefined);
-                        effectLog.debug('persist:success', {
+                        persistLog.debug('persist:success', {
                             action,
                             entityType,
                             dataId,
                             willEmit: emitCfg?.success,
                         });
                         this.emitSuccess(emitCfg, 'success', data);
-                        effectLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
+                        persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
                     }
                 } catch (err) {
-                    effectLog.error('persist:error', {
+                    persistLog.error('persist:error', {
                         action,
                         entityType: action === 'batch' ? 'batch' : (args[1] as string),
                         error: err instanceof Error ? err.message : String(err),
