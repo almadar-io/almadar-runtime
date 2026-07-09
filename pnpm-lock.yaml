@@ -4,13 +4,28 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  react: 19.2.3
+  react-dom: 19.2.3
+  '@types/react': '>=19.0.0'
+  '@types/react-dom': '>=19.0.0'
+  zustand: 4.5.7
+  react-native-reanimated: 4.1.1
+  react-native-worklets: 0.5.1
+  react-syntax-highlighter: ^16.1.0
+  '@react-three/fiber': 9.5.0
+  '@types/three': 0.160.0
+  '@almadar/std': ^16.103.2
+  '@almadar/ui': ^5.93.0
+  '@almadar/core': ^10.24.0
+
 importers:
 
   .:
     dependencies:
       '@almadar/core':
-        specifier: ^10.21.0
-        version: 10.21.0
+        specifier: ^10.24.0
+        version: link:../almadar-core
       '@almadar/evaluator':
         specifier: '>=2.9.2'
         version: 2.16.0
@@ -21,8 +36,8 @@ importers:
         specifier: ^2.14.2
         version: 2.14.2(express@5.2.1)
       '@almadar/std':
-        specifier: '>=7.2.4'
-        version: 16.74.0
+        specifier: ^16.103.2
+        version: link:../almadar-std
       '@faker-js/faker':
         specifier: ^9.3.0
         version: 9.9.0
@@ -60,8 +75,8 @@ importers:
 
 packages:
 
-  '@almadar/core@10.21.0':
-    resolution: {integrity: sha512-P6ipPs+19OYw7R46Q5uZao1QSglIqiyzJAwQxjtT32KNKIenGtZF3WZhoWIE65bBfpygEZINUjfjs9W4mhYHuQ==}
+  '@almadar/core@10.25.0':
+    resolution: {integrity: sha512-GkwgpunROGSjjO1N9UcTE9Zhy7dXggbrLddXVfWo9C0xbTPzEq4tjAL2PxJSMzkmcxK/R5lNchAqwHMer5fBNw==}
 
   '@almadar/eslint-plugin@2.8.2':
     resolution: {integrity: sha512-iQGH5MdsfcEPGUeImgS3XBWLfBRc0uO9+0Kyy87WQf/nc4hUoAEPxov5C/JAYe1tLoL34dLBIyKDm/SFeYPBsA==}
@@ -86,8 +101,8 @@ packages:
       '@almadar-io/rabit':
         optional: true
 
-  '@almadar/std@16.74.0':
-    resolution: {integrity: sha512-YdAzj4p3nD1VfnVXU5Ot2zQmYO1gSXhV1IhpZ8AegYCYkgu7RWe+f/bhmKD4MAPaL2YV5NLltJiz1mFfi3bPUA==}
+  '@almadar/std@16.134.0':
+    resolution: {integrity: sha512-pv+CccikW6nyy9NJZYcsxPAqeD7OeVycW3N9dEAi3f+S9bX655SX2iX1LZIK6KiKG12q0V9G7pclRI07IfQ3Sg==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -2078,7 +2093,7 @@ packages:
 
 snapshots:
 
-  '@almadar/core@10.21.0':
+  '@almadar/core@10.25.0':
     dependencies:
       '@almadar/patterns': 2.71.0
       zod: 3.25.76
@@ -2090,20 +2105,20 @@ snapshots:
 
   '@almadar/evaluator@2.16.0':
     dependencies:
-      '@almadar/core': 10.21.0
-      '@almadar/std': 16.74.0
+      '@almadar/core': 10.25.0
+      '@almadar/std': 16.134.0
 
   '@almadar/logger@1.4.0':
     dependencies:
-      '@almadar/core': 10.21.0
+      '@almadar/core': 10.25.0
 
   '@almadar/patterns@2.71.0':
     dependencies:
-      '@almadar/core': 10.21.0
+      '@almadar/core': 10.25.0
 
   '@almadar/server@2.14.2(express@5.2.1)':
     dependencies:
-      '@almadar/core': 10.21.0
+      '@almadar/core': 10.25.0
       '@almadar/logger': 1.4.0
       '@faker-js/faker': 9.9.0
       cors: 2.8.6
@@ -2119,9 +2134,9 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@almadar/std@16.74.0':
+  '@almadar/std@16.134.0':
     dependencies:
-      '@almadar/core': 10.21.0
+      '@almadar/core': 10.25.0
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true

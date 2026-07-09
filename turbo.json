@@ -12,5 +12,8 @@
     "typecheck": {},
     "lint": {},
     "test": {}
-  }
+  },
+  "extends": [
+    "//"
+  ]
 }
