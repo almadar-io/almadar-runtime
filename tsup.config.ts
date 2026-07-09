@@ -16,7 +16,7 @@ export default defineConfig({
   format: ['esm'],
   dts: true,
   clean: true,
-  sourcemap: true,
+  sourcemap: false,
   splitting: true,
   treeshake: true,
   // Top-level Node-only deps that must stay external so any consumer
