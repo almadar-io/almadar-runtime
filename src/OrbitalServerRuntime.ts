@@ -1528,6 +1528,13 @@ export class OrbitalServerRuntime {
     request: OrbitalEventRequest,
     onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void,
   ): Promise<OrbitalEventResponse> {
+    // Gap 4 (Almadar_Rabit_V3_Deepseek_Gaps.md #4): this whole body used to
+    // have no top-level error boundary, so a throw deep in an effect
+    // handler (e.g. an LLM abort inside emitLoloBody) escaped as an
+    // unhandled rejection instead of a normal failure response. Wrap it
+    // and reuse the same failure shape already returned above for
+    // "orbital not found" / payload-validation failures.
+    try {
     // Wire OS-level + substrate effect handlers before any effect runs.
     await this.ensureOsHandlers();
     await this.ensureAgentSubstrateHandlers();
@@ -1765,6 +1772,22 @@ export class OrbitalServerRuntime {
     }
 
     return response;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      xOrbitalLog.error('processOrbitalEvent:error', {
+        orbital: orbitalName,
+        event: request.event,
+        entityId: request.entityId,
+        error: message,
+      });
+      return {
+        success: false,
+        transitioned: false,
+        states: {},
+        emittedEvents: [],
+        error: message,
+      };
+    }
   }
 
   /**
