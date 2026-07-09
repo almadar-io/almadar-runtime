@@ -32,6 +32,11 @@
       "types": "./dist/createOsHandlers.d.ts",
       "import": "./dist/createOsHandlers.js",
       "require": "./dist/createOsHandlers.js"
+    },
+    "./mockRandom": {
+      "types": "./dist/mockRandom.d.ts",
+      "import": "./dist/mockRandom.js",
+      "require": "./dist/mockRandom.js"
     }
   },
   "files": [
@@ -42,6 +47,7 @@
     "access": "public"
   },
   "scripts": {
+    "prebuild": "rm -rf dist",
     "build": "tsup",
     "build:watch": "tsup --watch",
     "lint": "eslint src/",
@@ -55,8 +61,7 @@
     "@almadar/evaluator": "^2.29.0",
     "@almadar/logger": "^1.9.0",
     "@almadar/server": "^2.24.0",
-    "@almadar/std": "^16.138.0",
-    "@faker-js/faker": "^9.3.0"
+    "@almadar/std": "^16.138.0"
   },
   "peerDependencies": {
     "express": "^5.0.0"

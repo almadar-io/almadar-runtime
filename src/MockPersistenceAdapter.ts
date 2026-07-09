@@ -1,17 +1,30 @@
 /**
- * MockPersistenceAdapter - In-memory data store with faker-based mock generation
+ * MockPersistenceAdapter - In-memory data store with seeded mock generation
  *
  * Provides a stateful mock data layer that implements PersistenceAdapter.
- * Uses @faker-js/faker for realistic data generation based on field types.
+ * Uses a lightweight seeded PRNG so the client bundle does not pull in faker.
  *
  * @packageDocumentation
  */
 
-import { faker } from '@faker-js/faker';
 import type { PersistenceAdapter } from './OrbitalServerRuntime.js';
 import type { EntityRow } from './types.js';
 import type { EntityField, FieldValue } from '@almadar/core';
 import { createLogger } from '@almadar/logger';
+import {
+  seedRandom,
+  randomInt,
+  randomArrayElement,
+  shuffleArray,
+  randomPastDate,
+  randomRecentDate,
+  randomEmail,
+  randomUrl,
+  randomPhone,
+  randomUuid,
+  randomWords,
+  randomBoolean,
+} from './mockRandom.js';
 
 const mockLog = createLogger('almadar:runtime:mock');
 
@@ -26,7 +39,7 @@ const DEFAULT_MOCK_SEED = 42;
  *  `format: "image" | "avatar" | "thumbnail"` and a few well-known field
  *  names (`imageUrl`, `photo`, etc.). */
 function picsumUrl(entityName: string, fieldName: string, width = 400, height = 400): string {
-  const seed = `${entityName}-${fieldName}-${faker.number.int({ min: 0, max: 1000 })}`;
+  const seed = `${entityName}-${fieldName}-${randomInt({ min: 0, max: 1000 })}`;
   return `https://picsum.photos/seed/${encodeURIComponent(seed)}/${width}/${height}`;
 }
 /** Reference timestamp used as `now` for seeded rows. Deterministic so
@@ -53,7 +66,7 @@ type NamedEntityField = EntityField & { name: string };
 export interface EntitySchema {
   name: string;
   fields: NamedEntityField[];
-  /** Pre-authored instance data from the schema (used instead of faker generation) */
+  /** Pre-authored instance data from the schema (used instead of generated mocks) */
   seedData?: EntityRow[];
 }
 
@@ -71,7 +84,7 @@ export interface MockPersistenceConfig {
 // ============================================================================
 
 /**
- * In-memory mock data store with CRUD operations and faker-based seeding.
+ * In-memory mock data store with CRUD operations and seeded mock generation.
  */
 export class MockPersistenceAdapter implements PersistenceAdapter {
   private stores: Map<string, Map<string, EntityRow>> = new Map();
@@ -88,18 +101,18 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       // input doesn't overwrite the default.
       seed: config.seed ?? DEFAULT_MOCK_SEED,
     };
-    faker.seed(this.config.seed);
+    seedRandom(this.config.seed);
     mockLog.debug('mock:adapter:init', { seed: this.config.seed });
   }
 
-  /** Re-anchor faker's PRNG to the configured seed. Called before every
+  /** Re-anchor the PRNG to the configured seed. Called before every
    *  re-seed loop so identical reseed sequences produce identical rows
-   *  (timestamps + faker-generated fields). Without this, the first
+   *  (timestamps + generated fields). Without this, the first
    *  reseed produces row set A, the second produces row set B, and
    *  diff observers see all rows as "changed" between frames. */
   resetFakerSeed(): void {
     if (this.config.seed !== undefined) {
-      faker.seed(this.config.seed);
+      seedRandom(this.config.seed);
     }
   }
 
@@ -130,7 +143,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   /**
    * Register an entity schema and seed mock data.
    * If the schema has seedData, those instances are used directly.
-   * Otherwise, random mock data is generated with faker.
+   * Otherwise, random mock data is generated with the seeded PRNG.
    */
   registerEntity(schema: EntitySchema, seedCount?: number): void {
     const normalized = schema.name.toLowerCase();
@@ -194,12 +207,11 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
           if (eligible.length === 0) continue;
           const cardinality = field.relation.cardinality ?? 'many';
           if (cardinality === 'one' || cardinality === 'many-to-one') {
-            row[field.name] = faker.helpers.arrayElement(eligible) as FieldValue;
+            row[field.name] = randomArrayElement(eligible) as FieldValue;
           } else {
             // many / one-to-many / many-to-many → pick 2–4 IDs
-            const pickCount = Math.min(eligible.length, faker.number.int({ min: 2, max: 4 }));
-            row[field.name] = faker.helpers
-              .shuffle(eligible.slice())
+            const pickCount = Math.min(eligible.length, randomInt({ min: 2, max: 4 }));
+            row[field.name] = shuffleArray(eligible.slice())
               .slice(0, pickCount) as FieldValue;
           }
         }
@@ -264,11 +276,10 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     const id = this.nextId(entityName);
     // Deterministic timestamps: keep updatedAt anchored at the seed
     // reference so re-seeded rows compare identically across hermetic
-    // frames. createdAt uses faker (also deterministic with seed) to
-    // simulate a realistic creation date.
+    // frames. createdAt uses the seeded PRNG to simulate a realistic creation date.
     const item: EntityRow = {
       id,
-      createdAt: faker.date.past({ years: 1 }).toISOString(),
+      createdAt: randomPastDate({ years: 1 }).toISOString(),
       updatedAt: SEED_REFERENCE_TIMESTAMP,
     };
 
@@ -300,7 +311,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   private generateFieldValue(entityName: string, field: EntityField, index: number, depth = 0): FieldValue {
     // Mock-seed default policy: numeric fields preserve their declared
     // default (so `tokenCount : number = 0` stays 0), every other type
-    // falls through to faker. Mirrors the gate in the compiled-path
+    // falls through to the seeded PRNG. Mirrors the gate in the compiled-path
     // codegen (`backend.rs:generate_seed_mock_data`). String/enum/bool/
     // date placeholder defaults like `name = ""` would otherwise paint
     // every seeded row with the same literal.
@@ -322,10 +333,10 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     // Honor a declared default for ANY type when present. UI-factory entities seed
     // MEANINGFUL defaults (e.g. `features = ["Item","Item 2"]`, `hero = { … }`,
     // `name = "Name"`) that should render verbatim in the demo. The old numeric-only
-    // gate discarded object/array/string defaults and synthesized faker values instead
+    // gate discarded object/array/string defaults and synthesized random values instead
     // — leaving authored content unrendered and, for array fields, producing a non-array
-    // faker value that crashed the consumer's `.map`. Domain entities with no declared
-    // default still fall through to faker below.
+    // random value that crashed the consumer's `.map`. Domain entities with no declared
+    // default still fall through to the PRNG below.
     if (field.default !== undefined) {
       return field.default as FieldValue;
     }
@@ -348,10 +359,10 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         return this.generateStringValue(entityName, field, index);
 
       case 'number':
-        return faker.number.int({ min: 0, max: 100 });
+        return randomInt({ min: 0, max: 100 });
 
       case 'boolean':
-        return faker.datatype.boolean();
+        return randomBoolean();
 
       case 'date':
       case 'timestamp':
@@ -362,7 +373,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         // After narrowing, field is EnumEntityField with required values. The
         // optional check is defensive in case canonical changes shape.
         if (field.values && field.values.length > 0) {
-          return faker.helpers.arrayElement(field.values);
+          return randomArrayElement(field.values);
         }
         return null;
 
@@ -395,10 +406,10 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   private generateArrayValue(entityName: string, field: EntityField, index: number, depth = 0): FieldValue {
     if (field.type !== 'array' || !field.items) return [];
     // Stop recursing on self-referential types (e.g. Comment.replies: [Comment]).
-    // Without this guard, faker would loop forever materialising replies-of-
+    // Without this guard, the generator would loop forever materialising replies-of-
     // replies-of-replies until the call stack blows.
     if (depth >= MockPersistenceAdapter.MAX_NESTED_DEPTH) return [];
-    const count = faker.number.int({ min: 3, max: 5 });
+    const count = randomInt({ min: 3, max: 5 });
     const out: FieldValue[] = [];
     const elementName = field.name ?? 'item';
     for (let i = 0; i < count; i++) {
@@ -417,7 +428,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
 
   /**
    * Generate a single object value with each declared property populated
-   * by faker. Walks `properties` and recursively delegates to
+   * by the seeded PRNG. Walks `properties` and recursively delegates to
    * `generateFieldValue` per property so nested objects-of-arrays-of-objects
    * compose correctly.
    */
@@ -438,7 +449,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   /**
    * Generate a string value based on the field's declared schema metadata.
    * Reads `values` (enum) first, then `format` (email/url/phone/uuid/date/
-   * datetime), then falls back to faker.lorem.words. No field-name heuristics
+   * datetime), then falls back to randomWords. No field-name heuristics
    * — the schema is the source of truth. If a caller needs a real email, they
    * declare `format: "email"`; if they need an enum, they declare `values: [...]`.
    */
@@ -447,7 +458,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     // discriminator so the access is type-safe without a record cast.
     const values = 'values' in field ? field.values : undefined;
     if (values && values.length > 0) {
-      return faker.helpers.arrayElement(values);
+      return randomArrayElement(values);
     }
     // `field.name` is optional on the canonical EntityField (nested item/
     // property descriptors omit it). Top-level seed loop filters those out,
@@ -455,12 +466,12 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     // explicit fallback to satisfy strict-null checks.
     const fieldName = field.name ?? 'field';
     switch (field.format) {
-      case 'email': return faker.internet.email();
-      case 'url': return faker.internet.url();
-      case 'phone': return faker.phone.number();
-      case 'uuid': return faker.string.uuid();
-      case 'date': return faker.date.recent().toISOString().split('T')[0]!;
-      case 'datetime': return faker.date.recent().toISOString();
+      case 'email': return randomEmail();
+      case 'url': return randomUrl();
+      case 'phone': return randomPhone();
+      case 'uuid': return randomUuid();
+      case 'date': return randomRecentDate().toISOString().split('T')[0]!;
+      case 'datetime': return randomRecentDate().toISOString();
       case 'image':
       case 'avatar':
       case 'thumbnail':
@@ -468,7 +479,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     }
     // Field-name fallback for image-bearing string fields. Authors who haven't
     // (yet) annotated `format: "image"` still get a real photo from Picsum
-    // rather than a `faker.lorem.words(2)` sentence that breaks data-grid
+    // rather than a `randomWords(2)` sentence that breaks data-grid
     // imageField rendering. Heuristic is narrow + clearly named.
     const lname = fieldName.toLowerCase();
     if (
@@ -493,7 +504,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     ) {
       return picsumUrl(entityName, fieldName);
     }
-    const value = faker.lorem.words(2);
+    const value = randomWords(2);
     mockLog.debug('field:fallback-lorem', () => ({
       entityName,
       fieldName: field.name,
@@ -510,7 +521,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * field-name heuristics.
    */
   private generateDateValue(field: EntityField): string {
-    const date = faker.date.recent({ days: 30 });
+    const date = randomRecentDate({ days: 30 });
     if (field.format === 'date') return date.toISOString().split('T')[0]!;
     return date.toISOString();
   }
@@ -622,7 +633,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     this.idCounters.delete(normalized);
   }
 
-  /** Clear all data + re-anchor faker so the next seed loop reproduces
+  /** Clear all data + re-anchor the PRNG so the next seed loop reproduces
    *  identical rows. Hermetic-frame mode calls this between every step
    *  via OrbitalServerRuntime.resetMockPersistence. */
   clearAll(): void {

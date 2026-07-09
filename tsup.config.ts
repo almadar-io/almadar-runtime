@@ -12,10 +12,13 @@ export default defineConfig({
     // field path mapping; the import is never invoked in browsers (gated
     // by `isNodeEnv()`).
     'src/createOsHandlers.ts',
+    // Lightweight seeded PRNG exposed for downstream tooling that needs
+    // deterministic mock values without pulling in @faker-js/faker.
+    'src/mockRandom.ts',
   ],
   format: ['esm'],
   dts: true,
-  clean: true,
+  clean: false,
   sourcemap: false,
   splitting: true,
   treeshake: true,
