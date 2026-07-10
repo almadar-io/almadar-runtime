@@ -24,6 +24,7 @@ export type {
   TraitDefinition,
   EffectHandlers,
   BindingContext,
+  ConfigContext,
   Effect,
   EffectContext,
   EffectResult,

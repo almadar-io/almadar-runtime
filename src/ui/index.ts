@@ -14,8 +14,15 @@ export type {
   SlotContent,
   SlotSource,
   SlotManager,
+  MultiSourceSlotManager,
 } from './slots';
-export { createSlotSetter } from './slots';
+export {
+  createSlotSetter,
+  aggregateSlotContent,
+  assertIsSlotManager,
+  assertIsMultiSourceSlotManager,
+  validateSlotContent,
+} from './slots';
 
 // Callback-prop wrapper for pattern event bindings
 export { wrapCallbackForEvent } from './wrapCallbackForEvent';
@@ -53,3 +60,20 @@ export {
   type PerfDetail,
   type PerfDetailValue,
 } from './perf';
+
+// Contract enforcement
+export {
+  RendererContractViolationError,
+  type SlotContentValidationError,
+} from './contract-errors';
+
+// Renderer-agnostic `window.__orbitalVerification` bridge — every UI
+// library populates the same observation point via these helpers so the
+// Playwright verifiers stay renderer-blind.
+export {
+  ensureVerificationApi,
+  getOrbitalVerification,
+  bindEventBus,
+  bindTraitStateGetter,
+  type VerificationBus,
+} from './verification';
