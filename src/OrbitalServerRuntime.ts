@@ -213,7 +213,7 @@ export type ClientEffectTuple =
   | ClientRenderUITuple
   | ClientNavigateTuple
   | ClientNotifyTuple;
-import { isInlineTrait, isEntityCall } from "@almadar/core";
+import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs } from "@almadar/core";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
   preprocessSchema,
@@ -528,6 +528,16 @@ export class OrbitalServerRuntime {
   private substrateHandlers: AgentSubstrateHandlerResult | null = null;
   private substrateHandlersPromise: Promise<void> | null = null;
   private resolvedSchema: OrbitalSchema | null = null;
+  /**
+   * Trait name -> resolved `TraitConfig`, computed once per `register()` via
+   * `buildResolvedTraitConfigs` (`@almadar/core`). An embedded sub-trait's
+   * OWN declared config schema (`registered.traits` / `collectDeclaredConfigDefaults`)
+   * carries `@config.X` forwards verbatim — this map chains those through to
+   * the trait that actually embeds it (see `embedded-trait-config.ts` for the
+   * full rationale). Used as a fallback layer in `buildBindingContext` behind
+   * `declaredDefaults` and ahead of `callSiteOverride`.
+   */
+  private resolvedTraitConfigs: Record<string, TraitConfig> = {};
 
   constructor(config: OrbitalServerRuntimeConfig = {}) {
     this.config = {
@@ -765,6 +775,7 @@ export class OrbitalServerRuntime {
     // server's /api/schema handler) can serve the fully-resolved copy instead
     // of re-reading the raw .orb from disk. See getResolvedSchema().
     this.resolvedSchema = schema;
+    this.resolvedTraitConfigs = buildResolvedTraitConfigs(schema);
   }
 
   /**
@@ -788,6 +799,7 @@ export class OrbitalServerRuntime {
     this.setupTicks();
 
     this.resolvedSchema = schema;
+    this.resolvedTraitConfigs = buildResolvedTraitConfigs(schema);
   }
 
   /**
@@ -2453,9 +2465,23 @@ export class OrbitalServerRuntime {
     // playground while the compiled bundle renders correctly.
     const traitDef = registered.traits.find((t) => t.name === traitName);
     const declaredDefaults = collectDeclaredConfigDefaults(traitDef);
+    // An embedded sub-trait (e.g. std-browse's `DataGrid1`) never gets an
+    // entry in `configByTrait` — that map is only populated for `_resolved`-
+    // wrapped ref traits (see registerOrbitalAsync), and an inline atom
+    // sub-trait pulled in via `@trait.X` isn't one. Its OWN declared config
+    // (`declaredDefaults` above) is the only source, and for a `@config.X`
+    // forward field that's the literal unresolved string. `resolvedTraitConfigs`
+    // (built once at register() via `buildResolvedTraitConfigs`) chains that
+    // forward through to the trait that actually embeds it — merge it in
+    // ahead of `callSiteOverride` (a real call-site override still wins).
+    const resolvedDefaults = this.resolvedTraitConfigs[traitName];
     const callSiteOverride = registered.configByTrait.get(traitName);
-    if (declaredDefaults || callSiteOverride) {
-      bindings.config = { ...(declaredDefaults ?? {}), ...(callSiteOverride ?? {}) };
+    if (declaredDefaults || resolvedDefaults || callSiteOverride) {
+      bindings.config = {
+        ...(declaredDefaults ?? {}),
+        ...(resolvedDefaults ?? {}),
+        ...(callSiteOverride ?? {}),
+      };
     }
 
     // `@entity` resolves to a three-layer merge (outermost wins):

@@ -4,8 +4,14 @@
  * imports (`module`/`createRequire`, the external loader) into a browser bundle.
  * This file has zero node dependencies (types only, from `@almadar/core`).
  */
-import type { TraitConfig, TraitConfigValue, DeclaredTraitConfig, Entity, EntityRow, FieldValue, CallSiteConfig } from '@almadar/core';
-import { isCallSiteConfigDeclaration } from '@almadar/core';
+import type { TraitConfig, TraitConfigValue, DeclaredTraitConfig, Entity, EntityRow, FieldValue } from '@almadar/core';
+
+// `normalizeCallSiteConfigToValues` moved to `@almadar/core` (it only needs
+// `isCallSiteConfigDeclaration`, already owned there) so the JS interpreter
+// (`@almadar/runtime`) and the render substrate (`@almadar/ui`) share the
+// ONE implementation instead of each carrying its own copy. Re-exported here
+// for existing `@almadar/runtime` consumers.
+export { normalizeCallSiteConfigToValues } from '@almadar/core';
 
 /**
  * Walk a trait's declared `config { }` schema and return the flat
@@ -31,38 +37,6 @@ export function collectDeclaredConfigDefaults(
     }
   }
   return hasAny ? defaults : undefined;
-}
-
-/**
- * Convert a call-site config map into plain runtime values.
- *
- * A `CallSiteConfig` may contain either plain wiring values
- * (`TraitConfigValue`) or annotated `ConfigFieldDeclaration` objects
- * (`{ type, default, label, ... }`). The runtime binding context expects
- * only values, so this helper extracts `.default` from declarations and
- * passes plain values through unchanged. Entries that are not recognized as
- * declarations by `isCallSiteConfigDeclaration` are returned as-is.
- */
-export function normalizeCallSiteConfigToValues(
-  config: CallSiteConfig | undefined,
-): TraitConfig | undefined {
-  if (config === undefined) {
-    return undefined;
-  }
-
-  const out: Record<string, TraitConfigValue> = {};
-  let hasAny = false;
-  for (const [key, entry] of Object.entries(config)) {
-    const value = isCallSiteConfigDeclaration(entry)
-      ? entry.default
-      : entry;
-    if (value !== undefined) {
-      out[key] = value;
-      hasAny = true;
-    }
-  }
-
-  return hasAny ? out : undefined;
 }
 
 /**
