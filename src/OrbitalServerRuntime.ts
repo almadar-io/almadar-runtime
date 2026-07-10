@@ -2475,7 +2475,22 @@ export class OrbitalServerRuntime {
     // forward through to the trait that actually embeds it — merge it in
     // ahead of `callSiteOverride` (a real call-site override still wins).
     const resolvedDefaults = this.resolvedTraitConfigs[traitName];
-    const callSiteOverride = registered.configByTrait.get(traitName);
+    const callSiteOverrideRaw = registered.configByTrait.get(traitName);
+    // Drop unresolved `@config.X` forwards from the call-site config before it
+    // spreads last: for an embedded sub-trait rendered from a state-machine
+    // transition (e.g. std-health-score's inline DataGrid `fields={@config.
+    // fields}`), the call-site value IS the literal forward string, the same
+    // one `resolvedDefaults` already substituted to a concrete value. Spread
+    // raw, it would clobber the resolved array back to `"@config.fields"` and
+    // push an unresolved frame over the bridge — the server half of the
+    // render oscillation. A concrete override (a real array/scalar) still wins.
+    const callSiteOverride = callSiteOverrideRaw
+      ? Object.fromEntries(
+          Object.entries(callSiteOverrideRaw).filter(
+            ([, v]) => !(typeof v === 'string' && v.startsWith('@config.')),
+          ),
+        )
+      : undefined;
     if (declaredDefaults || resolvedDefaults || callSiteOverride) {
       bindings.config = {
         ...(declaredDefaults ?? {}),
