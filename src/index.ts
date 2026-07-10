@@ -194,3 +194,7 @@ export type {
   LayoutStrategy,
   PipeStep,
 } from "./composition/index.js";
+
+// Renderer-agnostic UI contract. React/Web Components/Vue renderers depend on
+// this surface and implement the framework-specific pieces on top.
+export * from "./ui/index.js";

@@ -5,6 +5,10 @@ export default defineConfig({
     'src/index.ts',
     'src/OrbitalServerRuntime.ts',
     'src/ServerBridge.ts',
+    // Renderer-agnostic UI contract. Any UI library (React, Web Components,
+    // etc.) imports this surface and implements the framework-specific slot
+    // manager / component registry on top of it.
+    'src/ui/index.ts',
     // Node-only module: separate entry so dist emits a standalone
     // `createOsHandlers.js` file. OrbitalServerRuntime loads it via
     // dynamic import() at runtime — needs the file to exist as a

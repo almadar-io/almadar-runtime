@@ -37,6 +37,11 @@
       "types": "./dist/mockRandom.d.ts",
       "import": "./dist/mockRandom.js",
       "require": "./dist/mockRandom.js"
+    },
+    "./ui": {
+      "types": "./dist/ui/index.d.ts",
+      "import": "./dist/ui/index.js",
+      "require": "./dist/ui/index.js"
     }
   },
   "files": [

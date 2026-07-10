@@ -8,6 +8,7 @@
  */
 
 import { createLogger } from '@almadar/logger';
+import type { PatternConfig } from '@almadar/core';
 import type { EffectHandlers, EventPayload, PatternProps } from './types.js';
 
 const log = createLogger('almadar:runtime:effects:client');
@@ -29,7 +30,7 @@ export interface ClientEventBus {
  */
 export interface SlotSetter {
     /** Accumulate a pattern into the pending slot map */
-    addPattern: (slot: string, pattern: unknown, props?: PatternProps) => void;
+    addPattern: (slot: string, pattern: PatternConfig, props?: PatternProps) => void;
     /** Mark a slot for clearing */
     clearSlot: (slot: string) => void;
 }
@@ -169,7 +170,7 @@ export function createClientEffectHandlers(
             return {};
         },
 
-        renderUI: (slot: string, pattern: unknown, props?: PatternProps) => {
+        renderUI: (slot: string, pattern: PatternConfig | null, props?: PatternProps) => {
             if (pattern === null) {
                 slotSetter.clearSlot(slot);
                 return;
