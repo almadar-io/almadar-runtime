@@ -45,6 +45,7 @@ import type {
   ImportChainLike,
 } from "../loader/schema-loader.js";
 import { createLogger } from '@almadar/logger';
+import { spliceLambdaTraitRefs, LambdaSpliceError } from "../ui/splice-lambda-traits.js";
 
 const refResolverLog = createLogger("almadar:runtime:ref-resolver");
 
@@ -622,6 +623,20 @@ export class ReferenceResolver {
     if (!entityResult.success || !traitsResult.success || !pagesResult.success) {
       // This should never happen since we checked errors above
       return { success: false, errors: ['Internal error: unexpected failure state'] };
+    }
+
+    // Lambda-scope splice — JS twin of the compiler's inline `splice_lambda_
+    // trait_refs`. Render-only `@trait.X` refs inside a `["fn", …]` render
+    // subtree (data-list `renderItem`, etc.) are spliced in place (wrapper
+    // config applied), their emits merged onto the host, and the consumed
+    // wrapper dropped from traits + pages. Mutates the resolved arrays.
+    try {
+      spliceLambdaTraitRefs(traitsResult.data, pagesResult.data);
+    } catch (e) {
+      if (e instanceof LambdaSpliceError) {
+        return { success: false, errors: [e.message] };
+      }
+      throw e;
     }
 
     return {

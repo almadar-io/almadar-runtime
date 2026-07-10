@@ -25,7 +25,7 @@ import type { OrbitalDefinition, OrbitalSchema, ResolvedTrait, SExpr, SExprAtom,
 
 const TRAIT_BINDING_PREFIX = '@trait.';
 
-function collectTraitRefsFromValue(value: SExpr, into: Set<string>): void {
+export function collectTraitRefsFromValue(value: SExpr, into: Set<string>): void {
   if (value === null || value === undefined) return;
   if (typeof value === 'string') {
     if (value.startsWith(TRAIT_BINDING_PREFIX)) {
@@ -47,7 +47,7 @@ function collectTraitRefsFromValue(value: SExpr, into: Set<string>): void {
   }
 }
 
-function collectTraitRefsFromEffects(
+export function collectTraitRefsFromEffects(
   effects: readonly SExpr[] | undefined,
   into: Set<string>,
 ): void {
