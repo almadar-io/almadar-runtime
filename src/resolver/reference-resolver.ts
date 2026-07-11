@@ -36,6 +36,9 @@ import {
   parsePageRef,
   parseImportedTraitRef,
   isInlineTrait,
+  configRefEventKnob,
+  resolveConfigRefEventName,
+  normalizeCallSiteConfigToValues,
 } from "@almadar/core";
 import type {
   LoaderOptions,
@@ -530,6 +533,49 @@ function applyEventRenames(
   } as Trait;
 }
 
+/**
+ * Resolve `@config.<knob>` emit-name references (Option B) on a trait to
+ * their concrete literals. Effective config per instance = the trait's
+ * declared config defaults folded under the call-site override — the same
+ * precedence the Rust inline phase and OrbitalServerRuntime's binding merge
+ * use. Runs BEFORE `applyEventRenames` (renames target RESOLVED names, per
+ * the pinned contract). Standalone (no call site) resolves to the declared
+ * default. Unresolvable refs (unknown knob / non-string / no default)
+ * surface as errors — mirror of the compiler's ORB_EMIT_CONFIG_REF_INVALID.
+ */
+export function resolveConfigRefEmitNames(
+  trait: Trait,
+  callSiteConfig?: TraitConfig,
+): { trait: Trait; errors: string[] } {
+  const emits = trait.emits ?? [];
+  const hasRef = emits.some((em) => configRefEventKnob(em.event) !== undefined);
+  if (!hasRef) return { trait, errors: [] };
+
+  const effectiveConfig = {
+    ...(normalizeCallSiteConfigToValues(trait.config) ?? {}),
+    ...(normalizeCallSiteConfigToValues(callSiteConfig) ?? {}),
+  };
+  const errors: string[] = [];
+  const nextEmits = emits.map((em) => {
+    if (configRefEventKnob(em.event) === undefined) return em;
+    const result = resolveConfigRefEventName(em.event, trait.config, effectiveConfig);
+    if (!result.ok) {
+      errors.push(
+        `Trait "${trait.name}" emits \`${em.event}\` but the reference is invalid (${result.error}): ` +
+          `the knob must be a declared string-typed config field with a default.`,
+      );
+      return em;
+    }
+    refResolverLog.debug("emit-config-ref:resolved", {
+      trait: trait.name,
+      ref: em.event,
+      resolved: result.value,
+    });
+    return { ...em, event: result.value };
+  });
+  return { trait: { ...trait, emits: nextEmits }, errors };
+}
+
 // ============================================================================
 // Reference Resolver
 // ============================================================================
@@ -859,12 +905,18 @@ export class ReferenceResolver {
     traitRef: TraitRef,
     imports: ResolvedImports
   ): ResolveResult<ResolvedTrait> {
-    // Case 1: Inline trait definition
+    // Case 1: Inline trait definition. Emit-name `@config.<knob>` refs
+    // resolve against the trait's own declared defaults (standalone
+    // semantics — no call site exists here).
     if (typeof traitRef !== "string" && "stateMachine" in traitRef) {
+      const { trait: resolvedInline, errors } = resolveConfigRefEmitNames(traitRef as Trait);
+      if (errors.length > 0) {
+        return { success: false, errors };
+      }
       return {
         success: true,
         data: {
-          trait: traitRef as Trait,
+          trait: resolvedInline,
           source: { type: "inline" },
         },
         warnings: [],
@@ -967,7 +1019,14 @@ export class ReferenceResolver {
       const baseTrait: Trait = overrideName
         ? { ...trait, name: overrideName }
         : trait;
-      const reboundTrait = applyLinkedEntityRename(baseTrait, linkedEntity);
+      // Emit-name config refs resolve BEFORE event renames so a call-site
+      // `events={...}` rename map targets the RESOLVED event names.
+      const { trait: configResolvedTrait, errors: configRefErrors } =
+        resolveConfigRefEmitNames(baseTrait, config);
+      if (configRefErrors.length > 0) {
+        return { success: false, errors: configRefErrors };
+      }
+      const reboundTrait = applyLinkedEntityRename(configResolvedTrait, linkedEntity);
       const renamedTrait = applyEventRenames(reboundTrait, eventRenames);
       const finalTrait: Trait = listensOverride !== undefined
         ? { ...renamedTrait, listens: listensOverride }
@@ -999,7 +1058,12 @@ export class ReferenceResolver {
       const baseLocal: Trait = overrideName
         ? { ...localTrait, name: overrideName }
         : localTrait;
-      const reboundLocal = applyLinkedEntityRename(baseLocal, linkedEntity);
+      const { trait: configResolvedLocal, errors: localConfigRefErrors } =
+        resolveConfigRefEmitNames(baseLocal, config);
+      if (localConfigRefErrors.length > 0) {
+        return { success: false, errors: localConfigRefErrors };
+      }
+      const reboundLocal = applyLinkedEntityRename(configResolvedLocal, linkedEntity);
       const renamedLocalTrait = applyEventRenames(reboundLocal, eventRenames);
       const finalLocalTrait: Trait = listensOverride !== undefined
         ? { ...renamedLocalTrait, listens: listensOverride }

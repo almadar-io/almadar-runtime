@@ -23,6 +23,7 @@ import type {
 } from '@almadar/core';
 import { isInlineTrait, getTraitName } from '@almadar/core';
 import { namespaceEvent } from '../utils/event-namespace.js';
+import { resolveConfigRefEmitNames } from './reference-resolver.js';
 
 // ============================================================================
 // Types
@@ -85,6 +86,13 @@ export function computeOrbitalEventInterface(
         if (!trait) {
             continue;
         }
+
+        // A trait reaching here PRE-resolution can still carry
+        // `@config.<knob>` emit-name refs; resolve with the trait's own
+        // declared defaults (standalone semantics). Resolved traits are
+        // untouched (no refs left). Invalid refs stay literal here — the
+        // resolver / compiler validator owns the error surface.
+        trait = resolveConfigRefEmitNames(trait).trait;
 
         // Collect external emits from trait
         collectTraitEmits(trait, emits, seenEmits, orbital.exposes);

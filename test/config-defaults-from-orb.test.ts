@@ -51,7 +51,7 @@ function loadAtomTrait(orbRelative: string, traitName: string): OrbTrait {
 
 describe('config defaults from real std atom .orb files', () => {
     it('std-modal ModalRecordModal exposes typed config defaults', () => {
-        const trait = loadAtomTrait('core/atoms/std-modal.orb', 'ModalRecordModal');
+        const trait = loadAtomTrait('ui/core/atoms/std-modal.orb', 'ModalRecordModal');
         const defaults = collectDeclaredConfigDefaults(
             trait as unknown as Parameters<typeof collectDeclaredConfigDefaults>[0],
         );
@@ -70,7 +70,7 @@ describe('config defaults from real std atom .orb files', () => {
     });
 
     it('std-search SearchResultSearch exposes string config defaults', () => {
-        const trait = loadAtomTrait('core/atoms/std-search.orb', 'SearchResultSearch');
+        const trait = loadAtomTrait('ui/core/atoms/std-search.orb', 'SearchResultSearch');
         const defaults = collectDeclaredConfigDefaults(
             trait as unknown as Parameters<typeof collectDeclaredConfigDefaults>[0],
         );
@@ -83,7 +83,7 @@ describe('config defaults from real std atom .orb files', () => {
 
     it('std-pagination PagedItemPagination exposes number + string config defaults', () => {
         const trait = loadAtomTrait(
-            'core/atoms/std-pagination.orb',
+            'ui/core/atoms/std-pagination.orb',
             'PagedItemPagination',
         );
         const defaults = collectDeclaredConfigDefaults(

@@ -56,27 +56,30 @@ describe('collectDeclaredEntityDefaults — real std atom .orb files', () => {
     });
 
     it('std-modal ModalRecord yields status default', () => {
-        const entity = loadOrbEntity('core/atoms/std-modal.orb');
+        const entity = loadOrbEntity('ui/core/atoms/std-modal.orb');
         const defaults = collectDeclaredEntityDefaults(entity);
         expect(defaults).toBeDefined();
         expect(defaults).toMatchObject({ status: 'active' });
     });
 
-    it('std-dashboard-summary SummaryRecord yields rich defaults', () => {
-        const entity = loadOrbEntity('core/atoms/std-dashboard-summary.orb');
+    // std-dashboard-summary was retired in the V3 Phase 5.B consolidation;
+    // std-event-log carries the same rich mixed-type default surface
+    // (strings + arrays) this case exists to cover.
+    it('std-event-log EventLogView yields rich defaults', () => {
+        const entity = loadOrbEntity('ui/core/atoms/std-event-log.orb');
         const defaults = collectDeclaredEntityDefaults(entity);
         expect(defaults).toBeDefined();
         expect(defaults).toMatchObject({
-            title: 'Performance overview',
-            period: 'Last 30 days',
-            tiles: [],
-            chartData: [],
+            kind: 'created',
+            allEntries: [],
+            entries: [],
+            filterChips: [],
             errorMessage: '',
         });
     });
 
     it('std-rating-review ReviewView yields numeric + string + array defaults', () => {
-        const entity = loadOrbEntity('core/atoms/std-rating-review.orb');
+        const entity = loadOrbEntity('ui/core/atoms/std-rating-review.orb');
         const defaults = collectDeclaredEntityDefaults(entity);
         expect(defaults).toBeDefined();
         expect(defaults).toMatchObject({
