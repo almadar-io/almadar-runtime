@@ -87,6 +87,19 @@ export function collectEmbeddedTraits(schema: OrbitalSchema | undefined | null):
       if (!traitRef || typeof traitRef !== 'object') continue;
       const resolved = (traitRef as TraitRef & { _resolved?: Trait })._resolved;
       const target: Trait = (resolved && typeof resolved === 'object') ? resolved : traitRef as Trait;
+      // The wrapper's OWN `config` (call-site overrides, e.g. a SimpleGrid's
+      // `children: [@trait.A, @trait.B, ...]`) is where composition actually
+      // places `@trait.X` refs — `_resolved.config` is the atom's own
+      // declared config SCHEMA (defaults like a Typography atom's generic
+      // "Sample content" placeholder), never the resolved call-site value.
+      // Scanning only `target.config` (== `_resolved.config` for wrapper
+      // refs) missed every `@trait.X` nested inside a sibling's call-site
+      // config, leaving those traits out of the embedded set so their own
+      // `render-ui` write landed in the shared slot instead of the
+      // per-trait sidecar.
+      if (typeof traitRef !== 'string' && 'config' in traitRef && traitRef.config) {
+        collectTraitRefsFromValue(traitRef.config, out);
+      }
       if (target.config) {
         collectTraitRefsFromValue(target.config, out);
       }
