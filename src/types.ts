@@ -365,6 +365,22 @@ export interface EffectHandlers {
     /** Configure debounce for an OS event type */
     osDebounce?: (ms: number, eventType: string) => void;
 
+    // === Browser device handlers (client-side only) ===
+    //
+    // User-initiated, async device APIs. The executor wraps each in
+    // `runSubstrate`, so a resolved value fires `emit.success` with the
+    // uniform `{ result }` payload and a rejection fires `emit.failure`
+    // with `{ error }`. Absent on the server (→ unsupported warning).
+
+    /** browser/open-file-picker — resolves with `{ files }` inside `result` */
+    browserOpenFilePicker?: (options?: BrowserFilePickerOptions) => Promise<{ files: BrowserFileMeta[] }>;
+    /** browser/clipboard-read — resolves with `{ text }` inside `result` */
+    browserClipboardRead?: () => Promise<{ text: string }>;
+    /** browser/clipboard-write — resolves with `{ text }` (echo) inside `result` */
+    browserClipboardWrite?: (text: string) => Promise<{ text: string }>;
+    /** browser/geolocation-current — resolves with the position inside `result` */
+    browserGeolocationCurrent?: (options?: BrowserGeolocationOptions) => Promise<BrowserGeolocationPosition>;
+
     // === Agent substrate handlers (server-side only) ===
     // These back the effect-position substrate operators that fire events
     // and return typed ServiceCallResult members.
@@ -389,6 +405,44 @@ export interface EffectHandlers {
  * operators meaningfully fire.
  */
 export type OsEmitConfig = Pick<import('@almadar/core').EmitConfig, 'on_message' | 'failure'>;
+
+// ============================================================================
+// Browser Device Handler Types (client host path)
+// ============================================================================
+//
+// Structural device shapes with no equivalent in @almadar/core (file metadata,
+// geolocation). Primitives only — no `unknown` — so they flow into the
+// uniform `{ result }` emit payload (EventPayload-compatible) without casts.
+
+/** Options for `browser/open-file-picker`. */
+export interface BrowserFilePickerOptions {
+    /** Allow selecting multiple files. */
+    multiple?: boolean;
+    /** MIME type filter (e.g. "image/*"). Best-effort; host may ignore. */
+    accept?: string;
+}
+
+/** Metadata for a file chosen via `browser/open-file-picker`. */
+export interface BrowserFileMeta {
+    name: string;
+    size: number;
+    type: string;
+    lastModified: number;
+}
+
+/** Options for `browser/geolocation-current` (subset of PositionOptions). */
+export interface BrowserGeolocationOptions {
+    enableHighAccuracy?: boolean;
+    timeout?: number;
+    maximumAge?: number;
+}
+
+/** Position returned by `browser/geolocation-current`. */
+export interface BrowserGeolocationPosition {
+    latitude: number;
+    longitude: number;
+    accuracy: number;
+}
 
 // ============================================================================
 // Binding Context Types
@@ -573,12 +627,13 @@ export interface TransitionObserver {
  * Maps execution environments to their available effect handlers.
  */
 export const HANDLER_MANIFEST: Record<ExecutionEnvironment, string[]> = {
-    client: ["render-ui", "render", "navigate", "notify", "emit", "set", "log", "ref", "deref", "watch", "send-server"],
+    client: ["render-ui", "render", "navigate", "notify", "emit", "set", "log", "ref", "deref", "watch", "send-server", "browser/open-file-picker", "browser/clipboard-read", "browser/clipboard-write", "browser/geolocation-current"],
     server: ["persist", "fetch", "fetch-stream", "call-service", "emit", "set", "spawn", "despawn", "log", "ref", "deref", "swap!", "atomic", "os/watch-files", "os/watch-process", "os/watch-port", "os/watch-http", "os/watch-cron", "os/watch-signal", "os/watch-env", "os/debounce"],
     test: [
         "render-ui", "render", "navigate", "notify", "emit", "set",
         "persist", "fetch", "call-service", "spawn", "despawn", "log",
         "ref", "deref", "swap!", "watch", "atomic", "send-server",
+        "browser/open-file-picker", "browser/clipboard-read", "browser/clipboard-write", "browser/geolocation-current",
     ],
     ssr: ["render-ui", "render", "fetch", "emit", "set", "log", "ref", "deref"],
 };

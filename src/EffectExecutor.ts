@@ -14,6 +14,8 @@ import type {
     EffectContext,
     EffectResult,
     ExecutionEnvironment,
+    BrowserFilePickerOptions,
+    BrowserGeolocationOptions,
 } from './types.js';
 import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
@@ -1346,6 +1348,63 @@ export class EffectExecutor {
                         return null;
                     }
                     return this.handlers.substrateEmitBody(orbitalName, loloSource);
+                }, emitCfg);
+                break;
+            }
+
+            // === Browser device operators (client-side, user-gesture) ===
+            // Async host APIs routed to dedicated handler methods. Uniform
+            // `{ result }` / `{ error }` payload via runSubstrate. On the
+            // server (or any host without the API) the handler is absent →
+            // unsupported warning; a thrown error fires `emit.failure`.
+
+            case 'browser/open-file-picker': {
+                const [positional, emitCfg] = this.splitSubstrateEmit(args);
+                const options = positional[0] as BrowserFilePickerOptions | undefined;
+                await this.runSubstrate(async () => {
+                    if (!this.handlers.browserOpenFilePicker) {
+                        this.logUnsupported('browser/open-file-picker');
+                        return null;
+                    }
+                    return this.handlers.browserOpenFilePicker(options);
+                }, emitCfg);
+                break;
+            }
+
+            case 'browser/clipboard-read': {
+                const [, emitCfg] = this.splitSubstrateEmit(args);
+                await this.runSubstrate(async () => {
+                    if (!this.handlers.browserClipboardRead) {
+                        this.logUnsupported('browser/clipboard-read');
+                        return null;
+                    }
+                    return this.handlers.browserClipboardRead();
+                }, emitCfg);
+                break;
+            }
+
+            case 'browser/clipboard-write': {
+                const [positional, emitCfg] = this.splitSubstrateEmit(args);
+                const text = positional[0] as string;
+                await this.runSubstrate(async () => {
+                    if (!this.handlers.browserClipboardWrite) {
+                        this.logUnsupported('browser/clipboard-write');
+                        return null;
+                    }
+                    return this.handlers.browserClipboardWrite(text);
+                }, emitCfg);
+                break;
+            }
+
+            case 'browser/geolocation-current': {
+                const [positional, emitCfg] = this.splitSubstrateEmit(args);
+                const options = positional[0] as BrowserGeolocationOptions | undefined;
+                await this.runSubstrate(async () => {
+                    if (!this.handlers.browserGeolocationCurrent) {
+                        this.logUnsupported('browser/geolocation-current');
+                        return null;
+                    }
+                    return this.handlers.browserGeolocationCurrent(options);
                 }, emitCfg);
                 break;
             }

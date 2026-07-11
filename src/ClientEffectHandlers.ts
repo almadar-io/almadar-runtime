@@ -9,7 +9,7 @@
 
 import { createLogger } from '@almadar/logger';
 import type { PatternConfig } from '@almadar/core';
-import type { EffectHandlers, EventPayload, PatternProps } from './types.js';
+import type { EffectHandlers, EventPayload, PatternProps, BrowserFilePickerOptions, BrowserGeolocationOptions } from './types.js';
 
 const log = createLogger('almadar:runtime:effects:client');
 
@@ -193,5 +193,66 @@ export function createClientEffectHandlers(
         sendServer: sendServer ?? ((event: string, payload?: EventPayload) => {
             sendServerEvent(orbitalName, event, payload);
         }),
+
+        // === Browser device handlers (client host path) ===
+        // Each throws when the underlying API is unavailable so the executor's
+        // runSubstrate wrapper fires `emit.failure` with `{ error }`.
+
+        browserOpenFilePicker: async (options?: BrowserFilePickerOptions) => {
+            // The File System Access API is newer than the DOM lib this package
+            // is pinned to, so `window.showOpenFilePicker` is not on `Window`.
+            // Type the host surface structurally and narrow through a single
+            // `Window & { ... }` intersection (overlaps `Window` → no `unknown`
+            // / `any` double-cast).
+            type FilePickerFn = (pickerOptions?: {
+                multiple?: boolean;
+                types?: Array<{ accept: Record<string, string[]> }>;
+            }) => Promise<Array<{ getFile: () => Promise<File> }>>;
+            if (typeof window === 'undefined' || !('showOpenFilePicker' in window)) {
+                throw new Error('File picker API is not available in this environment');
+            }
+            const host = window as Window & { showOpenFilePicker: FilePickerFn };
+            const pickerOptions: { multiple?: boolean; types?: Array<{ accept: Record<string, string[]> }> } = {};
+            if (options?.multiple === true) pickerOptions.multiple = true;
+            if (typeof options?.accept === 'string' && options.accept.length > 0) {
+                pickerOptions.types = [{ accept: { [options.accept]: [] } }];
+            }
+            const handles = await host.showOpenFilePicker(pickerOptions);
+            const files = await Promise.all(handles.map(async (handle) => {
+                const file = await handle.getFile();
+                return { name: file.name, size: file.size, type: file.type, lastModified: file.lastModified };
+            }));
+            return { files };
+        },
+
+        browserClipboardRead: async () => {
+            if (typeof navigator === 'undefined' || !navigator.clipboard) {
+                throw new Error('Clipboard API is not available in this environment');
+            }
+            const text = await navigator.clipboard.readText();
+            return { text };
+        },
+
+        browserClipboardWrite: async (text: string) => {
+            if (typeof navigator === 'undefined' || !navigator.clipboard) {
+                throw new Error('Clipboard API is not available in this environment');
+            }
+            await navigator.clipboard.writeText(text);
+            return { text };
+        },
+
+        browserGeolocationCurrent: async (options?: BrowserGeolocationOptions) => {
+            if (typeof navigator === 'undefined' || !navigator.geolocation) {
+                throw new Error('Geolocation API is not available in this environment');
+            }
+            const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(resolve, reject, options);
+            });
+            return {
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                accuracy: position.coords.accuracy,
+            };
+        },
     };
 }
