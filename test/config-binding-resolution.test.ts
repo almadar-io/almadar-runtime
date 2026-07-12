@@ -20,6 +20,7 @@ import {
     interpolateProps,
     interpolateValue,
     createContextFromBindings,
+    resolveCallSitePayloadCaptures,
     type BindingContext,
 } from '../src/BindingResolver.js';
 
@@ -189,5 +190,63 @@ describe('@config.X — inside render-ui pattern shapes', () => {
         // against here (we only set ctx.config), so it returns undefined —
         // confirms config and payload roots are independent.
         expect(result.entity).toBeUndefined();
+    });
+});
+
+// ============================================================================
+// Call-site payload capture (`@callsitePayload.X`)
+//
+// A composed trait whose call-site prop binds `@payload.<f>` inside a
+// transition render effect lowers (in the compiler) to a synthesized child
+// trait whose config carries `@callsitePayload.<f>`. At execution the engine
+// resolves that capture against the COMPOSING effect's triggering event payload
+// (snapshot → literal) before merging it into the child's config. This mirrors
+// `OrbitalServerRuntime.executeEffects`'s `bindings.config` assembly.
+// ============================================================================
+describe('call-site payload capture (@callsitePayload.X)', () => {
+    it('resolves a captured field to its literal against the composing event payload', () => {
+        const resolved = resolveCallSitePayloadCaptures(
+            { content: '@callsitePayload.error' },
+            { error: 'Boom', code: 'E1' },
+        );
+        expect(resolved.content).toBe('Boom');
+    });
+
+    it('passes non-capture config values through untouched', () => {
+        const resolved = resolveCallSitePayloadCaptures(
+            { content: '@callsitePayload.error', variant: 'body', level: 1 },
+            { error: 'Boom' },
+        );
+        expect(resolved).toEqual({ content: 'Boom', variant: 'body', level: 1 });
+    });
+
+    it('resolves a nested payload path', () => {
+        const resolved = resolveCallSitePayloadCaptures(
+            { title: '@callsitePayload.detail.title' },
+            { detail: { title: 'Hi' } },
+        );
+        expect(resolved.title).toBe('Hi');
+    });
+
+    it('yields null for a payload field absent on the composing event', () => {
+        const resolved = resolveCallSitePayloadCaptures(
+            { content: '@callsitePayload.missing' },
+            { error: 'Boom' },
+        );
+        expect(resolved.content).toBeNull();
+    });
+
+    it('embedded child receives the resolved literal via the config merge', () => {
+        // The child atom renders `content: @config.content`; its declared
+        // default plus the resolved call-site capture assemble the effective
+        // config exactly as OrbitalServerRuntime.executeEffects does.
+        const declaredDefaults = { content: 'Sample content', variant: 'body' };
+        const callSiteOverride = resolveCallSitePayloadCaptures(
+            { content: '@callsitePayload.error' },
+            { error: 'Load failed: timeout' },
+        );
+        const childConfig = { ...declaredDefaults, ...callSiteOverride };
+        expect(childConfig.content).toBe('Load failed: timeout');
+        expect(childConfig.variant).toBe('body');
     });
 });

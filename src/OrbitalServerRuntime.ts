@@ -139,6 +139,7 @@ import type { SSEEvent } from '@almadar/server';
 import {
   interpolateProps,
   createContextFromBindings,
+  resolveCallSitePayloadCaptures,
 } from "./BindingResolver.js";
 import { evaluate, evaluateGuard } from "@almadar/evaluator";
 import type {
@@ -2484,11 +2485,19 @@ export class OrbitalServerRuntime {
     // raw, it would clobber the resolved array back to `"@config.fields"` and
     // push an unresolved frame over the bridge — the server half of the
     // render oscillation. A concrete override (a real array/scalar) still wins.
+    // Call-site payload capture: a `@callsitePayload.<field>` override is a
+    // snapshot of THIS effect's triggering event payload, captured at the
+    // composing call site. Resolve it against `payload` (in scope here) to the
+    // literal before it merges into the child's config — the child then sees a
+    // plain value via its `@config.<knob>` read, never a payload ref.
     const callSiteOverride = callSiteOverrideRaw
-      ? Object.fromEntries(
-          Object.entries(callSiteOverrideRaw).filter(
-            ([, v]) => !(typeof v === 'string' && v.startsWith('@config.')),
+      ? resolveCallSitePayloadCaptures(
+          Object.fromEntries(
+            Object.entries(callSiteOverrideRaw).filter(
+              ([, v]) => !(typeof v === 'string' && v.startsWith('@config.')),
+            ),
           ),
+          payload,
         )
       : undefined;
     if (declaredDefaults || resolvedDefaults || callSiteOverride) {

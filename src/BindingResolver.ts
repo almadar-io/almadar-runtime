@@ -20,7 +20,8 @@ import {
 // node-only registry LOADER (createRequire/fs/path), which has no place in the
 // runtime interpreter that ships to the renderer.
 import { isKnownStdOperator as isKnownOperator } from '@almadar/std/registry';
-import type { BindingContext, EntityRow, PatternProps, EvaluationContextExtensions } from './types.js';
+import type { BindingContext, EntityRow, EventPayload, PatternProps, EvaluationContextExtensions } from './types.js';
+import type { TraitConfigObject, TraitConfigValue } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
 
 const bindLog = createLogger('almadar:runtime:bindings');
@@ -47,6 +48,57 @@ export { createMinimalContext, type EvaluationContext };
  * `docs/Almadar_Std_Gaps.md` §3.8.
  */
 export const CLIENT_ONLY_BINDING_ROOTS: ReadonlySet<string> = new Set(['trait']);
+
+/**
+ * Call-site payload capture grammar. Mirrors the Rust orbital-core
+ * `CALLSITE_PAYLOAD_PREFIX` (`@callsitePayload.`). A composed trait's call-site
+ * config value of this form is a snapshot of the COMPOSING effect's triggering
+ * event payload, captured at the call site — deliberately distinct from
+ * `@payload.` so it is never evaluated in the child's own INIT scope.
+ */
+export const CALLSITE_PAYLOAD_PREFIX = '@callsitePayload.';
+
+/** Narrow an arbitrary resolved payload value to a `TraitConfigValue` (total;
+ * `undefined` → `null`, `Date` → ISO string) so a captured literal merges into
+ * the child's typed config without a cast. */
+function payloadValueToConfigValue(v: unknown): TraitConfigValue {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+    if (v instanceof Date) return v.toISOString();
+    if (Array.isArray(v)) return v.map(payloadValueToConfigValue);
+    if (typeof v === 'object') {
+        const obj: Record<string, TraitConfigValue> = {};
+        for (const [k, val] of Object.entries(v)) obj[k] = payloadValueToConfigValue(val);
+        return obj;
+    }
+    return String(v);
+}
+
+/**
+ * Resolve call-site payload captures in a child trait's call-site config
+ * against the COMPOSING effect's triggering event payload. Each value of the
+ * form `@callsitePayload.<field>` becomes the literal read from `payload`
+ * (snapshot semantics — the child sees a plain value, never a payload ref).
+ * Non-capture entries pass through untouched. Returns a new object; the input
+ * is not mutated.
+ */
+export function resolveCallSitePayloadCaptures(
+    config: TraitConfigObject,
+    payload: EventPayload | undefined,
+): TraitConfigObject {
+    let ctx: EvaluationContext | undefined;
+    const out: Record<string, TraitConfigValue> = {};
+    for (const [key, value] of Object.entries(config)) {
+        if (typeof value === 'string' && value.startsWith(CALLSITE_PAYLOAD_PREFIX)) {
+            const field = value.slice(CALLSITE_PAYLOAD_PREFIX.length);
+            if (!ctx) ctx = createMinimalContext({}, payload ?? {}, 'idle');
+            out[key] = payloadValueToConfigValue(resolveBinding(`@payload.${field}`, ctx));
+        } else {
+            out[key] = value;
+        }
+    }
+    return out;
+}
 
 /** Return true when the binding's root segment is reserved for client-only resolution. */
 function isClientOnlyBinding(value: string): boolean {
