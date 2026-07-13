@@ -23,9 +23,6 @@ importers:
       '@almadar/std':
         specifier: ^16.138.0
         version: 16.138.0
-      '@faker-js/faker':
-        specifier: ^9.3.0
-        version: 9.9.0
     devDependencies:
       '@almadar/eslint-plugin':
         specifier: ^2.14.0
