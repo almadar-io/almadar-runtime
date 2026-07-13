@@ -62,10 +62,10 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
-    "@almadar/core": "^10.28.0",
+    "@almadar/core": "^10.29.0",
     "@almadar/evaluator": "^2.29.0",
     "@almadar/logger": "^1.9.0",
-    "@almadar/server": "^2.24.0",
+    "@almadar/server": "^2.25.0",
     "@almadar/std": "^16.138.0"
   },
   "peerDependencies": {
@@ -84,9 +84,9 @@
     "eslint": "10.0.0",
     "express": "^5.0.0",
     "tsup": "^8.0.0",
+    "turbo": "^2.8.17",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.0",
-    "turbo": "^2.8.17"
+    "vitest": "^2.1.0"
   },
   "repository": {
     "type": "git",
