@@ -9,7 +9,7 @@
 
 import type { PersistenceAdapter } from './OrbitalServerRuntime.js';
 import type { EntityRow } from './types.js';
-import type { EntityField, FieldValue } from '@almadar/core';
+import type { EntityField, EntityId, FieldValue } from '@almadar/core';
 import { createLogger } from '@almadar/logger';
 import {
   seedRandom,
@@ -65,6 +65,8 @@ type NamedEntityField = EntityField & { name: string };
 
 export interface EntitySchema {
   name: string;
+  /** V4 dual-carry id sibling of `name` — optional until the Phase-7 flip. */
+  id?: EntityId;
   fields: NamedEntityField[];
   /** Pre-authored instance data from the schema (used instead of generated mocks) */
   seedData?: EntityRow[];
@@ -90,6 +92,8 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   private stores: Map<string, Map<string, EntityRow>> = new Map();
   private schemas: Map<string, EntitySchema> = new Map();
   private idCounters: Map<string, number> = new Map();
+  /** entityId -> normalized store name, so relation lookups can prefer the id sibling over `relation.entity` name-matching. */
+  private storeNameById: Map<string, string> = new Map();
   private config: MockPersistenceConfig;
 
   constructor(config: MockPersistenceConfig = {}) {
@@ -148,6 +152,9 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   registerEntity(schema: EntitySchema, seedCount?: number): void {
     const normalized = schema.name.toLowerCase();
     this.schemas.set(normalized, schema);
+    if (schema.id) {
+      this.storeNameById.set(schema.id, normalized);
+    }
 
     if (schema.seedData && schema.seedData.length > 0) {
       // Seed with actual pre-authored instances
@@ -186,13 +193,19 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       // predicate is what makes `field.relation` typed in the loop below — no
       // record-access casts, no unknown narrowing.
       const relationFields = schema.fields.filter(
-        (f): f is NamedEntityField & { type: 'relation'; relation: { entity: string; cardinality?: string; field?: string } } =>
+        (f): f is NamedEntityField & { type: 'relation'; relation: { entity: string; entityId?: EntityId; cardinality?: string; field?: string } } =>
           f.type === 'relation',
       );
       if (relationFields.length === 0) continue;
       for (const row of store.values()) {
         for (const field of relationFields) {
-          const targetStore = this.stores.get(field.relation.entity.toLowerCase());
+          // Id-primary: prefer the `entityId` sibling via the id->name index,
+          // falling back to the `entity` name string when the id is absent
+          // or unindexed (transition-period tolerance).
+          const targetNormalized =
+            (field.relation.entityId && this.storeNameById.get(field.relation.entityId)) ??
+            field.relation.entity.toLowerCase();
+          const targetStore = this.stores.get(targetNormalized);
           if (!targetStore || targetStore.size === 0) continue;
           // Eligible IDs: every id in the target store, minus this row's own id
           // (only when target === self entity) so a comment doesn't list itself

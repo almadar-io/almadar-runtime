@@ -167,6 +167,7 @@ import type {
   OrbitalDefinition,
   Entity,
   EntityField,
+  EntityId,
   Trait,
   TraitTick,
   TraitConfig,
@@ -1107,7 +1108,7 @@ export class OrbitalServerRuntime {
             typeof f.name === 'string' && f.name.length > 0,
           )
           ;
-        this.persistence.registerEntity({ name: entity.name, fields });
+        this.persistence.registerEntity({ name: entity.name, id: entity.id, fields });
         if (this.config.debug) {
           persistLog.debug('mock:seeded', { entity: entity.name, count: this.persistence.count(entity.name) });
         }
@@ -1143,7 +1144,7 @@ export class OrbitalServerRuntime {
             typeof f.name === 'string' && f.name.length > 0,
           )
           ;
-        this.persistence.registerEntity({ name: auxEntity.name, fields: auxFields });
+        this.persistence.registerEntity({ name: auxEntity.name, id: auxEntity.id, fields: auxFields });
         if (this.config.debug) {
           persistLog.debug('mock:seeded-auxiliary', {
             entity: auxEntity.name,
@@ -1526,7 +1527,7 @@ export class OrbitalServerRuntime {
             typeof f.name === 'string' && f.name.length > 0,
           )
           ;
-        this.persistence.registerEntity({ name: entity.name, fields });
+        this.persistence.registerEntity({ name: entity.name, id: entity.id, fields });
       }
     }
   }
@@ -2737,7 +2738,7 @@ export class OrbitalServerRuntime {
     }
     visited.add(entityType);
     // Find the orbital that owns this entity type
-    let entityFields: Array<{ name: string; type: string; relation?: { entity?: string; cardinality?: string; onDelete?: string } }> | undefined;
+    let entityFields: Array<{ name: string; type: string; relation?: { entity?: string; entityId?: EntityId; cardinality?: string; onDelete?: string } }> | undefined;
 
     for (const [, registered] of this.orbitals) {
       if (registered.entity.name === entityType) {
@@ -2779,7 +2780,19 @@ export class OrbitalServerRuntime {
       }
 
       const foreignKeyField = relationField.name;
-      const relatedEntityType = relationField.relation.entity;
+      // Id-primary: prefer `relation.entityId` resolved against the
+      // registered orbitals' entity ids, falling back to the `entity` name
+      // string when the id is absent or unindexed (transition-period
+      // tolerance) — never throw on an unindexed id.
+      let relatedEntityType = relationField.relation.entity;
+      if (relationField.relation.entityId) {
+        for (const registered of this.orbitals.values()) {
+          if (registered.entity.id === relationField.relation.entityId) {
+            relatedEntityType = registered.entity.name;
+            break;
+          }
+        }
+      }
       const cardinality = relationField.relation.cardinality || 'one';
 
       // Collect all foreign key IDs to batch fetch

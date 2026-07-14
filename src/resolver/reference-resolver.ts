@@ -25,6 +25,8 @@ import type {
   OrbitalSchema,
   UseDeclaration,
   PatternConfig,
+  TraitId,
+  PageId,
 } from "@almadar/core";
 import {
   isEntityReference,
@@ -57,11 +59,81 @@ const refResolverLog = createLogger("almadar:runtime:ref-resolver");
 // ============================================================================
 
 /**
+ * A node reachable by id — the id-index entry.
+ */
+export interface IdIndexEntry {
+  kind: "trait" | "entity" | "page";
+  node: Trait | Entity | Page;
+}
+
+/**
  * Resolved imports from `uses` declarations.
  */
 export interface ResolvedImports {
   /** Map of alias -> loaded orbital */
   orbitals: Map<string, ResolvedImport>;
+
+  /**
+   * V4 id->node index spanning the composing orbital's own inline traits /
+   * entity / pages PLUS every imported orbital reachable via `uses`. Built
+   * once per `resolve()` call so id-carrying refs (`refId`, `linkedEntityId`,
+   * `traitRefIds`) can look a node up directly instead of re-walking every
+   * imported orbital's arrays by name. Additive only — every existing
+   * name-keyed lookup path stays intact and this index is consulted first,
+   * falling back to name matching when a ref's id is absent or unindexed.
+   */
+  idIndex: Map<string, IdIndexEntry>;
+}
+
+/**
+ * Walk one orbital's own inline nodes (traits / entity / pages) and add any
+ * that carry an `id` to the index. Shared between the local composing
+ * orbital and every imported orbital so the index spans the whole reachable
+ * graph.
+ */
+function indexOrbitalNodes(orbital: OrbitalDefinition, idIndex: Map<string, IdIndexEntry>): void {
+  for (const traitRef of orbital.traits ?? []) {
+    if (typeof traitRef !== "string" && "stateMachine" in traitRef) {
+      const trait = traitRef as Trait;
+      if (trait.id) {
+        idIndex.set(trait.id, { kind: "trait", node: trait });
+      }
+    }
+  }
+  const entityRef = orbital.entity;
+  if (
+    entityRef &&
+    typeof entityRef !== "string" &&
+    !("extends" in entityRef) &&
+    (entityRef as Entity).id
+  ) {
+    const entity = entityRef as Entity;
+    idIndex.set(entity.id!, { kind: "entity", node: entity });
+  }
+  for (const pageRef of orbital.pages ?? []) {
+    if (typeof pageRef !== "string" && !("ref" in pageRef)) {
+      const page = pageRef as Page;
+      if (page.id) {
+        idIndex.set(page.id, { kind: "page", node: page });
+      }
+    }
+  }
+}
+
+/**
+ * Build the id->node index spanning the local orbital plus every imported
+ * orbital reachable via `uses`. See {@link ResolvedImports.idIndex}.
+ */
+function buildIdIndex(
+  orbital: OrbitalDefinition,
+  orbitals: Map<string, ResolvedImport>,
+): Map<string, IdIndexEntry> {
+  const idIndex = new Map<string, IdIndexEntry>();
+  indexOrbitalNodes(orbital, idIndex);
+  for (const imported of orbitals.values()) {
+    indexOrbitalNodes(imported.orbital, idIndex);
+  }
+  return idIndex;
 }
 
 /**
@@ -587,6 +659,8 @@ export class ReferenceResolver {
   private loader: SchemaLoader;
   private options: ResolveOptions;
   private localTraits: Map<string, Trait>;
+  /** id-keyed mirror of `localTraits`, populated wherever the trait carries an `id`. */
+  private localTraitsById: Map<string, Trait> = new Map();
 
   private loaderInitialized = false;
 
@@ -595,6 +669,11 @@ export class ReferenceResolver {
     // Use provided loader; filesystem loader will be created lazily if needed
     this.loader = options.loader as SchemaLoader;
     this.localTraits = options.localTraits ?? new Map();
+    for (const trait of this.localTraits.values()) {
+      if (trait.id) {
+        this.localTraitsById.set(trait.id, trait);
+      }
+    }
   }
 
   private async ensureLoader(): Promise<void> {
@@ -635,12 +714,17 @@ export class ReferenceResolver {
     const alreadyResolved =
       traitsList.length > 0 && traitsList.every((t) => isInlineTrait(t));
     const importsResult = alreadyResolved
-      ? { success: true as const, data: { orbitals: new Map<string, ResolvedImport>() }, warnings: [] as string[] }
+      ? { success: true as const, data: { orbitals: new Map<string, ResolvedImport>(), idIndex: new Map<string, IdIndexEntry>() }, warnings: [] as string[] }
       : await this.resolveImports(orbital.uses ?? [], sourcePath, importChain);
     if (!importsResult.success) {
       return { success: false, errors: importsResult.errors };
     }
     const imports = importsResult.data;
+    // W3b: id->node index spanning this orbital's own inline nodes plus every
+    // imported orbital. Built once here (post-import-resolution) so every
+    // downstream trait/page lookup can consult it before falling back to
+    // name matching.
+    imports.idIndex = buildIdIndex(orbital, imports.orbitals);
 
     // Step 2: Resolve entity
     const entityResult = this.resolveEntity(orbital.entity, imports);
@@ -714,7 +798,7 @@ export class ReferenceResolver {
     if (this.options.skipExternalLoading) {
       return {
         success: true,
-        data: { orbitals },
+        data: { orbitals, idIndex: new Map<string, IdIndexEntry>() },
         warnings: ["External loading skipped"],
       };
     }
@@ -756,7 +840,7 @@ export class ReferenceResolver {
       return { success: false, errors };
     }
 
-    return { success: true, data: { orbitals }, warnings: [] };
+    return { success: true, data: { orbitals, idIndex: new Map<string, IdIndexEntry>() }, warnings: [] };
   }
 
   /**
@@ -941,6 +1025,7 @@ export class ReferenceResolver {
     if (typeof traitRef !== "string" && "ref" in traitRef) {
       const refObj = traitRef as {
         ref: string;
+        refId?: TraitId;
         name?: string;
         config?: TraitConfig;
         linkedEntity?: string;
@@ -955,6 +1040,7 @@ export class ReferenceResolver {
         refObj.name,
         refObj.events,
         refObj.listens,
+        refObj.refId,
       );
     }
 
@@ -980,6 +1066,7 @@ export class ReferenceResolver {
     overrideName?: string,
     eventRenames?: { [oldKey: string]: string },
     listensOverride?: TraitEventListener[],
+    refId?: TraitId,
   ): ResolveResult<ResolvedTrait> {
     // Check if it's an imported trait reference: "Alias.traits.TraitName"
     const parsed = parseImportedTraitRef(ref);
@@ -997,8 +1084,10 @@ export class ReferenceResolver {
         };
       }
 
-      // Find the trait in the imported orbital
-      const trait = this.findTraitInOrbital(imported.orbital, parsed.traitName);
+      // Find the trait in the imported orbital — id-primary: prefer the
+      // ref's `refId` against the id index, falling back to the existing
+      // name match when the id is absent or unindexed.
+      const trait = this.findTraitInOrbital(imported.orbital, parsed.traitName, refId, imports.idIndex);
       if (!trait) {
         return {
           success: false,
@@ -1052,8 +1141,9 @@ export class ReferenceResolver {
       };
     }
 
-    // Local trait (from localTraits map)
-    const localTrait = this.localTraits.get(ref);
+    // Local trait (from localTraits map) — id-primary: prefer the id-keyed
+    // map when the ref carries a `refId`, else the existing name-keyed map.
+    const localTrait = (refId && this.localTraitsById.get(refId)) ?? this.localTraits.get(ref);
     if (localTrait) {
       const baseLocal: Trait = overrideName
         ? { ...localTrait, name: overrideName }
@@ -1099,9 +1189,22 @@ export class ReferenceResolver {
   }
 
   /**
-   * Find a trait in an orbital by name.
+   * Find a trait in an orbital by name. Id-primary: when the calling ref
+   * carries a `refId` and the id index has a matching trait entry, return it
+   * directly — else fall back to the existing name match unchanged.
    */
-  private findTraitInOrbital(orbital: Orbital, traitName: string): Trait | null {
+  private findTraitInOrbital(
+    orbital: Orbital,
+    traitName: string,
+    refId?: TraitId,
+    idIndex?: Map<string, IdIndexEntry>,
+  ): Trait | null {
+    if (refId && idIndex) {
+      const entry = idIndex.get(refId);
+      if (entry && entry.kind === "trait") {
+        return entry.node as Trait;
+      }
+    }
     for (const traitRef of orbital.traits) {
       // Inline trait
       if (typeof traitRef !== "string" && "stateMachine" in traitRef) {
@@ -1202,7 +1305,8 @@ export class ReferenceResolver {
    */
   private resolvePageRefString(
     ref: string,
-    imports: ResolvedImports
+    imports: ResolvedImports,
+    refId?: PageId,
   ): ResolveResult<ResolvedPage> {
     const parsed = parsePageRef(ref);
     if (!parsed) {
@@ -1223,7 +1327,9 @@ export class ReferenceResolver {
       };
     }
 
-    const page = this.findPageInOrbital(imported.orbital, parsed.pageName);
+    // Id-primary: prefer `refId` against the id index, falling back to the
+    // existing name match when the id is absent or unindexed.
+    const page = this.findPageInOrbital(imported.orbital, parsed.pageName, refId, imports.idIndex);
     if (!page) {
       return {
         success: false,
@@ -1252,7 +1358,7 @@ export class ReferenceResolver {
     refObj: PageRefObject,
     imports: ResolvedImports
   ): ResolveResult<ResolvedPage> {
-    const baseResult = this.resolvePageRefString(refObj.ref, imports);
+    const baseResult = this.resolvePageRefString(refObj.ref, imports, refObj.refId);
     if (!baseResult.success) {
       return baseResult;
     }
@@ -1278,9 +1384,22 @@ export class ReferenceResolver {
   }
 
   /**
-   * Find a page in an orbital by name.
+   * Find a page in an orbital by name. Id-primary: when the calling ref
+   * carries a `refId` and the id index has a matching page entry, return it
+   * directly — else fall back to the existing name match unchanged.
    */
-  private findPageInOrbital(orbital: Orbital, pageName: string): Page | null {
+  private findPageInOrbital(
+    orbital: Orbital,
+    pageName: string,
+    refId?: PageId,
+    idIndex?: Map<string, IdIndexEntry>,
+  ): Page | null {
+    if (refId && idIndex) {
+      const entry = idIndex.get(refId);
+      if (entry && entry.kind === "page") {
+        return { ...(entry.node as Page) };
+      }
+    }
     const pages = orbital.pages;
     if (!pages) return null;
 
@@ -1319,6 +1438,9 @@ export class ReferenceResolver {
   addLocalTraits(traits: Trait[]): void {
     for (const trait of traits) {
       this.localTraits.set(trait.name, trait);
+      if (trait.id) {
+        this.localTraitsById.set(trait.id, trait);
+      }
     }
   }
 
