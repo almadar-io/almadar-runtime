@@ -29,6 +29,7 @@ import type {
     Orbital,
     ServiceCallResult,
     TraitId,
+    EventId,
 } from '@almadar/core';
 
 // ============================================================================
@@ -168,6 +169,8 @@ export interface TraitDefinition {
         from: string | string[];
         to: string;
         event: string;
+        /** V4 dual-carry id sibling of `event` — optional until the Phase-7 flip. */
+        eventId?: EventId;
         guard?: unknown;
         effects?: SExpr[];
         /** Compensating transition when effects fail (RCG-04) */
@@ -179,7 +182,11 @@ export interface TraitDefinition {
     /** Cross-trait event listeners (optional) */
     listens?: Array<{
         event: string;
+        /** V4 dual-carry id sibling of `event` — optional until the Phase-7 flip. */
+        eventId?: EventId;
         triggers: string;
+        /** V4 dual-carry id sibling of `triggers` — optional until the Phase-7 flip. */
+        triggersId?: EventId;
         payloadMapping?: EventPayload;
     }>;
 }

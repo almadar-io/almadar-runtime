@@ -20,6 +20,7 @@ import type {
     ConfigContext,
     EvaluationContextExtensions,
 } from './types.js';
+import type { EventId } from '@almadar/core';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import { evaluateGuard } from '@almadar/evaluator';
 import { createLogger } from '@almadar/logger';
@@ -64,20 +65,33 @@ export function createInitialTraitState(trait: TraitDefinition): TraitState {
  * `from`/`event` and differ by guard (e.g. retry under attempts<3 vs
  * give-up under attempts>=3), the runtime must consider all of them and
  * pick the first whose guard passes.
+ *
+ * V4 id-primary dispatch: when the caller supplies `eventId` AND the
+ * candidate transition carries its own `eventId`, the two ids are
+ * compared instead of the name strings — this lets a transition still
+ * fire after its `event` name diverges from the fired event's name (a
+ * rename mid-flight), as long as the id lineage matches. Either side
+ * missing an id falls back to the existing name comparison so id-free
+ * schemas dispatch exactly as before.
  */
 export function findMatchingTransitions(
     trait: TraitDefinition,
     currentState: string,
-    eventKey: string
+    eventKey: string,
+    eventId?: EventId
 ): TraitDefinition['transitions'] {
     if (!trait.transitions || trait.transitions.length === 0) {
         return [];
     }
     return trait.transitions.filter((t) => {
-        if (Array.isArray(t.from)) {
-            return t.from.includes(currentState) && t.event === eventKey;
+        const fromMatches = Array.isArray(t.from)
+            ? t.from.includes(currentState)
+            : t.from === currentState;
+        if (!fromMatches) return false;
+        if (eventId && t.eventId) {
+            return t.eventId === eventId;
         }
-        return t.from === currentState && t.event === eventKey;
+        return t.event === eventKey;
     });
 }
 
@@ -92,9 +106,10 @@ export function findMatchingTransitions(
 export function findTransition(
     trait: TraitDefinition,
     currentState: string,
-    eventKey: string
+    eventKey: string,
+    eventId?: EventId
 ): TraitDefinition['transitions'][0] | undefined {
-    return findMatchingTransitions(trait, currentState, eventKey)[0];
+    return findMatchingTransitions(trait, currentState, eventKey, eventId)[0];
 }
 
 /**
@@ -119,6 +134,12 @@ export interface ProcessEventOptions {
     trait: TraitDefinition;
     /** Event key to process */
     eventKey: string;
+    /**
+     * V4 dual-carry id sibling of `eventKey` — the id of the fired event,
+     * when known. Threaded to `findMatchingTransitions` for id-primary
+     * matching; absent means name-only dispatch (legacy).
+     */
+    eventId?: EventId;
     /** Event payload */
     payload?: EventPayload;
     /** Entity data for binding resolution */
@@ -182,7 +203,7 @@ export interface ProcessEventOptions {
  */
 export function processEvent(options: ProcessEventOptions): TransitionResult {
     const {
-        traitState, trait, eventKey, payload, entityData,
+        traitState, trait, eventKey, eventId, payload, entityData,
         config,
         guardMode = 'permissive',
         strictBindings = false,
@@ -194,7 +215,7 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
     // whose guard passes. This supports the standard "retry vs give-up"
     // pattern where two transitions share from/event and differ by guard
     // (e.g. attempts<3 → idle vs attempts>=3 → failed).
-    const candidates = findMatchingTransitions(trait, traitState.currentState, normalizedEvent);
+    const candidates = findMatchingTransitions(trait, traitState.currentState, normalizedEvent, eventId);
 
     if (candidates.length === 0) {
         smLog.debug('noTransition', { trait: trait.name, event: normalizedEvent, currentState: traitState.currentState });
@@ -345,6 +366,8 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
 /** Entry in a per-trait event queue. */
 export interface QueuedEvent {
     eventKey: string;
+    /** V4 dual-carry id sibling of `eventKey` — see `sendEvent` doc. */
+    eventId?: EventId;
     payload?: EventPayload;
     entityData?: EntityRow;
     /** Per-trait entity overrides (see `sendEvent` doc). */
@@ -626,12 +649,12 @@ export class StateMachineManager {
     /**
      * Check if a trait can handle an event from its current state.
      */
-    canHandleEvent(traitName: string, eventKey: string, entityId?: string): boolean {
+    canHandleEvent(traitName: string, eventKey: string, entityId?: string, eventId?: EventId): boolean {
         const trait = this.traits.get(traitName);
         const state = this.getOrInitState(traitName, entityId ?? SINGLETON_SCOPE);
         if (!trait || !state) return false;
 
-        return !!findTransition(trait, state.currentState, normalizeEventKey(eventKey));
+        return !!findTransition(trait, state.currentState, normalizeEventKey(eventKey), eventId);
     }
 
     /**
@@ -644,13 +667,18 @@ export class StateMachineManager {
      * `@entity.X` see prior step writes — required for [runtime] entities
      * that have no persistence row to reload.
      *
+     * `eventId` is the V4 dual-carry id sibling of `eventKey` (see
+     * {@link ProcessEventOptions.eventId}) — additive and optional, threaded
+     * through to `processEvent` for id-primary transition matching.
+     *
      * @returns Array of transition results (one per trait that had a matching transition)
      */
     sendEvent(
         eventKey: string,
         payload?: EventPayload,
         entityData?: EntityRow,
-        entityByTrait?: Record<string, EntityRow>
+        entityByTrait?: Record<string, EntityRow>,
+        eventId?: EventId
     ): Array<{ traitName: string; result: TransitionResult }> {
         const results: Array<{ traitName: string; result: TransitionResult }> = [];
         const scope = scopeOf(entityData);
@@ -666,6 +694,7 @@ export class StateMachineManager {
                 traitState,
                 trait,
                 eventKey,
+                eventId,
                 payload,
                 entityData: perTraitEntity,
                 config: this.traitConfigs.get(traitName),
@@ -720,13 +749,14 @@ export class StateMachineManager {
         eventKey: string,
         payload?: EventPayload,
         entityData?: EntityRow,
-        entityByTrait?: Record<string, EntityRow>
+        entityByTrait?: Record<string, EntityRow>,
+        eventId?: EventId
     ): void {
         const scope = scopeOf(entityData);
         for (const [traitName] of this.traits) {
             const key = compositeKey(traitName, scope);
             const queue = this.queues.get(key) ?? [];
-            queue.push({ eventKey, payload, entityData, entityByTrait });
+            queue.push({ eventKey, eventId, payload, entityData, entityByTrait });
             this.queues.set(key, queue);
         }
     }
@@ -764,6 +794,7 @@ export class StateMachineManager {
                 traitState,
                 trait,
                 eventKey: entry.eventKey,
+                eventId: entry.eventId,
                 payload: entry.payload,
                 entityData: perTraitEntity,
                 config: this.traitConfigs.get(traitName),

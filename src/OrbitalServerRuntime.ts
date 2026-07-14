@@ -176,6 +176,7 @@ import type {
   PatternConfig,
   ResolvedPatternProps,
   SExpr,
+  EventId,
 } from "@almadar/core";
 
 /**
@@ -292,6 +293,12 @@ export interface RegisteredOrbital {
  */
 export interface OrbitalEventRequest {
   event: string;
+  /**
+   * V4 dual-carry id sibling of `event` — the fired event's id, when known
+   * (e.g. threaded from a `listens[].triggersId`). Optional; absent means
+   * the state machine dispatches by name only (legacy).
+   */
+  eventId?: EventId;
   payload?: EventPayload;
   entityId?: string;
   /** User context for @user bindings (from Firebase auth) */
@@ -1255,9 +1262,13 @@ export class OrbitalServerRuntime {
               (raw?.[field] as string | undefined);
             const forwardedEntityId = pickId("entityId") ?? pickId("orbitalName");
 
-            // Trigger the mapped event
+            // Trigger the mapped event. `triggersId` is the V4 dual-carry id
+            // sibling of `triggers` — threading it lets the target
+            // transition match by id even if its `event` name has since
+            // diverged from `triggers` (mid-flight rename).
             await this.processOrbitalEvent(orbitalName, {
               event: listener.triggers,
+              eventId: listener.triggersId,
               payload: mappedPayload as EventPayload,
               entityId: forwardedEntityId,
             });
@@ -1613,7 +1624,7 @@ export class OrbitalServerRuntime {
       ),
     }));
 
-    const { event, payload, entityId, user } = request;
+    const { event, eventId, payload, entityId, user } = request;
 
     // API-boundary payload validation. Each trait declares a
     // `payloadSchema` per event in its `stateMachine.events` block
@@ -1702,6 +1713,7 @@ export class OrbitalServerRuntime {
       cleanPayload,
       entityData,
       entityByTrait,
+      eventId,
     );
 
     // Filter results to only active traits (if specified)
