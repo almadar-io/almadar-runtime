@@ -370,6 +370,15 @@ function compositeKey(traitName: string, scope: string): string {
 export class StateMachineManager {
     private traits: Map<string, TraitDefinition> = new Map();
     /**
+     * V4 identity index: trait id → trait name. Populated for traits that
+     * carry an `id` (ledger-backed schemas). Lets callers resolve a trait's
+     * state by its stable id, which survives a mid-session rename — the
+     * name-keyed maps are re-pointed on rename via {@link renameTrait}, but
+     * an id holder never has to observe the rename at all. Empty for legacy
+     * id-free schemas, where every lookup stays name-keyed (unchanged).
+     */
+    private traitIdToName: Map<string, string> = new Map();
+    /**
      * Per-trait call-site config, surfaced to guard expressions so
      * `@config.X` resolves at runtime. Populated by the orbital's
      * registration step (see `OrbitalServerRuntime.registerOrbital`'s
@@ -427,7 +436,74 @@ export class StateMachineManager {
      */
     addTrait(trait: TraitDefinition): void {
         this.traits.set(trait.name, trait);
+        if (trait.id !== undefined) {
+            this.traitIdToName.set(trait.id, trait.name);
+        }
         // Lazy: state for each entity scope is created on first event.
+    }
+
+    /**
+     * Resolve a trait by its V4 id. Returns undefined when no trait carries
+     * that id (legacy schema, or unknown id). Exact-match only — no name
+     * similarity.
+     */
+    getTraitById(traitId: string): TraitDefinition | undefined {
+        const name = this.traitIdToName.get(traitId);
+        return name === undefined ? undefined : this.traits.get(name);
+    }
+
+    /**
+     * Get a trait's current state by its V4 id (id-first lookup). Falls back
+     * to `undefined` when the id is unknown. The id survives a rename, so a
+     * holder of the id reads the right state without ever seeing the new name.
+     */
+    getStateById(traitId: string, entityId?: string): TraitState | undefined {
+        const name = this.traitIdToName.get(traitId);
+        return name === undefined ? undefined : this.getState(name, entityId);
+    }
+
+    /**
+     * Apply a mid-session trait rename: re-point the name-keyed maps from
+     * `oldName` to `newName`, preserving live state, queues, and the id
+     * index. A no-op when the trait isn't registered under `oldName`. This
+     * is the interpreter-side of a ledger `curName` edit for the trait's own
+     * name-keyed storage; id-keyed references need no update.
+     */
+    renameTrait(oldName: string, newName: string): void {
+        const trait = this.traits.get(oldName);
+        if (!trait || oldName === newName) return;
+        const renamed: TraitDefinition = { ...trait, name: newName };
+        this.traits.delete(oldName);
+        this.traits.set(newName, renamed);
+        if (renamed.id !== undefined) {
+            this.traitIdToName.set(renamed.id, newName);
+        }
+        const remap = <V>(m: Map<string, V>): void => {
+            const prefix = `${oldName}::`;
+            for (const key of [...m.keys()]) {
+                if (key.startsWith(prefix)) {
+                    const scope = key.slice(prefix.length);
+                    const v = m.get(key)!;
+                    m.delete(key);
+                    m.set(`${newName}::${scope}`, v);
+                }
+            }
+        };
+        remap(this.states);
+        remap(this.queues);
+        // `processing` is a Set of composite keys.
+        const prefix = `${oldName}::`;
+        for (const key of [...this.processing]) {
+            if (key.startsWith(prefix)) {
+                this.processing.delete(key);
+                this.processing.add(`${newName}::${key.slice(prefix.length)}`);
+            }
+        }
+        const cfg = this.traitConfigs.get(oldName);
+        if (cfg !== undefined) {
+            this.traitConfigs.set(newName, cfg);
+            this.traitConfigs.delete(oldName);
+        }
     }
 
     /**
@@ -448,6 +524,10 @@ export class StateMachineManager {
      * Remove a trait from the manager.
      */
     removeTrait(traitName: string): void {
+        const removed = this.traits.get(traitName);
+        if (removed?.id !== undefined) {
+            this.traitIdToName.delete(removed.id);
+        }
         this.traits.delete(traitName);
         // Drop every per-entity state row for this trait.
         const prefix = `${traitName}::`;

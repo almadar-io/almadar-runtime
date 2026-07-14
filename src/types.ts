@@ -28,6 +28,7 @@ import type {
     IntegrationContext,
     Orbital,
     ServiceCallResult,
+    TraitId,
 } from '@almadar/core';
 
 // ============================================================================
@@ -97,8 +98,9 @@ export type Unsubscribe = CoreUnsubscribe;
  * Event bus interface for pub/sub communication
  */
 export interface IEventBus {
-    /** Emit an event */
-    emit(type: string, payload?: EventPayload, source?: BusEventSource): void;
+    /** Emit an event. `routingKey` (V4) keys delivery by event-id when the
+     *  schema carries ids; absent → keyed by `type` (name, legacy). */
+    emit(type: string, payload?: EventPayload, source?: BusEventSource, routingKey?: string): void;
     /** Subscribe to an event */
     on(type: string, listener: EventListener): Unsubscribe;
     /** Subscribe to ALL events (wildcard listener) */
@@ -157,6 +159,9 @@ export interface TransitionResult {
  * Minimal trait definition for state machine processing
  */
 export interface TraitDefinition {
+    /** V4 dual-carry id sibling of `name` — the stable state-machine lookup
+     *  key when present (ledger-backed). Absent → keyed by name (legacy). */
+    id?: TraitId;
     name: string;
     states: Array<{ name: string; isInitial?: boolean }>;
     transitions: Array<{

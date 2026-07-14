@@ -46,6 +46,7 @@ import type {
   NextFunction,
 } from "express";
 import { EventBus } from "./EventBus.js";
+import { eventRouteKey, buildSourceMatcher, type ListenSourceDescriptor as IdListenSourceDescriptor } from "./identity/routing.js";
 import { createTickScheduler, type TickHandle, type TickScheduler } from "./TickScheduler.js";
 import { isValidCronExpression } from "./cron.js";
 import { parseDurationString } from "./duration.js";
@@ -1014,6 +1015,9 @@ export class OrbitalServerRuntime {
       const transitions = sm?.transitions || [];
 
       return {
+        // V4 dual-carry: thread the trait id so the manager's id index is
+        // populated for ledger-backed schemas (undefined → name-keyed only).
+        ...(t.id !== undefined ? { id: t.id } : {}),
         name: t.name,
         states: states as TraitDefinition['states'],
         transitions: transitions as TraitDefinition['transitions'],
@@ -1195,10 +1199,13 @@ export class OrbitalServerRuntime {
           // legacy concatenated form so migrated and unmigrated schemas both work.
           const { bareEvent, matcher } = parseListenSource(listener, orbitalName);
 
-          // Subscribe under the bare event key. Source filtering happens
-          // inside the handler closure so a single key can serve many
-          // listeners with different scopes.
-          const cleanup = this.eventBus.on(bareEvent, async (event) => {
+          // V4 identity routing: subscribe under the event-id key when the
+          // listen carries an `eventId` (rename-proof), else under the bare
+          // event name (legacy). Source filtering happens inside the handler
+          // closure so a single key can serve many listeners with different
+          // scopes.
+          const routeKey = eventRouteKey(bareEvent, listener.eventId);
+          const cleanup = this.eventBus.on(routeKey, async (event) => {
             // Source filter: skip if the emit doesn't match our declared scope.
             if (!matcher(event.source)) return;
             if (this.config.debug) {
@@ -1851,11 +1858,27 @@ export class OrbitalServerRuntime {
         // Forward the source stamp to the bus. If the caller didn't supply
         // one (legacy callers), synthesize one from the handler's lexical
         // closure so source-scoped listeners still match.
-        const stamp = source ?? {
+        //
+        // V4 identity: stamp the emitting orbital/trait/event IDS (when the
+        // schema carries them) so id-scoped listeners match after a rename,
+        // and route delivery under the event-id key. All three are optional
+        // dual-carry — absent → name stamp + name routing (legacy).
+        const emittingTrait = registered.traits.find((t) => t.name === traitName);
+        const emitContract = emittingTrait?.emits?.find((e) => e.event === event);
+        const stamp: BusEventSource = source ?? {
           orbital: registered.schema.name,
           trait: traitName,
         };
-        this.eventBus.emit(event, eventPayload, stamp);
+        if (stamp.orbitalId === undefined && registered.schema.id !== undefined) {
+          stamp.orbitalId = registered.schema.id;
+        }
+        if (stamp.traitId === undefined && emittingTrait?.id !== undefined) {
+          stamp.traitId = emittingTrait.id;
+        }
+        if (stamp.eventId === undefined && emitContract?.eventId !== undefined) {
+          stamp.eventId = emitContract.eventId;
+        }
+        this.eventBus.emit(event, eventPayload, stamp, eventRouteKey(event, stamp.eventId));
         const emittedItem = { event, payload: eventPayload, source: stamp };
         emittedEvents.push(emittedItem);
         onPush?.({ type: 'event', data: emittedItem });
@@ -3100,16 +3123,18 @@ function parseListenSource(
   bareEvent: string;
   matcher: (source: EventSourceMeta | undefined) => boolean;
 } {
-  // 1. Explicit source field from the new core schema (preferred).
-  const explicit = (listener as { source?: ListenSourceDescriptor }).source;
+  // 1. Explicit source field from the new core schema (preferred). Carries
+  //    V4 dual-carry `traitId`/`orbitalId` when the schema has ids, so the
+  //    matcher can compare ids (rename-proof) instead of names.
+  const explicit = (listener as { source?: IdListenSourceDescriptor }).source;
   if (explicit && typeof explicit === 'object') {
     return {
       bareEvent: listener.event,
-      matcher: buildMatcher(explicit, listenerOrbital),
+      matcher: buildSourceMatcher(explicit, listenerOrbital),
     };
   }
 
-  // 2. Fall back to parsing the legacy concatenated string.
+  // 2. Fall back to parsing the legacy concatenated string (no ids present).
   const key = listener.event;
   const parts = key.split('.');
   if (parts.length === 1) {
@@ -3127,7 +3152,7 @@ function parseListenSource(
     // Single-segment source: intra-orbital trait reference.
     return {
       bareEvent: eventName,
-      matcher: buildMatcher(
+      matcher: buildSourceMatcher(
         { kind: 'trait', trait: sourceOrStar },
         listenerOrbital,
       ),
@@ -3140,7 +3165,7 @@ function parseListenSource(
     const orbital = parts.slice(0, parts.length - 2).join('.');
     return {
       bareEvent: eventName,
-      matcher: buildMatcher({ kind: 'orbital', orbital, trait }, listenerOrbital),
+      matcher: buildSourceMatcher({ kind: 'orbital', orbital, trait }, listenerOrbital),
     };
   }
 
@@ -3148,38 +3173,5 @@ function parseListenSource(
   return { bareEvent: key, matcher: () => true };
 }
 
-/** Narrow the structured source descriptor into an executable matcher. */
-function buildMatcher(
-  src: ListenSourceDescriptor,
-  listenerOrbital: string,
-): (source: EventSourceMeta | undefined) => boolean {
-  if (src.kind === 'any') return () => true;
-  if (src.kind === 'trait') {
-    const wantedTrait = src.trait;
-    return (source) =>
-      !!source &&
-      source.orbital === listenerOrbital &&
-      source.trait === wantedTrait;
-  }
-  // src.kind === 'orbital'
-  const wantedOrbital = src.orbital;
-  const wantedTrait = src.trait;
-  return (source) =>
-    !!source &&
-    source.orbital === wantedOrbital &&
-    source.trait === wantedTrait;
-}
-
-/** Shape of the structured `source` field on `TraitEventListener`. */
-type ListenSourceDescriptor =
-  | { kind: 'any' }
-  | { kind: 'trait'; trait: string }
-  | { kind: 'orbital'; orbital: string; trait: string };
-
-/** Shape of `RuntimeEvent.source`. */
-type EventSourceMeta = {
-  orbital?: string;
-  trait?: string;
-  transition?: string;
-  tick?: string;
-};
+/** Shape of `RuntimeEvent.source` (names + V4 dual-carry ids). */
+type EventSourceMeta = BusEventSource;

@@ -56,7 +56,8 @@ export class EventBus implements IEventBus {
     emit(
         type: string,
         payload?: EventPayload,
-        source?: RuntimeEvent['source']
+        source?: RuntimeEvent['source'],
+        routingKey?: string
     ): void {
         // RCG-05: Circuit breaker for circular event loops
         if (this.depth >= this.maxDepth) {
@@ -71,7 +72,11 @@ export class EventBus implements IEventBus {
             source,
         };
 
-        const listeners = this.listeners.get(type);
+        // V4 identity routing: subscriptions are keyed under `routingKey`
+        // (an event-id key when the schema carries ids) while the envelope
+        // keeps the human `type`. Absent → key by name (legacy, unchanged).
+        const deliveryKey = routingKey ?? type;
+        const listeners = this.listeners.get(deliveryKey);
         const listenerCount = listeners?.size ?? 0;
 
         if (listenerCount > 0) {
