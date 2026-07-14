@@ -8,11 +8,66 @@
  * @packageDocumentation
  */
 
-import type { OrbitalDefinition, OrbitalSchema, Page } from '@almadar/core';
+import type { IdentityLedger, LedgerEntry, OrbitalDefinition, OrbitalSchema, Page } from '@almadar/core';
 import type { EventWiringEntry } from './event-wiring.js';
 import { applyEventWiring } from './event-wiring.js';
 import type { LayoutStrategy } from './layout-strategy.js';
 import { detectLayoutStrategy } from './layout-strategy.js';
+
+/** True when an input is a whole OrbitalSchema (carries an `orbitals` array). */
+function isSchema(input: OrbitalDefinition | OrbitalSchema): input is OrbitalSchema {
+    return 'orbitals' in input && Array.isArray((input as OrbitalSchema).orbitals);
+}
+
+/** Unwrap OrbitalSchema | OrbitalDefinition inputs to a flat OrbitalDefinition[]. */
+function asDefinitions(inputs: (OrbitalDefinition | OrbitalSchema)[]): OrbitalDefinition[] {
+    return inputs.flatMap(input =>
+        isSchema(input) ? (input.orbitals as OrbitalDefinition[]) : [input],
+    );
+}
+
+/**
+ * Union the identity ledgers of the schema-shaped inputs (V4 Phase 6, runtime
+ * mirror of the Rust compose ledger merge). Bare OrbitalDefinition inputs and
+ * ledger-less schemas contribute nothing (pre-V4 back-compat: no ledger in →
+ * no ledger out). Entries are keyed by id; first occurrence in input order wins
+ * for a duplicate id — the rows share one identity, so a `curName` divergence
+ * across slices resolves deterministically to the earliest input's row. Output
+ * entries are sorted by id for stable, order-independent composition.
+ */
+function mergeLedgers(inputs: (OrbitalDefinition | OrbitalSchema)[]): IdentityLedger | undefined {
+    const merged = new Map<string, LedgerEntry>();
+    let sawLedger = false;
+    for (const input of inputs) {
+        if (!isSchema(input) || input.ledger === undefined) continue;
+        sawLedger = true;
+        for (const [id, entry] of Object.entries(input.ledger.entries)) {
+            if (!merged.has(id)) merged.set(id, entry);
+        }
+    }
+    if (!sawLedger) return undefined;
+    const entries: Record<string, LedgerEntry> = {};
+    for (const [id, entry] of [...merged.entries()].sort(
+        ([a], [b]) => (a < b ? -1 : a > b ? 1 : 0),
+    )) {
+        entries[id] = entry;
+    }
+    return { schemaVersion: 1, entries };
+}
+
+/**
+ * Composed `schemaVersion` = max over the schema-shaped inputs that declare one
+ * (the newest IR version any slice carries; collapses to the shared value when
+ * uniform). Undefined when no input declares a version — pre-V4 stays unversioned.
+ */
+function mergeSchemaVersions(inputs: (OrbitalDefinition | OrbitalSchema)[]): number | undefined {
+    let max: number | undefined;
+    for (const input of inputs) {
+        if (!isSchema(input) || input.schemaVersion === undefined) continue;
+        max = max === undefined ? input.schemaVersion : Math.max(max, input.schemaVersion);
+    }
+    return max;
+}
 
 // ============================================================================
 // Types
@@ -24,8 +79,8 @@ import { detectLayoutStrategy } from './layout-strategy.js';
 export interface ComposeBehaviorsInput {
     /** Application name */
     appName: string;
-    /** Orbital definitions to compose */
-    orbitals: OrbitalDefinition[];
+    /** Orbital definitions (or schemas) to compose */
+    orbitals: (OrbitalDefinition | OrbitalSchema)[];
     /** Layout strategy override, or 'auto' to detect */
     layoutStrategy?: LayoutStrategy | 'auto';
     /** Cross-orbital event wiring */
@@ -140,10 +195,13 @@ export function composeBehaviors(
 ): ComposeBehaviorsResult {
     const {
         appName,
-        orbitals: rawOrbitals,
+        orbitals: rawInputs,
         layoutStrategy: strategyInput,
         eventWiring,
     } = input;
+
+    // Unwrap any OrbitalSchema inputs to OrbitalDefinition[]
+    const rawOrbitals = asDefinitions(rawInputs);
 
     // Step 1: Apply event wiring
     const wiredOrbitals =
@@ -178,11 +236,18 @@ export function composeBehaviors(
         };
     });
 
-    // Step 5: Build the schema
+    // Step 5: Union identity information from the schema-shaped inputs.
+    const ledger = mergeLedgers(rawInputs);
+    const schemaVersion = mergeSchemaVersions(rawInputs);
+
+    // Step 6: Build the schema. Identity keys are added only when present so
+    // ledger-less inputs compose byte-identically to the pre-V4 output.
     const schema: OrbitalSchema = {
         name: appName,
         version: '1.0.0',
         orbitals: orbitalsWithPages,
+        ...(schemaVersion !== undefined ? { schemaVersion } : {}),
+        ...(ledger !== undefined ? { ledger } : {}),
     };
 
     return {
