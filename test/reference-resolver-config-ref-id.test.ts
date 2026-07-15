@@ -66,6 +66,36 @@ describe('ReferenceResolver — id-primary config-reference resolution', () => {
     }
   });
 
+  it('resolves an event-typed config default to the event current key via refId', async () => {
+    const resolver = new ReferenceResolver({ basePath: '.', skipExternalLoading: true });
+    // The event was renamed OLD_SUBMIT -> SUBMIT_FORM; its stable id is unchanged.
+    const trait: Trait = {
+      name: 'FormControl',
+      scope: 'instance',
+      stateMachine: {
+        states: [{ name: 'idle', isInitial: true }],
+        events: [{ key: 'SUBMIT_FORM', id: 'evt_1', name: 'Submit form' }],
+        transitions: [],
+      },
+      config: {
+        pressEvent: {
+          type: 'event',
+          default: 'OLD_SUBMIT',
+          refId: 'evt_1',
+        },
+      },
+    } as Trait;
+    const orbital = makeOrbital(trait);
+
+    const result = await resolver.resolve(orbital);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const t = result.data.traits[0].trait;
+      expect(t.config?.pressEvent.default).toBe('SUBMIT_FORM');
+    }
+  });
+
   it('leaves the config default untouched when the field type is not a reference type', async () => {
     const resolver = new ReferenceResolver({ basePath: '.', skipExternalLoading: true });
     const trait: Trait = {

@@ -17,6 +17,7 @@ import type {
   PageRef,
   PageRefObject,
   Entity,
+  Event,
   Page,
   Trait,
   TraitRef,
@@ -64,8 +65,8 @@ const refResolverLog = createLogger("almadar:runtime:ref-resolver");
  * A node reachable by id — the id-index entry.
  */
 export interface IdIndexEntry {
-  kind: "trait" | "entity" | "page";
-  node: Trait | Entity | Page;
+  kind: "trait" | "entity" | "page" | "event";
+  node: Trait | Entity | Page | Event;
 }
 
 /**
@@ -99,6 +100,15 @@ function indexOrbitalNodes(orbital: OrbitalDefinition, idIndex: Map<string, IdIn
       const trait = traitRef as Trait;
       if (trait.id) {
         idIndex.set(trait.id, { kind: "trait", node: trait });
+      }
+      // Events are first-class (declared in `emits`, dispatched via
+      // listens/emits + render-ui event-name props). Index each by its
+      // stable id so an `event`-typed config knob's `refId` resolves to the
+      // event's current key after a call-site rename.
+      for (const ev of trait.stateMachine?.events ?? []) {
+        if (ev.id) {
+          idIndex.set(ev.id, { kind: "event", node: ev });
+        }
       }
     }
   }
@@ -687,6 +697,7 @@ function resolveEntityTokensById(
 const REFERENCE_CONFIG_TYPE_TO_ID_KIND: Readonly<Record<string, IdIndexEntry["kind"]>> = {
   entity: "entity",
   trait: "trait",
+  event: "event",
 };
 
 /**
@@ -702,9 +713,9 @@ const REFERENCE_CONFIG_TYPE_TO_ID_KIND: Readonly<Record<string, IdIndexEntry["ki
  * {@link resolveEntityTokensById}'s entity-name-token rewrite.
  *
  * Additive + presence-based: no `refId`, a non-reference `type`, or an id
- * unindexed / of the wrong kind (e.g. `type: "event"` has no `IdIndexEntry`
- * kind today — events aren't top-level indexed nodes) leaves the field
- * untouched.
+ * unindexed / of the wrong kind leaves the field untouched. `entity`/`trait`/
+ * `event` are all indexed by id (events per-trait from `stateMachine.events`),
+ * resolving to the node's current name (`entity`/`trait`) or key (`event`).
  */
 function resolveConfigRefsById(
   trait: Trait,
@@ -722,7 +733,11 @@ function resolveConfigRefsById(
     const entry = idIndex.get(field.refId);
     if (!entry || entry.kind !== expectedKind) continue;
     const currentName =
-      entry.kind === "entity" ? (entry.node as Entity).name : (entry.node as Trait).name;
+      entry.kind === "entity"
+        ? (entry.node as Entity).name
+        : entry.kind === "event"
+          ? (entry.node as Event).key
+          : (entry.node as Trait).name;
     if (!currentName || currentName === field.default) continue;
     nextSchema ??= { ...schema };
     nextSchema[key] = { ...field, default: currentName };
