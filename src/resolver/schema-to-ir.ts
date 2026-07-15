@@ -220,8 +220,17 @@ function resolveTrait(trait: any, source: 'schema' | 'library' | 'inline'): Reso
   };
 }
 
-function resolveTraits(schema: OrbitalSchema): Map<string, ResolvedTrait> {
+interface ResolvedTraitMaps {
+  byName: Map<string, ResolvedTrait>;
+  // Id-primary index: stable trait id → resolved trait. Page bindings whose
+  // `refId` survives a declaration rename resolve through this even when the
+  // ref's name is stale (the name-seam the V4 id-flip closes).
+  byId: Map<string, ResolvedTrait>;
+}
+
+function resolveTraits(schema: OrbitalSchema): ResolvedTraitMaps {
   const traitMap = new Map<string, ResolvedTrait>();
+  const traitById = new Map<string, ResolvedTrait>();
 
   // Note: OrbitalSchema no longer has top-level traits
   // Traits are only inside orbitals now
@@ -244,11 +253,13 @@ function resolveTraits(schema: OrbitalSchema): Map<string, ResolvedTrait> {
       if ('ref' in trait) {
         // eslint-disable-next-line almadar/no-record-string-unknown -- dynamic shape from preprocessor
         const wrap = trait as Record<string, unknown>;
-        const resolved = wrap['_resolved'] as { name?: string; stateMachine?: unknown } | undefined;
+        const resolved = wrap['_resolved'] as { name?: string; id?: string; stateMachine?: unknown } | undefined;
         if (resolved && resolved.stateMachine) {
           const name = resolved.name ?? (trait as { ref?: string }).ref;
           if (name && !traitMap.has(name)) {
-            traitMap.set(name, resolveTrait(resolved, 'inline'));
+            const resolvedTrait = resolveTrait(resolved, 'inline');
+            traitMap.set(name, resolvedTrait);
+            if (resolved.id) traitById.set(resolved.id, resolvedTrait);
           }
         }
         continue;
@@ -256,11 +267,14 @@ function resolveTraits(schema: OrbitalSchema): Map<string, ResolvedTrait> {
 
       // Plain inline trait definition
       if (!trait.name || traitMap.has(trait.name)) continue;
-      traitMap.set(trait.name, resolveTrait(trait, 'inline'));
+      const resolvedTrait = resolveTrait(trait, 'inline');
+      traitMap.set(trait.name, resolvedTrait);
+      const traitId = (trait as { id?: string }).id;
+      if (traitId) traitById.set(traitId, resolvedTrait);
     }
   }
 
-  return traitMap;
+  return { byName: traitMap, byId: traitById };
 }
 
 // ============================================================================
@@ -270,6 +284,7 @@ function resolveTraits(schema: OrbitalSchema): Map<string, ResolvedTrait> {
 function resolveTraitBinding(
   t: any,
   traitMap: Map<string, ResolvedTrait>,
+  traitById: Map<string, ResolvedTrait>,
   orbitalEntity?: string
 ): ResolvedTraitBinding {
   // Case 1: String reference
@@ -307,7 +322,9 @@ function resolveTraitBinding(
         linkedEntity: t.linkedEntity || t._resolved.linkedEntity || orbitalEntity,
       };
     }
-    const trait = traitMap.get(t.ref);
+    // Id-primary: a `refId` that survives a declaration rename resolves the
+    // (possibly renamed) trait by stable id; fall back to the name index.
+    const trait = (t.refId && traitById.get(t.refId)) ?? traitMap.get(t.ref);
     return {
       ref: t.ref,
       trait: trait || createEmptyTrait(t.ref, 'library'),
@@ -328,9 +345,9 @@ function resolveTraitBinding(
     };
   }
 
-  // Fallback: try to look up by name
+  // Fallback: try to look up by id (stable under rename) then by name
   const ref = t.name || t.ref || 'unknown';
-  const trait = traitMap.get(ref);
+  const trait = (t.refId && traitById.get(t.refId)) ?? traitMap.get(ref);
   return {
     ref,
     trait: trait || createEmptyTrait(ref, 'library'),
@@ -387,7 +404,8 @@ function getPageInfoFromRef(pageRef: PageRef): { name: string; path: string; tra
 
 function resolvePages(
   schema: OrbitalSchema,
-  traitMap: Map<string, ResolvedTrait>
+  traitMap: Map<string, ResolvedTrait>,
+  traitById: Map<string, ResolvedTrait>
 ): Map<string, ResolvedPage> {
   const pageMap = new Map<string, ResolvedPage>();
 
@@ -414,7 +432,7 @@ function resolvePages(
       const pageTraitRefs = pageInfo.traits || [];
 
       const traitBindings: ResolvedTraitBinding[] = pageTraitRefs.map((t: any) => {
-        const binding = resolveTraitBinding(t, traitMap, orbitalEntity);
+        const binding = resolveTraitBinding(t, traitMap, traitById, orbitalEntity);
 
         // Also add inline traits to traitMap for consistency
         if (binding.trait.source === 'inline' && !traitMap.has(binding.trait.name)) {
@@ -471,8 +489,8 @@ export function schemaToIR(
 
   // Resolve components
   const entities = resolveEntities(schema);
-  const traits = resolveTraits(schema);
-  const pages = resolvePages(schema, traits);
+  const { byName: traits, byId: traitsById } = resolveTraits(schema);
+  const pages = resolvePages(schema, traits, traitsById);
 
   const ir: ResolvedIR = {
     appName: schema.name,
