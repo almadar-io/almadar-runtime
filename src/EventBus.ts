@@ -82,7 +82,13 @@ export class EventBus implements IEventBus {
         if (listenerCount > 0) {
             log.debug('emit', { type, listenerCount, depth: this.depth });
         } else {
-            log.warn('emit no listeners', { type });
+            // DEBUG (not WARN): a zero-subscriber emit is a routing diagnostic,
+            // not an actionable warning — internal/tick events commonly have no
+            // runtime listener and that floods the console. Gate it behind the
+            // `almadar:runtime:eventbus` namespace so it surfaces only when
+            // debugging event routing. Real orphan emits are caught by the
+            // closed-circuit validator at validate time, not here.
+            log.debug('emit no listeners', { type });
         }
 
         this.depth++;
