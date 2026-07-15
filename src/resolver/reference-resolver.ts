@@ -27,6 +27,7 @@ import type {
   PatternConfig,
   TraitId,
   PageId,
+  ConfigFieldDeclaration,
 } from "@almadar/core";
 import {
   isEntityReference,
@@ -41,6 +42,7 @@ import {
   configRefEventKnob,
   resolveConfigRefEventName,
   normalizeCallSiteConfigToValues,
+  isReferenceConfigType,
 } from "@almadar/core";
 import type {
   LoaderOptions,
@@ -676,6 +678,66 @@ function resolveEntityTokensById(
   };
 }
 
+/**
+ * Map a reference config field's `type` (`"entity" | "trait" | "event"`) to
+ * the {@link IdIndexEntry.kind} its `refId` must resolve to. An `IdIndexEntry`
+ * whose kind doesn't match is treated the same as a missing index entry —
+ * presence-based, not a heuristic guess.
+ */
+const REFERENCE_CONFIG_TYPE_TO_ID_KIND: Readonly<Record<string, IdIndexEntry["kind"]>> = {
+  entity: "entity",
+  trait: "trait",
+};
+
+/**
+ * V4-W5 leverage-ids — id-primary resolution of REFERENCE-typed config
+ * values (`type: "entity" | "trait" | "event"`).
+ *
+ * A config knob typed `entity`/`trait`/`event` holds a reference NAME
+ * (e.g. `targetEntity: "Task"`); the stamp records the referenced node's
+ * stable id on the field's `refId`. Resolve each declared field by id
+ * against the id->node index and, if the referenced node's CURRENT name
+ * differs from the field's declared `default`, rewrite `default` to the
+ * current name — the config-value sibling of
+ * {@link resolveEntityTokensById}'s entity-name-token rewrite.
+ *
+ * Additive + presence-based: no `refId`, a non-reference `type`, or an id
+ * unindexed / of the wrong kind (e.g. `type: "event"` has no `IdIndexEntry`
+ * kind today — events aren't top-level indexed nodes) leaves the field
+ * untouched.
+ */
+function resolveConfigRefsById(
+  trait: Trait,
+  idIndex: Map<string, IdIndexEntry>,
+): Trait {
+  const schema = trait.config;
+  if (!schema) return trait;
+
+  let nextSchema: Record<string, ConfigFieldDeclaration> | undefined;
+  const rewrites: { key: string; from: ConfigFieldDeclaration["default"]; to: string }[] = [];
+  for (const [key, field] of Object.entries(schema)) {
+    if (!field.refId || !isReferenceConfigType(field.type)) continue;
+    const expectedKind = REFERENCE_CONFIG_TYPE_TO_ID_KIND[field.type];
+    if (!expectedKind) continue;
+    const entry = idIndex.get(field.refId);
+    if (!entry || entry.kind !== expectedKind) continue;
+    const currentName =
+      entry.kind === "entity" ? (entry.node as Entity).name : (entry.node as Trait).name;
+    if (!currentName || currentName === field.default) continue;
+    nextSchema ??= { ...schema };
+    nextSchema[key] = { ...field, default: currentName };
+    rewrites.push({ key, from: field.default, to: currentName });
+  }
+  if (!nextSchema) return trait;
+
+  refResolverLog.info("config-ref:id-resolve", {
+    trait: trait.name,
+    rewrites,
+  });
+
+  return { ...trait, config: nextSchema };
+}
+
 function applyEventRenames(
   trait: Trait,
   renames?: { [oldKey: string]: string },
@@ -870,6 +932,7 @@ export class ReferenceResolver {
     // before splice so spliced hosts carry already-id-resolved entity tokens.
     for (const resolvedTrait of traitsResult.data) {
       resolvedTrait.trait = resolveEntityTokensById(resolvedTrait.trait, imports.idIndex);
+      resolvedTrait.trait = resolveConfigRefsById(resolvedTrait.trait, imports.idIndex);
     }
 
     // Lambda-scope splice — JS twin of the compiler's inline `splice_lambda_
