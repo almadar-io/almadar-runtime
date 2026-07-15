@@ -374,24 +374,44 @@ function renameEventsInEffects(
  * Bindings (`@entity.X`, `@payload.X`) are NOT touched; only bare string
  * literals matching `atomLinkedEntity` get rewritten.
  */
+/**
+ * Entity-name string props inside a render-ui pattern tree. The call-site
+ * `linkedEntity` rebind rewrites only `entity`; the id-side-map reader
+ * ({@link resolveEntityTokensById}) additionally covers `entityType` and
+ * `source` per the V4 entity-token position list.
+ */
+const REBIND_ENTITY_PROPS: ReadonlySet<string> = new Set(["entity"]);
+const ID_ENTITY_PROPS: ReadonlySet<string> = new Set(["entity", "entityType", "source"]);
+
+/**
+ * `rename(name)` returns the replacement entity name for `name`, or
+ * `undefined` to leave it untouched. Shared by the name-based linkedEntity
+ * rebind (`n => n === atomLinked ? linkedEntity : undefined`) and the id
+ * side-map reader (a map lookup keyed by the trait's `entityRefIds`).
+ */
+type EntityRename = (name: string) => string | undefined;
+
 function renameEntityInRenderUiConfig(
   node: PatternConfig | readonly unknown[] | unknown,
-  oldName: string,
-  newName: string,
+  rename: EntityRename,
+  props: ReadonlySet<string>,
 ): PatternConfig | unknown[] | unknown {
   if (node === null || node === undefined) return node;
   if (Array.isArray(node)) {
-    return node.map((item) => renameEntityInRenderUiConfig(item, oldName, newName));
+    return node.map((item) => renameEntityInRenderUiConfig(item, rename, props));
   }
   if (typeof node !== "object") return node;
   const obj = node as PatternConfig;
   const next: PatternConfig = { ...obj };
   for (const [key, value] of Object.entries(obj)) {
-    if (key === "entity" && value === oldName) {
-      (next as { [k: string]: unknown })[key] = newName;
-      continue;
+    if (props.has(key) && typeof value === "string") {
+      const replaced = rename(value);
+      if (replaced !== undefined) {
+        (next as { [k: string]: unknown })[key] = replaced;
+        continue;
+      }
     }
-    (next as { [k: string]: unknown })[key] = renameEntityInRenderUiConfig(value, oldName, newName);
+    (next as { [k: string]: unknown })[key] = renameEntityInRenderUiConfig(value, rename, props);
   }
   return next;
 }
@@ -426,10 +446,10 @@ function renameEntityInRenderUiConfig(
  */
 function renameEntityInEffects(
   effects: readonly unknown[],
-  oldName: string,
-  newName: string,
+  rename: EntityRename,
+  props: ReadonlySet<string>,
 ): unknown[] {
-  return effects.map((effect) => renameEntityInEffect(effect, oldName, newName));
+  return effects.map((effect) => renameEntityInEffect(effect, rename, props));
 }
 
 /**
@@ -479,8 +499,8 @@ const ARGS_FROM_POS_2_ARE_EFFECTS = new Set([
 
 function renameEntityInEffect(
   effect: unknown,
-  oldName: string,
-  newName: string,
+  rename: EntityRename,
+  props: ReadonlySet<string>,
 ): unknown {
   if (!Array.isArray(effect) || effect.length === 0) return effect;
   const op = effect[0];
@@ -491,19 +511,21 @@ function renameEntityInEffect(
   // pattern tree get rewritten too.
   if (op === "render-ui" && effect.length >= 3) {
     const [, slot, config, ...rest] = effect;
-    const nextConfig = renameEntityInRenderUiConfig(config, oldName, newName);
+    const nextConfig = renameEntityInRenderUiConfig(config, rename, props);
     return [op, slot, nextConfig, ...rest];
   }
 
   // `(persist <op> <Entity> ...)`. Entity at position 2 (after the
   // create/update/delete/clear keyword). Per PersistEffect tuple shape.
-  if (op === "persist" && effect.length >= 3 && effect[2] === oldName) {
-    return [op, effect[1], newName, ...effect.slice(3)];
+  if (op === "persist" && effect.length >= 3 && typeof effect[2] === "string") {
+    const replaced = rename(effect[2]);
+    if (replaced !== undefined) return [op, effect[1], replaced, ...effect.slice(3)];
   }
 
   // Operators with the entity name at position 1.
-  if (ENTITY_AT_POS_1.has(op) && effect[1] === oldName) {
-    return [op, newName, ...effect.slice(2)];
+  if (ENTITY_AT_POS_1.has(op) && typeof effect[1] === "string") {
+    const replaced = rename(effect[1]);
+    if (replaced !== undefined) return [op, replaced, ...effect.slice(2)];
   }
 
   // Wrappers — recurse into nested effects. Whether to skip position 1
@@ -515,7 +537,7 @@ function renameEntityInEffect(
     return effect.map((arg, i) => {
       if (i < startIndex) return arg;
       if (Array.isArray(arg)) {
-        return renameEntityInEffect(arg, oldName, newName);
+        return renameEntityInEffect(arg, rename, props);
       }
       return arg;
     });
@@ -541,12 +563,13 @@ function applyLinkedEntityRename(
   if (!linkedEntity || !atomLinked || linkedEntity === atomLinked) return trait;
   const sm = trait.stateMachine;
   if (!sm) return { ...trait, linkedEntity };
+  const rename: EntityRename = (name) => (name === atomLinked ? linkedEntity : undefined);
   const nextTransitions = (sm.transitions ?? []).map((t) => {
     const nextEffects = t.effects
       ? (renameEntityInEffects(
           t.effects as readonly unknown[],
-          atomLinked,
-          linkedEntity,
+          rename,
+          REBIND_ENTITY_PROPS,
         ) as typeof t.effects)
       : t.effects;
     return { ...t, effects: nextEffects };
@@ -566,6 +589,91 @@ function applyLinkedEntityRename(
     linkedEntity,
     stateMachine: { ...sm, transitions: nextTransitions },
   } as Trait;
+}
+
+/**
+ * V4 leverage-ids — id-primary entity-token resolution.
+ *
+ * A trait's entity-name tokens (`linkedEntity`, positional `fetch`/`ref`/
+ * `deref`/`spawn`/`persist` args, and render-ui `entity`/`entityType`/`source`
+ * string props) are bare strings carrying the referenced entity's NAME. When
+ * the trait carries an `entityRefIds` side-map (`name → stable entity id`),
+ * resolve each token by id: look the mapped id up in the id→node index and,
+ * if the current entity declaration's name differs from the token (i.e. it was
+ * renamed after the side-map was stamped), rewrite the token to the current
+ * name. This is what lets the entity name-rewriter be deleted — a renamed
+ * entity keeps its id, so the token still resolves to the right declaration.
+ *
+ * Additive + presence-based: no side-map, an unindexed id, or an id whose
+ * entity name already matches the token → the trait passes through untouched
+ * and the existing name-based path stays authoritative.
+ */
+function resolveEntityTokensById(
+  trait: Trait,
+  idIndex: Map<string, IdIndexEntry>,
+): Trait {
+  const map = trait.entityRefIds;
+  if (!map) return trait;
+  const rewrites = new Map<string, string>();
+  for (const [tokenName, entityId] of Object.entries(map)) {
+    const entry = idIndex.get(entityId);
+    if (entry && entry.kind === "entity") {
+      const currentName = (entry.node as Entity).name;
+      if (currentName && currentName !== tokenName) {
+        rewrites.set(tokenName, currentName);
+      }
+    }
+  }
+  if (rewrites.size === 0) return trait;
+
+  const rename: EntityRename = (name) => rewrites.get(name);
+  const sm = trait.stateMachine;
+  const nextTransitions = sm?.transitions
+    ? sm.transitions.map((t) => ({
+        ...t,
+        effects: t.effects
+          ? (renameEntityInEffects(
+              t.effects as readonly unknown[],
+              rename,
+              ID_ENTITY_PROPS,
+            ) as typeof t.effects)
+          : t.effects,
+      }))
+    : sm?.transitions;
+  const nextTicks = trait.ticks
+    ? trait.ticks.map((tick) => ({
+        ...tick,
+        effects: (renameEntityInEffects(
+          tick.effects as readonly unknown[],
+          rename,
+          ID_ENTITY_PROPS,
+        ) as typeof tick.effects),
+      }))
+    : trait.ticks;
+  const nextInitial = trait.initialEffects
+    ? (renameEntityInEffects(
+        trait.initialEffects as readonly unknown[],
+        rename,
+        ID_ENTITY_PROPS,
+      ) as typeof trait.initialEffects)
+    : trait.initialEffects;
+  const nextLinked =
+    trait.linkedEntity !== undefined
+      ? (rewrites.get(trait.linkedEntity) ?? trait.linkedEntity)
+      : trait.linkedEntity;
+
+  refResolverLog.info("entity-ref:id-resolve", {
+    trait: trait.name,
+    rewrites: Object.fromEntries(rewrites),
+  });
+
+  return {
+    ...trait,
+    linkedEntity: nextLinked,
+    ...(sm ? { stateMachine: { ...sm, transitions: nextTransitions ?? [] } } : {}),
+    ...(nextTicks !== undefined ? { ticks: nextTicks } : {}),
+    ...(nextInitial !== undefined ? { initialEffects: nextInitial } : {}),
+  };
 }
 
 function applyEventRenames(
@@ -753,6 +861,15 @@ export class ReferenceResolver {
     if (!entityResult.success || !traitsResult.success || !pagesResult.success) {
       // This should never happen since we checked errors above
       return { success: false, errors: ['Internal error: unexpected failure state'] };
+    }
+
+    // V4 leverage-ids — resolve each trait's entity-name tokens by the
+    // `entityRefIds` side-map (name → stable id) against the id->node index,
+    // so a renamed entity still resolves by id. Additive: traits without the
+    // side-map pass through untouched (name path stays authoritative). Runs
+    // before splice so spliced hosts carry already-id-resolved entity tokens.
+    for (const resolvedTrait of traitsResult.data) {
+      resolvedTrait.trait = resolveEntityTokensById(resolvedTrait.trait, imports.idIndex);
     }
 
     // Lambda-scope splice — JS twin of the compiler's inline `splice_lambda_

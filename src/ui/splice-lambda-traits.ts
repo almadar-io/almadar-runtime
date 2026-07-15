@@ -34,6 +34,7 @@ import type {
   SExpr,
   Trait,
   TraitEventContract,
+  TraitId,
 } from '@almadar/core';
 import { collectDeclaredConfigDefaults } from '../config-defaults.js';
 import { collectTraitRefsFromEffects, collectTraitRefsFromValue } from './embedded-traits.js';
@@ -69,6 +70,16 @@ export class LambdaSpliceError extends Error {
 interface SpliceEntry {
   template: SExpr | null;
   emits: TraitEventContract[];
+  /** The wrapper trait's current (post-rename) name — the identity by which
+   *  consumed-wrapper removal tracks it (the embed token may hold a stale
+   *  name when resolution went through the id side-map). */
+  traitName: string;
+  /** V4 leverage-ids — the wrapper trait's stable id (when stamped), so a
+   *  host's `traitEmbedIds` side-map can resolve this template by id. */
+  id?: TraitId;
+  /** V4 leverage-ids — the wrapper's OWN `@trait.<Name>` embed side-map, used
+   *  when recursing into this template's nested embed refs. */
+  embedIds?: Record<string, TraitId>;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,10 +173,10 @@ function substituteConfig(expr: SExpr, subs: Record<string, SExpr>): SExpr {
 function buildTemplate(trait: Trait): SpliceEntry {
   const raw = renderOnlyTemplate(trait);
   const emits = trait.emits ?? [];
-  if (raw === null) return { template: null, emits };
+  if (raw === null) return { template: null, emits, traitName: trait.name, id: trait.id, embedIds: trait.traitEmbedIds };
   const defaults = collectDeclaredConfigDefaults(trait as { config?: DeclaredTraitConfig });
   const template = defaults ? substituteConfig(raw, defaults as Record<string, SExpr>) : raw;
-  return { template, emits };
+  return { template, emits, traitName: trait.name, id: trait.id, embedIds: trait.traitEmbedIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +185,14 @@ function buildTemplate(trait: Trait): SpliceEntry {
 
 interface SpliceState {
   templates: Map<string, SpliceEntry>;
+  /** V4 leverage-ids — id-keyed mirror of `templates`, populated wherever a
+   *  wrapper trait carries an `id`. Consulted first when the current scope's
+   *  `embedIds` side-map maps an embed token to a trait id. */
+  templatesById: Map<string, SpliceEntry>;
+  /** V4 leverage-ids — the `traitEmbedIds` side-map of the trait whose body is
+   *  currently being walked (host at top level, the wrapper when recursing into
+   *  a spliced template). Maps embed token NAME → embedded trait id. */
+  embedIds?: Record<string, TraitId>;
   visiting: string[];
   merged: Array<[string, TraitEventContract]>;
   spliced: Set<string>;
@@ -192,7 +211,12 @@ function spliceExpr(expr: SExpr, inLambda: boolean, st: SpliceState): SExpr {
     if (!inLambda || !expr.startsWith(TRAIT_BINDING_PREFIX)) return expr;
     const name = expr.slice(TRAIT_BINDING_PREFIX.length);
     if (name.length === 0 || name.includes('.')) return expr;
-    const entry = st.templates.get(name);
+    // Id-primary: prefer the current scope's `traitEmbedIds` side-map, resolving
+    // the embedded trait's stable id against the id-keyed template map — so a
+    // renamed wrapper still resolves via id. Else fall back to the name match.
+    const embedId = st.embedIds?.[name];
+    const entry = (embedId !== undefined ? st.templatesById.get(embedId) : undefined)
+      ?? st.templates.get(name);
     // Unknown reference — the binding validator owns that error.
     if (entry === undefined) return expr;
     if (entry.template === null) {
@@ -208,10 +232,17 @@ function spliceExpr(expr: SExpr, inLambda: boolean, st: SpliceState): SExpr {
     st.visiting.push(name);
     // The wrapper's template may itself hold nested inline refs (JSX
     // children); they are now inside the lambda too, so splice recursively.
+    // Nested embeds resolve against the WRAPPER's own side-map, so swap the
+    // active `embedIds` for the recursion and restore it after.
+    const prevEmbedIds = st.embedIds;
+    st.embedIds = entry.embedIds;
     const expanded = spliceExpr(entry.template, true, st);
+    st.embedIds = prevEmbedIds;
     st.visiting.pop();
-    for (const emit of entry.emits) st.merged.push([name, emit]);
-    st.spliced.add(name);
+    for (const emit of entry.emits) st.merged.push([entry.traitName, emit]);
+    // Track the wrapper by its resolved (current) name, not the embed token —
+    // the two differ when resolution went through the id side-map.
+    st.spliced.add(entry.traitName);
     st.changed = true;
     return expanded;
   }
@@ -280,30 +311,49 @@ function removeConsumedWrappers(
   pages: SpliceResolvedPage[],
   spliced: Set<string>,
 ): void {
+  // Id side-map support: a surviving `@trait.X` reference may hold a stale
+  // token name that resolves (via the referring trait's `traitEmbedIds`) to a
+  // wrapper whose current name differs. Removal tracks wrappers by current
+  // name, so resolve each collected token to the wrapper's current name via
+  // this id→name map before testing "still referenced". Absent side-maps, the
+  // token IS the current name and this is a no-op.
+  const idToName = new Map<string, string>();
+  for (const { trait } of traits) {
+    if (trait.id) idToName.set(trait.id, trait.name);
+  }
+
   // Fixpoint: removing an outer wrapper can strand the reference that kept an
   // inner wrapper alive (nested JSX children), so re-scan survivors until
   // nothing more drops.
   for (;;) {
     const stillReferenced = new Set<string>();
     for (const { trait } of traits) {
+      // Collect this trait's raw embed tokens, then resolve each to the
+      // wrapper's current name through the trait's own `traitEmbedIds`.
+      const rawTokens = new Set<string>();
       for (const t of trait.stateMachine?.transitions ?? []) {
         if (t.guard !== undefined && t.guard !== null) {
-          collectTraitRefsFromValue(t.guard as SExpr, stillReferenced);
+          collectTraitRefsFromValue(t.guard as SExpr, rawTokens);
         }
-        collectTraitRefsFromEffects(t.effects as SExpr[] | undefined, stillReferenced);
+        collectTraitRefsFromEffects(t.effects as SExpr[] | undefined, rawTokens);
       }
       for (const tick of trait.ticks ?? []) {
         if (tick.guard !== undefined && tick.guard !== null) {
-          collectTraitRefsFromValue(tick.guard as SExpr, stillReferenced);
+          collectTraitRefsFromValue(tick.guard as SExpr, rawTokens);
         }
-        collectTraitRefsFromEffects(tick.effects as SExpr[] | undefined, stillReferenced);
+        collectTraitRefsFromEffects(tick.effects as SExpr[] | undefined, rawTokens);
       }
       if (trait.config) {
         for (const field of Object.values(trait.config)) {
           if (field && typeof field === 'object' && 'default' in field && field.default !== undefined) {
-            collectTraitRefsFromValue(field.default as SExpr, stillReferenced);
+            collectTraitRefsFromValue(field.default as SExpr, rawTokens);
           }
         }
+      }
+      for (const token of rawTokens) {
+        const embedId = trait.traitEmbedIds?.[token];
+        const resolvedName = (embedId !== undefined ? idToName.get(embedId) : undefined) ?? token;
+        stillReferenced.add(resolvedName);
       }
     }
 
@@ -356,8 +406,11 @@ export function spliceLambdaTraitRefs(
 ): void {
   if (traits.length === 0) return;
   const templates = new Map<string, SpliceEntry>();
+  const templatesById = new Map<string, SpliceEntry>();
   for (const { trait } of traits) {
-    templates.set(trait.name, buildTemplate(trait));
+    const entry = buildTemplate(trait);
+    templates.set(trait.name, entry);
+    if (trait.id) templatesById.set(trait.id, entry);
   }
 
   const spliced = new Set<string>();
@@ -365,6 +418,8 @@ export function spliceLambdaTraitRefs(
     const host = resolved.trait;
     const st: SpliceState = {
       templates,
+      templatesById,
+      embedIds: host.traitEmbedIds,
       // Seed with the host itself so a self-reference never self-splices.
       visiting: [host.name],
       merged: [],

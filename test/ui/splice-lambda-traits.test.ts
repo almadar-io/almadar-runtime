@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { Effect, Page, SExpr, Trait } from '@almadar/core';
+import type { Effect, Page, SExpr, Trait, TraitId } from '@almadar/core';
 import {
   spliceLambdaTraitRefs,
   LambdaSpliceError,
@@ -275,5 +275,49 @@ describe('spliceLambdaTraitRefs — recursion', () => {
 
     // Must return; the cycle edge stays a reference for the validator.
     expect(() => spliceLambdaTraitRefs(traits, [])).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (6) W4-B2 — id-primary embed resolution via traitEmbedIds
+// ---------------------------------------------------------------------------
+
+describe('spliceLambdaTraitRefs — id-primary embed resolution', () => {
+  it('resolves a stale @trait.<OldName> token to the renamed wrapper via traitEmbedIds', () => {
+    // Wrapper declaration renamed OldCard -> NewCard; its stable id is unchanged.
+    const wrapper = renderOnlyTrait('NewCard', { type: 'text', text: '@config.content' }, {
+      config: { content: { type: 'string', default: '@party.title' } },
+    });
+    wrapper.id = 'trait_card' as TraitId;
+
+    // Host still embeds the OLD name; the side-map maps OLD name -> stable id.
+    const host = renderOnlyTrait('Host', lambdaRenderPattern(['@trait.OldCard']));
+    host.traitEmbedIds = { OldCard: 'trait_card' as TraitId };
+
+    const traits = [resolved(host), resolved(wrapper)];
+    spliceLambdaTraitRefs(traits, []);
+
+    const json = JSON.stringify(hostPatternOf(traits, 'Host'));
+    // Spliced by id even though the token name no longer matches any trait name.
+    expect(json).toContain('@party.title');
+    expect(json).not.toContain('@trait.OldCard');
+    // Wrapper consumed once spliced.
+    expect(traitNames(traits)).toEqual(['Host']);
+  });
+
+  it('falls back to name resolution when no side-map is present', () => {
+    const wrapper = renderOnlyTrait('InlineW1', { type: 'text', text: '@config.content' }, {
+      config: { content: { type: 'string', default: '@party.title' } },
+    });
+    // Host embeds the actual (current) name; no traitEmbedIds side-map.
+    const host = renderOnlyTrait('Host', lambdaRenderPattern(['@trait.InlineW1']));
+
+    const traits = [resolved(host), resolved(wrapper)];
+    spliceLambdaTraitRefs(traits, []);
+
+    const json = JSON.stringify(hostPatternOf(traits, 'Host'));
+    expect(json).toContain('@party.title');
+    expect(json).not.toContain('@trait.InlineW1');
+    expect(traitNames(traits)).toEqual(['Host']);
   });
 });
