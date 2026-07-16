@@ -153,6 +153,59 @@ export class LoaderCache {
 }
 
 // ============================================================================
+// Browse-form specifier mapping (FC-3)
+// ============================================================================
+
+/**
+ * Outcome of mapping a `uses ... from "<specifier>"` string to its canonical
+ * loader form. Mirrors the Rust `BrowseMapping` enum in
+ * `orbital-compiler/src/loader/mod.rs`.
+ */
+export type BrowseMapping =
+  | { kind: 'not-browse-form' }
+  | { kind: 'mapped'; canonical: string }
+  | { kind: 'malformed' };
+
+/**
+ * The dual accepted `uses ... from` forms, named for the malformed-import error
+ * so an agent that mistypes a browse path sees both loader and browse examples.
+ */
+const BROWSE_FORM_HELP =
+  "Accepted forms — loader: std/behaviors/<name> (e.g. std/behaviors/std-stats) | " +
+  "almadar-behaviors/<name> (e.g. almadar-behaviors/rpg-hero); " +
+  "browse: @std/<topic>/<kind>/<name>.lolo (e.g. @std/ui/core/atoms/std-stats.lolo) | " +
+  "@behaviors/<topic>/<kind>/<name>.lolo (e.g. @behaviors/app/molecules/app-crud-manager.lolo)";
+
+const BROWSE_PREFIX_TO_PACKAGE: ReadonlyArray<readonly [string, string]> = [
+  ['@std/', 'std/behaviors/'],
+  ['@behaviors/', 'almadar-behaviors/'],
+];
+
+/**
+ * Map a browse-form primitive specifier — the mount paths the free-compose
+ * agent reads (`@std/…`, `@behaviors/…`) — to the canonical loader specifier.
+ *
+ * Deterministic pure string transform, identical to the Rust compiler:
+ * strip the mount alias and intermediate topic/kind path, drop a trailing
+ * `.lolo`, and route to the owning registry. `@std/<...>/<name>.lolo` →
+ * `std/behaviors/<name>`; `@behaviors/<...>/<name>.lolo` →
+ * `almadar-behaviors/<name>`. No fuzzy matching — the name is the path
+ * basename verbatim. A browse-prefixed specifier with no basename is
+ * `malformed`; anything not starting with a mount alias is `not-browse-form`.
+ */
+export function mapBrowseSpecifier(importPath: string): BrowseMapping {
+  for (const [prefix, pkg] of BROWSE_PREFIX_TO_PACKAGE) {
+    if (!importPath.startsWith(prefix)) continue;
+    const rest = importPath.slice(prefix.length);
+    const basename = rest.slice(rest.lastIndexOf('/') + 1);
+    const name = basename.endsWith('.lolo') ? basename.slice(0, -'.lolo'.length) : basename;
+    if (name.length === 0) return { kind: 'malformed' };
+    return { kind: 'mapped', canonical: `${pkg}${name}` };
+  }
+  return { kind: 'not-browse-form' };
+}
+
+// ============================================================================
 // External Orbital Loader
 // ============================================================================
 
@@ -305,6 +358,20 @@ export class ExternalOrbitalLoader {
    * Resolve an import path to an absolute filesystem path.
    */
   resolvePath(importPath: string, fromPath?: string): LoadResult<string> {
+    // FC-3: accept the browse-form specifier the free-compose agent reads
+    // (`@std/…`, `@behaviors/…`) by mapping it to the canonical loader form
+    // before any resolution — identical mapping to the Rust compiler path.
+    const mapped = mapBrowseSpecifier(importPath);
+    if (mapped.kind === "malformed") {
+      return {
+        success: false,
+        error: `Unresolvable primitive import "${importPath}". ${BROWSE_FORM_HELP}`,
+      };
+    }
+    if (mapped.kind === "mapped") {
+      importPath = mapped.canonical;
+    }
+
     // Standard library
     if (importPath.startsWith("std/")) {
       return this.resolveStdPath(importPath);

@@ -21,7 +21,7 @@ import {
 // runtime interpreter that ships to the renderer.
 import { isKnownStdOperator as isKnownOperator } from '@almadar/std/registry';
 import type { BindingContext, EntityRow, EventPayload, PatternProps, EvaluationContextExtensions } from './types.js';
-import type { TraitConfigObject, TraitConfigValue } from '@almadar/core';
+import type { TraitConfigObject, TraitConfigValue, RenderChildrenMap } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
 
 const bindLog = createLogger('almadar:runtime:bindings');
@@ -351,11 +351,41 @@ function interpolateArray(value: unknown[], ctx: EvaluationContext): unknown {
     let anyChanged = false;
     for (let i = 0; i < value.length; i++) {
         const item = value[i];
+        // Dynamic-collection children entry (`["array/map", <expr>, ["fn", …]]`):
+        // evaluate the collection at render time — the evaluator's `array/map`
+        // binds the lambda param as the per-item `@item` scope and reduces the
+        // RenderUINode body — then splice the resolved nodes flat into the host
+        // list so components receive a plain RenderUINode[].
+        if (Array.isArray(item) && isRenderChildrenMap(item)) {
+            const expanded = evaluate(item, ctx);
+            if (Array.isArray(expanded)) {
+                for (const node of expanded) mapped.push(node);
+            }
+            anyChanged = true;
+            continue;
+        }
         const interpolated = interpolateValue(item, ctx);
         mapped.push(interpolated);
         if (interpolated !== item) anyChanged = true;
     }
     return anyChanged ? mapped : value;
+}
+
+/**
+ * Narrow an array element to a dynamic-collection children entry
+ * (`["array/map", <collectionExpr>, ["fn", <param>, <RenderUINode>]]`) — the
+ * canonical, verbatim IR for map-in-`children:`. Structural, no name/heuristic
+ * match beyond the pinned operator + lambda head.
+ */
+function isRenderChildrenMap(value: unknown[]): value is RenderChildrenMap {
+    if (value.length !== 3 || value[0] !== 'array/map') return false;
+    const lambda = value[2];
+    return (
+        Array.isArray(lambda) &&
+        lambda.length === 3 &&
+        lambda[0] === 'fn' &&
+        typeof lambda[1] === 'string'
+    );
 }
 
 /**
