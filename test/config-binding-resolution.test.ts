@@ -250,3 +250,65 @@ describe('call-site payload capture (@callsitePayload.X)', () => {
         expect(childConfig.variant).toBe('body');
     });
 });
+
+// ============================================================================
+// render-ui-typed config overrides — nested bindings resolve through the
+// config indirection (R-CONFIG-RENDERUI-OVERRIDE-SINGLE-PASS). A call-site
+// override of a render-ui knob (std-thread's `bodyContent`) is an object tree
+// that still carries `@config.*` / `@payload.*` bindings; the pure-binding
+// branch must recurse into a CONFIG-rooted resolution, while entity/payload
+// resolutions keep the single-pass identity contract.
+// ============================================================================
+
+describe('@config.<render-ui knob> — nested bindings inside the resolved tree', () => {
+    function makeRichCtx(config: Record<string, unknown>, payload: Record<string, unknown>) {
+        const bindings: BindingContext = {
+            entity: {} as unknown as BindingContext['entity'],
+            payload,
+            state: 'browsing',
+            config,
+        };
+        return createContextFromBindings(bindings);
+    }
+
+    it('resolves @config and @payload bindings nested in a render-ui override tree', () => {
+        const ctx = makeRichCtx(
+            {
+                sectionTitle: 'Replies',
+                bodyContent: {
+                    type: 'stack',
+                    children: [
+                        { type: 'typography', content: '@config.sectionTitle' },
+                        { type: 'reply-tree', nodes: '@payload.data' },
+                    ],
+                },
+            },
+            { data: [{ id: 'r1' }, { id: 'r2' }] },
+        );
+        const result = interpolateValue('@config.bodyContent', ctx) as {
+            children: [{ content: string }, { nodes: unknown[] }];
+        };
+        expect(result.children[0].content).toBe('Replies');
+        expect(result.children[1].nodes).toEqual([{ id: 'r1' }, { id: 'r2' }]);
+    });
+
+    it('keeps identity for a config object with no nested bindings', () => {
+        const body = { type: 'stack', children: [{ type: 'divider' }] };
+        const ctx = makeRichCtx({ bodyContent: body }, {});
+        expect(interpolateValue('@config.bodyContent', ctx)).toBe(body);
+    });
+
+    it('keeps the single-pass identity contract for payload-rooted rows', () => {
+        const row = { id: 'row1', note: '@config.lookalike' };
+        const ctx = makeRichCtx({ lookalike: 'x' }, { row });
+        expect(interpolateValue('@payload.row', ctx)).toBe(row);
+    });
+
+    it('terminates on a cyclic @config forward', () => {
+        const cyclic: Record<string, unknown> = { type: 'stack' };
+        cyclic['children'] = ['@config.bodyContent'];
+        const ctx = makeRichCtx({ bodyContent: cyclic }, {});
+        const result = interpolateValue('@config.bodyContent', ctx) as { children: unknown[] };
+        expect(Array.isArray(result.children)).toBe(true);
+    });
+});

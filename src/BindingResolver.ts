@@ -236,6 +236,14 @@ export function interpolateValue(value: unknown, ctx: EvaluationContext): unknow
 // ============================================================================
 
 /**
+ * Config bindings currently being recursed into (synchronous stack). A cyclic
+ * `@config.X` forward (knob default referencing itself through a call-site
+ * chain) would otherwise recurse forever; on re-entry the raw resolved value
+ * is returned instead.
+ */
+const inFlightConfigRecursions = new Set<string>();
+
+/**
  * Interpolate a string value.
  */
 function interpolateString(value: string, ctx: EvaluationContext): unknown {
@@ -250,6 +258,27 @@ function interpolateString(value: string, ctx: EvaluationContext): unknown {
         }
         const resolved = resolveBinding(value, ctx);
         bindLog.debug('resolve', { binding: value, resolvedType: typeof resolved });
+        // A `render-ui`-typed config knob overridden at the call site arrives
+        // as an object tree that still carries bindings (`@config.*`,
+        // `@payload.*`, `?data` rewrites). The single-pass identity contract
+        // protects entity rows, so recursion is scoped to CONFIG-rooted
+        // bindings whose resolved tree still contains bindings — entity/
+        // payload resolutions keep their identity semantics untouched.
+        if (
+            value.startsWith('@config.') &&
+            resolved !== null &&
+            typeof resolved === 'object' &&
+            containsBindings(resolved) &&
+            !inFlightConfigRecursions.has(value)
+        ) {
+            inFlightConfigRecursions.add(value);
+            try {
+                bindLog.debug('resolve:config-recurse', { binding: value });
+                return interpolateValue(resolved, ctx);
+            } finally {
+                inFlightConfigRecursions.delete(value);
+            }
+        }
         return resolved;
     }
 
