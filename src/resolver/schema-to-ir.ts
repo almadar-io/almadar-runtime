@@ -260,6 +260,13 @@ function resolveTraits(schema: OrbitalSchema): ResolvedTraitMaps {
             const resolvedTrait = resolveTrait(resolved, 'inline');
             traitMap.set(name, resolvedTrait);
             if (resolved.id) traitById.set(resolved.id, resolvedTrait);
+            // V4 composed-surface backbone: page-ref refIds point at the
+            // wrapper's own LOCAL declaration id (distinct from the resolved
+            // atom's id) — register it so a renamed declaration still binds.
+            const declId = wrap['id'];
+            if (typeof declId === 'string' && declId.length > 0) {
+              traitById.set(declId, resolvedTrait);
+            }
           }
         }
         continue;
