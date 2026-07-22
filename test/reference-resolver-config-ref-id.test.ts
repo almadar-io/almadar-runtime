@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
-import type { OrbitalDefinition, EntityId, Trait } from '@almadar/core';
+import type { OrbitalDefinition, EntityId, Trait, TraitId } from '@almadar/core';
 
 // W5-4b: a config knob typed `entity`/`trait`/`event` holds a reference NAME
 // (`targetEntity: "Task"`); the stamp records the referenced node's stable id
@@ -93,6 +93,74 @@ describe('ReferenceResolver — id-primary config-reference resolution', () => {
     if (result.success) {
       const t = result.data.traits[0].trait;
       expect(t.config?.pressEvent.default).toBe('SUBMIT_FORM');
+    }
+  });
+
+  it('preserves the @trait. binding form when refreshing a renamed trait-typed default', async () => {
+    const resolver = new ReferenceResolver({ basePath: '.', skipExternalLoading: true });
+    // The default-form trait was renamed DefaultForm -> DefaultFormV2; the
+    // knob default was authored in binding form and must STAY a binding —
+    // the render channel keys on the @trait. prefix (std-service-email
+    // blank-boot class).
+    const referenced: Trait = {
+      id: 'trait_df' as TraitId,
+      name: 'DefaultFormV2',
+      scope: 'instance',
+      stateMachine: { states: [{ name: 'ready', isInitial: true }], events: [], transitions: [] },
+    } as Trait;
+    const host: Trait = {
+      name: 'EmailHost',
+      scope: 'instance',
+      stateMachine: { states: [{ name: 'idle', isInitial: true }], events: [], transitions: [] },
+      config: {
+        uiTrait: {
+          type: 'trait',
+          default: '@trait.DefaultForm',
+          refId: 'trait_df',
+        },
+      },
+    } as Trait;
+    const orbital = makeOrbital(host);
+    orbital.traits.push(referenced);
+
+    const result = await resolver.resolve(orbital);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const t = result.data.traits.find((x) => x.trait.name === 'EmailHost')?.trait;
+      expect(t?.config?.uiTrait.default).toBe('@trait.DefaultFormV2');
+    }
+  });
+
+  it('leaves an up-to-date @trait. binding default untouched (no lossy form strip)', async () => {
+    const resolver = new ReferenceResolver({ basePath: '.', skipExternalLoading: true });
+    const referenced: Trait = {
+      id: 'trait_df' as TraitId,
+      name: 'DefaultForm',
+      scope: 'instance',
+      stateMachine: { states: [{ name: 'ready', isInitial: true }], events: [], transitions: [] },
+    } as Trait;
+    const host: Trait = {
+      name: 'EmailHost',
+      scope: 'instance',
+      stateMachine: { states: [{ name: 'idle', isInitial: true }], events: [], transitions: [] },
+      config: {
+        uiTrait: {
+          type: 'trait',
+          default: '@trait.DefaultForm',
+          refId: 'trait_df',
+        },
+      },
+    } as Trait;
+    const orbital = makeOrbital(host);
+    orbital.traits.push(referenced);
+
+    const result = await resolver.resolve(orbital);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const t = result.data.traits.find((x) => x.trait.name === 'EmailHost')?.trait;
+      expect(t?.config?.uiTrait.default).toBe('@trait.DefaultForm');
     }
   });
 

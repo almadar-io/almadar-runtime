@@ -738,10 +738,23 @@ function resolveConfigRefsById(
         : entry.kind === "event"
           ? (entry.node as Event).key
           : (entry.node as Trait).name;
-    if (!currentName || currentName === field.default) continue;
+    if (!currentName) continue;
+    // Preserve the authored VALUE FORM: a trait knob default written as the
+    // `@trait.X` binding must stay a binding after the name refresh — the
+    // render channel (UISlotRenderer's recursive `@trait.X` walk, embed
+    // sidecar routing) keys on the prefix, and stripping it turned
+    // std-service-email's standalone default form into a dead text leaf
+    // (blank boot). Bare-name defaults (`targetEntity: "Task"`) keep the
+    // bare form as before.
+    const isTraitBinding =
+      entry.kind === "trait" &&
+      typeof field.default === "string" &&
+      field.default.startsWith("@trait.");
+    const nextDefault = isTraitBinding ? `@trait.${currentName}` : currentName;
+    if (nextDefault === field.default) continue;
     nextSchema ??= { ...schema };
-    nextSchema[key] = { ...field, default: currentName };
-    rewrites.push({ key, from: field.default, to: currentName });
+    nextSchema[key] = { ...field, default: nextDefault };
+    rewrites.push({ key, from: field.default, to: nextDefault });
   }
   if (!nextSchema) return trait;
 
