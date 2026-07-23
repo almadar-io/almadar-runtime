@@ -678,12 +678,20 @@ export class StateMachineManager {
         payload?: EventPayload,
         entityData?: EntityRow,
         entityByTrait?: Record<string, EntityRow>,
-        eventId?: EventId
+        eventId?: EventId,
+        // When set, the event dispatches to THIS trait only — the scoped-
+        // listen delivery contract. A listen's trigger is addressed to the
+        // LISTENING trait; broadcasting it orbital-wide made a trigger
+        // renamed to INIT re-run every trait's initializer (the
+        // R-SCOPED-LISTEN-INIT-RENAME-FREEZE re-fire cascade: the source's
+        // own INIT refetched, re-emitted, re-triggered — a permanent loop).
+        targetTrait?: string
     ): Array<{ traitName: string; result: TransitionResult }> {
         const results: Array<{ traitName: string; result: TransitionResult }> = [];
         const scope = scopeOf(entityData);
 
         for (const [traitName, trait] of this.traits) {
+            if (targetTrait !== undefined && traitName !== targetTrait) continue;
             const traitState = this.getOrInitState(traitName, scope);
             if (!traitState) continue;
             const key = compositeKey(traitName, scope);

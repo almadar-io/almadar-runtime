@@ -301,6 +301,13 @@ export interface OrbitalEventRequest {
   eventId?: EventId;
   payload?: EventPayload;
   entityId?: string;
+  /**
+   * Scoped-listen delivery: dispatch to THIS trait only. A listens-matched
+   * trigger is addressed to the listening trait; without this, a trigger
+   * renamed to INIT broadcast orbital-wide and re-ran every trait's
+   * initializer (R-SCOPED-LISTEN-INIT-RENAME-FREEZE re-fire cascade).
+   */
+  targetTrait?: string;
   /** User context for @user bindings (from Firebase auth) */
   user?: {
     uid: string;
@@ -1271,6 +1278,7 @@ export class OrbitalServerRuntime {
               eventId: listener.triggersId,
               payload: mappedPayload as EventPayload,
               entityId: forwardedEntityId,
+              targetTrait: trait.name,
             });
           });
 
@@ -1625,6 +1633,11 @@ export class OrbitalServerRuntime {
     }));
 
     const { event, eventId, payload, entityId, user } = request;
+    // Scoped-listen delivery: first-class request field, or the client
+    // relay's `_targetTrait` payload sidecar (the `_activeTraits` pattern).
+    const targetTrait =
+      request.targetTrait ??
+      ((payload as EventPayload | undefined)?.['_targetTrait'] as string | undefined);
 
     // API-boundary payload validation. Each trait declares a
     // `payloadSchema` per event in its `stateMachine.events` block
@@ -1681,6 +1694,7 @@ export class OrbitalServerRuntime {
     const cleanPayload = payload ? { ...payload } : undefined;
     if (cleanPayload) {
       delete (cleanPayload as EventPayload & { _activeTraits?: unknown })._activeTraits;
+      delete (cleanPayload as EventPayload & { _targetTrait?: unknown })._targetTrait;
     }
 
     // Get entity data if entityId provided
@@ -1714,6 +1728,7 @@ export class OrbitalServerRuntime {
       entityData,
       entityByTrait,
       eventId,
+      targetTrait,
     );
 
     // Filter results to only active traits (if specified)
