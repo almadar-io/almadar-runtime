@@ -491,10 +491,12 @@ export class EffectExecutor {
         emit: EmitConfig | undefined,
         key: 'success' | 'on_change' | 'on_message',
         payload: unknown,
+        /** True only for a persist effect's `emit:{success}` envelope — see `EffectHandlers.emit`. */
+        fromPersistSuccess?: boolean,
     ): void {
         const eventName = emit?.[key];
         if (eventName) {
-            this.handlers.emit(eventName, payload as EventPayload | undefined, this.sourceStamp());
+            this.handlers.emit(eventName, payload as EventPayload | undefined, this.sourceStamp(), fromPersistSuccess);
         }
     }
 
@@ -720,7 +722,7 @@ export class EffectExecutor {
                             opCount: operations.length,
                             willEmit: emitCfg?.success,
                         });
-                        this.emitSuccess(emitCfg, 'success', operations);
+                        this.emitSuccess(emitCfg, 'success', operations, true);
                         persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
                     } else {
                         const entityType = args[1] as string;
@@ -738,7 +740,7 @@ export class EffectExecutor {
                             dataId,
                             willEmit: emitCfg?.success,
                         });
-                        this.emitSuccess(emitCfg, 'success', data);
+                        this.emitSuccess(emitCfg, 'success', data, true);
                         persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
                     }
                 } catch (err) {

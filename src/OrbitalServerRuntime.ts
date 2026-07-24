@@ -217,7 +217,7 @@ export type ClientEffectTuple =
   | ClientRenderUITuple
   | ClientNavigateTuple
   | ClientNotifyTuple;
-import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs } from "@almadar/core";
+import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping } from "@almadar/core";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
   preprocessSchema,
@@ -315,6 +315,23 @@ export interface OrbitalEventRequest {
     displayName?: string;
     [key: string]: unknown;
   };
+  /** Per-tab client identity (UUID) — excludes this request's origin from live-broadcast delivery. */
+  clientId?: string;
+}
+
+/**
+ * One persist-envelope success emit, handed to the live-broadcast sink
+ * (`setLiveBroadcastSink`). Fired only from the `persist` effect's
+ * `emit:{success}` envelope (batch and single-op) — never from the generic
+ * emit funnel — so transport layers can fan it out to every OTHER
+ * connected client without matching on event names.
+ */
+export interface LiveBroadcastItem {
+  event: string;
+  payload?: EventPayload;
+  source: BusEventSource;
+  /** `clientId` of the request that produced this emit; excluded from delivery by the transport. */
+  originClientId?: string;
 }
 
 /**
@@ -545,6 +562,8 @@ export class OrbitalServerRuntime {
   private substrateHandlers: AgentSubstrateHandlerResult | null = null;
   private substrateHandlersPromise: Promise<void> | null = null;
   private resolvedSchema: OrbitalSchema | null = null;
+  /** Wired by the hosting server (e.g. the playground SSE endpoint) via `setLiveBroadcastSink`. */
+  private liveBroadcastSink: ((item: LiveBroadcastItem) => void) | null = null;
   /**
    * Trait name -> resolved `TraitConfig`, computed once per `register()` via
    * `buildResolvedTraitConfigs` (`@almadar/core`). An embedded sub-trait's
@@ -1233,23 +1252,11 @@ export class OrbitalServerRuntime {
               }));
             }
 
-            // Apply payload mapping
-            let mappedPayload = event.payload;
-            if (listener.payloadMapping && event.payload) {
-              mappedPayload = {};
-              for (const [key, expr] of Object.entries(
-                listener.payloadMapping,
-              )) {
-                if (typeof expr === "string" && expr.startsWith("@payload.")) {
-                  const field = expr.slice("@payload.".length);
-                  (mappedPayload as EventPayload)[key] = (
-                    event.payload as EventPayload
-                  )[field];
-                } else {
-                  (mappedPayload as EventPayload)[key] = expr as string;
-                }
-              }
-            }
+            // Apply payload mapping (shared contract with the client wiring)
+            const mappedPayload = applyListenPayloadMapping(
+              listener.payloadMapping,
+              event.payload as EventPayload | undefined,
+            );
 
             // Forward entityId so the triggered trait can bind @entity.*
             // against the right row. Without this, cross-trait listens
@@ -1551,6 +1558,17 @@ export class OrbitalServerRuntime {
     }
   }
 
+  /**
+   * Wire a live-broadcast sink. Called only from a `persist` effect's
+   * `emit:{success}` envelope firing site (batch and single-op) — see
+   * `docs/Almadar_Live_Push.md`. The hosting server (e.g. the playground's
+   * `/api/events` SSE endpoint) uses this to fan persist mutations out to
+   * every OTHER connected client; a fresh call replaces the previous sink.
+   */
+  setLiveBroadcastSink(sink: (item: LiveBroadcastItem) => void): void {
+    this.liveBroadcastSink = sink;
+  }
+
   // ==========================================================================
   // Event Processing
   // ==========================================================================
@@ -1632,7 +1650,7 @@ export class OrbitalServerRuntime {
       ),
     }));
 
-    const { event, eventId, payload, entityId, user } = request;
+    const { event, eventId, payload, entityId, user, clientId } = request;
     // Scoped-listen delivery: first-class request field, or the client
     // relay's `_targetTrait` payload sidecar (the `_activeTraits` pattern).
     const targetTrait =
@@ -1761,6 +1779,7 @@ export class OrbitalServerRuntime {
           user,
           clientEffectsByTrait,
           onPush,
+          clientId,
         );
       }
     }
@@ -1855,6 +1874,8 @@ export class OrbitalServerRuntime {
     user?: OrbitalEventRequest["user"],
     clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>,
     onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void,
+    /** Per-request originating client (from `OrbitalEventRequest.clientId`); absent for ticks. Carried through to persist-envelope broadcast items so the sink can exclude the origin. */
+    originClientId?: string,
   ): Promise<void> {
     const entityType = registered.entity.name;
 
@@ -1874,7 +1895,7 @@ export class OrbitalServerRuntime {
     let contextRef: EffectContext | null = null;
 
     const handlers: EffectHandlers = {
-      emit: (event, eventPayload, source) => {
+      emit: (event, eventPayload, source, fromPersistSuccess) => {
         if (this.config.debug) {
           busLog.debug('emit:dispatch', () => ({
             event,
@@ -1922,6 +1943,21 @@ export class OrbitalServerRuntime {
           sourceTrait: stamp.trait,
           dispatchOrbital: registered.schema.name,
         });
+        // Live-push (docs/Almadar_Live_Push.md): broadcast ONLY the
+        // persist-envelope success emit, positionally signaled by
+        // EffectExecutor's persist case — reuses the exact `stamp` object
+        // already pushed to `emittedEvents` so the broadcast payload is
+        // identical to the origin's response.
+        if (fromPersistSuccess) {
+          busLog.debug('live-broadcast:sink-call', {
+            event,
+            sourceOrbital: stamp.orbital,
+            sourceTrait: stamp.trait,
+            originClientId,
+            sinkWired: this.liveBroadcastSink !== null,
+          });
+          this.liveBroadcastSink?.({ event, payload: eventPayload, source: stamp, originClientId });
+        }
       },
 
       set: async (targetId, field, value) => {

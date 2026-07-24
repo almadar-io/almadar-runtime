@@ -187,7 +187,8 @@ export interface TraitDefinition {
         triggers: string;
         /** V4 dual-carry id sibling of `triggers` — optional until the Phase-7 flip. */
         triggersId?: EventId;
-        payloadMapping?: EventPayload;
+        /** `with { ... }` payload rewrite: `{ targetField: "@payload.<sourceField>" | literal }` */
+        payloadMapping?: Record<string, string>;
     }>;
 }
 
@@ -210,8 +211,15 @@ export interface EffectHandlers {
      * `Orbital.TraitName EVENT -> TRIGGER` in .lolo) can filter incoming
      * events by their originating trait. Omitted when the emit is
      * synthesized by a non-trait context (e.g. test harness).
+     *
+     * `fromPersistSuccess` is set only by `EffectExecutor`'s `persist` case
+     * (batch and single-op), never inferred from the event name — the
+     * positional signal a server-side implementation uses to also fan this
+     * emit out to other connected clients (live-broadcast). Absent/false
+     * for every other emit source (plain `emit` effect, `set`/`call-service`/
+     * `fetch` success envelopes, cascade re-emits).
      */
-    emit: (event: string, payload?: EventPayload, source?: RuntimeEvent['source']) => void;
+    emit: (event: string, payload?: EventPayload, source?: RuntimeEvent['source'], fromPersistSuccess?: boolean) => void;
 
     /** Persist data (create/update/delete/batch) */
     persist: (
