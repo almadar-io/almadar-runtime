@@ -79,6 +79,21 @@ export interface MockPersistenceConfig {
   defaultSeedCount?: number;
   /** Enable debug logging */
   debug?: boolean;
+  /**
+   * Make the signed-in viewer own some of the seeded rows.
+   *
+   * An ownership-scoped view (`only my bookings`, `my prescriptions`) filters
+   * rows by `@user.id`. Faker-seeded owner columns hold random ids, so such a
+   * view is ALWAYS empty in mock mode and cannot be told apart from a broken
+   * filter — the exact ambiguity that cost this campaign a debugging cycle.
+   *
+   * `ownerFields` names the columns that hold a user id, as `Entity.field`
+   * pairs — declared explicitly, never inferred from a field's name. Every
+   * other seeded row is assigned `ownerId`, so a scoped view has real data AND
+   * the scoping stays observable (a second persona sees the complement).
+   */
+  ownerId?: string;
+  ownerFields?: string[];
 }
 
 // ============================================================================
@@ -265,9 +280,22 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       mockLog.debug('seeding', { count, entity: entityName });
     }
 
+    // Declared owner columns for THIS entity (see MockPersistenceConfig.ownerFields).
+    const ownerCols = (this.config.ownerFields ?? [])
+      .map((pair) => pair.split('.'))
+      .filter(([ent]) => ent?.toLowerCase() === normalized)
+      .map(([, field]) => field)
+      .filter((field): field is string => Boolean(field));
+    const ownerId = this.config.ownerId;
+
     const generated: Array<{ id: string; updatedAt: string }> = [];
     for (let i = 0; i < count; i++) {
       const item = this.generateMockItem(normalized, entityName, fields, i + 1);
+      // Give the viewer every other row, so an ownership-scoped view has real
+      // data while a second persona still sees a different set.
+      if (ownerId && ownerCols.length > 0 && i % 2 === 0) {
+        for (const col of ownerCols) item[col] = ownerId;
+      }
       store.set(item.id as string, item);
       generated.push({
         id: item.id as string,

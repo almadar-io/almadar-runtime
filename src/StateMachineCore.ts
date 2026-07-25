@@ -20,7 +20,7 @@ import type {
     ConfigContext,
     EvaluationContextExtensions,
 } from './types.js';
-import type { EventId } from '@almadar/core';
+import type { EventId, UserContext } from '@almadar/core';
 import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
 import { evaluateGuard } from '@almadar/evaluator';
 import { createLogger } from '@almadar/logger';
@@ -156,6 +156,14 @@ export interface ProcessEventOptions {
      */
     config?: ConfigContext;
     /**
+     * Authenticated viewer for `@user.X` resolution inside guard expressions.
+     * The validator admits `@user` in guard context alongside `@config`; this
+     * is the runtime side of that contract. Without it a role gate
+     * (`when ["=", @user.role, "admin"]`) can never pass, because the guard's
+     * EvaluationContext has no user to compare against.
+     */
+    user?: UserContext;
+    /**
      * Guard evaluation error handling mode. (RCG-02)
      * - "permissive": Guard errors allow the transition (default, backwards-compatible)
      * - "strict": Guard errors block the transition
@@ -205,6 +213,7 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
     const {
         traitState, trait, eventKey, eventId, payload, entityData,
         config,
+        user,
         guardMode = 'permissive',
         strictBindings = false,
         contextExtensions,
@@ -260,6 +269,7 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
             // propagates `bindings.config` to ctx.config when present —
             // we just need to pass it through here.
             config,
+            user,
         }, strictBindings, contextExtensions);
 
         try {
@@ -372,6 +382,8 @@ export interface QueuedEvent {
     entityData?: EntityRow;
     /** Per-trait entity overrides (see `sendEvent` doc). */
     entityByTrait?: Record<string, EntityRow>;
+    /** Authenticated viewer at enqueue time, for `@user` guard resolution. */
+    user?: UserContext;
 }
 
 /**
@@ -685,7 +697,10 @@ export class StateMachineManager {
         // renamed to INIT re-run every trait's initializer (the
         // R-SCOPED-LISTEN-INIT-RENAME-FREEZE re-fire cascade: the source's
         // own INIT refetched, re-emitted, re-triggered — a permanent loop).
-        targetTrait?: string
+        targetTrait?: string,
+        // Authenticated viewer for `@user.X` guard resolution — per-request,
+        // so it is a parameter rather than manager config.
+        user?: UserContext
     ): Array<{ traitName: string; result: TransitionResult }> {
         const results: Array<{ traitName: string; result: TransitionResult }> = [];
         const scope = scopeOf(entityData);
@@ -706,6 +721,7 @@ export class StateMachineManager {
                 payload,
                 entityData: perTraitEntity,
                 config: this.traitConfigs.get(traitName),
+                user,
                 guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,
                 contextExtensions: this.config.contextExtensions,
@@ -758,13 +774,14 @@ export class StateMachineManager {
         payload?: EventPayload,
         entityData?: EntityRow,
         entityByTrait?: Record<string, EntityRow>,
-        eventId?: EventId
+        eventId?: EventId,
+        user?: UserContext
     ): void {
         const scope = scopeOf(entityData);
         for (const [traitName] of this.traits) {
             const key = compositeKey(traitName, scope);
             const queue = this.queues.get(key) ?? [];
-            queue.push({ eventKey, eventId, payload, entityData, entityByTrait });
+            queue.push({ eventKey, eventId, payload, entityData, entityByTrait, user });
             this.queues.set(key, queue);
         }
     }
@@ -806,6 +823,7 @@ export class StateMachineManager {
                 payload: entry.payload,
                 entityData: perTraitEntity,
                 config: this.traitConfigs.get(traitName),
+                user: entry.user,
                 guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,
                 contextExtensions: this.config.contextExtensions,

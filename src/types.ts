@@ -31,6 +31,7 @@ import type {
     TraitId,
     EventId,
     TraitEventListener,
+    UserContext,
 } from '@almadar/core';
 
 // ============================================================================
@@ -472,6 +473,8 @@ export interface BindingContext {
     state?: string;
     /** Trait-level state/config */
     config?: ConfigContext;
+    /** Authenticated viewer behind `@user.x` — ownership (`@user.id`) and role gates. */
+    user?: UserContext;
     /**
      * Local variables introduced by a `let` form, keyed by bare name and
      * referenced via `@<name>` (the canonical evaluator convention — same as

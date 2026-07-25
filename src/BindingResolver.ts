@@ -506,6 +506,14 @@ export function createContextFromBindings(
     if (bindings.config) {
         ctx.config = bindings.config;
     }
+    // Carry the authenticated viewer so `@user.id` / `@user.role` resolve.
+    // Omitting this made every `@user` read undefined no matter what the
+    // request carried — ownership filters matched no rows and role gates were
+    // inert in the interpreter while the compiled path honoured them
+    // (R-USER-DROPPED-IN-BINDING-CONTEXT).
+    if (bindings.user) {
+        ctx.user = bindings.user;
+    }
     // Carry `let`-bound locals onto the evaluator context so `@<name>`
     // references inside the `let` body resolve. Mirrors the evaluator's own
     // `createChildContext(parent, locals)` — same Map shape, same lookup path

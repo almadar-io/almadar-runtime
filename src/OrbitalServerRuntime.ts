@@ -177,6 +177,8 @@ import type {
   ResolvedPatternProps,
   SExpr,
   EventId,
+  UserContext,
+  RawUserClaims,
 } from "@almadar/core";
 
 /**
@@ -217,7 +219,7 @@ export type ClientEffectTuple =
   | ClientRenderUITuple
   | ClientNavigateTuple
   | ClientNotifyTuple;
-import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping } from "@almadar/core";
+import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext } from "@almadar/core";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
   preprocessSchema,
@@ -308,13 +310,8 @@ export interface OrbitalEventRequest {
    * initializer (R-SCOPED-LISTEN-INIT-RENAME-FREEZE re-fire cascade).
    */
   targetTrait?: string;
-  /** User context for @user bindings (from Firebase auth) */
-  user?: {
-    uid: string;
-    email?: string;
-    displayName?: string;
-    [key: string]: unknown;
-  };
+  /** Provider claims for `@user` bindings, normalized by `normalizeUserContext`. */
+  user?: RawUserClaims;
   /** Per-tab client identity (UUID) — excludes this request's origin from live-broadcast delivery. */
   clientId?: string;
 }
@@ -451,6 +448,28 @@ export interface OrbitalServerRuntimeConfig {
    * @almadar-io/rabit injects these at runtime; tests can inject mocks.
    */
   substrateServices?: SubstrateServices;
+  /**
+   * Viewer identity used when a request carries no authenticated user — the
+   * persona a preview or verification run is looking at the app AS.
+   *
+   * `@user.id` / `@user.role` are what an app's ownership scoping and role
+   * gates resolve against, so with no user every predicate takes its negative
+   * branch and every owner filter matches nothing. A host that has real auth
+   * leaves this unset and the request's own user always wins; a dev host
+   * (playground, runtime-verify) sets it to make both branches reachable.
+   *
+   * Never a fallback for production auth: an authenticated request is not
+   * overridden, and a host that sets this is declaring itself a dev host.
+   */
+  defaultUser?: UserContext;
+  /**
+   * Seeded columns that hold a user id, as `Entity.field` pairs (e.g.
+   * `RosterEntry.memberId`). In mock mode the `defaultUser` is assigned to
+   * every other seeded row of each named column, so a scoped view has real
+   * rows and a second persona sees the complement. Explicit by design — the
+   * seeder never guesses an owner column from its name.
+   */
+  mockOwnerFields?: string[];
 }
 
 /**
@@ -605,6 +624,11 @@ export class OrbitalServerRuntime {
         seed: config.mockSeed,
         defaultSeedCount: config.mockSeedCount ?? 6,
         debug: config.debug,
+        // Let the dev viewer own some seeded rows, so ownership-scoped views
+        // ("only mine") have data instead of being indistinguishable from a
+        // broken filter. Columns are declared, never inferred by name.
+        ownerId: config.defaultUser?.id,
+        ownerFields: config.mockOwnerFields,
       });
       if (config.debug) {
         persistLog.debug('mock:init', { adapter: 'MockPersistenceAdapter' });
@@ -1424,6 +1448,8 @@ export class OrbitalServerRuntime {
               state:
                 registered.manager.getState(traitName)?.currentState ||
                 "unknown",
+              // A tick has no request user; only a dev host's ambient persona.
+              user: this.config.defaultUser,
             }, false, this.config.contextExtensions);
 
             const guardPasses = evaluateGuard(
@@ -1466,6 +1492,7 @@ export class OrbitalServerRuntime {
             fetchedData,
             clientEffects,
             tickEffectResults,
+            this.config.defaultUser,
           );
 
           if (this.config.debug) {
@@ -1570,6 +1597,21 @@ export class OrbitalServerRuntime {
     this.liveBroadcastSink = sink;
   }
 
+  /**
+   * Switch the viewer a dev host presents the app as — see
+   * `OrbitalServerRuntimeConfig.defaultUser`. Pass `undefined` for an
+   * unauthenticated viewer. Takes effect on the next event; an authenticated
+   * request still overrides it.
+   */
+  setDefaultUser(user: UserContext | undefined): void {
+    this.config.defaultUser = user;
+  }
+
+  /** The viewer a dev host is currently presenting the app as. */
+  getDefaultUser(): UserContext | undefined {
+    return this.config.defaultUser;
+  }
+
   // ==========================================================================
   // Event Processing
   // ==========================================================================
@@ -1651,7 +1693,11 @@ export class OrbitalServerRuntime {
       ),
     }));
 
-    const { event, eventId, payload, entityId, user, clientId } = request;
+    const { event, eventId, payload, entityId, user: requestUser, clientId } = request;
+    // The viewer this event is executed as. A request's own authenticated user
+    // always wins; `defaultUser` only fills the gap for a dev host that has no
+    // auth (see the config field's doc).
+    const viewer = normalizeUserContext(requestUser) ?? this.config.defaultUser;
     // Scoped-listen delivery: first-class request field, or the client
     // relay's `_targetTrait` payload sidecar (the `_activeTraits` pattern).
     const targetTrait =
@@ -1748,6 +1794,7 @@ export class OrbitalServerRuntime {
       entityByTrait,
       eventId,
       targetTrait,
+      viewer,
     );
 
     // Filter results to only active traits (if specified)
@@ -1777,7 +1824,7 @@ export class OrbitalServerRuntime {
           fetchedData,
           clientEffects,
           effectResults,
-          user,
+          viewer,
           clientEffectsByTrait,
           onPush,
           clientId,
@@ -1872,7 +1919,8 @@ export class OrbitalServerRuntime {
     fetchedData: { [entityType: string]: EntityRow | EntityRow[] },
     clientEffects: ClientEffectTuple[],
     effectResults: EffectResult[],
-    user?: OrbitalEventRequest["user"],
+    /** Already-normalized viewer (see `processOrbitalEvent`'s `viewer`). */
+    user?: UserContext,
     clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>,
     onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void,
     /** Per-request originating client (from `OrbitalEventRequest.clientId`); absent for ticks. Carried through to persist-envelope broadcast items so the sink can exclude the origin. */
@@ -2247,7 +2295,7 @@ export class OrbitalServerRuntime {
               const predicate = options.filter as SExpr;
               entities = entities.filter((entity) => {
                 const ctx = createContextFromBindings(
-                  { entity, payload: bindingsRef?.payload, current: entity },
+                  { entity, payload: bindingsRef?.payload, current: entity, user: bindingsRef?.user },
                   false,
                 );
                 try {
@@ -2534,7 +2582,7 @@ export class OrbitalServerRuntime {
       entity: entityData,
       payload,
       state: state?.currentState || "unknown",
-      user, // @user bindings from Firebase auth
+      user,
     };
 
     // Call-site `config: { ... }` injection. Reference-resolver captures the
