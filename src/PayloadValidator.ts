@@ -10,6 +10,7 @@
 
 import type { PayloadField } from '@almadar/core';
 import type { TraitDefinition, EventPayload } from './types.js';
+import type { SExpr } from '@almadar/core';
 
 // ============================================================================
 // Per-Request Payload Validation
@@ -184,7 +185,7 @@ export function validatePayloadShapes(
  * Extract payload field references from a payloadMapping object.
  * Finds all `@payload.fieldName` patterns and returns the field names.
  */
-function extractPayloadReferences(mapping: EventPayload): string[] {
+function extractPayloadReferences(mapping: Record<string, SExpr>): string[] {
     const refs: string[] = [];
 
     function collect(value: unknown): void {
@@ -197,7 +198,7 @@ function extractPayloadReferences(mapping: EventPayload): string[] {
             if (Array.isArray(value)) {
                 value.forEach(collect);
             } else {
-                Object.values(value as EventPayload).forEach(collect);
+                Object.values(value).forEach(collect);
             }
         }
     }

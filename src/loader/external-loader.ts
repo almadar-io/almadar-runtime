@@ -500,7 +500,6 @@ export class ExternalOrbitalLoader {
       .replace(/^behaviors\//, "")
       .replace(/\.orb$/, "");
 
-    const topics = ["core", "core-variations", "agent", "game", "service", "app", "probes", "marketing"] as const;
     const tiers = ["atoms", "molecules", "organisms"] as const;
 
     // Build candidate list across all configured roots: std first, then any
@@ -517,6 +516,17 @@ export class ExternalOrbitalLoader {
     let totalCandidates = 0;
     for (const root of roots) {
       const candidates: string[] = [];
+      // Topics are whatever the registry actually holds, never a hardcoded
+      // list: a fourth hand-maintained copy of the topic set drifts silently.
+      // It already had — `ml` and `infra` were both absent, so every
+      // `std/behaviors/<name>` import in those topics resolved nowhere while
+      // `orb validate` stayed green.
+      const registryRoot = path.join(root, "behaviors", "registry");
+      const topics = fs.existsSync(registryRoot)
+        ? fs.readdirSync(registryRoot, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name)
+        : [];
       for (const topic of topics) {
         for (const tier of tiers) {
           candidates.push(path.join(root, "behaviors", "registry", topic, tier, `${name}.orb`));

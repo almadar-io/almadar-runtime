@@ -142,7 +142,7 @@ import {
   createContextFromBindings,
   resolveCallSitePayloadCaptures,
 } from "./BindingResolver.js";
-import { evaluate, evaluateGuard } from "@almadar/evaluator";
+import { evaluate, evaluateGuard, evaluateListenPayloadExpr } from "@almadar/evaluator";
 import type {
   TraitDefinition,
   TraitState,
@@ -1256,6 +1256,7 @@ export class OrbitalServerRuntime {
             const mappedPayload = applyListenPayloadMapping(
               listener.payloadMapping,
               event.payload as EventPayload | undefined,
+              evaluateListenPayloadExpr,
             );
 
             // Forward entityId so the triggered trait can bind @entity.*

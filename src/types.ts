@@ -30,6 +30,7 @@ import type {
     ServiceCallResult,
     TraitId,
     EventId,
+    TraitEventListener,
 } from '@almadar/core';
 
 // ============================================================================
@@ -179,17 +180,8 @@ export interface TraitDefinition {
             effects?: SExpr[];
         };
     }>;
-    /** Cross-trait event listeners (optional) */
-    listens?: Array<{
-        event: string;
-        /** V4 dual-carry id sibling of `event` — optional until the Phase-7 flip. */
-        eventId?: EventId;
-        triggers: string;
-        /** V4 dual-carry id sibling of `triggers` — optional until the Phase-7 flip. */
-        triggersId?: EventId;
-        /** `with { ... }` payload rewrite: `{ targetField: "@payload.<sourceField>" | literal }` */
-        payloadMapping?: Record<string, string>;
-    }>;
+    /** Cross-trait event listeners (optional). Canonical shape — `@almadar/core` owns it. */
+    listens?: TraitEventListener[];
 }
 
 // ============================================================================
