@@ -792,6 +792,18 @@ function autoDetectBehaviorsLibPaths(stdLibPath: string | undefined): string[] {
         }
         break;
       }
+      // Workspace layout: <repo>/packages/almadar-std → sibling
+      // <repo>/packages/almadar-behaviors. A pnpm workspace link resolves
+      // `stdLibPath` to the real source directory, whose ancestors are neither
+      // `@almadar` nor `.pnpm`, so neither branch above fires and every domain
+      // atom comes back "not found in registry" for locally-linked runs.
+      if (path.basename(dir).endsWith("almadar-std")) {
+        const sibling = path.join(parent, path.basename(dir).replace(/almadar-std$/, "almadar-behaviors"));
+        if (fs.existsSync(path.join(sibling, "behaviors", "registry"))) {
+          found.push(sibling);
+          break;
+        }
+      }
       dir = parent;
     }
   } catch {
