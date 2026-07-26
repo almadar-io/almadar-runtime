@@ -31,6 +31,7 @@ const DEFAULT_MOCK_SEED = 42;
  *  diff observers don't see all rows as "changed" between frames just
  *  because the wallclock advanced. */
 const SEED_REFERENCE_TIMESTAMP = '2024-01-01T00:00:00.000Z';
+const MS_PER_DAY = 86_400_000;
 
 // ============================================================================
 // Types
@@ -309,17 +310,23 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     persistence?: EntityPersistence,
   ): EntityRow {
     const id = this.nextId(entityName);
-    // Deterministic timestamps: keep updatedAt anchored at the seed
-    // reference so re-seeded rows compare identically across hermetic
-    // frames. createdAt uses the seeded PRNG to simulate a realistic creation date.
+    // Both timestamps come from the seeded PRNG, so a fixed seed reproduces them.
+    // updatedAt was previously pinned to SEED_REFERENCE_TIMESTAMP, which made every
+    // row render the same "Updated Jan 1, 2024" — an updated column that never varies
+    // reads as broken data. It anchored nothing anyway: createdAt is relative to the
+    // current date, so hermetic frames never held across days to begin with.
+    const createdAt = randomPastDate({ years: 1 });
+    const updatedAt = new Date(
+      Math.min(createdAt.getTime() + randomInt({ min: 0, max: 30 }) * MS_PER_DAY, Date.now()),
+    );
     return {
       ...sampleRow(
         { name: entityName, persistence, fields },
         { index, strategy: 'seeded', persistence },
       ),
       id,
-      createdAt: randomPastDate({ years: 1 }).toISOString(),
-      updatedAt: SEED_REFERENCE_TIMESTAMP,
+      createdAt: createdAt.toISOString(),
+      updatedAt: updatedAt.toISOString(),
     };
   }
 
