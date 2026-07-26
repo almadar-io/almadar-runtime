@@ -9,21 +9,15 @@
 
 import type { PersistenceAdapter } from './OrbitalServerRuntime.js';
 import type { EntityRow } from './types.js';
-import type { EntityField, EntityId, FieldValue } from '@almadar/core';
+import type { EntityField, EntityId, EntityPersistence, FieldValue } from '@almadar/core';
+import { sampleRow, sampleRowCount } from '@almadar/core/mock';
 import { createLogger } from '@almadar/logger';
 import {
   seedRandom,
-  randomInt,
   randomArrayElement,
+  randomInt,
   shuffleArray,
   randomPastDate,
-  randomRecentDate,
-  randomEmail,
-  randomUrl,
-  randomPhone,
-  randomUuid,
-  randomWords,
-  randomBoolean,
 } from './mockRandom.js';
 
 const mockLog = createLogger('almadar:runtime:mock');
@@ -33,15 +27,6 @@ const mockLog = createLogger('almadar:runtime:mock');
  *  matching the compiled path's compile-baked-in mock semantics. */
 const DEFAULT_MOCK_SEED = 42;
 
-/** Return a deterministic stock-photo URL from Picsum Photos.
- *  Free, no API key, seed-stable so the same entity+field always renders
- *  the same image across reruns. Used for fields declaring
- *  `format: "image" | "avatar" | "thumbnail"` and a few well-known field
- *  names (`imageUrl`, `photo`, etc.). */
-function picsumUrl(entityName: string, fieldName: string, width = 400, height = 400): string {
-  const seed = `${entityName}-${fieldName}-${randomInt({ min: 0, max: 1000 })}`;
-  return `https://picsum.photos/seed/${encodeURIComponent(seed)}/${width}/${height}`;
-}
 /** Reference timestamp used as `now` for seeded rows. Deterministic so
  *  diff observers don't see all rows as "changed" between frames just
  *  because the wallclock advanced. */
@@ -70,6 +55,11 @@ export interface EntitySchema {
   fields: NamedEntityField[];
   /** Pre-authored instance data from the schema (used instead of generated mocks) */
   seedData?: EntityRow[];
+  /** A `[runtime]` entity is a per-orbital singleton, so it seeds ONE row whose
+   *  values equal its declared defaults. Without this the persistence layer can
+   *  disagree with the declared-default layer in the `@entity` merge and boot a
+   *  machine into the wrong state. */
+  persistence?: EntityPersistence;
 }
 
 export interface MockPersistenceConfig {
@@ -175,8 +165,12 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       // Seed with actual pre-authored instances
       this.seedFromInstances(schema.name, schema.seedData);
     } else {
-      const count = seedCount ?? this.config.defaultSeedCount ?? 6;
-      this.seed(schema.name, schema.fields, count);
+      const requested = seedCount ?? this.config.defaultSeedCount ?? 6;
+      const count = sampleRowCount(
+        { name: schema.name, persistence: schema.persistence, fields: schema.fields },
+        requested,
+      );
+      this.seed(schema.name, schema.fields, count, schema.persistence);
     }
 
     // Phase 9.6.A: re-link relation fields across ALL registered entities.
@@ -235,12 +229,11 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
           if (eligible.length === 0) continue;
           const cardinality = field.relation.cardinality ?? 'many';
           if (cardinality === 'one' || cardinality === 'many-to-one') {
-            row[field.name] = randomArrayElement(eligible) as FieldValue;
+            row[field.name] = randomArrayElement(eligible);
           } else {
             // many / one-to-many / many-to-many → pick 2–4 IDs
             const pickCount = Math.min(eligible.length, randomInt({ min: 2, max: 4 }));
-            row[field.name] = shuffleArray(eligible.slice())
-              .slice(0, pickCount) as FieldValue;
+            row[field.name] = shuffleArray(eligible.slice()).slice(0, pickCount);
           }
         }
       }
@@ -272,7 +265,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   /**
    * Seed an entity with mock data.
    */
-  seed(entityName: string, fields: EntityField[], count: number): void {
+  seed(entityName: string, fields: EntityField[], count: number, persistence?: EntityPersistence): void {
     const store = this.getStore(entityName);
     const normalized = entityName.toLowerCase();
 
@@ -290,7 +283,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
 
     const generated: Array<{ id: string; updatedAt: string }> = [];
     for (let i = 0; i < count; i++) {
-      const item = this.generateMockItem(normalized, entityName, fields, i + 1);
+      const item = this.generateMockItem(entityName, fields, i + 1, persistence);
       // Give the viewer every other row, so an ownership-scoped view has real
       // data while a second persona still sees a different set.
       if (ownerId && ownerCols.length > 0 && i % 2 === 0) {
@@ -306,266 +299,30 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   }
 
   /**
-   * Generate a single mock item based on field schemas.
+   * Generate a single mock item. Field values come from the canonical policy in
+   * `@almadar/core/mock`; this method owns only the id and timestamp stamping.
    */
   private generateMockItem(
-    normalizedName: string,
     entityName: string,
     fields: EntityField[],
-    index: number
+    index: number,
+    persistence?: EntityPersistence,
   ): EntityRow {
     const id = this.nextId(entityName);
     // Deterministic timestamps: keep updatedAt anchored at the seed
     // reference so re-seeded rows compare identically across hermetic
     // frames. createdAt uses the seeded PRNG to simulate a realistic creation date.
-    const item: EntityRow = {
+    return {
+      ...sampleRow(
+        { name: entityName, persistence, fields },
+        { index, strategy: 'seeded', persistence },
+      ),
       id,
       createdAt: randomPastDate({ years: 1 }).toISOString(),
       updatedAt: SEED_REFERENCE_TIMESTAMP,
     };
-
-    for (const field of fields) {
-      // Skip nameless nested-descriptor fields (canonical EntityField allows
-      // `name?` on inner items/properties; the top-level seed loop only
-      // iterates real named fields).
-      if (!field.name) continue;
-      if (field.name === 'id' || field.name === 'createdAt' || field.name === 'updatedAt') {
-        continue;
-      }
-      item[field.name] = this.generateFieldValue(entityName, field, index);
-    }
-
-    return item;
   }
 
-  /** Max nesting depth for recursive array/object schemas (e.g. a Comment
-   *  entity whose `replies: [Comment]` field references itself). Without
-   *  this guard, generateArrayValue → generateObjectValue → generateArray…
-   *  recurses until stack overflow on every recursive type. Three levels
-   *  is enough to render a useful thread depth (parent → reply → sub-reply)
-   *  in catalog/preview without blowing the fixture. */
-  private static MAX_NESTED_DEPTH = 3;
-
-  /**
-   * Generate a mock value for a field based on its schema.
-   */
-  private generateFieldValue(entityName: string, field: EntityField, index: number, depth = 0): FieldValue {
-    // Mock-seed default policy: numeric fields preserve their declared
-    // default (so `tokenCount : number = 0` stays 0), every other type
-    // falls through to the seeded PRNG. Mirrors the gate in the compiled-path
-    // codegen (`backend.rs:generate_seed_mock_data`). String/enum/bool/
-    // date placeholder defaults like `name = ""` would otherwise paint
-    // every seeded row with the same literal.
-    const fieldTypeLc = field.type.toLowerCase();
-    // `values` is on ScalarEntityField + EnumEntityField only. Narrow via
-    // the discriminator instead of casting to `unknown` so we keep canonical
-    // type safety end-to-end.
-    const values = 'values' in field ? field.values : undefined;
-    mockLog.debug('field:generate', {
-      entityName,
-      fieldName: field.name,
-      fieldType: fieldTypeLc,
-      hasValues: !!values?.length,
-      valuesCount: values?.length ?? 0,
-      values: values?.length ? values.join(',') : null,
-      format: field.format ?? null,
-      hasDefault: field.default !== undefined,
-    });
-    // Honor a declared default for ANY type when present. UI-factory entities seed
-    // MEANINGFUL defaults (e.g. `features = ["Item","Item 2"]`, `hero = { … }`,
-    // `name = "Name"`) that should render verbatim in the demo. The old numeric-only
-    // gate discarded object/array/string defaults and synthesized random values instead
-    // — leaving authored content unrendered and, for array fields, producing a non-array
-    // random value that crashed the consumer's `.map`. Domain entities with no declared
-    // default still fall through to the PRNG below.
-    if (field.default !== undefined) {
-      return field.default as FieldValue;
-    }
-
-    // Always populate seeded fields. The previous 80% heuristic dropped
-    // ~20% of optional fields to null to "exercise the UI's empty path",
-    // but that flaked runtime-verify — a seeded row could silently come
-    // out with `name=null` and the DataGrid would render a blank-title
-    // card that didn't match any test expectation. Deterministic seed
-    // data is more valuable than random-nil stress; callers who want
-    // nil-testing should construct that scenario explicitly.
-    //
-    // Switch on the canonical `field.type` (not the lowercased local var) so
-    // each case narrows `field` to its discriminated-union variant — e.g.
-    // `case 'array'` gives us `ArrayEntityField` with typed `items`, `case
-    // 'relation'` gives `RelationEntityField` with typed `relation`. No
-    // `unknown`/record-typed access needed.
-    switch (field.type) {
-      case 'string':
-        return this.generateStringValue(entityName, field, index);
-
-      case 'number':
-        return randomInt({ min: 0, max: 100 });
-
-      case 'boolean':
-        return randomBoolean();
-
-      case 'date':
-      case 'timestamp':
-      case 'datetime':
-        return this.generateDateValue(field);
-
-      case 'enum':
-        // After narrowing, field is EnumEntityField with required values. The
-        // optional check is defensive in case canonical changes shape.
-        if (field.values && field.values.length > 0) {
-          return randomArrayElement(field.values);
-        }
-        return null;
-
-      case 'relation':
-        // Placeholder — filled in by `linkRelationFields` after the seed pass
-        // (target entity's store may not exist yet at field-generation time).
-        // many-cardinality → empty array slot; one-cardinality → empty string slot.
-        return field.relation?.cardinality === 'one' ? '' : [];
-
-      case 'array':
-        return this.generateArrayValue(entityName, field, index, depth);
-      case 'object':
-        return this.generateObjectValue(entityName, field, index, depth);
-
-      default:
-        // Treat unknown types as strings
-        return this.generateStringValue(entityName, field, index);
-    }
-  }
-
-  /**
-   * Generate 3–5 elements for an array field. When `items` describes an
-   * object shape (the common case for `tiles: [KpiTile]`-style declarations),
-   * each element is recursively mock-generated against `items.properties`.
-   * When `items` describes a scalar, each element uses the scalar generator
-   * for that type. When `items` is missing (legacy `[object] = []` declarations
-   * with no element schema), falls back to an empty array — the historical
-   * behavior.
-   */
-  private generateArrayValue(entityName: string, field: EntityField, index: number, depth = 0): FieldValue {
-    if (field.type !== 'array' || !field.items) return [];
-    // Stop recursing on self-referential types (e.g. Comment.replies: [Comment]).
-    // Without this guard, the generator would loop forever materialising replies-of-
-    // replies-of-replies until the call stack blows.
-    if (depth >= MockPersistenceAdapter.MAX_NESTED_DEPTH) return [];
-    const count = randomInt({ min: 3, max: 5 });
-    const out: FieldValue[] = [];
-    const elementName = field.name ?? 'item';
-    for (let i = 0; i < count; i++) {
-      // Synthesize a child EntityField for the element. Each iteration gets a
-      // fresh `index` so per-element string generators don't repeat verbatim.
-      // The spread preserves the discriminator on `items` (string/object/array/…)
-      // so generateFieldValue's switch narrows correctly.
-      const elementField = {
-        ...field.items,
-        name: `${elementName}[${i}]`,
-      } as EntityField;
-      out.push(this.generateFieldValue(entityName, elementField, index * 10 + i, depth + 1));
-    }
-    return out as FieldValue;
-  }
-
-  /**
-   * Generate a single object value with each declared property populated
-   * by the seeded PRNG. Walks `properties` and recursively delegates to
-   * `generateFieldValue` per property so nested objects-of-arrays-of-objects
-   * compose correctly.
-   */
-  private generateObjectValue(entityName: string, field: EntityField, index: number, depth = 0): FieldValue {
-    if (!field.properties) return null;
-    if (depth >= MockPersistenceAdapter.MAX_NESTED_DEPTH) return null;
-    const out: Record<string, FieldValue> = {};
-    for (const [propName, propField] of Object.entries(field.properties)) {
-      // The nested schema may omit `name` (it's implied by the parent key)
-      // — synthesize one so downstream string generators that read `field.name`
-      // have something to log against.
-      const childField = { ...propField, name: propName } as EntityField;
-      out[propName] = this.generateFieldValue(entityName, childField, index, depth + 1);
-    }
-    return out as FieldValue;
-  }
-
-  /**
-   * Generate a string value based on the field's declared schema metadata.
-   * Reads `values` (enum) first, then `format` (email/url/phone/uuid/date/
-   * datetime), then falls back to randomWords. No field-name heuristics
-   * — the schema is the source of truth. If a caller needs a real email, they
-   * declare `format: "email"`; if they need an enum, they declare `values: [...]`.
-   */
-  private generateStringValue(entityName: string, field: EntityField, _index: number): string {
-    // `values` exists on Scalar + Enum variants only. Narrow via canonical
-    // discriminator so the access is type-safe without a record cast.
-    const values = 'values' in field ? field.values : undefined;
-    if (values && values.length > 0) {
-      return randomArrayElement(values);
-    }
-    // `field.name` is optional on the canonical EntityField (nested item/
-    // property descriptors omit it). Top-level seed loop filters those out,
-    // so name is set here in practice — but the type system needs the
-    // explicit fallback to satisfy strict-null checks.
-    const fieldName = field.name ?? 'field';
-    switch (field.format) {
-      case 'email': return randomEmail();
-      case 'url': return randomUrl();
-      case 'phone': return randomPhone();
-      case 'uuid': return randomUuid();
-      case 'date': return randomRecentDate().toISOString().split('T')[0]!;
-      case 'datetime': return randomRecentDate().toISOString();
-      case 'image':
-      case 'avatar':
-      case 'thumbnail':
-        return picsumUrl(entityName, fieldName);
-    }
-    // Field-name fallback for image-bearing string fields. Authors who haven't
-    // (yet) annotated `format: "image"` still get a real photo from Picsum
-    // rather than a `randomWords(2)` sentence that breaks data-grid
-    // imageField rendering. Heuristic is narrow + clearly named.
-    const lname = fieldName.toLowerCase();
-    if (
-      lname === 'image' ||
-      lname === 'imageurl' ||
-      lname === 'image_url' ||
-      lname === 'photo' ||
-      lname === 'photourl' ||
-      lname === 'photo_url' ||
-      lname === 'avatar' ||
-      lname === 'avatarurl' ||
-      lname === 'avatar_url' ||
-      lname === 'thumbnail' ||
-      lname === 'thumbnailurl' ||
-      lname === 'thumbnail_url' ||
-      lname === 'picture' ||
-      lname === 'pictureurl' ||
-      lname === 'cover' ||
-      lname === 'coverurl' ||
-      lname === 'banner' ||
-      lname === 'bannerurl'
-    ) {
-      return picsumUrl(entityName, fieldName);
-    }
-    const value = randomWords(2);
-    mockLog.debug('field:fallback-lorem', () => ({
-      entityName,
-      fieldName: field.name,
-      hasValues: false,
-      format: field.format ?? null,
-      generated: value,
-    }));
-    return value;
-  }
-
-  /**
-   * Generate a date value. Uses the field's `format` (date vs datetime) to
-   * decide ISO shape; otherwise returns a recent ISO-8601 datetime. No
-   * field-name heuristics.
-   */
-  private generateDateValue(field: EntityField): string {
-    const date = randomRecentDate({ days: 30 });
-    if (field.format === 'date') return date.toISOString().split('T')[0]!;
-    return date.toISOString();
-  }
 
   private capitalizeFirst(str: string): string {
     return str.charAt(0).toUpperCase() + str.slice(1);

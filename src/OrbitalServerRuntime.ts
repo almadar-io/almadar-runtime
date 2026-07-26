@@ -1165,7 +1165,12 @@ export class OrbitalServerRuntime {
             typeof f.name === 'string' && f.name.length > 0,
           )
           ;
-        this.persistence.registerEntity({ name: entity.name, id: entity.id, fields });
+        this.persistence.registerEntity({
+          name: entity.name,
+          id: entity.id,
+          fields,
+          persistence: entity.persistence,
+        });
         if (this.config.debug) {
           persistLog.debug('mock:seeded', { entity: entity.name, count: this.persistence.count(entity.name) });
         }
@@ -1201,7 +1206,12 @@ export class OrbitalServerRuntime {
             typeof f.name === 'string' && f.name.length > 0,
           )
           ;
-        this.persistence.registerEntity({ name: auxEntity.name, id: auxEntity.id, fields: auxFields });
+        this.persistence.registerEntity({
+          name: auxEntity.name,
+          id: auxEntity.id,
+          fields: auxFields,
+          persistence: auxEntity.persistence,
+        });
         if (this.config.debug) {
           persistLog.debug('mock:seeded-auxiliary', {
             entity: auxEntity.name,
@@ -1581,7 +1591,12 @@ export class OrbitalServerRuntime {
             typeof f.name === 'string' && f.name.length > 0,
           )
           ;
-        this.persistence.registerEntity({ name: entity.name, id: entity.id, fields });
+        this.persistence.registerEntity({
+          name: entity.name,
+          id: entity.id,
+          fields,
+          persistence: entity.persistence,
+        });
       }
     }
   }

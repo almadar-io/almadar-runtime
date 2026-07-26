@@ -22,15 +22,14 @@
  */
 
 import { isEntityCall } from '@almadar/core';
+import { sampleFieldValue, sampleRow, sampleRowCount } from '@almadar/core/mock';
 import { perfStart, perfEnd } from './perf';
 import type {
   OrbitalSchema,
   Orbital,
   OrbitalEntity,
-  EntityField,
   EntityRow,
   EntityData,
-  FieldValue,
   Trait,
   TraitRef,
   StateMachine,
@@ -48,38 +47,13 @@ import type {
  * @internal
  */
 function generateEntityRow(entity: OrbitalEntity, idx: number): EntityRow {
-  const row: EntityRow = { id: String(idx) };
-  for (const f of entity.fields) {
-    if (f.name === undefined || f.name === 'id') continue;
-    row[f.name] = generateFieldValue(entity.name, f, idx);
-  }
-  return row;
-}
-
-/**
- * Generate a `FieldValue` for one entity field at the given index.
- *
- * @internal
- */
-function generateFieldValue(
-  entityName: string,
-  field: EntityField,
-  idx: number,
-): FieldValue {
-  if ('values' in field && field.values && field.values.length > 0) {
-    return field.values[(idx - 1) % field.values.length];
-  }
-  const fieldName = field.name ?? '';
-  switch (field.type) {
-    case 'string':
-      return `${entityName} ${fieldName.charAt(0).toUpperCase() + fieldName.slice(1)} ${idx}`;
-    case 'number':
-      return idx * 10;
-    case 'boolean':
-      return idx % 2 === 0;
-    default:
-      return (field.default as FieldValue | undefined) ?? null;
-  }
+  return {
+    ...sampleRow(
+      { name: entity.name ?? 'Entity', persistence: entity.persistence, fields: entity.fields },
+      { index: idx, strategy: 'index', persistence: entity.persistence },
+    ),
+    id: String(idx),
+  };
 }
 
 /**
@@ -102,10 +76,11 @@ export function buildMockData(schema: OrbitalSchema): EntityData {
       continue;
     }
 
-    const rows: EntityRow[] = Array.from({ length: 10 }, (_, i) =>
-      generateEntityRow(entity, i + 1),
+    const count = sampleRowCount(
+      { name: entityName, persistence: entity.persistence, fields: entity.fields },
+      10,
     );
-    result[entityName] = rows;
+    result[entityName] = Array.from({ length: count }, (_, i) => generateEntityRow(entity, i + 1));
   }
 
   for (const orbital of schema.orbitals) {
@@ -135,7 +110,13 @@ export function buildMockData(schema: OrbitalSchema): EntityData {
         for (const f of sourceEntity.fields) {
           if (f.name === undefined || f.name === 'id') continue;
           if (row[f.name] !== undefined) continue;
-          row[f.name] = generateFieldValue(sourceName, f, i + 1);
+          const value = sampleFieldValue(f, {
+            entityName: sourceName,
+            index: i + 1,
+            strategy: 'index',
+            persistence: sourceEntity.persistence,
+          });
+          if (value !== undefined) row[f.name] = value;
         }
       });
     }
