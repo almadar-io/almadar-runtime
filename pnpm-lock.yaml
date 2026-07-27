@@ -21,8 +21,8 @@ importers:
         specifier: ^2.29.0
         version: 2.29.0(express@5.2.1)
       '@almadar/std':
-        specifier: ^16.147.0
-        version: 16.147.0
+        specifier: ^16.149.0
+        version: 16.149.0
     devDependencies:
       '@almadar/eslint-plugin':
         specifier: ^2.15.0
@@ -83,8 +83,8 @@ packages:
       '@almadar-io/rabit':
         optional: true
 
-  '@almadar/std@16.147.0':
-    resolution: {integrity: sha512-nBIXovvVh2BMgNe/1EHasqzbK/a2zMKCjAiiyc9Z+OpZ3mKVaFEOOphFCoEXjjoRbVN0XOybVS8AJLz+vpBLVg==}
+  '@almadar/std@16.149.0':
+    resolution: {integrity: sha512-DT2aOZrDmdWysRcVsKFW9n0kW9PdD1rtq09ygoq3pjyBZtNWSatmluUWGcI1RR16pXXIyhIjEM7Lsx+UxxbhYg==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -2331,7 +2331,7 @@ snapshots:
   '@almadar/evaluator@2.37.0':
     dependencies:
       '@almadar/core': 10.38.0
-      '@almadar/std': 16.147.0
+      '@almadar/std': 16.149.0
 
   '@almadar/logger@1.10.0':
     dependencies:
@@ -2355,7 +2355,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@almadar/std@16.147.0':
+  '@almadar/std@16.149.0':
     dependencies:
       '@almadar/core': 10.38.0
 

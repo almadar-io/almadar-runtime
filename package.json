@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "6.41.0",
+  "version": "6.42.0",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -66,7 +66,7 @@
     "@almadar/evaluator": "^2.37.0",
     "@almadar/logger": "^1.10.0",
     "@almadar/server": "^2.29.0",
-    "@almadar/std": "^16.147.0"
+    "@almadar/std": "^16.149.0"
   },
   "peerDependencies": {
     "express": "^5.0.0"
