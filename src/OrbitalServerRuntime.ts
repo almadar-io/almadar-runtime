@@ -1801,7 +1801,10 @@ export class OrbitalServerRuntime {
       }
     }
 
-    // Process event through state machine
+    // Process event through state machine. `_activeTraits` scopes the
+    // transition loop itself — off-page traits neither transition nor
+    // mutate state (previously only their effects were filtered below,
+    // leaving FSMs silently advancing on name-shared events).
     const results = registered.manager.sendEvent(
       event,
       cleanPayload,
@@ -1810,6 +1813,7 @@ export class OrbitalServerRuntime {
       eventId,
       targetTrait,
       viewer,
+      activeTraits && activeTraits.length > 0 ? new Set(activeTraits) : undefined,
     );
 
     // Filter results to only active traits (if specified)

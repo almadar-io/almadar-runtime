@@ -700,13 +700,23 @@ export class StateMachineManager {
         targetTrait?: string,
         // Authenticated viewer for `@user.X` guard resolution — per-request,
         // so it is a parameter rather than manager config.
-        user?: UserContext
+        user?: UserContext,
+        // Page-scoped execution set (`_activeTraits`): when set, traits
+        // outside it neither transition nor mutate state. Effect filtering
+        // alone left off-page FSMs silently advancing on name-shared events
+        // (R-TABLEVIEW-LOADED-UNSCOPED cross-page half). `targetTrait` is
+        // more specific and bypasses this set.
+        allowedTraits?: ReadonlySet<string>
     ): Array<{ traitName: string; result: TransitionResult }> {
         const results: Array<{ traitName: string; result: TransitionResult }> = [];
         const scope = scopeOf(entityData);
 
         for (const [traitName, trait] of this.traits) {
-            if (targetTrait !== undefined && traitName !== targetTrait) continue;
+            if (targetTrait !== undefined) {
+                if (traitName !== targetTrait) continue;
+            } else if (allowedTraits !== undefined && !allowedTraits.has(traitName)) {
+                continue;
+            }
             const traitState = this.getOrInitState(traitName, scope);
             if (!traitState) continue;
             const key = compositeKey(traitName, scope);
