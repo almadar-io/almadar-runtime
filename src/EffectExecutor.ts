@@ -18,7 +18,7 @@ import type {
     BrowserGeolocationOptions,
 } from './types.js';
 import { HANDLER_MANIFEST } from './types.js';
-import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
+import { interpolateValue, createContextFromBindings, deferEntityBindings } from './BindingResolver.js';
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
 import type { FieldValue, SExpr, Orbital, TraitConfig } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
@@ -59,6 +59,14 @@ export interface EffectExecutorOptions {
     contextExtensions?: EvaluationContextExtensions;
     /** Evaluator for resolving nested S-expression values in `set` (e.g., substrate operators) */
     evaluator?: SExpressionEvaluator;
+    /**
+     * When true, render-ui args keep `@entity`-dependent prop leaves as
+     * `RenderBindingMarker`s for render-time evaluation instead of resolving
+     * them eagerly at flush time. Set by the client-side interpreter
+     * (`useTraitStateMachine`); server-side executors resolve eagerly so
+     * SSE-pushed props stay concrete.
+     */
+    deferRenderBindings?: boolean;
 }
 
 // ============================================================================
@@ -94,6 +102,33 @@ function resolveArgs(
 ): unknown[] {
     const ctx = createContextFromBindings(bindings, strictBindings, contextExtensions);
     return args.map((arg) => interpolateValue(arg, ctx));
+}
+
+/**
+ * Interpolate ONLY string-leaf `@entity.*` refs in a fetch-like filter
+ * against the ISSUING trait's bindings. Inside a filter, the STRUCTURED row
+ * form `["object/get", "@entity", <field>]` is the candidate row — the query
+ * language the handler evaluates per fetched row — and must stay verbatim.
+ * But a string leaf like `"@entity.activeChannel"` (an expression-valued
+ * config knob such as std-browse's `initialFilterValue` spliced in at
+ * resolve time) means the trait's OWN frame: left raw it re-scopes to the
+ * candidate row at per-row evaluation and the filter can never match (the
+ * chat thread compared `row.channel == row.activeChannel` — always "").
+ */
+function interpolateFilterTraitRefs(value: SExpr, ctx: ReturnType<typeof createContextFromBindings>): SExpr {
+    if (typeof value === 'string') {
+        return value === '@entity' || value.startsWith('@entity.')
+            ? (interpolateValue(value, ctx) as SExpr)
+            : value;
+    }
+    if (Array.isArray(value)) {
+        // The row-scoped read — preserve byte-for-byte.
+        if (value.length >= 2 && value[0] === 'object/get' && value[1] === '@entity') {
+            return value;
+        }
+        return value.map((v) => interpolateFilterTraitRefs(v as SExpr, ctx)) as SExpr;
+    }
+    return value;
 }
 
 // ============================================================================
@@ -134,6 +169,7 @@ export class EffectExecutor {
     private strictBindings: boolean;
     private contextExtensions?: EvaluationContextExtensions;
     private evaluator?: SExpressionEvaluator;
+    private deferRenderBindings: boolean;
 
     constructor(options: EffectExecutorOptions) {
         this.handlers = options.handlers;
@@ -143,6 +179,7 @@ export class EffectExecutor {
         this.strictBindings = options.strictBindings ?? false;
         this.contextExtensions = options.contextExtensions;
         this.evaluator = options.evaluator;
+        this.deferRenderBindings = options.deferRenderBindings ?? false;
     }
 
     private _evaluator?: EvaluatorInstance;
@@ -299,9 +336,23 @@ export class EffectExecutor {
             typeof args[1] === 'object' &&
             !Array.isArray(args[1]);
 
+        // render-ui on the deferring (client) path carries `@entity`-dependent
+        // prop leaves as render-time binding markers instead of resolving them
+        // eagerly — the renderer re-evaluates them against the live entity
+        // store on every React render (compiled-shell parity). Slot name and
+        // priority interpolate normally; payload-referencing leaves stay eager.
+        const isDeferringRenderUI =
+            (operator === 'render-ui' || operator === 'render') &&
+            this.deferRenderBindings;
+
         let resolvedArgs: unknown[];
         if (isCompound) {
             resolvedArgs = args;
+        } else if (isDeferringRenderUI) {
+            const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
+            resolvedArgs = args.map((arg, index) =>
+                index === 0 ? interpolateValue(arg, ctx) : deferEntityBindings(arg as SExpr, ctx),
+            );
         } else if (isSetPathForm) {
             const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
             // Preserve args[0] (the @entity.<path> literal); resolve the rest.
@@ -326,7 +377,7 @@ export class EffectExecutor {
             const opts = args[1] as FetchOptions;
             const resolvedOpts: FetchOptions = {
                 ...(opts.id !== undefined && { id: interpolateValue(opts.id, ctx) as string }),
-                ...(opts.filter !== undefined && { filter: opts.filter }),
+                ...(opts.filter !== undefined && { filter: interpolateFilterTraitRefs(opts.filter as SExpr, ctx) }),
                 ...(opts.limit !== undefined && { limit: interpolateValue(opts.limit, ctx) as number }),
                 ...(opts.offset !== undefined && { offset: interpolateValue(opts.offset, ctx) as number }),
                 ...(opts.include !== undefined && { include: interpolateValue(opts.include, ctx) as string[] }),
@@ -1111,6 +1162,7 @@ export class EffectExecutor {
                     debug: this.debug,
                     strictBindings: this.strictBindings,
                     contextExtensions: this.contextExtensions,
+                    deferRenderBindings: this.deferRenderBindings,
                 });
                 await bodyExecutor.execute(body);
                 break;

@@ -219,7 +219,7 @@ export type ClientEffectTuple =
   | ClientRenderUITuple
   | ClientNavigateTuple
   | ClientNotifyTuple;
-import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, DEFAULT_VIEWER } from "@almadar/core";
+import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, DEFAULT_VIEWER, isRuntimeEntity } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName } from "@almadar/core/mock";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
@@ -287,6 +287,13 @@ export interface RegisteredOrbital {
    * `state.fields`. The trait's `@entity` binding is a three-layer merge:
    * declared entity field defaults < persistence entityData < this map.
    * Mutated only by the `set` effect handler.
+   *
+   * For a `[shared]` linked entity the map is keyed `$shared::<entityName>`
+   * instead of the trait name — ONE frame across every bound trait, the
+   * server half of the client hook's `sharedKeyByTraitName` groups. Without
+   * it a writer trait's `(set @entity.X …)` was invisible to a sibling's
+   * effect interpolation (the chat thread's refetch filter read "" while the
+   * composer held the open channel).
    */
   traitFieldStates: Map<string, EntityRow>;
 }
@@ -1311,6 +1318,22 @@ export class OrbitalServerRuntime {
           const cleanup = this.eventBus.on(routeKey, async (event) => {
             // Source filter: skip if the emit doesn't match our declared scope.
             if (!matcher(event.source)) return;
+            // Client-originated cascade: the originating tab relays every
+            // hop through the bridge itself (its own listens wiring), so
+            // dispatching the same trigger here ran each hop TWICE — one
+            // Send persisted two ChatMessage rows. Headless dispatches
+            // (ticks, circuit-router probes) carry no originClientId and
+            // keep this fan-out as their circuit.
+            if (event.source?.originClientId !== undefined) {
+              if (this.config.debug) {
+                xOrbitalLog.debug('listen:skip-client-origin', {
+                  receiverTrait: trait.name,
+                  event: listener.event,
+                  originClientId: event.source.originClientId,
+                });
+              }
+              return;
+            }
             if (this.config.debug) {
               xOrbitalLog.debug('listen:received', () => ({
                 receiverOrbital: orbitalName,
@@ -1667,6 +1690,36 @@ export class OrbitalServerRuntime {
   // ==========================================================================
 
   /**
+   * `traitFieldStates` key for one trait: its own name, or — when its linked
+   * entity is `[shared]` — `$shared::<entityName>` so every trait bound to
+   * that entity reads/writes ONE frame. The server twin of the client hook's
+   * `sharedKeyByTraitName` (useTraitStateMachine): without it, a sibling
+   * trait's effect interpolation (a fetch filter reading
+   * `@entity.activeChannel`) never saw the writer's `(set …)`.
+   */
+  private sharedFieldKey(registered: RegisteredOrbital, traitName: string): string {
+    const trait = registered.traits.find((t) => t.name === traitName);
+    const linked = trait?.linkedEntity ?? registered.entity.name;
+    return this.isSharedEntity(registered, linked) ? `$shared::${linked}` : traitName;
+  }
+
+  /** Resolve an entity name to its declared `shared` flag: the orbital's own
+   *  entity, its auxiliary entities, then other registered orbitals' primary
+   *  entities (cross-orbital binds like a membership rail in the chat page). */
+  private isSharedEntity(registered: RegisteredOrbital, entityName: string): boolean {
+    if (registered.entity.name === entityName) return registered.entity.shared === true;
+    for (const aux of registered.schema.auxiliaryEntities ?? []) {
+      if (typeof aux === 'object' && !isEntityCall(aux) && aux.name === entityName) {
+        return aux.shared === true;
+      }
+    }
+    for (const other of this.orbitals.values()) {
+      if (other.entity.name === entityName) return other.entity.shared === true;
+    }
+    return false;
+  }
+
+  /**
    * Process an event for an orbital
    *
    * @param onPush - Optional incremental-push callback. Called immediately
@@ -1828,11 +1881,14 @@ export class OrbitalServerRuntime {
     // `(set @entity.X Y)` effects). For [runtime] entities with no persistence
     // row, this is the only way `@entity.X` references in guards get resolved
     // to the values prior transitions committed — matches the runtime UI hook
-    // behavior so guard outcomes are identical across both paths.
+    // behavior so guard outcomes are identical across both paths. Resolved
+    // per trait THROUGH the shared key so a `[shared]` group's frame reaches
+    // every bound trait's guards, not just the writer's.
     const entityByTrait: Record<string, EntityRow> = {};
-    for (const [name, fields] of registered.traitFieldStates) {
+    for (const trait of registered.traits) {
+      const fields = registered.traitFieldStates.get(this.sharedFieldKey(registered, trait.name));
       if (fields && Object.keys(fields).length > 0) {
-        entityByTrait[name] = fields;
+        entityByTrait[trait.name] = fields;
       }
     }
 
@@ -2030,6 +2086,12 @@ export class OrbitalServerRuntime {
         if (stamp.eventId === undefined && emitContract?.eventId !== undefined) {
           stamp.eventId = emitContract.eventId;
         }
+        // Stamp the originating client so the listens fan-out can tell a
+        // client-driven cascade (the client relays every hop itself) from a
+        // headless one (this fan-out IS the circuit). See BusEventSource.
+        if (originClientId !== undefined && stamp.originClientId === undefined) {
+          stamp.originClientId = originClientId;
+        }
         this.eventBus.emit(event, eventPayload, stamp, eventRouteKey(event, stamp.eventId));
         const emittedItem = { event, payload: eventPayload, source: stamp };
         emittedEvents.push(emittedItem);
@@ -2067,10 +2129,13 @@ export class OrbitalServerRuntime {
         // `(set @entity.X Y)` writes to per-trait scalar state, not
         // persistence. Persistence writes only via explicit
         // `(persist update ...)`. Mirrors compiled's `state.fields` reducer.
-        let fieldState = registered.traitFieldStates.get(traitName);
+        // A `[shared]` linked entity writes through the shared key — one
+        // frame across its bound traits (see sharedFieldKey).
+        const fieldKey = this.sharedFieldKey(registered, traitName);
+        let fieldState = registered.traitFieldStates.get(fieldKey);
         if (!fieldState) {
           fieldState = {} as EntityRow;
-          registered.traitFieldStates.set(traitName, fieldState);
+          registered.traitFieldStates.set(fieldKey, fieldState);
         }
         fieldState[field] = value as FieldValue;
         effectResults.push({
@@ -2540,6 +2605,9 @@ export class OrbitalServerRuntime {
           context: contextRef ?? { traitName, orbitalName: registered.schema.name, state: 'unknown', transition: 'unknown' },
           debug: this.config.debug,
           contextExtensions: this.config.contextExtensions,
+          // Same render-time marker boundary as the outer executor
+          // (including the [shared]-defers-regardless-of-persistence rule).
+          deferRenderBindings: registered.entity === undefined || isRuntimeEntity(registered.entity) || registered.entity.shared === true,
         });
 
         for (const innerEffect of atomicEffects) {
@@ -2707,7 +2775,7 @@ export class OrbitalServerRuntime {
     // the entity schema declares a sensible default. Mirrors the `@config`
     // merge applied above (declared defaults < call-site override). RC-2.
     const entityFieldDefaults = collectDeclaredEntityDefaults(registered.entity);
-    const traitFieldState = registered.traitFieldStates.get(traitName);
+    const traitFieldState = registered.traitFieldStates.get(this.sharedFieldKey(registered, traitName));
     if (entityFieldDefaults || traitFieldState) {
       bindings.entity = {
         ...(entityFieldDefaults ?? {}),
@@ -2739,6 +2807,18 @@ export class OrbitalServerRuntime {
       context,
       debug: this.config.debug,
       contextExtensions: this.config.contextExtensions,
+      // Carry `@entity`-dependent render-ui leaves as render-time markers
+      // for runtime-only (and unlinked) entities: the client's local state
+      // machines execute the same `(set)` writes, so the renderer resolves
+      // markers against its live store — otherwise these SSE-pushed eager
+      // props clobber the client's live marker frames on every event.
+      // Persistent NON-shared entities stay eager: their `@entity` merges
+      // persistence rows the client does not hold. A `[shared]` entity is
+      // deferred REGARDLESS of persistence — its trait frame's scalars are
+      // client-held by contract (one live frame across bound traits), and
+      // the eager clobber pinned the chat composer's controlled input to
+      // the server's flush-time "" on every keystroke round-trip.
+      deferRenderBindings: registered.entity === undefined || isRuntimeEntity(registered.entity) || registered.entity.shared === true,
     });
 
     await executor.executeAll(effects);

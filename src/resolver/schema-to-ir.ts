@@ -144,6 +144,12 @@ function resolveEntities(schema: OrbitalSchema): Map<string, ResolvedEntity> {
         usedByTraits: [],
         usedByPages: [],
         runtime: isRuntime,
+        // `[shared]` is orthogonal to persistence and drives the client's
+        // shared-entity groups (one frame across bound traits). Dropping it
+        // here left every browser-side trait on a private copy — cross-trait
+        // `@entity` reads (rail highlight, thread refresh filter) saw only
+        // declared defaults.
+        shared: entity.shared === true,
         hasInstances: (entityInstances?.length ?? 0) > 0,
         instances: entityInstances,
         defaults: {}, // defaults are part of instances, not entity definition

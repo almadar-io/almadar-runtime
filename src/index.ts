@@ -67,8 +67,10 @@ export {
   extractBindings,
   createContextFromBindings,
   createMinimalContext,
+  deferEntityBindings,
   resolveCallSitePayloadCaptures,
   CALLSITE_PAYLOAD_PREFIX,
+  type DeferredPatternValue,
   type EvaluationContext,
 } from "./BindingResolver.js";
 

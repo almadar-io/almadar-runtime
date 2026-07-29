@@ -630,7 +630,7 @@ export interface TransitionObserver {
         guardResult?: boolean;
         effects: Array<{
             type: string;
-            args: unknown[];
+            args: SExpr[];
             status: "executed" | "failed" | "skipped";
             error?: string;
             durationMs?: number;

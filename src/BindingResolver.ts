@@ -20,8 +20,10 @@ import {
 // node-only registry LOADER (createRequire/fs/path), which has no place in the
 // runtime interpreter that ships to the renderer.
 import { isKnownStdOperator as isKnownOperator } from '@almadar/std/registry';
-import type { BindingContext, EntityRow, EventPayload, PatternProps, EvaluationContextExtensions } from './types.js';
-import type { TraitConfigObject, TraitConfigValue, RenderChildrenMap } from '@almadar/core';
+import type { BindingContext, EntityRow, EventPayload, PatternProps, EvaluationContextExtensions, RuntimePatternValue } from './types.js';
+import type { TraitConfigObject, TraitConfigValue, RenderChildrenMap, RenderBindingMarker } from '@almadar/core';
+import { containsEntityBinding, containsPayloadBinding, RENDER_BINDING_MARKER } from '@almadar/core';
+import type { SExpr } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
 
 const bindLog = createLogger('almadar:runtime:bindings');
@@ -29,6 +31,9 @@ const bindLog = createLogger('almadar:runtime:bindings');
 // `ticks` loop emits hundreds/sec. Default its floor to WARN; opt back in with
 // setNamespaceLevel('almadar:runtime:bindings', 'DEBUG').
 setNamespaceLevel('almadar:runtime:bindings', 'WARN');
+// Low-volume (per config-forward leaf per flush, not per eval) — its own
+// namespace so the defer path stays observable while the firehose is floored.
+const deferLog = createLogger('almadar:runtime:defer');
 // See OrbitalServerRuntime — same `almadar:runtime:render-ui` namespace,
 // instantiated here so interpolation of pattern objects can report
 // whether the resolved row reference matches what arrived in ctx.
@@ -231,6 +236,80 @@ export function interpolateValue(value: unknown, ctx: EvaluationContext): unknow
     return value;
 }
 
+/**
+ * Value a deferred render-ui prop tree can carry: interpolated runtime
+ * values, raw pass-through S-expressions (`fn` lambdas), render-time
+ * binding markers, and nested arrays/records of the same. No `unknown`
+ * escape hatch.
+ */
+export type DeferredPatternValue =
+    | RuntimePatternValue
+    | RenderBindingMarker
+    | SExpr
+    | Date
+    | readonly DeferredPatternValue[]
+    | { readonly [prop: string]: DeferredPatternValue };
+
+/**
+ * Carry `@entity`-dependent prop leaves into slot content as
+ * `RenderBindingMarker`s instead of resolving them at flush time — the
+ * renderer (`@almadar/ui`'s SlotContentRenderer) evaluates each marker
+ * against the live entity store on every React render, the same model the
+ * compiled shell uses. Everything else resolves eagerly through the same
+ * `interpolateValue` path the non-deferring executor uses:
+ * - payload-referencing leaves stay eager (`@payload` is event-scoped and
+ *   does not exist at render time);
+ * - `fn` render lambdas pass through raw (they are already render-time);
+ * - literal arrays (children lists) and plain objects recurse per item.
+ */
+export function deferEntityBindings(value: SExpr, ctx: EvaluationContext, configHops = 0): DeferredPatternValue {
+    if (typeof value === 'string') {
+        if (containsEntityBinding(value) && !containsPayloadBinding(value)) {
+            return { [RENDER_BINDING_MARKER]: true, expression: value };
+        }
+        // A whole-string `@config.X` forward can UNCOVER an `@entity` ref —
+        // a call-site knob like `value: @entity.draft` or a render tree in
+        // `feedBodyContent`. Eagerly interpolating the hop evaluates the
+        // uncovered ref too, freezing the knob at its flush-time value (the
+        // chat composer's controlled input snapped back to "" on every
+        // keystroke). Resolve the hop by LOOKUP (no evaluation) and defer
+        // the uncovered value like any other raw leaf. Bounded hops guard
+        // against a self-referencing forward.
+        if (value.startsWith('@config.') && !value.includes(' ') && configHops < 8) {
+            const hop = ctx.config?.[value.slice('@config.'.length)];
+            deferLog.debug('defer:config-hop', () => ({
+                forward: value,
+                hopType: typeof hop,
+                hopPreview: typeof hop === 'string' ? hop : Array.isArray(hop) ? 'array' : hop === undefined ? 'undefined' : 'object',
+            }));
+            if (hop !== undefined && hop !== value) {
+                return deferEntityBindings(hop as SExpr, ctx, configHops + 1);
+            }
+        }
+        return interpolateValue(value, ctx) as RuntimePatternValue | Date;
+    }
+    if (Array.isArray(value)) {
+        if (value.length === 3 && value[0] === 'fn' && typeof value[1] === 'string') {
+            return value;
+        }
+        if (isSExpression(value)) {
+            if (containsEntityBinding(value) && !containsPayloadBinding(value)) {
+                return { [RENDER_BINDING_MARKER]: true, expression: value };
+            }
+            return interpolateValue(value, ctx) as RuntimePatternValue | Date;
+        }
+        return value.map((item) => deferEntityBindings(item, ctx));
+    }
+    if (value !== null && typeof value === 'object') {
+        const out: Record<string, DeferredPatternValue> = {};
+        for (const [key, item] of Object.entries(value as Record<string, SExpr>)) {
+            out[key] = deferEntityBindings(item, ctx);
+        }
+        return out;
+    }
+    return value;
+}
+
 // ============================================================================
 // String Interpolation
 // ============================================================================
@@ -386,7 +465,10 @@ function interpolateArray(value: unknown[], ctx: EvaluationContext): unknown {
         // RenderUINode body — then splice the resolved nodes flat into the host
         // list so components receive a plain RenderUINode[].
         if (Array.isArray(item) && isRenderChildrenMap(item)) {
-            const expanded = evaluate(item, ctx);
+            // The guard pins the operator-headed call shape; RenderItemLambda's
+            // body is render-node data, not statically SExpr — the evaluator
+            // only needs the verified call structure.
+            const expanded = evaluate(item as SExpr, ctx);
             if (Array.isArray(expanded)) {
                 for (const node of expanded) mapped.push(node);
             }

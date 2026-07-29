@@ -21,11 +21,11 @@
  *
  * @packageDocumentation
  */
-import type { OrbitalDefinition, OrbitalSchema, ResolvedTrait, SExpr, SExprAtom, Trait, TraitRef, Transition, TraitTick } from '@almadar/core';
+import type { OrbitalDefinition, OrbitalSchema, ResolvedTrait, RuntimeValue, SExpr, Trait, TraitRef, Transition, TraitTick } from '@almadar/core';
 
 const TRAIT_BINDING_PREFIX = '@trait.';
 
-export function collectTraitRefsFromValue(value: SExpr, into: Set<string>): void {
+export function collectTraitRefsFromValue(value: RuntimeValue, into: Set<string>): void {
   if (value === null || value === undefined) return;
   if (typeof value === 'string') {
     if (value.startsWith(TRAIT_BINDING_PREFIX)) {
@@ -41,7 +41,7 @@ export function collectTraitRefsFromValue(value: SExpr, into: Set<string>): void
     return;
   }
   if (typeof value === 'object') {
-    for (const v of Object.values(value as SExprAtom & Record<string, SExpr>)) {
+    for (const v of Object.values(value as Record<string, RuntimeValue>)) {
       collectTraitRefsFromValue(v, into);
     }
   }
