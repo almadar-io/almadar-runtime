@@ -115,6 +115,23 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     mockLog.debug('mock:adapter:init', { seed: this.config.seed });
   }
 
+  /**
+   * Add owner columns discovered after construction.
+   *
+   * The adapter is built before any schema is registered, so schema-DERIVED
+   * owner columns (relation fields pointing at the `[identity]` entity) can
+   * only arrive later.
+   *
+   * ⚠️ Seeding is EAGER — `registerEntity()` seeds immediately — so callers must
+   * supply these columns BEFORE registering any orbital. Calling this afterwards
+   * silently stamps nothing.
+   */
+  addOwnerFields(fields: readonly string[]): void {
+    if (fields.length === 0) return;
+    const merged = new Set([...(this.config.ownerFields ?? []), ...fields]);
+    this.config.ownerFields = [...merged];
+  }
+
   /** Re-anchor the PRNG to the configured seed. Called before every
    *  re-seed loop so identical reseed sequences produce identical rows
    *  (timestamps + generated fields). Without this, the first
@@ -209,6 +226,13 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       if (relationFields.length === 0) continue;
       for (const row of store.values()) {
         for (const field of relationFields) {
+          // A schema-derived owner column IS a relation to the [identity]
+          // entity, so this pass would overwrite the viewer stamp `seed()` just
+          // assigned and every ownership-scoped view would render empty again.
+          // Deliberate assignment wins over random linking.
+          if (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) {
+            continue;
+          }
           // Id-primary: prefer the `entityId` sibling via the id->name index,
           // falling back to the `entity` name string when the id is absent
           // or unindexed (transition-period tolerance).

@@ -36,6 +36,9 @@ import {
   isPageReferenceObject,
   inferTsType,
 } from '@almadar/core';
+import { createLogger } from '@almadar/logger';
+
+const schemaToIrLog = createLogger('almadar:runtime:schema-to-ir');
 
 // ============================================================================
 // Cache
@@ -228,6 +231,24 @@ interface ResolvedTraitMaps {
   byId: Map<string, ResolvedTrait>;
 }
 
+/**
+ * A second declaration under a name the trait index already holds. The index is
+ * name-keyed, so the loser is dropped and every `@trait.X` / page binding /
+ * listen source naming it silently resolves to the winner — the failure mode
+ * looks like a working app rendering the wrong trait's data. Trait names are
+ * unique per app by contract (`ORB_T_DUPLICATE_NAME`), so reaching here means
+ * an upstream resolver produced a colliding pair; say so instead of dropping it
+ * without a trace.
+ */
+function reportTraitNameCollision(name: string, orbitalName: string | undefined): void {
+  schemaToIrLog.error('trait-name-collision', {
+    trait: name,
+    orbital: orbitalName,
+    kept: 'first',
+    consequence: 'later declaration dropped; every reference to this name binds the first',
+  });
+}
+
 function resolveTraits(schema: OrbitalSchema): ResolvedTraitMaps {
   const traitMap = new Map<string, ResolvedTrait>();
   const traitById = new Map<string, ResolvedTrait>();
@@ -256,7 +277,9 @@ function resolveTraits(schema: OrbitalSchema): ResolvedTraitMaps {
         const resolved = wrap['_resolved'] as { name?: string; id?: string; stateMachine?: unknown } | undefined;
         if (resolved && resolved.stateMachine) {
           const name = resolved.name ?? (trait as { ref?: string }).ref;
-          if (name && !traitMap.has(name)) {
+          if (name && traitMap.has(name)) {
+            reportTraitNameCollision(name, (orbital as Orbital).name);
+          } else if (name) {
             const resolvedTrait = resolveTrait(resolved, 'inline');
             traitMap.set(name, resolvedTrait);
             if (resolved.id) traitById.set(resolved.id, resolvedTrait);
@@ -273,7 +296,11 @@ function resolveTraits(schema: OrbitalSchema): ResolvedTraitMaps {
       }
 
       // Plain inline trait definition
-      if (!trait.name || traitMap.has(trait.name)) continue;
+      if (!trait.name) continue;
+      if (traitMap.has(trait.name)) {
+        reportTraitNameCollision(trait.name, (orbital as Orbital).name);
+        continue;
+      }
       const resolvedTrait = resolveTrait(trait, 'inline');
       traitMap.set(trait.name, resolvedTrait);
       const traitId = (trait as { id?: string }).id;

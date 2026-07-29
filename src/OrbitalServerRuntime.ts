@@ -219,7 +219,8 @@ export type ClientEffectTuple =
   | ClientRenderUITuple
   | ClientNavigateTuple
   | ClientNotifyTuple;
-import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext } from "@almadar/core";
+import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, DEFAULT_VIEWER } from "@almadar/core";
+import { ownerFieldsFromSchema, identityEntityName } from "@almadar/core/mock";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
   preprocessSchema,
@@ -600,6 +601,11 @@ export class OrbitalServerRuntime {
       autoPreprocess: false,
       namespaceEvents: true,
       ...config,
+      // `@user` is never Null. A host that named no viewer (no ALMADAR_PERSONA,
+      // no auth yet) otherwise renders every `viewerName: @user.name` blank, so
+      // the app cannot say who you are. DEFAULT_VIEWER carries an empty `role`,
+      // so no `@user.role` guard changes outcome — see its doc in @almadar/core.
+      defaultUser: config.defaultUser ?? DEFAULT_VIEWER,
     };
     this.eventBus = new EventBus();
 
@@ -627,7 +633,9 @@ export class OrbitalServerRuntime {
         // Let the dev viewer own some seeded rows, so ownership-scoped views
         // ("only mine") have data instead of being indistinguishable from a
         // broken filter. Columns are declared, never inferred by name.
-        ownerId: config.defaultUser?.id,
+        // `this.config`, not `config` — the DEFAULT_VIEWER fallback is applied
+        // there, and reading the raw param leaves every seeded row unowned.
+        ownerId: this.config.defaultUser?.id,
         ownerFields: config.mockOwnerFields,
       });
       if (config.debug) {
@@ -820,6 +828,11 @@ export class OrbitalServerRuntime {
       }
     }
 
+    // BEFORE the loop: registerOrbital seeds each entity eagerly
+    // (MockPersistenceAdapter.registerEntity -> seed), so owner columns learned
+    // after it would arrive too late to stamp a single row.
+    this.applyIdentityOwnerFields(schema);
+
     // Register all orbitals (await to ensure instance seeding completes)
     for (const orbital of schema.orbitals) {
       await this.registerOrbitalAsync(orbital);
@@ -839,6 +852,24 @@ export class OrbitalServerRuntime {
   }
 
   /**
+   * Teach the mock seeder which columns hold the viewer's id, derived from the
+   * schema's `[identity]` entity. No-op for a program that declares none, so
+   * unmigrated apps seed exactly as before. Mirrors
+   * `orbital-core/src/runtime/seed.rs::owner_fields_from_schema` — a feature
+   * that lives on only one execution path is not a feature.
+   */
+  private applyIdentityOwnerFields(schema: OrbitalSchema): void {
+    if (!(this.persistence instanceof MockPersistenceAdapter)) return;
+    const derived = ownerFieldsFromSchema(schema);
+    if (derived.length === 0) return;
+    this.persistence.addOwnerFields(derived);
+    persistLog.debug('mock:identity-owner-fields', {
+      identity: identityEntityName(schema),
+      columns: derived,
+    });
+  }
+
+  /**
    * Register an OrbitalSchema synchronously (for backward compatibility).
    * Note: This version doesn't wait for instance seeding to complete.
    * Use async register() for guaranteed instance seeding.
@@ -847,6 +878,9 @@ export class OrbitalServerRuntime {
     if (this.config.debug) {
       registerLog.debug('register:schema-sync', { name: schema.name });
     }
+
+    // Before the loop — see the note in register(): seeding is eager.
+    this.applyIdentityOwnerFields(schema);
 
     for (const orbital of schema.orbitals) {
       this.registerOrbital(orbital);
@@ -860,6 +894,7 @@ export class OrbitalServerRuntime {
 
     this.resolvedSchema = schema;
     this.resolvedTraitConfigs = buildResolvedTraitConfigs(schema);
+    this.applyIdentityOwnerFields(schema);
   }
 
   /**

@@ -558,6 +558,131 @@ function renameEntityInEffect(
   return effect;
 }
 
+const TRAIT_EMBED_PREFIX = "@trait.";
+
+/**
+ * Rewrite `@trait.<from>` embed roots to `@trait.<to>` anywhere in a value
+ * tree. Boundary-checked at `.`/`[` so `@trait.FooBar` is not matched by a
+ * `Foo` substitution. JS twin of the compiler's
+ * `rewrite_trait_embed_in_sexpr` (`inline/identity_normalize.rs:330`).
+ */
+function renameTraitEmbedsInValue(node: unknown, subs: ReadonlyMap<string, string>): unknown {
+  if (node === null || node === undefined) return node;
+  if (typeof node === "string") {
+    if (!node.startsWith(TRAIT_EMBED_PREFIX)) return node;
+    const rest = node.slice(TRAIT_EMBED_PREFIX.length);
+    const dot = rest.search(/[.[]/);
+    const name = dot === -1 ? rest : rest.slice(0, dot);
+    const suffix = dot === -1 ? "" : rest.slice(dot);
+    const to = subs.get(name);
+    return to === undefined ? node : `${TRAIT_EMBED_PREFIX}${to}${suffix}`;
+  }
+  if (Array.isArray(node)) return node.map((item) => renameTraitEmbedsInValue(item, subs));
+  if (typeof node !== "object") return node;
+  const next: { [k: string]: unknown } = {};
+  for (const [key, value] of Object.entries(node as { [k: string]: unknown })) {
+    next[key] = renameTraitEmbedsInValue(value, subs);
+  }
+  return next;
+}
+
+/**
+ * Point one trait's `@trait.X` embeds at their disambiguated pull names.
+ * Covers transition effects, tick effects AND config-field defaults — the
+ * last one carries `std-browse`'s `bodyContent`/`denseBodyContent` trees, so
+ * skipping it leaves the embeds pointing at the wrong copy.
+ */
+function renameTraitEmbeds(trait: Trait, subs: ReadonlyMap<string, string>): Trait {
+  if (subs.size === 0) return trait;
+  const sm = trait.stateMachine;
+  const next: Trait = { ...trait };
+  if (sm) {
+    next.stateMachine = {
+      ...sm,
+      transitions: (sm.transitions ?? []).map((t) =>
+        t.effects
+          ? { ...t, effects: renameTraitEmbedsInValue(t.effects, subs) as typeof t.effects }
+          : t,
+      ),
+    };
+  }
+  if (trait.ticks) {
+    next.ticks = trait.ticks.map((tick) =>
+      tick.effects
+        ? { ...tick, effects: renameTraitEmbedsInValue(tick.effects, subs) as typeof tick.effects }
+        : tick,
+    );
+  }
+  if (trait.config) {
+    const nextConfig: { [k: string]: ConfigFieldDeclaration } = {};
+    for (const [key, field] of Object.entries(trait.config)) {
+      nextConfig[key] =
+        field.default === undefined
+          ? field
+          : {
+              ...field,
+              default: renameTraitEmbedsInValue(
+                field.default,
+                subs,
+              ) as ConfigFieldDeclaration["default"],
+            };
+    }
+    next.config = nextConfig;
+  }
+  return next;
+}
+
+/**
+ * The trait entry an orbital declares under `localName` — inline definition or
+ * unresolved `{ref, name, …}` wrapper. `findTraitInOrbital` only ever returns
+ * inline definitions; an atom's sub-views are refs (`trait DenseTableView =
+ * TableView.traits.TableViewRender -> BrowseItem`), so the sibling pull needs
+ * both shapes.
+ */
+function findTraitEntryInOrbital(
+  orbital: Orbital,
+  localName: string,
+): Exclude<TraitRef, string> | null {
+  for (const traitRef of orbital.traits ?? []) {
+    if (typeof traitRef === "string") continue;
+    if ("stateMachine" in traitRef) {
+      if ((traitRef as Trait).name === localName) return traitRef;
+      continue;
+    }
+    if (!("ref" in traitRef)) continue;
+    const refObj = traitRef as { ref: string; name?: string };
+    const declared = refObj.name ?? parseImportedTraitRef(refObj.ref)?.traitName;
+    if (declared === localName) return traitRef;
+  }
+  return null;
+}
+
+/** Every `@trait.X` root name a trait references (effects, ticks, config defaults). */
+function traitEmbedNamesOf(trait: Trait): string[] {
+  const found = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (node === null || node === undefined) return;
+    if (typeof node === "string") {
+      if (!node.startsWith(TRAIT_EMBED_PREFIX)) return;
+      const rest = node.slice(TRAIT_EMBED_PREFIX.length);
+      const dot = rest.search(/[.[]/);
+      const name = dot === -1 ? rest : rest.slice(0, dot);
+      if (name.length > 0) found.add(name);
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    if (typeof node !== "object") return;
+    for (const value of Object.values(node as { [k: string]: unknown })) walk(value);
+  };
+  for (const t of trait.stateMachine?.transitions ?? []) walk(t.effects);
+  for (const tick of trait.ticks ?? []) walk(tick.effects);
+  for (const field of Object.values(trait.config ?? {})) walk(field.default);
+  return [...found];
+}
+
 /**
  * Apply a linkedEntity override from a trait-ref call site to an
  * imported atom. When the atom declared `entity: "ModalRecord"` inside
@@ -860,6 +985,9 @@ export class ReferenceResolver {
   /** id-keyed mirror of `localTraits`, populated wherever the trait carries an `id`. */
   private localTraitsById: Map<string, Trait> = new Map();
 
+  /** Import scope of each loaded source orbital, keyed by its source path. */
+  private sourceImportsCache: Map<string, ResolvedImports> = new Map();
+
   private loaderInitialized = false;
 
   constructor(options: ResolveOptions) {
@@ -951,6 +1079,13 @@ export class ReferenceResolver {
     if (!entityResult.success || !traitsResult.success || !pagesResult.success) {
       // This should never happen since we checked errors above
       return { success: false, errors: ['Internal error: unexpected failure state'] };
+    }
+
+    // Sibling-trait auto-pull. Runs before the id pass so pulled copies get the
+    // same entity/config id resolution every declared trait gets.
+    const pullErrors = await this.pullSiblingTraits(traitsResult.data, imports, importChain);
+    if (pullErrors.length > 0) {
+      return { success: false, errors: pullErrors };
     }
 
     // V4 leverage-ids — resolve each trait's entity-name tokens by the
@@ -1188,6 +1323,258 @@ export class ReferenceResolver {
     }
 
     return { success: true, data: resolved, warnings: [] };
+  }
+
+  /**
+   * The import scope of an already-loaded orbital, memoised per source path.
+   * A sibling that is itself a ref names its target through the SOURCE atom's
+   * aliases, so it can only be resolved against those.
+   */
+  private async importsOfSource(
+    imported: ResolvedImport,
+    chain: ImportChainLike,
+  ): Promise<ResolvedImports | null> {
+    const key = imported.sourcePath ?? `${imported.alias}:${imported.from}`;
+    const cached = this.sourceImportsCache.get(key);
+    if (cached) return cached;
+    const result = await this.resolveImports(
+      imported.orbital.uses ?? [],
+      imported.sourcePath,
+      chain,
+    );
+    if (!result.success) return null;
+    result.data.idIndex = buildIdIndex(imported.orbital, result.data.orbitals);
+    this.sourceImportsCache.set(key, result.data);
+    return result.data;
+  }
+
+  /**
+   * Sibling-trait auto-pull — the JS twin of the compiler's
+   * `phases/inline/trait.rs` pass, appending to `resolved` in place.
+   *
+   * An atom's main trait embeds its own sub-views as `@trait.<Sibling>` string
+   * literals (`std-browse`'s `bodyContent: {children: [@trait.DataGrid1]}`).
+   * A consumer that imports only the main trait never instantiates those
+   * siblings, so the token dangles: no state machine, no fetch, an empty list
+   * where the grid should be. The compiled path materialises them; without this
+   * pass the interpreted path did not, so a raw `.orb` handed straight to
+   * `OrbitalServerRuntime` rendered a different app than the same `.orb` run
+   * through `orbital resolve`.
+   *
+   * Pulls are keyed per EMBEDDER (`owner` = the top-level consumer trait that
+   * started the chain), not per atom. Two rebinds of one atom in one orbital
+   * (`ChannelRail -> Channel` and `ChatThread -> ChatMessage`, both std-browse)
+   * carry different entity rebinds and different hosts to listen to, so one
+   * shared copy can only ever serve one of them. The first owner keeps the
+   * source name; later owners pull under `<Owner><Sibling>` — unique by
+   * construction, since owner names are unique within the orbital.
+   */
+  private async pullSiblingTraits(
+    resolved: ResolvedTrait[],
+    imports: ResolvedImports,
+    chain: ImportChainLike,
+  ): Promise<string[]> {
+    interface PullItem {
+      alias: string;
+      sibling: string;
+      linkedEntity: string | undefined;
+      /** Immediate embedder — the trait whose `@trait.X` tokens get repointed. */
+      parent: string;
+      /** Top-level consumer trait this materialisation belongs to. */
+      owner: string;
+    }
+
+    const work: PullItem[] = [];
+    /** owner → (atom-side name → name it landed under for THIS owner). */
+    const ownerSubs = new Map<string, Map<string, string>>();
+    const subsFor = (owner: string): Map<string, string> => {
+      let m = ownerSubs.get(owner);
+      if (!m) {
+        m = new Map();
+        ownerSubs.set(owner, m);
+      }
+      return m;
+    };
+
+    for (const rt of resolved) {
+      if (rt.source.type !== "imported" || !rt.trait.name) continue;
+      const owner = rt.trait.name;
+      // The atom-side name of the owner itself: a pulled sibling's listens name
+      // their host by THAT name, and it has to resolve to this rebind.
+      subsFor(owner).set(rt.source.traitName, owner);
+      for (const sibling of traitEmbedNamesOf(rt.trait)) {
+        work.push({ alias: rt.source.alias, sibling, linkedEntity: rt.linkedEntity, parent: owner, owner });
+      }
+    }
+    if (work.length === 0) return [];
+
+    const errors: string[] = [];
+    const consumerDeclared = new Set(resolved.map((r) => r.trait.name).filter(Boolean));
+    const seen = new Set(consumerDeclared);
+    const visited = new Set<string>();
+    const pulledAs = new Map<string, string>();
+    /** pulled trait's final name → its owner. */
+    const ownerOf = new Map<string, string>();
+    /** parent final name → (`@trait.<from>` → `@trait.<to>`) rewrites. */
+    const parentRewrites = new Map<string, Map<string, string>>();
+    const pulled: ResolvedTrait[] = [];
+
+    const noteRewrite = (parent: string, from: string, to: string): void => {
+      let m = parentRewrites.get(parent);
+      if (!m) {
+        m = new Map();
+        parentRewrites.set(parent, m);
+      }
+      m.set(from, to);
+    };
+
+    // LIFO, mirroring the compiler's `worklist.pop()`, so the two paths agree on
+    // which owner keeps the bare source name.
+    for (let item = work.pop(); item !== undefined; item = work.pop()) {
+      const { alias, sibling, linkedEntity, parent, owner } = item;
+      const pullKey = `${alias} ${sibling} ${owner}`;
+      const existing = pulledAs.get(pullKey);
+      if (existing !== undefined) {
+        // Already materialised for THIS owner (two traits of one atom embedding
+        // the same sub-view). Share it, repointing this parent's tokens.
+        if (existing !== sibling) noteRewrite(parent, sibling, existing);
+        continue;
+      }
+      let finalName = sibling;
+      if (seen.has(sibling)) {
+        // Explicit composition wins — the consumer declared this name itself.
+        if (consumerDeclared.has(sibling)) continue;
+        finalName = `${owner}${sibling}`;
+        // Even the prefixed name is taken by something that is not this pull:
+        // leave the token dangling for the validator rather than capture the
+        // wrong trait.
+        if (seen.has(finalName)) continue;
+      }
+      if (visited.has(pullKey)) continue;
+      visited.add(pullKey);
+
+      const imported = imports.orbitals.get(alias);
+      if (!imported) continue;
+      // Same-alias siblings only — a `@trait.X` naming anything else is the
+      // validator's `ORB_BINDING_TRAIT_UNKNOWN` to report, not ours to guess.
+      const atomEntry = findTraitEntryInOrbital(imported.orbital, sibling);
+      if (!atomEntry) continue;
+
+      let atomTrait: Trait;
+      if ("stateMachine" in atomEntry) {
+        const { trait: cfgResolved, errors: cfgErrors } = resolveConfigRefEmitNames(
+          atomEntry as Trait,
+        );
+        if (cfgErrors.length > 0) {
+          errors.push(...cfgErrors);
+          continue;
+        }
+        atomTrait = cfgResolved;
+      } else {
+        // The sibling is itself a REF inside the source atom (`trait DenseTableView
+        // = TableView.traits.TableViewRender -> BrowseItem {…}` — the shape every
+        // std-browse sub-view uses). Resolve it in the SOURCE orbital's import
+        // scope, never the consumer's: the alias `TableView` means something only
+        // there. The compiler gets this for free by inlining bottom-up.
+        const srcImports = await this.importsOfSource(imported, chain);
+        if (!srcImports) continue;
+        const refObj = atomEntry as {
+          ref: string;
+          refId?: TraitId;
+          name?: string;
+          config?: TraitConfig;
+          linkedEntity?: string;
+          events?: { [oldKey: string]: string };
+          listens?: TraitEventListener[];
+        };
+        const nested = this.resolveTraitRefString(
+          refObj.ref,
+          srcImports,
+          refObj.config,
+          refObj.linkedEntity,
+          refObj.name ?? sibling,
+          refObj.events,
+          refObj.listens,
+          refObj.refId,
+        );
+        if (!nested.success) {
+          errors.push(...nested.errors);
+          continue;
+        }
+        atomTrait = nested.data.trait;
+      }
+
+      let copy = applyLinkedEntityRename(atomTrait, linkedEntity);
+      if (finalName !== sibling) {
+        copy = { ...copy, name: finalName };
+        noteRewrite(parent, sibling, finalName);
+      }
+
+      // Recurse with THIS copy as the parent but the SAME owner, so a sibling's
+      // own sub-views stay inside the owner's materialisation.
+      for (const next of traitEmbedNamesOf(copy)) {
+        work.push({ alias, sibling: next, linkedEntity, parent: finalName, owner });
+      }
+
+      pulledAs.set(pullKey, finalName);
+      subsFor(owner).set(sibling, finalName);
+      ownerOf.set(finalName, owner);
+      seen.add(finalName);
+      pulled.push({
+        trait: copy,
+        source: { type: "imported", alias, traitName: sibling },
+        ...(linkedEntity !== undefined ? { linkedEntity } : {}),
+      });
+    }
+
+    if (pulled.length === 0 && parentRewrites.size === 0) return errors;
+
+    // Repoint each parent's `@trait.X` tokens at the copy it actually owns.
+    const applyRewrites = (rt: ResolvedTrait): void => {
+      const subs = rt.trait.name ? parentRewrites.get(rt.trait.name) : undefined;
+      if (subs) rt.trait = renameTraitEmbeds(rt.trait, subs);
+    };
+    for (const rt of resolved) applyRewrites(rt);
+    for (const rt of pulled) applyRewrites(rt);
+
+    // A pulled copy's source-scoped listens name its host and co-siblings by
+    // their ATOM names; resolve them through ITS OWNER's map. `traitId` is
+    // id-first in `buildSourceMatcher`, so it has to follow the name to the
+    // local declaration or the subscription matches nothing.
+    const idByName = new Map<string, TraitId | undefined>();
+    for (const rt of [...resolved, ...pulled]) {
+      if (rt.trait.name) idByName.set(rt.trait.name, rt.trait.id);
+    }
+    for (const rt of pulled) {
+      const listens = rt.trait.listens;
+      const owner = rt.trait.name ? ownerOf.get(rt.trait.name) : undefined;
+      const subs = owner ? ownerSubs.get(owner) : undefined;
+      if (!listens || listens.length === 0 || !subs) continue;
+      let changed = false;
+      const nextListens = listens.map((listen) => {
+        const source = listen.source;
+        if (!source || source.kind !== "trait") return listen;
+        const target = subs.get(source.trait);
+        if (target === undefined || target === source.trait) return listen;
+        changed = true;
+        const traitId = idByName.get(target);
+        return {
+          ...listen,
+          source: { kind: "trait" as const, trait: target, ...(traitId ? { traitId } : {}) },
+        };
+      });
+      if (changed) rt.trait = { ...rt.trait, listens: nextListens };
+    }
+
+    refResolverLog.info("sibling-pull", {
+      pulled: pulled.map((p) => ({
+        trait: p.trait.name,
+        owner: p.trait.name ? ownerOf.get(p.trait.name) : undefined,
+        linkedEntity: p.linkedEntity ?? p.trait.linkedEntity,
+      })),
+    });
+    resolved.push(...pulled);
+    return errors;
   }
 
   /**
