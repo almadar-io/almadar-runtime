@@ -220,7 +220,8 @@ export type ClientEffectTuple =
   | ClientNavigateTuple
   | ClientNotifyTuple;
 import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, type FetchOptions } from "@almadar/core";
-import { ownerFieldsFromSchema, identityEntityName } from "@almadar/core/mock";
+import { ownerFieldsFromSchema, identityEntityName, entityAccessPolicies } from "@almadar/core/mock";
+import { applyRowAccess, checkMutationAccess } from "./entityAccess.js";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
   preprocessSchema,
@@ -2279,8 +2280,20 @@ export class OrbitalServerRuntime {
             this.validateRelationCardinality(type, data || {});
           }
 
+          const accessBindings = { user: bindingsRef?.user, payload: bindingsRef?.payload, config: bindingsRef?.config };
+          const mutationPolicy = this.resolvedSchema
+            ? entityAccessPolicies(this.resolvedSchema, type)?.[
+                action === 'create' ? 'create' : action === 'update' ? 'update' : 'delete'
+              ]
+            : undefined;
+
           switch (action) {
             case "create": {
+              if (!checkMutationAccess(data || {}, mutationPolicy, accessBindings)) {
+                throw new Error(
+                  `@create denied: the declared access policy for '${type}' rejected this row`,
+                );
+              }
               const { id } = await this.persistence.create(type, data || {});
               resultData = { id, ...(data || {}) };
               break;
@@ -2288,6 +2301,14 @@ export class OrbitalServerRuntime {
             case "update":
               if (data?.id || entityId) {
                 const updateId = (data?.id as string) || entityId!;
+                if (mutationPolicy !== undefined) {
+                  const existing = await this.persistence.getById(type, updateId);
+                  if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings)) {
+                    throw new Error(
+                      `@update denied: the declared access policy for '${type}' rejected this row`,
+                    );
+                  }
+                }
                 await this.persistence.update(type, updateId, data || {});
                 // Return the updated entity
                 const updated = await this.persistence.getById(type, updateId);
@@ -2306,6 +2327,14 @@ export class OrbitalServerRuntime {
                 : undefined;
               const deleteId = directId ?? nestedId ?? entityId;
               if (deleteId) {
+                if (mutationPolicy !== undefined) {
+                  const existing = await this.persistence.getById(type, deleteId);
+                  if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings)) {
+                    throw new Error(
+                      `@delete denied: the declared access policy for '${type}' rejected this row`,
+                    );
+                  }
+                }
                 // Enforce onDelete relation rules before deleting
                 await this.enforceOnDeleteRules(type, deleteId);
                 await this.persistence.delete(type, deleteId);
@@ -2412,10 +2441,19 @@ export class OrbitalServerRuntime {
           let result: EntityRow | EntityRow[] | null = null;
           let total = 0;
 
+          // The entity's declared `@read` policy — ANDed with any call-site
+          // `filter:`, applied to every fetch (id or collection) no matter
+          // which trait issues it. The un-bypassable half of row visibility
+          // (R-FETCH-SCOPE-SIBLING-BYPASS).
+          const readPolicy = this.resolvedSchema
+            ? entityAccessPolicies(this.resolvedSchema, fetchEntityType)?.read
+            : undefined;
+          const accessBindings = { user: bindingsRef?.user, payload: bindingsRef?.payload, config: bindingsRef?.config };
+
           if (options?.id) {
             // Single entity fetch
             const entity = await this.persistence.getById(fetchEntityType, options.id);
-            if (entity) {
+            if (entity && applyRowAccess([entity], readPolicy, undefined, accessBindings).length > 0) {
               // Populate relations if include specified
               if (options?.include && options.include.length > 0) {
                 await this.populateRelations([entity], fetchEntityType, options.include);
@@ -2426,31 +2464,17 @@ export class OrbitalServerRuntime {
               total = 1;
             }
           } else {
-            // Collection fetch
+            // Collection fetch. `applyRowAccess` ANDs the declared @read
+            // policy with the call-site filter (either may be absent).
             let entities = await this.persistence.list(fetchEntityType);
-
-            // Apply filter SExpression if provided. Mirrors
-            // ServerEffectHandlers.fetch. Each row is evaluated against
-            // the predicate with @entity bound to the row, @payload to
-            // the inbound event payload, and @current to the row.
-            if (options?.filter !== undefined && options.filter !== null) {
-              const predicate = options.filter as SExpr;
-              entities = entities.filter((entity) => {
-                const ctx = createContextFromBindings(
-                  { entity, payload: bindingsRef?.payload, current: entity, user: bindingsRef?.user },
-                  false,
-                );
-                try {
-                  return Boolean(evaluate(predicate, ctx));
-                } catch (err) {
-                  effectLog.error('fetch:filter-eval-error', {
-                    entityType: fetchEntityType,
-                    error: err instanceof Error ? err : String(err),
-                  });
-                  return false;
-                }
-              });
-            }
+            entities = applyRowAccess(
+              entities,
+              readPolicy,
+              options?.filter !== undefined && options.filter !== null
+                ? (options.filter as SExpr)
+                : undefined,
+              accessBindings,
+            );
 
             // Capture total AFTER filter, BEFORE offset/limit — paginating
             // consumers need the count of rows matching the filter, not

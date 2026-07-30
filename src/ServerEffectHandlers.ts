@@ -433,7 +433,7 @@ export function createServerEffectHandlers(
             const predicate = options.filter as SExpr;
             entities = entities.filter((entity) => {
               const ctx = createContextFromBindings(
-                { entity, payload: bindings?.payload, current: entity },
+                { entity, payload: bindings?.payload, current: entity, user: bindings?.user, config: bindings?.config },
                 false,
               );
               try {
