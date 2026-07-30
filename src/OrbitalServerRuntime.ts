@@ -219,7 +219,7 @@ export type ClientEffectTuple =
   | ClientRenderUITuple
   | ClientNavigateTuple
   | ClientNotifyTuple;
-import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, DEFAULT_VIEWER, isRuntimeEntity } from "@almadar/core";
+import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, type FetchOptions } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName } from "@almadar/core/mock";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
@@ -1685,6 +1685,25 @@ export class OrbitalServerRuntime {
     return this.config.defaultUser;
   }
 
+  /**
+   * The registered app's declared persona roster: the live rows of its
+   * `[identity]` entity, mapped onto viewers (`Almadar_LOLO_Identity.md` §4.3).
+   * Live-store rows rather than a re-derivation, so the roster carries the ids
+   * ownership scoping actually compares `@user.id` against. Empty when no
+   * schema is registered or the app declares no `[identity]` entity — there is
+   * no global fallback roster by design.
+   */
+  async getIdentityRoster(): Promise<UserContext[]> {
+    const schema = this.resolvedSchema;
+    if (!schema) return [];
+    const entityName = identityEntityName(schema);
+    if (!entityName) return [];
+    const rows = await this.persistence.list(entityName);
+    return rows
+      .map((row) => personaFromIdentityRow(row))
+      .filter((p): p is UserContext => p !== undefined);
+  }
+
   // ==========================================================================
   // Event Processing
   // ==========================================================================
@@ -2038,6 +2057,19 @@ export class OrbitalServerRuntime {
   ): Promise<void> {
     const entityType = registered.entity.name;
 
+    // Every fetch this dispatch will run, with its option keys — the one line
+    // that shows when a SIBLING trait's unfiltered fetch of the same entity
+    // bypasses a scoped call site (R-FETCH-SCOPE-SIBLING-BYPASS).
+    for (const eff of effects) {
+      if (Array.isArray(eff) && eff[0] === 'fetch') {
+        xOrbitalLog.debug('fetch:pre-exec-keys', () => ({
+          trait: traitName,
+          entity: String(eff[1]),
+          optKeys: Object.keys((eff[2] as FetchOptions | undefined) ?? {}).join('+'),
+        }));
+      }
+    }
+
     // Push to both the flat `clientEffects` array (legacy wire shape) and the
     // tagged `clientEffectsByTrait` sidecar in lockstep. Closure captures
     // `traitName` from this invocation's scope, so cascade emits — which run
@@ -2377,15 +2409,6 @@ export class OrbitalServerRuntime {
 
       fetch: async (fetchEntityType, options) => {
         try {
-          xOrbitalLog.info('fetch:enter', () => ({
-            entityType: fetchEntityType,
-            hasOptions: options !== undefined && options !== null,
-            optionsKeys: options ? Object.keys(options).join(',') : '',
-            filterType: typeof options?.filter,
-            filterIsArray: Array.isArray(options?.filter),
-            filterJson: JSON.stringify(options?.filter ?? null).slice(0, 300),
-            payloadJson: JSON.stringify(bindingsRef?.payload ?? null).slice(0, 300),
-          }));
           let result: EntityRow | EntityRow[] | null = null;
           let total = 0;
 

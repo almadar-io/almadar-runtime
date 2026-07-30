@@ -418,15 +418,6 @@ export function createServerEffectHandlers(
 
     fetch: async (fetchEntityType, options) => {
       try {
-        effectLog.info("clientFetch:enter", () => ({
-          entityType: fetchEntityType,
-          hasOptions: options !== undefined && options !== null,
-          optionsKeys: options ? Object.keys(options).join(',') : '',
-          filterType: typeof options?.filter,
-          filterIsArray: Array.isArray(options?.filter),
-          filterJson: JSON.stringify(options?.filter ?? null).slice(0, 300),
-          payloadJson: JSON.stringify(bindings?.payload ?? null).slice(0, 300),
-        }));
         let result: EntityRow | EntityRow[] | null = null;
         let total = 0;
         if (options?.id) {
