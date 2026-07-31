@@ -13,8 +13,14 @@
  * @packageDocumentation
  */
 
-import type { EventPayload, SExpr, ServiceParams } from "@almadar/core";
+import type { EntityAccessPolicies, EventPayload, SExpr, ServiceParams } from "@almadar/core";
 import type { PersistenceAdapter } from "./PersistenceAdapter.js";
+import {
+  applyRowAccess,
+  checkMutationAccess,
+  accessDeniedMessage,
+  type AccessBindings,
+} from "./entityAccess.js";
 import type {
   EffectHandlers,
   BindingContext,
@@ -97,6 +103,16 @@ export interface CreateServerEffectHandlersOptions {
     action: string,
     params?: ServiceParams,
   ) => Promise<EventPayload | null>;
+  /**
+   * The declared `@read`/`@create`/`@update`/`@delete` directives, keyed by
+   * entity name. Build it with `entityAccessTable(schema)` from `@almadar/core`.
+   *
+   * Optional: a caller that holds no schema (the client offline-preview path)
+   * passes nothing and gets today's unrestricted behavior. A preview is not a
+   * security boundary — the generated server is, and that one always has the
+   * policies compiled in.
+   */
+  entityAccess?: ReadonlyMap<string, EntityAccessPolicies>;
   /** Verbose logging. */
   debug?: boolean;
 }
@@ -135,8 +151,26 @@ export function createServerEffectHandlers(
     emittedEvents,
     source,
     callService: consumerCallService,
+    entityAccess,
     debug,
   } = opts;
+
+  /**
+   * Bindings every access check evaluates against. `config` is load-bearing:
+   * dropping it made every `@config.*`-guarded filter fail closed and empty
+   * the list (R-ENTITY-ACCESS-CONFIG-DROPPED-IN-ROW-CTX).
+   */
+  const accessBindings = (forEntityType: string): AccessBindings => ({
+    user: bindings?.user,
+    payload: bindings?.payload,
+    config: bindings?.config,
+    onPredicateError: (err) => {
+      effectLog.error('access-predicate-eval-error', {
+        entityType: forEntityType,
+        error: err instanceof Error ? err : String(err),
+      });
+    },
+  });
 
   const record = (entry: ServerEffectResult): void => {
     effectResults?.push(entry);
@@ -298,8 +332,13 @@ export function createServerEffectHandlers(
       let resultData: EntityRow | undefined;
       const sizeBefore = (await persistence.list(type)).length;
       try {
+        const mutationPolicy = entityAccess?.get(type)?.[action];
         switch (action) {
           case "create": {
+            // `@create` is checked against the INCOMING data — no row exists yet.
+            if (!checkMutationAccess((data ?? {}) as EntityRow, mutationPolicy, accessBindings(type))) {
+              throw new Error(accessDeniedMessage("create", type));
+            }
             const { id } = await persistence.create(type, (data ?? {}) as EntityRow);
             resultData = { id, ...((data ?? {}) as EntityRow) };
             break;
@@ -308,6 +347,16 @@ export function createServerEffectHandlers(
             const row = (data ?? {}) as EntityRow;
             const idOrFallback = (row.id as string | undefined) ?? entityId;
             if (idOrFallback) {
+              // `@update` is checked against the EXISTING row, read fresh — the
+              // incoming patch is what the caller wants, not what they may touch.
+              // Read only when a policy exists, so unpoliced entities keep today's
+              // single round-trip.
+              if (mutationPolicy !== undefined) {
+                const existing = await persistence.getById(type, idOrFallback);
+                if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings(type))) {
+                  throw new Error(accessDeniedMessage("update", type));
+                }
+              }
               await persistence.update(type, idOrFallback, row);
               const updated = await persistence.getById(type, idOrFallback);
               resultData = updated ?? { id: idOrFallback, ...row };
@@ -322,6 +371,12 @@ export function createServerEffectHandlers(
                 : undefined;
             const deleteId = directId ?? nestedId ?? entityId;
             if (deleteId) {
+              if (mutationPolicy !== undefined) {
+                const existing = await persistence.getById(type, deleteId);
+                if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings(type))) {
+                  throw new Error(accessDeniedMessage("delete", type));
+                }
+              }
               await persistence.delete(type, deleteId);
               resultData = { id: deleteId, deleted: true } as EntityRow;
             }
@@ -422,31 +477,33 @@ export function createServerEffectHandlers(
         let total = 0;
         if (options?.id) {
           const entity = await persistence.getById(fetchEntityType, options.id);
-          if (entity) {
-            if (fetchedData) fetchedData[fetchEntityType] = [entity];
-            result = entity;
+          // Fetching by id is still a read: the policy applies, the call-site
+          // `filter:` does not (there is nothing to narrow). Same split as
+          // OrbitalServerRuntime.
+          const visible = entity
+            ? applyRowAccess(
+                [entity],
+                entityAccess?.get(fetchEntityType)?.read,
+                undefined,
+                accessBindings(fetchEntityType),
+              )
+            : [];
+          if (visible.length > 0) {
+            if (fetchedData) fetchedData[fetchEntityType] = visible;
+            result = visible[0] ?? null;
             total = 1;
           }
         } else {
           let entities = await persistence.list(fetchEntityType);
-          if (options?.filter !== undefined && options.filter !== null) {
-            const predicate = options.filter as SExpr;
-            entities = entities.filter((entity) => {
-              const ctx = createContextFromBindings(
-                { entity, payload: bindings?.payload, current: entity, user: bindings?.user, config: bindings?.config },
-                false,
-              );
-              try {
-                return Boolean(evaluate(predicate, ctx));
-              } catch (err) {
-                effectLog.error('fetch-filter-eval-error', {
-                  entityType: fetchEntityType,
-                  error: err instanceof Error ? err : String(err),
-                });
-                return false;
-              }
-            });
-          }
+          // The declared `@read` directive AND the call-site `filter:`, through
+          // the one evaluator OrbitalServerRuntime uses — a second inline copy
+          // here is how this path silently diverged before.
+          entities = applyRowAccess(
+            entities,
+            entityAccess?.get(fetchEntityType)?.read,
+            options?.filter as SExpr | undefined,
+            accessBindings(fetchEntityType),
+          );
           // Capture total AFTER filter, BEFORE offset/limit so paginating
           // consumers receive the count of rows matching the filter.
           total = entities.length;
@@ -476,9 +533,16 @@ export function createServerEffectHandlers(
       // and test environments working without a live SSE transport.
       try {
         const rows = await persistence.list(streamEntityType);
+        // A stream is a read: the `@read` directive scopes it like any other.
+        const visible = applyRowAccess(
+          rows,
+          entityAccess?.get(streamEntityType)?.read,
+          undefined,
+          accessBindings(streamEntityType),
+        );
         const matched = options?.id
-          ? rows.filter(r => r['id'] === options.id)
-          : rows;
+          ? visible.filter(r => r['id'] === options.id)
+          : visible;
         for (const row of matched) {
           onChunk(row);
         }

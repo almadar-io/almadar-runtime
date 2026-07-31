@@ -32,6 +32,29 @@ export interface AccessBindings {
    * (R-ENTITY-ACCESS-CONFIG-DROPPED-IN-ROW-CTX).
    */
   config?: TraitConfigObject;
+  /**
+   * Called when a predicate throws. Evaluation still fails closed (the row is
+   * dropped / the mutation denied) — this only surfaces the cause, because a
+   * fail-closed policy and a genuinely-empty result look identical from the
+   * outside, which is exactly how R-ENTITY-ACCESS-CONFIG-DROPPED-IN-ROW-CTX
+   * hid for as long as it did.
+   */
+  onPredicateError?: (error: unknown) => void;
+}
+
+/** The three directives checked against a row before it is written. */
+export type MutationOp = 'create' | 'update' | 'delete';
+
+/**
+ * The one denial message. Three enforcement paths must produce it identically —
+ * `OrbitalServerRuntime` (interpreter), `createServerEffectHandlers` (offline
+ * preview), and the TypeScript that `orbital-shell-typescript` emits into a
+ * generated app's server — because a consumer distinguishing "denied" from
+ * "failed" reads this string. The Rust emitter holds a const mirroring it, and
+ * a test asserts the two agree.
+ */
+export function accessDeniedMessage(op: MutationOp, entityType: string): string {
+  return `@${op} denied: the declared access policy for '${entityType}' rejected this row`;
 }
 
 /**
@@ -41,13 +64,18 @@ export interface AccessBindings {
  *
  * A predicate that fails to evaluate drops its row: a filter/policy that
  * cannot be evaluated must never widen the result set.
+ *
+ * Generic in the row type so a caller's element type survives the call —
+ * generated server code chains a typed `filter:` callback straight off the
+ * result, and widening `Ticket[]` to `EntityRow[]` would collapse every field
+ * to the index signature and break `tsc` on any arithmetic/date comparison.
  */
-export function applyRowAccess(
-  rows: EntityRow[],
+export function applyRowAccess<T extends EntityRow>(
+  rows: T[],
   policy: SExpr | undefined,
   filter: SExpr | undefined,
   bindings: AccessBindings,
-): EntityRow[] {
+): T[] {
   if (policy === undefined && filter === undefined) {
     return rows;
   }
@@ -60,7 +88,8 @@ export function applyRowAccess(
     return predicates.every((predicate) => {
       try {
         return Boolean(evaluate(predicate, ctx));
-      } catch {
+      } catch (err) {
+        bindings.onPredicateError?.(err);
         return false;
       }
     });
@@ -90,7 +119,8 @@ export function checkMutationAccess(
   );
   try {
     return Boolean(evaluate(policy, ctx));
-  } catch {
+  } catch (err) {
+    bindings.onPredicateError?.(err);
     return false;
   }
 }

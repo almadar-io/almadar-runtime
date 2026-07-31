@@ -119,6 +119,13 @@ export type {
 // node `module`) precisely so this browser consumer doesn't pull node code.
 export { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults, normalizeCallSiteConfigToValues } from "./config-defaults.js";
 
+// Row-level entity access — the one evaluator for every declared
+// `@read`/`@create`/`@update`/`@delete` directive. Generated app servers should
+// prefer the `@almadar/runtime/entityAccess` subpath so a Node process does not
+// pull this whole barrel; re-exported here for consumers already on the root.
+export { applyRowAccess, checkMutationAccess } from "./entityAccess.js";
+export type { AccessBindings } from "./entityAccess.js";
+
 // Storage contract + in-memory default — extracted from OrbitalServerRuntime
 // so browser-side mock runtimes can use the same adapter interface.
 export type { PersistenceAdapter } from "./PersistenceAdapter.js";

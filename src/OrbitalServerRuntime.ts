@@ -221,7 +221,7 @@ export type ClientEffectTuple =
   | ClientNotifyTuple;
 import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, type FetchOptions } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, entityAccessPolicies } from "@almadar/core/mock";
-import { applyRowAccess, checkMutationAccess } from "./entityAccess.js";
+import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from "./entityAccess.js";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
   preprocessSchema,
@@ -2290,9 +2290,7 @@ export class OrbitalServerRuntime {
           switch (action) {
             case "create": {
               if (!checkMutationAccess(data || {}, mutationPolicy, accessBindings)) {
-                throw new Error(
-                  `@create denied: the declared access policy for '${type}' rejected this row`,
-                );
+                throw new Error(accessDeniedMessage('create', type));
               }
               const { id } = await this.persistence.create(type, data || {});
               resultData = { id, ...(data || {}) };
@@ -2304,9 +2302,7 @@ export class OrbitalServerRuntime {
                 if (mutationPolicy !== undefined) {
                   const existing = await this.persistence.getById(type, updateId);
                   if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings)) {
-                    throw new Error(
-                      `@update denied: the declared access policy for '${type}' rejected this row`,
-                    );
+                    throw new Error(accessDeniedMessage('update', type));
                   }
                 }
                 await this.persistence.update(type, updateId, data || {});
@@ -2330,9 +2326,7 @@ export class OrbitalServerRuntime {
                 if (mutationPolicy !== undefined) {
                   const existing = await this.persistence.getById(type, deleteId);
                   if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings)) {
-                    throw new Error(
-                      `@delete denied: the declared access policy for '${type}' rejected this row`,
-                    );
+                    throw new Error(accessDeniedMessage('delete', type));
                   }
                 }
                 // Enforce onDelete relation rules before deleting

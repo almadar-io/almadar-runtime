@@ -19,6 +19,11 @@ export default defineConfig({
     // Lightweight seeded PRNG exposed for downstream tooling that needs
     // deterministic mock values without pulling in @faker-js/faker.
     'src/mockRandom.ts',
+    // Row-level entity access. A separate entry because generated app servers
+    // import it directly — going through the root barrel would drag `./ui`,
+    // MockPersistenceAdapter and the whole @almadar/std chain into a Node
+    // process that needs two pure functions.
+    'src/entityAccess.ts',
   ],
   format: ['esm'],
   dts: true,
