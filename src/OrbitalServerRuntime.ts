@@ -1676,9 +1676,24 @@ export class OrbitalServerRuntime {
    * `OrbitalServerRuntimeConfig.defaultUser`. Pass `undefined` for an
    * unauthenticated viewer. Takes effect on the next event; an authenticated
    * request still overrides it.
+   *
+   * Mock mode seeded owner columns EAGERLY at construction, stamped with
+   * whichever id was `defaultUser` then (see `MockPersistenceAdapter.seed`).
+   * Switching to a different id here would otherwise leave those columns
+   * pointing at the old viewer forever, so an ownership-scoped view for the
+   * new one stays empty — `restampOwner` re-points the already-stamped cells
+   * instead of re-seeding.
    */
   setDefaultUser(user: UserContext | undefined): void {
+    const previousId = this.config.defaultUser?.id;
     this.config.defaultUser = user;
+    if (
+      this.persistence instanceof MockPersistenceAdapter &&
+      user?.id !== undefined &&
+      user.id !== previousId
+    ) {
+      this.persistence.restampOwner(user.id);
+    }
   }
 
   /** The viewer a dev host is currently presenting the app as. */

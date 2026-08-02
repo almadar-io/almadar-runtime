@@ -101,6 +101,13 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   /** entityId -> normalized store name, so relation lookups can prefer the id sibling over `relation.entity` name-matching. */
   private storeNameById: Map<string, string> = new Map();
   private config: MockPersistenceConfig;
+  /**
+   * Every (entity, row id, column) cell `seed()` stamped with `config.ownerId`.
+   * Seeding is eager and runs once at registration, before a dev host's
+   * viewer is known to have changed — see `restampOwner`, which walks this
+   * list to re-point the stamp when the default user changes later.
+   */
+  private ownerStampedCells: Array<{ entity: string; id: string; column: string }> = [];
 
   constructor(config: MockPersistenceConfig = {}) {
     this.config = {
@@ -130,6 +137,37 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     if (fields.length === 0) return;
     const merged = new Set([...(this.config.ownerFields ?? []), ...fields]);
     this.config.ownerFields = [...merged];
+  }
+
+  /**
+   * Re-point every owner-stamped cell from the current `ownerId` to
+   * `newOwnerId`, and remember `newOwnerId` for any future seed.
+   *
+   * Seeding is eager (`registerEntity()` seeds immediately, at construction
+   * time), so the columns above are frozen to whichever id was the default
+   * user THEN — a dev host switching viewers later (`setDefaultUser` /
+   * `POST /persona`) left the stamp pointing at the old id forever, so an
+   * ownership-scoped view for the NEW viewer stayed empty. This does not
+   * re-seed (eager seeding is intentional, see the class doc); it only
+   * re-labels the cells `seed()` already marked as viewer-owned.
+   *
+   * No-op when there is no new id, or it matches the current one — an
+   * anonymous switch (`newOwnerId === undefined`) leaves existing stamps as
+   * they are rather than clearing a non-nullable owner column.
+   */
+  restampOwner(newOwnerId: string | undefined): void {
+    const oldOwnerId = this.config.ownerId;
+    this.config.ownerId = newOwnerId;
+    if (!newOwnerId || newOwnerId === oldOwnerId) return;
+    for (const cell of this.ownerStampedCells) {
+      const row = this.stores.get(cell.entity)?.get(cell.id);
+      if (row) row[cell.column] = newOwnerId;
+    }
+    mockLog.debug('mock:owner-restamped', {
+      from: oldOwnerId,
+      to: newOwnerId,
+      cells: this.ownerStampedCells.length,
+    });
   }
 
   /** Re-anchor the PRNG to the configured seed. Called before every
@@ -312,7 +350,10 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       // Give the viewer every other row, so an ownership-scoped view has real
       // data while a second persona still sees a different set.
       if (ownerId && ownerCols.length > 0 && i % 2 === 0) {
-        for (const col of ownerCols) item[col] = ownerId;
+        for (const col of ownerCols) {
+          item[col] = ownerId;
+          this.ownerStampedCells.push({ entity: normalized, id: item.id as string, column: col });
+        }
       }
       store.set(item.id as string, item);
       generated.push({
@@ -468,6 +509,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   clearAll(): void {
     this.stores.clear();
     this.idCounters.clear();
+    this.ownerStampedCells = [];
     this.resetFakerSeed();
     mockLog.debug('mock:adapter:clearAll', { reanchored: this.config.seed });
   }
