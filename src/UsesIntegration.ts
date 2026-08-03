@@ -13,7 +13,7 @@
  * @packageDocumentation
  */
 
-import type { OrbitalSchema, Orbital, OrbitalDefinition, Entity, Page, Trait, TraitRef } from "@almadar/core";
+import type { OrbitalSchema, Orbital, OrbitalDefinition, Entity, EntityRef, Page, Trait, TraitRef } from "@almadar/core";
 import {
   isEntityReference,
   isPageReference,
@@ -232,12 +232,13 @@ export async function preprocessSchema(
       design: resolvedOrbital.original.design,
       // Gap #22: pass through auxiliary entities so OrbitalServerRuntime's
       // mock-seed branch registers SearchResult / FilterTarget / PagedItem
-      // alongside the molecule's primary entity. Without this, an inlined
-      // .orb that has `auxiliaryEntities` populated by the Rust inline
-      // phase still loses them here, and `(set @entity.searchTerm ...)` /
-      // `(fetch SearchResult ...)` from no-rebind imports hit unregistered
-      // persistence and silently no-op.
-      auxiliaryEntities: resolvedOrbital.original.auxiliaryEntities,
+      // alongside the molecule's primary entity — and DERIVE them for
+      // no-rebind imported traits. L1-emitted registry .orbs carry no
+      // auxiliaryEntities (only the Rust inline phase adds them, and the
+      // runtime path never runs it), so a trait imported without `-> Entity`
+      // stays bound to its atom's own entity while that entity was never
+      // registered or seeded here — hard zero rows.
+      auxiliaryEntities: deriveAuxiliaryEntities(resolvedOrbital),
     };
 
     preprocessedOrbitals.push(preprocessedOrbital);
@@ -258,6 +259,34 @@ export async function preprocessSchema(
       warnings,
     },
   };
+}
+
+/**
+ * Runtime-path mirror of the Rust inline phase's auxiliary-entity pass
+ * (orbital-compiler `phases/inline/mod.rs`, Gap #22): a trait imported
+ * WITHOUT a `-> Entity` rebind stays bound to the imported atom's own
+ * entity. Surface that entity in `auxiliaryEntities` (deduped against the
+ * primary and any artifact-carried auxiliaries) so registration and
+ * mock-seeding see it.
+ */
+function deriveAuxiliaryEntities(resolvedOrbital: ResolvedOrbital): EntityRef[] | undefined {
+  const combined: EntityRef[] = [...(resolvedOrbital.original.auxiliaryEntities ?? [])];
+  const seen = new Set<string>([resolvedOrbital.entity.name]);
+  for (const aux of combined) {
+    if (typeof aux !== "string" && "name" in aux && typeof aux.name === "string") {
+      seen.add(aux.name);
+    }
+  }
+  for (const rt of resolvedOrbital.traits) {
+    if (rt.source.type !== "imported" || rt.linkedEntity) continue;
+    const imported = resolvedOrbital.imports.orbitals.get(rt.source.alias);
+    const entity = imported?.orbital?.entity;
+    if (!entity || typeof entity === "string" || !("fields" in entity) || !entity.name) continue;
+    if (seen.has(entity.name)) continue;
+    seen.add(entity.name);
+    combined.push(entity);
+  }
+  return combined.length > 0 ? combined : undefined;
 }
 
 // ============================================================================
