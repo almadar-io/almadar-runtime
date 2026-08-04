@@ -358,6 +358,30 @@ function interpolateString(value: string, ctx: EvaluationContext): unknown {
                 inFlightConfigRecursions.delete(value);
             }
         }
+        // A config DEFAULT that is itself a binding string — e.g. the atom
+        // default `navItems = @pages` / `theme = @currentTheme`, read via
+        // `@config.navItems`. The compiler's inline phase substitutes config
+        // defaults into the render-ui pattern (so `@config.X` → the default,
+        // then the binding resolves); the eager runtime path must mirror that
+        // by resolving the string binding through, instead of returning the
+        // raw `"@pages"` literal. Guards: pure binding, not client-only,
+        // and the in-flight set breaks a self-referencing config forward.
+        if (
+            value.startsWith('@config.') &&
+            typeof resolved === 'string' &&
+            resolved.startsWith('@') &&
+            isPureBinding(resolved) &&
+            !isClientOnlyBinding(resolved) &&
+            !inFlightConfigRecursions.has(value)
+        ) {
+            inFlightConfigRecursions.add(value);
+            try {
+                bindLog.debug('resolve:config-default-binding', { binding: value, resolvesTo: resolved });
+                return interpolateString(resolved, ctx);
+            } finally {
+                inFlightConfigRecursions.delete(value);
+            }
+        }
         return resolved;
     }
 
@@ -595,6 +619,16 @@ export function createContextFromBindings(
     // (R-USER-DROPPED-IN-BINDING-CONTEXT).
     if (bindings.user) {
         ctx.user = bindings.user;
+    }
+    // Render-resolved schema sigils (`@pages`, `@currentTheme`) — seeded onto
+    // the render binding context only. Guards build their context via
+    // `createMinimalContext` (no `pages`/`currentTheme`), so the sigils are
+    // render-resolved exactly like the compiler's `OirBindingRoot` roots.
+    if (bindings.pages) {
+        ctx.pages = bindings.pages;
+    }
+    if (bindings.currentTheme) {
+        ctx.currentTheme = bindings.currentTheme;
     }
     // Carry `let`-bound locals onto the evaluator context so `@<name>`
     // references inside the `let` body resolve. Mirrors the evaluator's own

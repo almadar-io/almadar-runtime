@@ -219,7 +219,7 @@ export type ClientEffectTuple =
   | ClientRenderUITuple
   | ClientNavigateTuple
   | ClientNotifyTuple;
-import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, type FetchOptions } from "@almadar/core";
+import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, entityAccessPolicies } from "@almadar/core/mock";
 import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from "./entityAccess.js";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
@@ -558,6 +558,37 @@ function needsPreprocessing(schema: OrbitalSchema): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Map the host orbital's inline pages to the `NavItem[]` the `@pages` render
+ * sigil yields (`href = page.path`, `label = page.name`). Mirrors the Rust
+ * resolver's `get_page_from_ref` filter — only inline `Page` definitions
+ * contribute; string and `{ ref }` page references are skipped (they have no
+ * resolvable path/name at this layer).
+ */
+function inlineNavItems(pages: readonly PageRef[]): NavItem[] {
+  const items: NavItem[] = [];
+  for (const page of pages) {
+    if (isPageReference(page)) continue;
+    const p = page as Page;
+    if (typeof p.path === 'string' && typeof p.name === 'string') {
+      items.push({ href: p.path, label: p.name });
+    }
+  }
+  return items;
+}
+
+/**
+ * Derive the `data-theme` selector-key string from an orbital's `theme`.
+ * `ThemeRef` string → the name; inline `ThemeDefinition` → its `name`; absent
+ * → empty string. Mirrors the Rust resolver's `theme_data_key` (variant axis
+ * is the open decision; the base name is the key for now).
+ */
+function themeDataKey(theme: ThemeRef | undefined): string {
+  if (theme === undefined) return '';
+  if (typeof theme === 'string') return theme;
+  return theme.name;
 }
 
 /**
@@ -2820,6 +2851,21 @@ export class OrbitalServerRuntime {
         ...(resolvedDefaults ?? {}),
         ...(callSiteOverride ?? {}),
       };
+    }
+
+    // Render-resolved schema sigils (`@pages`, `@currentTheme`). The host
+    // orbital's pages and theme are constant for every trait in it; seeded
+    // here so the atom default `navItems = @pages` / `theme = @currentTheme`
+    // resolve at render exactly as the compiler's post-pass substitutes them
+    // in `resolve_to_oir`. Mirrors `get_page_from_ref` (inline pages only) +
+    // `theme_data_key` in the Rust resolver.
+    const sigilPages = inlineNavItems(registered.schema.pages);
+    if (sigilPages.length > 0) {
+      bindings.pages = sigilPages;
+    }
+    const sigilTheme = themeDataKey(registered.schema.theme);
+    if (sigilTheme) {
+      bindings.currentTheme = sigilTheme;
     }
 
     // `@entity` resolves to a three-layer merge (outermost wins):

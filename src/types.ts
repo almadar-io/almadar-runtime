@@ -32,6 +32,7 @@ import type {
     EventId,
     TraitEventListener,
     UserContext,
+    NavItem,
 } from '@almadar/core';
 
 // ============================================================================
@@ -475,6 +476,18 @@ export interface BindingContext {
     config?: ConfigContext;
     /** Authenticated viewer behind `@user.x` — ownership (`@user.id`) and role gates. */
     user?: UserContext;
+    /**
+     * The host orbital's pages for the `@pages` render sigil (`href`/`label`
+     * per inline page). Seeded onto the render binding context only — never
+     * present on a guard/tick context. Mirrors the compiler's
+     * `OirBindingRoot::Pages`.
+     */
+    pages?: NavItem[];
+    /**
+     * The `data-theme` key string for the `@currentTheme` render sigil,
+     * derived from the host orbital's `Orbital.theme`. Render-context only.
+     */
+    currentTheme?: string;
     /**
      * Local variables introduced by a `let` form, keyed by bare name and
      * referenced via `@<name>` (the canonical evaluator convention — same as
