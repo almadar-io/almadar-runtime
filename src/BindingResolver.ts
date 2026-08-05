@@ -262,6 +262,58 @@ export type DeferredPatternValue =
  * - `fn` render lambdas pass through raw (they are already render-time);
  * - literal arrays (children lists) and plain objects recurse per item.
  */
+/**
+ * Resolve `@config.X` leaves inside a `fn` render-lambda body.
+ *
+ * A lambda body passes through raw (it is render-time), and `@almadar/ui`'s
+ * `resolveLambdaBindings` beta-reduces only the lambda's own formal params —
+ * `@item.*` / `@index`. It has no `ctx.config`, and nothing else walks a lambda
+ * body, so a `@config.X` inside one is closed over by NO layer: it reached the
+ * DOM as literal text and painted (S16c). Outside a lambda the same leaf
+ * resolves through `interpolateString` → `resolveBinding`, which yields
+ * `undefined` for an unsupplied knob. This restores that symmetry.
+ *
+ * An unsupplied knob becomes `undefined`, not the literal, so a component whose
+ * body falls back (`children ?? content`) renders the fallback. Only
+ * `@config.*` is touched — `@item.*` stays for the UI layer to reduce.
+ * Identity-preserving: the original node is returned unless a leaf changed, so
+ * the `fn`-passthrough reference contract holds.
+ */
+function resolveConfigLeavesInLambdaBody<T>(node: T, ctx: EvaluationContext): T {
+    if (typeof node === 'string') {
+        if (!node.startsWith('@config.') || node.includes(' ')) return node;
+        const resolved = resolveBinding(node, ctx);
+        deferLog.debug('lambda:config-leaf', () => ({
+            binding: node,
+            resolvedType: typeof resolved,
+            selfForward: resolved === node,
+        }));
+        // A self-forward (`config.children === '@config.children'`) resolves to
+        // itself — treat it as unsupplied rather than re-emitting the literal.
+        return (resolved === node ? undefined : resolved) as T;
+    }
+    if (Array.isArray(node)) {
+        let changed = false;
+        const out = node.map((item) => {
+            const next = resolveConfigLeavesInLambdaBody(item, ctx);
+            if (next !== item) changed = true;
+            return next;
+        });
+        return (changed ? out : node) as T;
+    }
+    if (node !== null && typeof node === 'object' && !(node instanceof Date)) {
+        let changed = false;
+        const out: Record<string, SExpr> = {};
+        for (const [key, item] of Object.entries(node as Record<string, SExpr>)) {
+            const next = resolveConfigLeavesInLambdaBody(item, ctx);
+            if (next !== item) changed = true;
+            out[key] = next;
+        }
+        return (changed ? out : node) as T;
+    }
+    return node;
+}
+
 export function deferEntityBindings(value: SExpr, ctx: EvaluationContext, configHops = 0): DeferredPatternValue {
     if (typeof value === 'string') {
         if (containsEntityBinding(value) && !containsPayloadBinding(value)) {
@@ -290,7 +342,7 @@ export function deferEntityBindings(value: SExpr, ctx: EvaluationContext, config
     }
     if (Array.isArray(value)) {
         if (value.length === 3 && value[0] === 'fn' && typeof value[1] === 'string') {
-            return value;
+            return resolveConfigLeavesInLambdaBody(value, ctx);
         }
         if (isSExpression(value)) {
             if (containsEntityBinding(value) && !containsPayloadBinding(value)) {
@@ -454,7 +506,9 @@ function interpolateArray(value: unknown[], ctx: EvaluationContext): unknown {
     // any other inner SExpressions stay intact) instead.
     if (Array.isArray(value) && value.length === 3 && value[0] === 'fn'
         && typeof value[1] === 'string') {
-        return value;
+        // Same asymmetry as the deferring twin: `@config.*` inside a lambda
+        // body is resolved by no layer downstream, so resolve it here.
+        return resolveConfigLeavesInLambdaBody(value, ctx);
     }
 
     if (isSExpression(value)) {

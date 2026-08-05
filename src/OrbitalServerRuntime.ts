@@ -572,11 +572,29 @@ function inlineNavItems(pages: readonly PageRef[]): NavItem[] {
   for (const page of pages) {
     if (isPageReference(page)) continue;
     const p = page as Page;
-    if (typeof p.path === 'string' && typeof p.name === 'string') {
-      items.push({ href: p.path, label: p.name });
-    }
+    if (typeof p.path !== 'string' || typeof p.name !== 'string') continue;
+    // Root pages only: detail/param pages (paths with a `:` segment) are not
+    // nav entries. Mirrors the compiler's `p.path.contains(':')` filter.
+    if (p.path.includes(':')) continue;
+    const item: NavItem = {
+      href: p.path,
+      // `@label` annotation wins; else derive by stripping a trailing
+      // `Page` suffix from `name` (`ContactsPage` → `Contacts`).
+      label: p.label ?? deriveNavLabel(p.name),
+    };
+    if (typeof p.icon === 'string') item.icon = p.icon;
+    items.push(item);
   }
   return items;
+}
+
+/** Derive a human nav label from a page `name`: strip a trailing `Page`
+ * suffix. Mirrors the compiler's `derive_nav_label`. */
+function deriveNavLabel(name: string): string {
+  if (name.endsWith('Page') && name.length > 'Page'.length) {
+    return name.slice(0, -'Page'.length);
+  }
+  return name;
 }
 
 /**
@@ -590,6 +608,11 @@ function themeDataKey(theme: ThemeRef | undefined): string {
   if (typeof theme === 'string') return theme;
   return theme.name;
 }
+
+/** The baseline theme `@currentTheme` falls back to when an orbital declares
+ * no `theme`. Keeps standalone renders (no rabit) styled; rabit overrides
+ * globally via `Orbital.theme`. Mirrors the compiler's `DEFAULT_THEME_KEY`. */
+const DEFAULT_THEME_KEY = 'minimalist-light';
 
 /**
  * Internal tick binding for tracking active ticks
@@ -2853,20 +2876,25 @@ export class OrbitalServerRuntime {
       };
     }
 
-    // Render-resolved schema sigils (`@pages`, `@currentTheme`). The host
-    // orbital's pages and theme are constant for every trait in it; seeded
-    // here so the atom default `navItems = @pages` / `theme = @currentTheme`
-    // resolve at render exactly as the compiler's post-pass substitutes them
-    // in `resolve_to_oir`. Mirrors `get_page_from_ref` (inline pages only) +
-    // `theme_data_key` in the Rust resolver.
-    const sigilPages = inlineNavItems(registered.schema.pages);
+    // Render-resolved schema sigils (`@pages`, `@currentTheme`). `@pages` is
+    // APP-WIDE: an orbital is authored in isolation and cannot know its
+    // siblings, so the nav is assembled from the union of root pages across
+    // ALL registered orbitals (deduped by path). Mirrors the compiler's
+    // resolver in `resolve_to_oir`. `@currentTheme` stays per-orbital.
+    const sigilPages: NavItem[] = [];
+    const seenPaths = new Set<string>();
+    for (const reg of this.orbitals.values()) {
+      for (const item of inlineNavItems(reg.schema.pages ?? [])) {
+        if (seenPaths.has(item.href)) continue;
+        seenPaths.add(item.href);
+        sigilPages.push(item);
+      }
+    }
     if (sigilPages.length > 0) {
       bindings.pages = sigilPages;
     }
-    const sigilTheme = themeDataKey(registered.schema.theme);
-    if (sigilTheme) {
-      bindings.currentTheme = sigilTheme;
-    }
+    const sigilTheme = themeDataKey(registered.schema.theme) || DEFAULT_THEME_KEY;
+    bindings.currentTheme = sigilTheme;
 
     // `@entity` resolves to a three-layer merge (outermost wins):
     //   1. Declared entity field defaults (schema `default:` values)  — base

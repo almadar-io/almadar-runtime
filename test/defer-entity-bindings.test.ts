@@ -63,6 +63,28 @@ describe('deferEntityBindings', () => {
     expect(deferEntityBindings(lambda, ctx)).toBe(lambda);
   });
 
+  // S16c: `@config.X` inside a lambda body is closed over by NO layer —
+  // `@almadar/ui`'s `resolveLambdaBindings` reduces only `@item.*`/`@index` and
+  // has no config scope — so an unsupplied knob used to reach the DOM as the
+  // literal string and paint. It must resolve here, like it does outside a
+  // lambda, while `@item.*` is left for the UI layer.
+  it('resolves @config leaves inside a fn lambda body, leaving @item for the UI layer', () => {
+    const lambda = [
+      'fn',
+      'item',
+      { type: 'typography', content: '@item.title', children: '@config.children' },
+    ];
+    const out = deferEntityBindings(lambda, ctx) as [string, string, Record<string, unknown>];
+    expect(out[2].children).toBeUndefined();
+    expect(out[2].content).toBe('@item.title');
+  });
+
+  it('substitutes a SUPPLIED knob inside a fn lambda body', () => {
+    const lambda = ['fn', 'item', { type: 'typography', children: '@config.label' }];
+    const out = deferEntityBindings(lambda, ctx) as [string, string, Record<string, unknown>];
+    expect(out[2].children).toBe('static label');
+  });
+
   it('recurses into literal children trees, marking nested entity leaves', () => {
     const children = [
       { type: 'typography', content: 'HP: @entity.hp' },
