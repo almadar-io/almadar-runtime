@@ -644,6 +644,12 @@ export class OrbitalServerRuntime {
   private substrateHandlers: AgentSubstrateHandlerResult | null = null;
   private substrateHandlersPromise: Promise<void> | null = null;
   private resolvedSchema: OrbitalSchema | null = null;
+
+  /** App-level theme key from the schema's `theme "<key>"` header — the
+   *  `@currentTheme` fallback between an orbital's own `theme` and
+   *  `DEFAULT_THEME_KEY`. Set at registration, before the orbital loops
+   *  (`resolvedSchema` is assigned only after them). */
+  private appThemeKey: string | undefined;
   /** Wired by the hosting server (e.g. the playground SSE endpoint) via `setLiveBroadcastSink`. */
   private liveBroadcastSink: ((item: LiveBroadcastItem) => void) | null = null;
   /**
@@ -853,6 +859,7 @@ export class OrbitalServerRuntime {
     if (this.config.debug) {
       registerLog.debug('register:schema', { name: schema.name });
     }
+    this.appThemeKey = themeDataKey(schema.theme) || undefined;
 
     // Auto-preprocess if the schema has unresolved imports and we have (or
     // can construct) a loader. This replaces the old autoPreprocess flag,
@@ -940,6 +947,7 @@ export class OrbitalServerRuntime {
     if (this.config.debug) {
       registerLog.debug('register:schema-sync', { name: schema.name });
     }
+    this.appThemeKey = themeDataKey(schema.theme) || undefined;
 
     // Before the loop — see the note in register(): seeding is eager.
     this.applyIdentityOwnerFields(schema);
@@ -2893,7 +2901,7 @@ export class OrbitalServerRuntime {
     if (sigilPages.length > 0) {
       bindings.pages = sigilPages;
     }
-    const sigilTheme = themeDataKey(registered.schema.theme) || DEFAULT_THEME_KEY;
+    const sigilTheme = themeDataKey(registered.schema.theme) || this.appThemeKey || DEFAULT_THEME_KEY;
     bindings.currentTheme = sigilTheme;
 
     // `@entity` resolves to a three-layer merge (outermost wins):
