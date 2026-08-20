@@ -1049,7 +1049,7 @@ export class EffectExecutor {
                             : (patternRaw as PatternConfig);
                     const props = args[2] as PatternProps | undefined;
                     const priority = args[3] as number | undefined;
-                    this.handlers.renderUI(slot, pattern, props, priority);
+                    await this.handlers.renderUI(slot, pattern, props, priority);
                 } else {
                     this.logUnsupported('render-ui');
                 }

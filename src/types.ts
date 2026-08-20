@@ -284,13 +284,16 @@ export interface EffectHandlers {
 
     /** Render UI to a slot (client only). `pattern` is the post-interpolation
      * `PatternConfig` from the trait's `(render-ui slot pattern)` SExpr, or
-     * `null` when the trait clears the slot (`render-ui slot null`). */
+     * `null` when the trait clears the slot (`render-ui slot null`).
+     * May be async: the server runtime injects relation option data
+     * (relationsData) read from the persistence adapter before pushing —
+     * the interpreter's mirror of codegen's build-time relationsData. */
     renderUI?: (
         slot: string,
         pattern: PatternConfig | null,
         props?: PatternProps,
         priority?: number
-    ) => void;
+    ) => void | Promise<void>;
 
     /** Navigate to a route (client only) */
     navigate?: (path: string, params?: { [key: string]: string }) => void;

@@ -409,6 +409,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     data: EntityRow
   ): Promise<{ id: string }> {
     const store = this.getStore(entityType);
+    this.assertFileValuesWithinCeiling(entityType, data);
     const id = this.nextId(entityType);
     const now = new Date().toISOString();
 
@@ -423,6 +424,33 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
 
     store.set(id, item);
     return { id };
+  }
+
+  /**
+   * Mock-mode file storage ceiling: a `file`-typed value whose `url` is a
+   * `data:` URI keeps the whole payload in this in-memory/localStorage
+   * store. Above the ceiling the write is REJECTED with a clear error —
+   * never silently truncated or corrupted. Real deployments store bytes in
+   * object storage and keep only the URL, so the ceiling is mock-only.
+   */
+  private static readonly FILE_DATA_URI_CEILING_BYTES = 2 * 1024 * 1024;
+
+  private assertFileValuesWithinCeiling(entityType: string, data: EntityRow): void {
+    for (const [fieldName, value] of Object.entries(data)) {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
+      const candidate = value as { url?: unknown; sizeBytes?: unknown };
+      if (typeof candidate.url !== 'string' || !candidate.url.startsWith('data:')) continue;
+      const bytes =
+        typeof candidate.sizeBytes === 'number' ? candidate.sizeBytes : candidate.url.length;
+      if (bytes > MockPersistenceAdapter.FILE_DATA_URI_CEILING_BYTES) {
+        throw new Error(
+          `${entityType}.${fieldName}: the playground mock store cannot persist files larger than ` +
+            `${MockPersistenceAdapter.FILE_DATA_URI_CEILING_BYTES / (1024 * 1024)}MB ` +
+            `(got ${(bytes / (1024 * 1024)).toFixed(1)}MB). Use a smaller file - production ` +
+            `deployments store file bytes in object storage instead of the row.`,
+        );
+      }
+    }
   }
 
   /**
@@ -453,6 +481,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     data: EntityRow
   ): Promise<void> {
     const store = this.getStore(entityType);
+    this.assertFileValuesWithinCeiling(entityType, data);
     const existing = store.get(id);
 
     if (!existing) {

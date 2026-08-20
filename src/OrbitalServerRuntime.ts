@@ -154,6 +154,7 @@ import type {
   EventPayload,
   EvaluationContextExtensions,
   RuntimeRenderPattern,
+  RuntimePatternValue,
 } from "./types.js";
 import { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults, normalizeCallSiteConfigToValues } from "./config-defaults.js";
 // Backward-compat: `collectDeclaredConfigDefaults` used to live here. The package
@@ -221,6 +222,7 @@ export type ClientEffectTuple =
   | ClientNotifyTuple;
 import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, entityAccessPolicies } from "@almadar/core/mock";
+import { getPatternFieldsContract } from "@almadar/core/patterns";
 import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from "./entityAccess.js";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
 import {
@@ -1139,6 +1141,111 @@ export class OrbitalServerRuntime {
    */
   clearPreprocessCache(): void {
     this.preprocessedCache.clear();
+  }
+
+  /**
+   * Resolve an entity definition by name across every registered orbital's
+   * resolved primary entity. Used by relation-option injection to find the
+   * relation TARGET entity (usually another orbital's primary).
+   */
+  private findEntityDefByName(name: string): Entity | undefined {
+    for (const registered of this.orbitals.values()) {
+      if (registered.entity?.name === name) return registered.entity;
+    }
+    return undefined;
+  }
+
+  /**
+   * Server-side relation-option injection — the interpreter's mirror of the
+   * compiled path's build-time `relationsData` generation (orbital-rust
+   * registry.rs). Walks a render-ui pattern tree; for every form pattern
+   * (form / form-section / inline-edit-form / wizard-step) and detail-panel
+   * whose linked entity declares relation-typed fields among the node's
+   * `fields`, reads the relation TARGET entity's rows from the persistence
+   * adapter and attaches `relationsData: { <field>: [{value, label}] }`.
+   * Label contract identical to codegen: `name || title || id`. Options are
+   * re-read on every render-ui, so they refresh with each re-render exactly
+   * like any fetch. Authored `relationsData` is never overwritten.
+   */
+  private async injectRelationOptions(
+    pattern: PatternConfig | null,
+    registered: RegisteredOrbital,
+    traitName: string,
+  ): Promise<void> {
+    if (pattern === null || typeof pattern !== 'object') return;
+
+    const linkedEntityName =
+      registered.traits.find((t) => t.name === traitName)?.linkedEntity ??
+      registered.entity?.name;
+    if (!linkedEntityName) return;
+    const entityDef = this.findEntityDefByName(linkedEntityName);
+    if (!entityDef?.fields) return;
+
+    const relationTargets = new Map<string, string>();
+    for (const field of entityDef.fields) {
+      if (field.type === 'relation' && field.relation?.entity && field.name) {
+        relationTargets.set(field.name, field.relation.entity);
+      }
+    }
+    if (relationTargets.size === 0) return;
+
+    interface MutableRenderPattern {
+      [prop: string]: RuntimePatternValue;
+    }
+
+    const visit = async (node: RuntimePatternValue): Promise<void> => {
+      if (node === null || node === undefined || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) await visit(child);
+        return;
+      }
+      const record = node as MutableRenderPattern;
+      const nodeType = record['type'];
+      const fields = record['fields'];
+      if (
+        typeof nodeType === 'string' &&
+        // Which patterns consume entity-bound field lists is DECLARED per
+        // component via `@fieldsContract` and read from the pattern registry
+        // — never a hardcoded name list. Both contracts get relation options
+        // (form selects need choices; display fields need label resolution).
+        getPatternFieldsContract(nodeType) !== undefined &&
+        Array.isArray(fields) &&
+        record['relationsData'] === undefined
+      ) {
+        const relationsData: MutableRenderPattern = {};
+        for (const fieldEntry of fields) {
+          const fieldName =
+            typeof fieldEntry === 'string'
+              ? fieldEntry
+              : fieldEntry !== null && typeof fieldEntry === 'object' && !Array.isArray(fieldEntry)
+                ? String(
+                    (fieldEntry as MutableRenderPattern)['name'] ??
+                      (fieldEntry as MutableRenderPattern)['key'] ??
+                      '',
+                  )
+                : '';
+          const targetEntity = fieldName ? relationTargets.get(fieldName) : undefined;
+          if (!targetEntity) continue;
+          try {
+            const rows = await this.persistence.list(targetEntity);
+            relationsData[fieldName] = rows.map((r) => ({
+              value: String(r.id ?? ''),
+              label: String(r.name ?? r.title ?? r.id ?? ''),
+            }));
+          } catch {
+            // A missing/unregistered target collection means no options —
+            // the select renders empty rather than the render failing.
+          }
+        }
+        if (Object.keys(relationsData).length > 0) {
+          record['relationsData'] = relationsData;
+        }
+      }
+      const children = record['children'];
+      if (children !== undefined) await visit(children);
+    };
+
+    await visit(pattern as RuntimePatternValue);
   }
 
   /**
@@ -2755,7 +2862,11 @@ export class OrbitalServerRuntime {
       },
 
       // Client-side effects - collect for forwarding to client
-      renderUI: (slot, pattern, props, priority) => {
+      renderUI: async (slot, pattern, props, priority) => {
+        // Relation-option injection (server-side, mirrors compiled codegen):
+        // form/detail patterns with relation-typed fields get relationsData
+        // read from the persistence adapter before the effect ships.
+        await this.injectRelationOptions(pattern, registered, traitName);
         // Snapshot the resolved row reference (if any) so the log can
         // tell whether successive render-ui pushes for the same slot
         // carry the SAME row object (stable, no remount expected) or a
