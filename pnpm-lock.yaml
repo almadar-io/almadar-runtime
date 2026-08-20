@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@almadar/core':
-        specifier: ^10.61.0
-        version: 10.61.0
+        specifier: ^10.62.0
+        version: 10.62.0
       '@almadar/evaluator':
         specifier: ^2.41.0
         version: 2.41.0
@@ -21,8 +21,8 @@ importers:
         specifier: ^2.34.0
         version: 2.34.0(express@5.2.1)
       '@almadar/std':
-        specifier: ^16.176.0
-        version: 16.176.0
+        specifier: ^16.178.0
+        version: 16.178.0
     devDependencies:
       '@almadar/eslint-plugin':
         specifier: ^2.15.0
@@ -60,8 +60,8 @@ importers:
 
 packages:
 
-  '@almadar/core@10.61.0':
-    resolution: {integrity: sha512-Oll2Zzew8ZwGv+4IHuAq3t62AvSmyuWijQ3/HZ0WQJ4iAFQCJIZe7o0gqa7fY6vmtMlVdcGG15R+9l/pg1xy9w==}
+  '@almadar/core@10.62.0':
+    resolution: {integrity: sha512-HclpKbv7OChb3GwDGn+7rwW9HL7C+NhrFFuxZ1zqCJUcxksviEEjj2nKcAFuepb13id2K6tVWZ78qQ/RLaCU0w==}
 
   '@almadar/eslint-plugin@2.15.0':
     resolution: {integrity: sha512-8mQTnuU7eHOSpCgAag5VEywVce9iWFNC2j6cKvrwjOH/cbak+6Akgnp/zjK3bvy6xoVp6k/4H6bIh/WkRhbfSg==}
@@ -83,8 +83,8 @@ packages:
       '@almadar-io/rabit':
         optional: true
 
-  '@almadar/std@16.176.0':
-    resolution: {integrity: sha512-WdWhlS8Xly7umZdilHkJrrQaQgoE7t+rFqI34ps3otNalxYXW5uphneaxRLdD3ivIBiUWqH2glBiWM1xiR6ASQ==}
+  '@almadar/std@16.178.0':
+    resolution: {integrity: sha512-DrQrQJhMsrgLAi27sbgKJIZzVzgehq+SEnLDo1zUaYx5D1B/ivNY7rP7T8DpzTQbYYJZ3/BX3xUB9bQqPVx/aA==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -2319,7 +2319,7 @@ packages:
 
 snapshots:
 
-  '@almadar/core@10.61.0':
+  '@almadar/core@10.62.0':
     dependencies:
       zod: 3.25.76
 
@@ -2330,16 +2330,16 @@ snapshots:
 
   '@almadar/evaluator@2.41.0':
     dependencies:
-      '@almadar/core': 10.61.0
-      '@almadar/std': 16.176.0
+      '@almadar/core': 10.62.0
+      '@almadar/std': 16.178.0
 
   '@almadar/logger@1.11.0':
     dependencies:
-      '@almadar/core': 10.61.0
+      '@almadar/core': 10.62.0
 
   '@almadar/server@2.34.0(express@5.2.1)':
     dependencies:
-      '@almadar/core': 10.61.0
+      '@almadar/core': 10.62.0
       '@almadar/logger': 1.11.0
       '@faker-js/faker': 9.9.0
       cors: 2.8.6
@@ -2355,9 +2355,9 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@almadar/std@16.176.0':
+  '@almadar/std@16.178.0':
     dependencies:
-      '@almadar/core': 10.61.0
+      '@almadar/core': 10.62.0
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true
