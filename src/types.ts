@@ -295,8 +295,14 @@ export interface EffectHandlers {
         priority?: number
     ) => void | Promise<void>;
 
-    /** Navigate to a route (client only) */
-    navigate?: (path: string, params?: { [key: string]: string }) => void;
+    /** Navigate to a route (client only). `crumb` labels the navigation-stack
+     * entry the client pushes for the target page (from the effect's
+     * `{ crumb: … }` options). */
+    navigate?: (path: string, params?: { [key: string]: string }, crumb?: string) => void;
+
+    /** Pop the orbital-scoped navigation stack and return to the previous
+     * entry (client only). */
+    navigateBack?: () => void;
 
     /** Show a notification (client: toast, server: log) */
     notify?: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;
@@ -658,10 +664,10 @@ export interface TransitionObserver {
  * Maps execution environments to their available effect handlers.
  */
 export const HANDLER_MANIFEST: Record<ExecutionEnvironment, string[]> = {
-    client: ["render-ui", "render", "navigate", "notify", "emit", "set", "log", "ref", "deref", "watch", "send-server", "browser/open-file-picker", "browser/clipboard-read", "browser/clipboard-write", "browser/geolocation-current"],
+    client: ["render-ui", "render", "navigate", "navigate-back", "notify", "emit", "set", "log", "ref", "deref", "watch", "send-server", "browser/open-file-picker", "browser/clipboard-read", "browser/clipboard-write", "browser/geolocation-current"],
     server: ["persist", "fetch", "fetch-stream", "call-service", "emit", "set", "spawn", "despawn", "log", "ref", "deref", "swap!", "atomic", "os/watch-files", "os/watch-process", "os/watch-port", "os/watch-http", "os/watch-cron", "os/watch-signal", "os/watch-env", "os/debounce"],
     test: [
-        "render-ui", "render", "navigate", "notify", "emit", "set",
+        "render-ui", "render", "navigate", "navigate-back", "notify", "emit", "set",
         "persist", "fetch", "call-service", "spawn", "despawn", "log",
         "ref", "deref", "swap!", "watch", "atomic", "send-server",
         "browser/open-file-picker", "browser/clipboard-read", "browser/clipboard-write", "browser/geolocation-current",

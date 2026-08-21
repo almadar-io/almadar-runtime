@@ -210,7 +210,10 @@ export type ClientRenderUITuple =
 
 export type ClientNavigateTuple =
   | ['navigate', string]
-  | ['navigate', string, Record<string, string> | undefined];
+  | ['navigate', string, Record<string, string> | undefined]
+  | ['navigate', string, Record<string, string> | undefined, { crumb?: string }];
+
+export type ClientNavigateBackTuple = ['navigate-back'];
 
 export type ClientNotifyTuple =
   | ['notify', string, string | SExpr | undefined]
@@ -219,6 +222,7 @@ export type ClientNotifyTuple =
 export type ClientEffectTuple =
   | ClientRenderUITuple
   | ClientNavigateTuple
+  | ClientNavigateBackTuple
   | ClientNotifyTuple;
 import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, entityAccessPolicies } from "@almadar/core/mock";
@@ -2892,8 +2896,16 @@ export class OrbitalServerRuntime {
         });
         pushClientEffect(['render-ui', slot, pattern, props, priority]);
       },
-      navigate: (path, params) => {
-        pushClientEffect(['navigate', path, params]);
+      navigate: (path, params, crumb) => {
+        if (crumb !== undefined) {
+          pushClientEffect(['navigate', path, params, { crumb }]);
+        } else {
+          pushClientEffect(['navigate', path, params]);
+        }
+      },
+
+      navigateBack: () => {
+        pushClientEffect(['navigate-back']);
       },
 
       notify: (message, type) => {

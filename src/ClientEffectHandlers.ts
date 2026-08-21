@@ -43,8 +43,12 @@ export interface CreateClientEffectHandlersOptions {
     eventBus: ClientEventBus;
     /** Slot setter for render-ui effects */
     slotSetter: SlotSetter;
-    /** Navigate function for navigate effects */
-    navigate?: (path: string, params?: { [key: string]: string }) => void;
+    /** Navigate function for navigate effects. `crumb` labels the target
+     * page's navigation-stack entry (from the effect's `{ crumb: … }`
+     * options). */
+    navigate?: (path: string, params?: { [key: string]: string }, crumb?: string) => void;
+    /** Navigate-back function: pop the orbital-scoped navigation stack. */
+    navigateBack?: () => void;
     /** Notify function for notification effects */
     notify?: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;
     /**
@@ -142,7 +146,7 @@ function sendServerEvent(orbital: string, event: string, payload?: EventPayload)
 export function createClientEffectHandlers(
     options: CreateClientEffectHandlersOptions
 ): EffectHandlers {
-    const { eventBus, slotSetter, navigate, notify, sendServer, orbitalName = '' } = options;
+    const { eventBus, slotSetter, navigate, navigateBack, notify, sendServer, orbitalName = '' } = options;
 
     return {
         emit: (event: string, payload?: EventPayload) => {
@@ -184,6 +188,10 @@ export function createClientEffectHandlers(
                 return;
             }
             log.warn('navigate-no-handler', { path });
+        }),
+
+        navigateBack: navigateBack ?? (() => {
+            log.warn('navigate-back-no-handler');
         }),
 
         notify: notify ?? ((msg: string, type?: string) => {

@@ -257,6 +257,7 @@ export class EffectExecutor {
             'render-ui': this.handlers.renderUI,
             'render': this.handlers.renderUI,
             'navigate': this.handlers.navigate,
+            'navigate-back': this.handlers.navigateBack,
             'notify': this.handlers.notify,
             'log': this.handlers.log,
             'ref': this.handlers.ref,
@@ -1058,11 +1059,33 @@ export class EffectExecutor {
 
             case 'navigate': {
                 if (this.handlers.navigate) {
-                    const path = args[0] as string;
+                    const path = args[0];
+                    // A dynamic target (`(navigate ?href)`) can arrive
+                    // unresolved when the event was dispatched without its
+                    // payload (synthetic harness emits) — degrade to a warn,
+                    // never crash the effect chain on `undefined.trim()`.
+                    if (typeof path !== 'string' || path === '') {
+                        effectLog.warn('navigate-path-unresolved', { pathType: typeof path });
+                        break;
+                    }
                     const params = args[1] as { [key: string]: string } | undefined;
-                    this.handlers.navigate(path, params);
+                    const options = args[2] as { crumb?: unknown } | undefined;
+                    const crumb =
+                        options && typeof options.crumb === 'string' && options.crumb !== ''
+                            ? options.crumb
+                            : undefined;
+                    this.handlers.navigate(path, params, crumb);
                 } else {
                     this.logUnsupported('navigate');
+                }
+                break;
+            }
+
+            case 'navigate-back': {
+                if (this.handlers.navigateBack) {
+                    this.handlers.navigateBack();
+                } else {
+                    this.logUnsupported('navigate-back');
                 }
                 break;
             }
