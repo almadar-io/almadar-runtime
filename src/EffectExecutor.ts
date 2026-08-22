@@ -1486,6 +1486,18 @@ export class EffectExecutor {
                 break;
             }
 
+            case 'browser/push-subscribe': {
+                const [, emitCfg] = this.splitSubstrateEmit(args);
+                await this.runSubstrate(async () => {
+                    if (!this.handlers.browserPushSubscribe) {
+                        this.logUnsupported('browser/push-subscribe');
+                        return null;
+                    }
+                    return this.handlers.browserPushSubscribe();
+                }, emitCfg);
+                break;
+            }
+
             default: {
                 // Namespaced value-position substrate operators
                 // (llm/*, memory/*, session/*, workspace/*, trace/*,

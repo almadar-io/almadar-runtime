@@ -107,6 +107,19 @@ function getOrOpenWs(): WebSocket | null {
     return _ws;
 }
 
+/** PushManager.subscribe wants the VAPID public key as raw bytes, not base64url. */
+function urlBase64ToArrayBuffer(base64Url: string): ArrayBuffer {
+    const padding = '='.repeat((4 - (base64Url.length % 4)) % 4);
+    const base64 = (base64Url + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const buffer = new ArrayBuffer(raw.length);
+    const view = new Uint8Array(buffer);
+    for (let i = 0; i < raw.length; i++) {
+        view[i] = raw.charCodeAt(i);
+    }
+    return buffer;
+}
+
 function sendServerEvent(orbital: string, event: string, payload?: EventPayload): void {
     const msg = JSON.stringify({
         type: 'ORBITAL_EVENT',
@@ -247,6 +260,33 @@ export function createClientEffectHandlers(
             }
             await navigator.clipboard.writeText(text);
             return { text };
+        },
+
+        browserPushSubscribe: async () => {
+            if (
+                typeof navigator === 'undefined' || !('serviceWorker' in navigator) ||
+                typeof window === 'undefined' || !('PushManager' in window)
+            ) {
+                throw new Error('Push API is not available in this environment');
+            }
+            const keyResponse = await fetch('/api/push/vapid-public-key');
+            if (!keyResponse.ok) {
+                throw new Error('Push is not configured on this host (no VAPID public key)');
+            }
+            const { publicKey } = await keyResponse.json() as { publicKey: string };
+            const registration = await navigator.serviceWorker.register('/almadar-push-sw.js');
+            const subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToArrayBuffer(publicKey),
+            });
+            const json = subscription.toJSON();
+            const endpoint = json.endpoint ?? '';
+            const p256dh = json.keys?.p256dh ?? '';
+            const auth = json.keys?.auth ?? '';
+            if (!endpoint || !p256dh || !auth) {
+                throw new Error('Push subscription resolved without endpoint/keys');
+            }
+            return { endpoint, p256dh, auth };
         },
 
         browserGeolocationCurrent: async (options?: BrowserGeolocationOptions) => {

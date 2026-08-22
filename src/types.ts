@@ -403,6 +403,8 @@ export interface EffectHandlers {
     browserClipboardWrite?: (text: string) => Promise<{ text: string }>;
     /** browser/geolocation-current — resolves with the position inside `result` */
     browserGeolocationCurrent?: (options?: BrowserGeolocationOptions) => Promise<BrowserGeolocationPosition>;
+    /** browser/push-subscribe — resolves with the flat Web Push subscription credentials inside `result` */
+    browserPushSubscribe?: () => Promise<{ endpoint: string; p256dh: string; auth: string }>;
 
     // === Agent substrate handlers (server-side only) ===
     // These back the effect-position substrate operators that fire events

@@ -3007,6 +3007,38 @@ export class OrbitalServerRuntime {
       };
     }
 
+    // A config value that IS a `@user.*` binding ("viewerName: @user.name")
+    // reaches the s-expr evaluator as a raw string: `resolveBinding` carries
+    // no config→user forward hop (interpolateString's hop covers only plain
+    // string props), so on apps whose viewer field was missing the SIGIL TEXT
+    // itself leaked into the UI (2026-08-22 survey: 13 detail pages rendered
+    // a literal "@user.name" account chip). Resolve the forward one hop here
+    // against the request viewer: a resolved field substitutes, a missing one
+    // becomes '' (blank hides the account menu) — never the sigil.
+    if (bindings.config) {
+      const USER_FORWARD = /^@user(?:\.[\w]+)+$/;
+      let changed = false;
+      const resolved: Record<string, TraitConfigValue> = {};
+      for (const [key, value] of Object.entries(bindings.config)) {
+        if (typeof value === 'string' && USER_FORWARD.test(value)) {
+          let cur: unknown = user;
+          for (const seg of value.slice('@user.'.length).split('.')) {
+            cur = cur !== null && typeof cur === 'object'
+              ? (cur as EventPayload)[seg]
+              : undefined;
+          }
+          resolved[key] =
+            typeof cur === 'string' || typeof cur === 'number' || typeof cur === 'boolean'
+              ? cur
+              : '';
+          changed = true;
+        } else {
+          resolved[key] = value;
+        }
+      }
+      if (changed) bindings.config = resolved;
+    }
+
     // Render-resolved schema sigils (`@pages`, `@currentTheme`). `@pages` is
     // APP-WIDE: an orbital is authored in isolation and cannot know its
     // siblings, so the nav is assembled from the union of root pages across
