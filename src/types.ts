@@ -196,6 +196,17 @@ export interface TraitDefinition {
  * Client: React hooks, DOM, router
  * Server: Express, database, integrators
  */
+/**
+ * Caller identity forwarded with a call-service dispatch (I-25) — the id and
+ * roster role of the SAME normalized viewer entity ACL enforces against.
+ * Absent when no viewer is bound (ticks, anonymous); role-gated services
+ * fail closed on absence.
+ */
+export interface ServiceCallContext {
+    principal?: string;
+    role?: string;
+}
+
 export interface EffectHandlers {
     /**
      * Emit an event to the event bus.
@@ -225,11 +236,14 @@ export interface EffectHandlers {
     /** Set a field value on an entity */
     set: (entityId: string, field: string, value: FieldValue) => void;
 
-    /** Call an external service */
+    /** Call an external service. `context` carries the caller's identity
+     * (the same viewer entity ACL enforces against) so role-gated services
+     * can enforce server-side; hosts forward it to the integration factory. */
     callService: (
         service: string,
         action: string,
-        params?: ServiceParams
+        params?: ServiceParams,
+        context?: ServiceCallContext
     ) => Promise<EventPayload | null>;
 
     /** Fetch entity data (server only) - returns data for client-side rendering.

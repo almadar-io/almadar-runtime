@@ -26,6 +26,7 @@ import type {
   BindingContext,
   EffectContext,
   EntityRow,
+  ServiceCallContext,
 } from "./types.js";
 import { EffectExecutor } from "./EffectExecutor.js";
 import { createContextFromBindings } from "./BindingResolver.js";
@@ -102,6 +103,7 @@ export interface CreateServerEffectHandlersOptions {
     service: string,
     action: string,
     params?: ServiceParams,
+    context?: ServiceCallContext,
   ) => Promise<EventPayload | null>;
   /**
    * The declared `@read`/`@create`/`@update`/`@delete` directives, keyed by
@@ -419,7 +421,13 @@ export function createServerEffectHandlers(
       try {
         let result: EventPayload | null = null;
         if (consumerCallService) {
-          result = await consumerCallService(service, action, params);
+          const viewer = bindings?.user;
+          result = await consumerCallService(
+            service,
+            action,
+            params,
+            viewer ? { principal: viewer.id, role: viewer.role } : undefined,
+          );
         } else {
           // Mock fallback: synthetic result satisfying common service-atom
           // emit shapes ({id, clientSecret, success, status, params-echo}).

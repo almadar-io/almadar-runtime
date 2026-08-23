@@ -2568,6 +2568,7 @@ export class OrbitalServerRuntime {
               service,
               action,
               params,
+              user ? { principal: user.id, role: user.role } : undefined,
             );
           } else if (this.config.mode === 'mock') {
             // Mock mode: return a useful default so service-atom chains
