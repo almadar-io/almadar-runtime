@@ -119,6 +119,25 @@ describe('TickScheduler', () => {
         expect(pendingFrameCount()).toBe(0);
     });
 
+    it('never bursts catch-up firings after a stalled pass (spiral-of-death guard)', () => {
+        const scheduler = createTickScheduler();
+        const onDue = vi.fn();
+        scheduler.add(33, onDue);
+
+        tickFrame(0);
+        tickFrame(1000); // one stalled pass ≈ 30 missed beats
+        expect(onDue).toHaveBeenCalledTimes(1); // fires once, drops the debt
+
+        // Healthy cadence is preserved through the phase remainder: the stall
+        // left 1000 % 33 = 10ms of phase; two more 16ms frames reach 42ms ≥ 33ms.
+        onDue.mockClear();
+        tickFrame(16);
+        tickFrame(16);
+        expect(onDue).toHaveBeenCalledTimes(1);
+
+        scheduler.stopAll();
+    });
+
     describe('addCron', () => {
         beforeEach(() => {
             vi.useFakeTimers();

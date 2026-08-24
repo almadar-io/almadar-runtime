@@ -6,8 +6,13 @@
  * isn't available, e.g. Node/SSR) that walks every registered tick each pass
  * and fires whichever one(s) have crossed their own interval — so ticks due
  * in the same pass commit together instead of on independent, uncoordinated
- * timers. Framework-light: no React, usable from `OrbitalServerRuntime`
- * (this package) and from `@almadar/ui`'s `useTraitStateMachine` alike.
+ * timers. Each interval tick fires AT MOST ONCE per pass: missed beats are
+ * dropped (the phase remainder is kept, so healthy cadence is unchanged),
+ * because bursting catch-up firings after a slow pass multiplies the work
+ * that made the pass slow — an unbounded accumulator is a spiral-of-death
+ * amplifier that pegs the main thread and starves input. Framework-light:
+ * no React, usable from `OrbitalServerRuntime` (this package) and from
+ * `@almadar/ui`'s `useTraitStateMachine` alike.
  *
  * @packageDocumentation
  */
@@ -162,9 +167,11 @@ export class TickScheduler {
       }
       tick.accumulatedMs += timestamp - tick.lastTimestamp;
       tick.lastTimestamp = timestamp;
-      while (tick.accumulatedMs >= tick.intervalMs) {
-        tick.accumulatedMs -= tick.intervalMs;
+      if (tick.accumulatedMs >= tick.intervalMs) {
         tick.onDue();
+        // Fire once per pass; keep only the phase remainder. Whole missed
+        // beats are dropped so an overloaded pass can never burst.
+        tick.accumulatedMs = tick.accumulatedMs % tick.intervalMs;
       }
     }
   }

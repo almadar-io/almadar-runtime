@@ -329,6 +329,16 @@ export interface OrbitalEventRequest {
   user?: RawUserClaims;
   /** Per-tab client identity (UUID) — excludes this request's origin from live-broadcast delivery. */
   clientId?: string;
+  /**
+   * Broadcast-class marker (T6, docs/Almadar_Tick_Loop.md §3a): the name of
+   * the tick that emitted this event. Tick-stamped dispatches are
+   * latest-state broadcasts — the client fires them without awaiting the
+   * response, and the server relays them to OTHER tabs coalesced
+   * (newest-per-key) at a snapshot rate instead of 1:1.
+   */
+  tick?: string;
+  /** Emitting trait for a tick-stamped dispatch — builds the relay's BusEventSource (sourceless emits are dropped client-side). */
+  sourceTrait?: string;
 }
 
 /**
@@ -421,6 +431,12 @@ export interface LoaderConfig {
 export interface OrbitalServerRuntimeConfig {
   /** Enable debug logging */
   debug?: boolean;
+  /**
+   * Snapshot cadence (ms) for relaying tick-stamped broadcasts to other
+   * clients — newest-per-(client, orbital, event) wins between flushes
+   * (T6, docs/Almadar_Tick_Loop.md §3a). Default 50 (≈20Hz).
+   */
+  tickRelayIntervalMs?: number;
   /** Custom effect handlers (for integrating with your data layer) */
   effectHandlers?: Partial<EffectHandlers>;
   /** Persistence adapter for entity data */
@@ -658,6 +674,14 @@ export class OrbitalServerRuntime {
   private appThemeKey: string | undefined;
   /** Wired by the hosting server (e.g. the playground SSE endpoint) via `setLiveBroadcastSink`. */
   private liveBroadcastSink: ((item: LiveBroadcastItem) => void) | null = null;
+  /**
+   * Tick-broadcast relay (T6): newest pending item per
+   * (originClientId, orbital, event), flushed to the live-broadcast sink on
+   * the `tickRelayIntervalMs` cadence — other tabs get the latest position
+   * at snapshot rate, never 1:1 with emissions.
+   */
+  private readonly tickRelayPending = new Map<string, LiveBroadcastItem>();
+  private tickRelayTimer: ReturnType<typeof setInterval> | null = null;
   /**
    * Trait name -> resolved `TraitConfig`, computed once per `register()` via
    * `buildResolvedTraitConfigs` (`@almadar/core`). An embedded sub-trait's
@@ -1875,6 +1899,40 @@ export class OrbitalServerRuntime {
   }
 
   /**
+   * Queue a tick-stamped dispatch for coalesced snapshot relay (T6). Newest
+   * per (originClientId, orbital, event) wins between flushes — the standard
+   * netcode position-broadcast discipline.
+   */
+  private queueTickRelay(orbitalName: string, request: OrbitalEventRequest): void {
+    const key = `${request.clientId ?? ''}:${orbitalName}:${request.event}`;
+    this.tickRelayPending.set(key, {
+      event: request.event,
+      payload: request.payload,
+      source: { orbital: orbitalName, trait: request.sourceTrait, tick: request.tick },
+      originClientId: request.clientId,
+    });
+    if (this.tickRelayTimer === null) {
+      const timer = setInterval(() => this.flushTickRelay(), this.config.tickRelayIntervalMs ?? 50);
+      // Never hold a Node process open for the relay.
+      if (typeof timer === 'object' && typeof timer.unref === 'function') timer.unref();
+      this.tickRelayTimer = timer;
+    }
+  }
+
+  private flushTickRelay(): void {
+    if (this.tickRelayPending.size === 0) {
+      if (this.tickRelayTimer !== null) {
+        clearInterval(this.tickRelayTimer);
+        this.tickRelayTimer = null;
+      }
+      return;
+    }
+    const items = Array.from(this.tickRelayPending.values());
+    this.tickRelayPending.clear();
+    for (const item of items) this.liveBroadcastSink?.(item);
+  }
+
+  /**
    * The registered app's declared persona roster: the live rows of its
    * `[identity]` entity, mapped onto viewers (`Almadar_LOLO_Identity.md` §4.3).
    * Live-store rows rather than a re-derivation, so the roster carries the ids
@@ -2202,6 +2260,14 @@ export class OrbitalServerRuntime {
     // Include server effect results if any
     if (effectResults.length > 0) {
       response.effectResults = effectResults;
+    }
+
+    // T6: a tick-stamped dispatch is a latest-state broadcast — queue it for
+    // coalesced snapshot relay to other tabs. Local processing above is
+    // unchanged (guards/persists still run); only the cross-tab fan-out is
+    // lossy.
+    if (request.tick !== undefined && this.liveBroadcastSink !== null) {
+      this.queueTickRelay(orbitalName, request);
     }
 
     return response;
