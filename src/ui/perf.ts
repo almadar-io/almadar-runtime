@@ -66,6 +66,17 @@ function push(entry: PerfEntry): void {
 }
 
 function isEnabled(): boolean {
+  // Namespace gate (log config) OR the probe switch `__ALMADAR_PERF__` — the
+  // latter enables timing + aggregation WITHOUT the per-entry debug lines,
+  // so a probe run doesn't recreate the console firehose it's measuring.
+  return (
+    isLogLevelEnabled('DEBUG', PERF_NAMESPACE) ||
+    (globalThis as { __ALMADAR_PERF__?: boolean }).__ALMADAR_PERF__ === true
+  );
+}
+
+/** Per-entry debug lines only when the namespace itself is enabled. */
+function isVerbose(): boolean {
   return isLogLevelEnabled('DEBUG', PERF_NAMESPACE);
 }
 
@@ -98,7 +109,8 @@ export function perfEnd(name: string, startToken: number, detail?: PerfDetail): 
     } catch { /* ignore */ }
   }
   push({ name, durationMs, ts: endTs, detail });
-  log.debug(name, () => ({ durationMs, ...(detail ?? {}) }));
+  aggregate(name, durationMs);
+  if (isVerbose()) log.debug(name, () => ({ durationMs, ...(detail ?? {}) }));
 }
 
 /** Synchronous wrapper that times a fn end-to-end. */
@@ -109,6 +121,63 @@ export function perfTime<T>(name: string, fn: () => T, detail?: PerfDetail): T {
   } finally {
     perfEnd(name, t, detail);
   }
+}
+
+/** Async wrapper — the tick/effect paths are async end-to-end. */
+export async function perfTimeAsync<T>(name: string, fn: () => Promise<T> | T): Promise<T> {
+  const t = perfStart(name);
+  try {
+    return await fn();
+  } finally {
+    perfEnd(name, t);
+  }
+}
+
+/** Record a non-duration scalar (queue depth, entries/pass) into the summary. */
+export function perfGauge(name: string, value: number): void {
+  if (!isEnabled()) return;
+  aggregate(name, value);
+}
+
+// Aggregation: per-phase buckets dumped as one sorted `[PROFILE] summary`
+// line every 5s (WARN so it survives quiet-by-default log configs — the
+// probe is opt-in, so the line is signal, not noise).
+interface PerfBucket {
+  count: number;
+  totalMs: number;
+  maxMs: number;
+}
+const buckets = new Map<string, PerfBucket>();
+let dumpTimer: ReturnType<typeof setInterval> | null = null;
+
+function aggregate(name: string, ms: number): void {
+  const b = buckets.get(name);
+  if (b) {
+    b.count++;
+    b.totalMs += ms;
+    if (ms > b.maxMs) b.maxMs = ms;
+  } else {
+    buckets.set(name, { count: 1, totalMs: ms, maxMs: ms });
+  }
+  if (dumpTimer === null) {
+    dumpTimer = setInterval(dumpSummary, 5000);
+    if (typeof dumpTimer === 'object' && 'unref' in dumpTimer) dumpTimer.unref();
+  }
+}
+
+function dumpSummary(): void {
+  if (buckets.size === 0) return;
+  const rows = [...buckets.entries()]
+    .map(([name, b]) => ({
+      name,
+      count: b.count,
+      totalMs: Math.round(b.totalMs),
+      avgMs: Math.round((b.totalMs / b.count) * 100) / 100,
+      maxMs: Math.round(b.maxMs * 10) / 10,
+    }))
+    .sort((a, b) => b.totalMs - a.totalMs);
+  log.warn('[PROFILE] summary', { phases: JSON.stringify(rows) });
+  buckets.clear();
 }
 
 /** Snapshot in insertion order (oldest first). Stable identity until next push. */

@@ -53,6 +53,8 @@ export {
   perfStart,
   perfEnd,
   perfTime,
+  perfTimeAsync,
+  perfGauge,
   clearPerf,
   pushPerfEntry,
   perfStore,

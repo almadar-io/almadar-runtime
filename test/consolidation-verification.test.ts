@@ -237,6 +237,7 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
             },
             persist: async (action, entityType, data) => {
                 calls.persist.push([action, entityType, data]);
+                return data;
             },
             set: (entityId, field, value) => {
                 calls.set.push([entityId, field, value]);

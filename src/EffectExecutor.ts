@@ -20,7 +20,7 @@ import type {
 import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings, deferEntityBindings } from './BindingResolver.js';
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
-import type { FieldValue, SExpr, Orbital, TraitConfig } from '@almadar/core';
+import type { FieldValue, SExpr, Orbital, TraitConfig, RuntimeValue } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
 import type { SExpressionEvaluator } from '@almadar/evaluator';
 import { SExpressionEvaluator as EvaluatorInstance } from '@almadar/evaluator';
@@ -78,7 +78,7 @@ export interface EffectExecutorOptions {
 /**
  * Parse an effect into operator and arguments.
  */
-function parseEffect(effect: unknown): { operator: string; args: unknown[] } | null {
+function parseEffect(effect: RuntimeValue): { operator: string; args: RuntimeValue[] } | null {
     if (!Array.isArray(effect) || effect.length === 0) {
         return null;
     }
@@ -95,11 +95,11 @@ function parseEffect(effect: unknown): { operator: string; args: unknown[] } | n
  * Resolve all bindings in effect arguments.
  */
 function resolveArgs(
-    args: unknown[],
+    args: RuntimeValue[],
     bindings: BindingContext,
     strictBindings?: boolean,
     contextExtensions?: EvaluationContextExtensions,
-): unknown[] {
+): RuntimeValue[] {
     const ctx = createContextFromBindings(bindings, strictBindings, contextExtensions);
     return args.map((arg) => interpolateValue(arg, ctx));
 }
@@ -283,7 +283,7 @@ export class EffectExecutor {
     /**
      * Execute a single effect.
      */
-    async execute(effect: unknown): Promise<void> {
+    async execute(effect: RuntimeValue): Promise<void> {
         const parsed = parseEffect(effect);
         if (!parsed) {
             if (this.debug) {
@@ -346,7 +346,7 @@ export class EffectExecutor {
             (operator === 'render-ui' || operator === 'render') &&
             this.deferRenderBindings;
 
-        let resolvedArgs: unknown[];
+        let resolvedArgs: RuntimeValue[];
         if (isCompound) {
             resolvedArgs = args;
         } else if (isDeferringRenderUI) {
@@ -360,10 +360,10 @@ export class EffectExecutor {
             // S-expression values (arrays like ['llm/generate', ...]) are
             // evaluated through the evaluator so substrate operators can
             // capture results: (set @entity.x (llm/generate @entity.prompt))
-            const resolvedRest: unknown[] = [];
+            const resolvedRest: RuntimeValue[] = [];
             for (const a of args.slice(1)) {
                 if (Array.isArray(a) && a.length > 0 && typeof a[0] === 'string') {
-                    let result: unknown = this.getEvaluator().evaluate(a as SExpr, ctx);
+                    let result: RuntimeValue = this.getEvaluator().evaluate(a as SExpr, ctx);
                     if (result instanceof Promise) {
                         result = await result;
                     }
@@ -414,7 +414,7 @@ export class EffectExecutor {
     /**
      * Execute multiple effects in sequence.
      */
-    async executeAll(effects: unknown[]): Promise<void> {
+    async executeAll(effects: RuntimeValue[]): Promise<void> {
         for (const effect of effects) {
             await this.execute(effect);
         }
@@ -423,7 +423,7 @@ export class EffectExecutor {
     /**
      * Execute multiple effects in parallel.
      */
-    async executeParallel(effects: unknown[]): Promise<void> {
+    async executeParallel(effects: RuntimeValue[]): Promise<void> {
         await Promise.all(effects.map((effect) => this.execute(effect)));
     }
 
@@ -438,7 +438,7 @@ export class EffectExecutor {
      * Unlike `executeAll`, this method does NOT throw on effect errors.
      * Instead, it captures errors in the returned `EffectResult[]` array.
      */
-    async executeWithResults(effects: unknown[]): Promise<EffectResult[]> {
+    async executeWithResults(effects: RuntimeValue[]): Promise<EffectResult[]> {
         const results: EffectResult[] = [];
 
         for (const effect of effects) {
@@ -607,8 +607,8 @@ export class EffectExecutor {
      * substrate-op args. Returns `[positionalArgs, emitConfig]`.
      */
     private splitSubstrateEmit(
-        args: unknown[],
-    ): [unknown[], EmitConfig | undefined] {
+        args: RuntimeValue[],
+    ): [RuntimeValue[], EmitConfig | undefined] {
         const emitCfg = args.length > 0
             ? this.extractEmitConfig(args[args.length - 1])
             : undefined;
@@ -619,7 +619,7 @@ export class EffectExecutor {
     // Effect Dispatch
     // ==========================================================================
 
-    private async dispatch(operator: string, args: unknown[]): Promise<void> {
+    private async dispatch(operator: string, args: RuntimeValue[]): Promise<void> {
         switch (operator) {
             // === Universal Effects ===
 
@@ -779,20 +779,22 @@ export class EffectExecutor {
                     } else {
                         const entityType = args[1] as string;
                         const data = args[2] as EntityRow | undefined;
-                        await this.handlers.persist(action, entityType, data);
-                        // persist() returns void — best available success payload
-                        // is the data that went in, which matches the interpreted
-                        // runtime's existing @entity reactivity contract.
-                        const dataId = typeof data === 'string'
-                            ? data
-                            : (data && typeof data === 'object' ? ((data as { id?: unknown }).id as string | undefined) : undefined);
+                        // The persisted row (create: submitted data + the
+                        // minted id) is the success payload — matching the
+                        // compiled path, which emits its `created` row. Falls
+                        // back to the submitted data when a handler has no row.
+                        const persisted = await this.handlers.persist(action, entityType, data);
+                        const successPayload = persisted ?? data;
+                        const dataId = typeof successPayload === 'string'
+                            ? successPayload
+                            : (successPayload && typeof successPayload === 'object' ? ((successPayload as { id?: unknown }).id as string | undefined) : undefined);
                         persistLog.debug('persist:success', {
                             action,
                             entityType,
                             dataId,
                             willEmit: emitCfg?.success,
                         });
-                        this.emitSuccess(emitCfg, 'success', data, true);
+                        this.emitSuccess(emitCfg, 'success', successPayload, true);
                         persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
                     }
                 } catch (err) {
@@ -1107,7 +1109,7 @@ export class EffectExecutor {
 
             case 'do': {
                 // Sequential execution of nested effects
-                const nestedEffects = args as unknown[];
+                const nestedEffects = args;
                 for (const nested of nestedEffects) {
                     await this.execute(nested);
                 }
@@ -1162,14 +1164,14 @@ export class EffectExecutor {
                 // own `createChildContext` (`ctx.locals.has(root)`).
                 const rawBindings = args[0];
                 const body = args[1];
-                const locals = new Map<string, unknown>(this.bindings.locals);
-                const pairs: Array<[string, unknown]> = Array.isArray(rawBindings)
-                    ? (rawBindings as unknown[]).flatMap((b) =>
+                const locals = new Map<string, RuntimeValue>(this.bindings.locals);
+                const pairs: Array<[string, RuntimeValue]> = Array.isArray(rawBindings)
+                    ? (rawBindings as RuntimeValue[]).flatMap((b) =>
                         Array.isArray(b) && typeof b[0] === 'string'
-                            ? [[b[0], b[1]] as [string, unknown]]
+                            ? [[b[0], b[1]] as [string, RuntimeValue]]
                             : [],
                     )
-                    : Object.entries(rawBindings as { [k: string]: unknown });
+                    : Object.entries(rawBindings as { [k: string]: RuntimeValue });
                 for (const [name, valueExpr] of pairs) {
                     const ctx = createContextFromBindings(
                         { ...this.bindings, locals },
@@ -1543,7 +1545,7 @@ export class EffectExecutor {
 export function createTestExecutor(
     overrides: Partial<EffectHandlers> = {}
 ): EffectExecutor {
-    const noopAsync = async () => { };
+    const noopAsync = async () => undefined;
     const noop = () => { };
 
     return new EffectExecutor({

@@ -13,7 +13,7 @@
  * @packageDocumentation
  */
 
-import type { EntityAccessPolicies, EventPayload, SExpr, ServiceParams } from "@almadar/core";
+import type { EntityAccessPolicies, EventPayload, SExpr, ServiceParams, RuntimeValue } from "@almadar/core";
 import type { PersistenceAdapter } from "./PersistenceAdapter.js";
 import {
   applyRowAccess,
@@ -401,6 +401,7 @@ export function createServerEffectHandlers(
           data: resultData,
           success: true,
         });
+        return resultData;
       } catch (err) {
         effectLog.error("persist:store-mutate-error", {
           action,
@@ -415,6 +416,7 @@ export function createServerEffectHandlers(
           error: err instanceof Error ? err.message : String(err),
         });
       }
+      return undefined;
     },
 
     callService: async (service, action, params) => {
@@ -681,7 +683,7 @@ export function createServerEffectHandlers(
           } as EffectContext),
       });
       try {
-        await atomicExecutor.executeAll(atomicEffects as unknown[]);
+        await atomicExecutor.executeAll(atomicEffects as RuntimeValue[]);
         record({ effect: "atomic", success: true });
       } catch (err) {
         record({

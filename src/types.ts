@@ -33,6 +33,7 @@ import type {
     TraitEventListener,
     UserContext,
     NavItem,
+    RuntimeValue,
 } from '@almadar/core';
 
 // ============================================================================
@@ -226,12 +227,23 @@ export interface EffectHandlers {
      */
     emit: (event: string, payload?: EventPayload, source?: RuntimeEvent['source'], fromPersistSuccess?: boolean) => void;
 
-    /** Persist data (create/update/delete/batch) */
+    /**
+     * Persist data (create/update/delete/batch).
+     *
+     * Returns the persisted ROW — for a create that is the submitted data
+     * plus the store-minted `id`, which the caller's `emit:{success}`
+     * envelope carries. Without it a `*_CREATED` listener sees no id (the
+     * compiled path emits the created row), so anything routing on the new
+     * row's identity — navigating to the page just created — worked in one
+     * execution path only. Implementations that have no row to hand back
+     * (batch, a denied write, a no-op stub) return undefined and the
+     * envelope falls back to the submitted data.
+     */
     persist: (
         action: 'create' | 'update' | 'delete' | 'batch',
         entityType: string,
         data?: EntityRow
-    ) => Promise<void>;
+    ) => Promise<EntityRow | undefined>;
 
     /** Set a field value on an entity */
     set: (entityId: string, field: string, value: FieldValue) => void;
@@ -520,7 +532,7 @@ export interface BindingContext {
      * a `let` body's effects resolve their value expressions against the
      * `let`-bound locals.
      */
-    locals?: Map<string, unknown>;
+    locals?: Map<string, RuntimeValue>;
     /** Additional custom bindings */
     [key: string]: unknown;
 }

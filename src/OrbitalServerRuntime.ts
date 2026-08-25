@@ -2609,6 +2609,7 @@ export class OrbitalServerRuntime {
             data: resultData,
             success: true,
           });
+          return resultData;
         } catch (err) {
           effectLog.error("persist:store-mutate-error", {
             action,
@@ -2623,6 +2624,7 @@ export class OrbitalServerRuntime {
             error: err instanceof Error ? err.message : String(err),
           });
         }
+        return undefined;
       },
 
       callService: async (service, action, params) => {

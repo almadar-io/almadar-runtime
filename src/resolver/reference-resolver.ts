@@ -684,6 +684,42 @@ function traitEmbedNamesOf(trait: Trait): string[] {
 }
 
 /**
+ * Resolve a pulled sibling's `@config.<knob>` forward defaults against the
+ * trait that embeds it — the JS twin of the compiler's
+ * `forwarded_sibling_config` (`phases/inline/trait.rs`).
+ *
+ * `MasterListView = DataList.traits.DataListRender { config { fields:
+ * @config.fields } }` inside `std-browse` means "take `fields` from whoever
+ * embeds me". The embedder is known at exactly one place, the pull site: a
+ * sibling is materialised per embedder, and its own declared default IS the
+ * forward string, so without this the knob still reads `@config.fields` at
+ * render time, `deferEntityBindings`' hop finds the same token and stops, and
+ * a populated list renders blank.
+ *
+ * Only whole-string forwards resolve here. A `@config.<knob>.<path>` form and
+ * a knob the embedder does not declare are left for the binding validator.
+ */
+function resolveForwardedSiblingConfig(trait: Trait, parent: Trait | undefined): Trait {
+  const declared = trait.config;
+  const parentDeclared = parent?.config;
+  if (!declared || !parentDeclared) return trait;
+  let next: Record<string, ConfigFieldDeclaration> | undefined;
+  for (const [key, field] of Object.entries(declared)) {
+    const forward = field.default;
+    if (typeof forward !== "string" || !forward.startsWith("@config.")) continue;
+    const knob = forward.slice("@config.".length);
+    if (knob.length === 0 || knob.includes(".")) continue;
+    const value = parentDeclared[knob]?.default;
+    // The embedder forwards the same token upward — its own embedder supplies
+    // the value one pull further out.
+    if (value === undefined || value === forward) continue;
+    next ??= { ...declared };
+    next[key] = { ...field, default: value };
+  }
+  return next ? { ...trait, config: next } : trait;
+}
+
+/**
  * Apply a linkedEntity override from a trait-ref call site to an
  * imported atom. When the atom declared `entity: "ModalRecord"` inside
  * its render-ui configs and the ref site supplied
@@ -1504,7 +1540,13 @@ export class ReferenceResolver {
         atomTrait = nested.data.trait;
       }
 
-      let copy = applyLinkedEntityRename(atomTrait, linkedEntity);
+      const embedder =
+        resolved.find((r) => r.trait.name === parent)?.trait ??
+        pulled.find((r) => r.trait.name === parent)?.trait;
+      let copy = resolveForwardedSiblingConfig(
+        applyLinkedEntityRename(atomTrait, linkedEntity),
+        embedder,
+      );
       if (finalName !== sibling) {
         copy = { ...copy, name: finalName };
         noteRewrite(parent, sibling, finalName);

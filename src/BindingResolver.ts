@@ -23,7 +23,7 @@ import { isKnownStdOperator as isKnownOperator } from '@almadar/std/registry';
 import type { BindingContext, EntityRow, EventPayload, PatternProps, EvaluationContextExtensions, RuntimePatternValue } from './types.js';
 import type { TraitConfigObject, TraitConfigValue, RenderChildrenMap, RenderBindingMarker } from '@almadar/core';
 import { containsEntityBinding, containsPayloadBinding, RENDER_BINDING_MARKER } from '@almadar/core';
-import type { SExpr } from '@almadar/core';
+import type { SExpr, RuntimeValue } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
 
 const bindLog = createLogger('almadar:runtime:bindings');
@@ -216,7 +216,7 @@ export function interpolateProps(
 /**
  * Interpolate a single value.
  */
-export function interpolateValue(value: unknown, ctx: EvaluationContext): unknown {
+export function interpolateValue(value: RuntimeValue, ctx: EvaluationContext): RuntimeValue {
     if (value === null || value === undefined) {
         return value;
     }
@@ -377,7 +377,7 @@ const inFlightConfigRecursions = new Set<string>();
 /**
  * Interpolate a string value.
  */
-function interpolateString(value: string, ctx: EvaluationContext): unknown {
+function interpolateString(value: string, ctx: EvaluationContext): RuntimeValue {
     // Pure binding - resolve directly
     if (value.startsWith('@') && isPureBinding(value)) {
         // Client-only bindings (currently `@trait.*`) round-trip through
@@ -485,7 +485,7 @@ function interpolateEmbeddedBindings(value: string, ctx: EvaluationContext): str
 /**
  * Interpolate an array value.
  */
-function interpolateArray(value: unknown[], ctx: EvaluationContext): unknown {
+function interpolateArray(value: RuntimeValue[], ctx: EvaluationContext): RuntimeValue {
     if (value.length === 0) {
         // Preserve identity for empty arrays too — same rationale as
         // `interpolateProps` below.
