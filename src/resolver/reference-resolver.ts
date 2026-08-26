@@ -143,7 +143,7 @@ function buildIdIndex(
   const idIndex = new Map<string, IdIndexEntry>();
   indexOrbitalNodes(orbital, idIndex);
   for (const imported of orbitals.values()) {
-    indexOrbitalNodes(imported.orbital, idIndex);
+    for (const o of importedOrbitals(imported)) indexOrbitalNodes(o, idIndex);
   }
   return idIndex;
 }
@@ -158,11 +158,30 @@ export interface ResolvedImport {
   /** The original import path */
   from: string;
 
-  /** The loaded orbital */
+  /** The loaded orbital — the behavior's primary/named orbital. */
   orbital: Orbital;
+
+  /**
+   * EVERY orbital of the imported behavior, not just the primary one. A
+   * multi-orbital organism keeps its traits and pages spread across all of
+   * them, and `Alias.traits.X` carries no orbital segment, so lookups must
+   * search the whole list. Mirrors the compiled path's
+   * `AliasEntry { orbitals: Vec<Orbital> }` (orbital-compiler
+   * `phases/inline/context.rs`), which already resolves this way — without
+   * this the runtime silently fails on any trait outside orbital 0.
+   */
+  orbitals: Orbital[];
 
   /** Absolute source path */
   sourcePath: string;
+}
+
+/**
+ * Every orbital of an imported behavior, primary first. Falls back to the
+ * single primary for any loader that predates `orbitals`.
+ */
+function importedOrbitals(imported: ResolvedImport): Orbital[] {
+  return imported.orbitals?.length ? imported.orbitals : [imported.orbital];
 }
 
 /**
@@ -1211,6 +1230,7 @@ export class ReferenceResolver {
         alias: use.as,
         from: use.from,
         orbital: loadResult.data.orbital,
+        orbitals: loadResult.data.orbitals ?? [loadResult.data.orbital],
         sourcePath: loadResult.data.sourcePath,
       });
     }
@@ -1493,7 +1513,11 @@ export class ReferenceResolver {
       if (!imported) continue;
       // Same-alias siblings only — a `@trait.X` naming anything else is the
       // validator's `ORB_BINDING_TRAIT_UNKNOWN` to report, not ours to guess.
-      const atomEntry = findTraitEntryInOrbital(imported.orbital, sibling);
+      let atomEntry: Exclude<TraitRef, string> | null = null;
+      for (const o of importedOrbitals(imported)) {
+        atomEntry = findTraitEntryInOrbital(o, sibling);
+        if (atomEntry) break;
+      }
       if (!atomEntry) continue;
 
       let atomTrait: Trait;
@@ -1724,13 +1748,21 @@ export class ReferenceResolver {
       // Find the trait in the imported orbital — id-primary: prefer the
       // ref's `refId` against the id index, falling back to the existing
       // name match when the id is absent or unindexed.
-      const trait = this.findTraitInOrbital(imported.orbital, parsed.traitName, refId, imports.idIndex);
+      // Search every orbital of the behavior — a trait name is unique across
+      // one behavior's orbitals by convention, first match wins (same policy
+      // as the compiled path's `get_trait`).
+      let trait: Trait | null = null;
+      for (const o of importedOrbitals(imported)) {
+        trait = this.findTraitInOrbital(o, parsed.traitName, refId, imports.idIndex);
+        if (trait) break;
+      }
       if (!trait) {
+        const available = importedOrbitals(imported).flatMap((o) => this.listTraitsInOrbital(o));
         return {
           success: false,
           errors: [
             `Trait "${parsed.traitName}" not found in imported orbital "${parsed.alias}". ` +
-              `Available traits: ${this.listTraitsInOrbital(imported.orbital).join(", ") || "none"}`,
+              `Available traits: ${available.join(", ") || "none"}`,
           ],
         };
       }
@@ -1966,13 +1998,19 @@ export class ReferenceResolver {
 
     // Id-primary: prefer `refId` against the id index, falling back to the
     // existing name match when the id is absent or unindexed.
-    const page = this.findPageInOrbital(imported.orbital, parsed.pageName, refId, imports.idIndex);
+    // Pages, like traits, may live in any orbital of a multi-orbital behavior.
+    let page: Page | null = null;
+    for (const o of importedOrbitals(imported)) {
+      page = this.findPageInOrbital(o, parsed.pageName, refId, imports.idIndex);
+      if (page) break;
+    }
     if (!page) {
+      const available = importedOrbitals(imported).flatMap((o) => this.listPagesInOrbital(o));
       return {
         success: false,
         errors: [
           `Page "${parsed.pageName}" not found in imported orbital "${parsed.alias}". ` +
-            `Available pages: ${this.listPagesInOrbital(imported.orbital).join(", ") || "none"}`,
+            `Available pages: ${available.join(", ") || "none"}`,
         ],
       };
     }

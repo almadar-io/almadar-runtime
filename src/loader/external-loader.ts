@@ -22,8 +22,16 @@ import { OrbitalSchemaSchema } from "@almadar/core";
  * Result of loading an orbital.
  */
 export interface LoadedOrbital {
-  /** The loaded orbital */
+  /** The loaded orbital — the named one when requested, else the first. */
   orbital: Orbital;
+
+  /**
+   * EVERY orbital in the loaded schema. `Alias.traits.X` carries no orbital
+   * segment, so a multi-orbital behavior's traits and pages must all stay
+   * reachable; resolving against `orbital` alone silently loses everything
+   * outside it. Mirrors the compiled path's `AliasEntry.orbitals`.
+   */
+  orbitals?: Orbital[];
 
   /** Source path (resolved absolute path) */
   sourcePath: string;
@@ -348,6 +356,7 @@ export class ExternalOrbitalLoader {
       success: true,
       data: {
         orbital,
+        orbitals: schema.orbitals,
         sourcePath: schemaResult.data.sourcePath,
         importPath,
       },
