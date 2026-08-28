@@ -353,38 +353,113 @@ function renameEventsInRenderUiConfig(
 }
 
 /**
- * Rewrite event names inside an effects SExpr array. Walks every
- * `(render-ui slot config)` call and passes the config through
- * {@link renameEventsInRenderUiConfig}. Preserves non-render-ui effects
- * unchanged.
+ * Rewrite event names inside an effects SExpr array. Recursively walks
+ * every effect node through {@link renameEventRefsInNode} — mirroring the
+ * event arms of the compiled path's `rewrite_identifiers`.
  */
 function renameEventsInEffects(
   effects: readonly unknown[],
   rename: (k: string | undefined) => string | undefined,
 ): unknown[] {
-  return effects.map((effect) => {
-    if (!Array.isArray(effect)) return effect;
-    if (effect[0] === "render-ui" && effect.length >= 3) {
-      const slot = effect[1];
-      const config = effect[2];
-      const nextConfig = renameEventsInRenderUiConfig(config, rename);
-      return [effect[0], slot, nextConfig, ...effect.slice(3)];
+  return effects.map((effect) => renameEventRefsInNode(effect, rename));
+}
+
+/**
+ * Recursive event-name rewrite over an effect/expression tree. Mirrors
+ * the compiled path (`orbital-compiler` `inline/rewrite.rs`):
+ *   - `["emit", "OLD", ...]` — position-1 event head (bare and payload
+ *     forms; the walk continues into the tail). Skipping these left a
+ *     composed atom's `(emit OLD …)` firing the pre-rename name while
+ *     every listener subscribed the renamed key — renamed cascades never
+ *     delivered on the runtime path (R-CLIENT-RENAMED-CASCADE-DEAD).
+ *   - any object `emit: "OLD"` or `emit: { success: "OLD", ... }` option
+ *     map on fetch/persist/call-service/ref effects.
+ *   - `["render-ui", slot, config, ...]` — user-dispatchable event-name
+ *     props inside the config via {@link renameEventsInRenderUiConfig}.
+ * Only `emit` positions are rewritten, so guard/comparison strings are
+ * never touched.
+ */
+/**
+ * Emit-option map slot keys that carry event names — fetch/persist/
+ * call-service/ref/os-watch/set effects. Mirrors the compiled path's
+ * emit-map arm (`inline/rewrite.rs`).
+ */
+const EMIT_OPTION_SLOTS = new Set(["success", "failure", "on_message", "on_change"]);
+
+function renameEventRefsInNode(
+  node: unknown,
+  rename: (k: string | undefined) => string | undefined,
+): unknown {
+  if (node === null || node === undefined) return node;
+  if (Array.isArray(node)) {
+    if (node[0] === "render-ui" && node.length >= 3) {
+      const nextConfig = renameEventsInRenderUiConfig(node[2], rename);
+      return [
+        node[0],
+        node[1],
+        nextConfig,
+        ...node.slice(3).map((x) => renameEventRefsInNode(x, rename)),
+      ];
     }
-    return effect;
-  });
+    const out = node.map((x) => renameEventRefsInNode(x, rename));
+    if (node[0] === "emit" && typeof node[1] === "string") {
+      out[1] = rename(node[1]) ?? node[1];
+    }
+    return out;
+  }
+  if (typeof node === "object") {
+    const obj = node as { [k: string]: unknown };
+    const next: { [k: string]: unknown } = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === "emit") {
+        if (typeof v === "string") {
+          next[k] = rename(v) ?? v;
+        } else if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+          // Only the declared emit-slot keys carry event names (the same
+          // slot-key universe as the compiled path's emit-map arm) — other
+          // values recurse normally so a rename key can never clobber an
+          // arbitrary string that merely sits inside an emit map.
+          const slots: { [k: string]: unknown } = {};
+          for (const [slot, slotV] of Object.entries(v as { [k: string]: unknown })) {
+            slots[slot] =
+              EMIT_OPTION_SLOTS.has(slot) && typeof slotV === "string"
+                ? (rename(slotV) ?? slotV)
+                : renameEventRefsInNode(slotV, rename);
+          }
+          next[k] = slots;
+        } else {
+          next[k] = renameEventRefsInNode(v, rename);
+        }
+        continue;
+      }
+      next[k] = renameEventRefsInNode(v, rename);
+    }
+    return next;
+  }
+  return node;
 }
 
 /**
  * Apply a call-site `events: { OLD: NEW, ... }` rename map to a resolved
- * trait's state machine. Rewrites every mention of an old key in:
+ * trait. Rewrites every mention of an old key in:
  *   - `stateMachine.transitions[].event` (the trigger)
- *   - `stateMachine.transitions[].effects[]` render-ui button / action /
+ *   - `stateMachine.transitions[].effects[]` and `ticks[].effects[]`:
+ *     `(emit OLD …)` heads, `emit:` option maps on fetch/persist/
+ *     call-service/ref effects, and render-ui button / action /
  *     itemAction / submitEvent / cancelEvent / onX event-name props
  *   - `stateMachine.events[].key` + `.name` (humanized display)
  *   - `emits[].event`
+ *   - `listens[].triggers` (this trait's own transition event) and
+ *     `listens[].event` for UNSOURCED/`any` listens only
  *
- * Does NOT rewrite `listens[].event`: those entries reference OTHER traits'
- * events, not this trait's own events, so the rename doesn't apply.
+ * Does NOT rewrite a SOURCED `listens[].event` (kind trait/orbital): that
+ * entry names an event in the SOURCE trait's vocabulary and follows the
+ * source trait's own renames, not this call site's.
+ *
+ * Parity: the compiled path rewrites all of the above at compose time
+ * (`orbital-compiler` `inline/rewrite.rs` — `rewrite_identifiers` +
+ * `rewrite_trait_event_fields`), so the runtime must produce the same
+ * fully-renamed trait at registration time.
  *
  * Returns the trait unchanged when `renames` is empty or undefined.
  */
@@ -954,15 +1029,14 @@ function applyEventRenames(
   const rename = (k: string | undefined): string | undefined =>
     k !== undefined && k in renames ? renames[k] : k;
   const sm = trait.stateMachine;
-  if (!sm) return trait;
-  const nextTransitions = (sm.transitions ?? []).map((t) => {
+  const nextTransitions = (sm?.transitions ?? []).map((t) => {
     const nextEvent = rename(t.event) ?? t.event;
     const nextEffects = t.effects
       ? (renameEventsInEffects(t.effects as readonly unknown[], rename) as typeof t.effects)
       : t.effects;
     return { ...t, event: nextEvent, effects: nextEffects };
   });
-  const nextEvents = (sm.events ?? []).map((e) => {
+  const nextEvents = (sm?.events ?? []).map((e) => {
     const newKey = rename(e.key);
     if (newKey === e.key) return e;
     return { ...e, key: newKey ?? e.key };
@@ -972,13 +1046,44 @@ function applyEventRenames(
     const newEvent = rename(em.event);
     return newEvent === em.event ? em : { ...em, event: newEvent ?? em.event };
   });
+  // Tick effects carry the same `(emit OLD …)` heads and render-ui event
+  // props as transition effects — the compiled path walks them too.
+  // Skipping ticks left tick-originated emits (e.g. a platformer body's
+  // physicsTick BODY_MOVED) firing the pre-rename name.
+  const nextTicks = (trait.ticks ?? []).map((tk) =>
+    tk.effects
+      ? {
+          ...tk,
+          effects: renameEventsInEffects(
+            tk.effects as readonly unknown[],
+            rename,
+          ) as typeof tk.effects,
+        }
+      : tk,
+  );
+  // A listen's `triggers` names THIS trait's transition event — rename it.
+  // A listen's `event` names the SOURCE trait's vocabulary when sourced
+  // (kind trait/orbital); unsourced/`any` listens follow this trait's own
+  // renames. Mirrors the compiled path's `rewrite_trait_event_fields`.
+  const nextListens = (trait.listens ?? []).map((l) => {
+    const sourced = l.source !== undefined && l.source.kind !== "any";
+    const nextEvent = sourced ? l.event : (rename(l.event) ?? l.event);
+    const nextTriggers = rename(l.triggers) ?? l.triggers;
+    return nextEvent === l.event && nextTriggers === l.triggers
+      ? l
+      : { ...l, event: nextEvent, triggers: nextTriggers };
+  });
   return {
     ...trait,
-    stateMachine: {
-      ...sm,
-      transitions: nextTransitions,
-      events: nextEvents,
-    },
+    stateMachine: sm
+      ? {
+          ...sm,
+          transitions: nextTransitions,
+          events: nextEvents,
+        }
+      : sm,
+    ...(trait.ticks ? { ticks: nextTicks } : {}),
+    ...(trait.listens ? { listens: nextListens } : {}),
     emits: nextEmits,
   } as Trait;
 }

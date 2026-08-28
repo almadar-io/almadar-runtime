@@ -2703,8 +2703,14 @@ export class OrbitalServerRuntime {
 
           if (options?.id) {
             // Single entity fetch
-            const entity = await this.persistence.getById(fetchEntityType, options.id);
-            if (entity && applyRowAccess([entity], readPolicy, undefined, accessBindings).length > 0) {
+            const stored = await this.persistence.getById(fetchEntityType, options.id);
+            if (stored && applyRowAccess([stored], readPolicy, undefined, accessBindings).length > 0) {
+              // Hydrate a CLONE, never the store's row: populateRelations
+              // attaches related objects over the FK columns, and an
+              // in-memory persistence layer returns live references — a
+              // mutated store row then fails later filters/validation and
+              // silently vanishes from every subsequent fetch.
+              const entity = { ...stored };
               // Populate relations if include specified
               if (options?.include && options.include.length > 0) {
                 await this.populateRelations([entity], fetchEntityType, options.include);
@@ -2740,8 +2746,10 @@ export class OrbitalServerRuntime {
               entities = entities.slice(0, options.limit);
             }
 
-            // Populate relations if include specified
+            // Populate relations if include specified — on CLONES, for the
+            // same store-corruption reason as the single-row branch above.
             if (options?.include && options.include.length > 0) {
+              entities = entities.map((row) => ({ ...row }));
               await this.populateRelations(entities, fetchEntityType, options.include);
             }
 
