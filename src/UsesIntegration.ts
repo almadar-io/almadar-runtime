@@ -298,6 +298,11 @@ function deriveAuxiliaryEntities(resolvedOrbital: ResolvedOrbital): EntityRef[] 
  *
  * - `persistent` entities share the same collection
  * - `runtime` entities get isolated collections per orbital
+ *
+ * NOTE: the runtime's own store keying does NOT go through this helper —
+ * `MockPersistenceAdapter` resolves entity → store via its declared
+ * `collection` directly (collection-keyed stores, 2026-08-29). This stays
+ * exported for external consumers computing display/derived names only.
  */
 export function getIsolatedCollectionName(
   orbitalName: string,

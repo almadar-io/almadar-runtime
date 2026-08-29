@@ -1408,6 +1408,7 @@ export class OrbitalServerRuntime {
         this.persistence.registerEntity({
           name: entity.name,
           id: entity.id,
+          collection: entity.collection,
           fields,
           persistence: entity.persistence,
         });
@@ -1449,6 +1450,7 @@ export class OrbitalServerRuntime {
         this.persistence.registerEntity({
           name: auxEntity.name,
           id: auxEntity.id,
+          collection: auxEntity.collection,
           fields: auxFields,
           persistence: auxEntity.persistence,
         });
@@ -1850,8 +1852,28 @@ export class OrbitalServerRuntime {
         this.persistence.registerEntity({
           name: entity.name,
           id: entity.id,
+          collection: entity.collection,
           fields,
           persistence: entity.persistence,
+        });
+      }
+      // Auxiliary entities (imported atom entities) were registered at boot;
+      // a reset that drops them would leave their fetches on empty stores and
+      // orphan any sibling sharing their collection.
+      for (const auxRef of registered.schema.auxiliaryEntities ?? []) {
+        if (typeof auxRef === 'string' || isEntityCall(auxRef)) continue;
+        if (!auxRef.name || !auxRef.fields) continue;
+        const auxFields = auxRef.fields
+          .filter((f): f is typeof f & { name: string } =>
+            typeof f.name === 'string' && f.name.length > 0,
+          )
+          ;
+        this.persistence.registerEntity({
+          name: auxRef.name,
+          id: auxRef.id,
+          collection: auxRef.collection,
+          fields: auxFields,
+          persistence: auxRef.persistence,
         });
       }
     }

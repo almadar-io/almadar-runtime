@@ -53,6 +53,15 @@ export interface EntitySchema {
   name: string;
   /** V4 dual-carry id sibling of `name` — optional until the Phase-7 flip. */
   id?: EntityId;
+  /**
+   * Declared `persistent: <collection>` name. Entities declaring the SAME
+   * collection share ONE store — a shadow entity (`WikiTagRef [persistent:
+   * tags]`) reads the very rows its sibling (`Tag [persistent: tags]`) seeds,
+   * matching the compiled path's dedup-by-collection (orbital-shell-typescript
+   * seed.rs) and docs/Almadar_Entity.md's collection rule. Absent → the store
+   * is keyed by entity name, as before.
+   */
+  collection?: string;
   fields: NamedEntityField[];
   /** Pre-authored instance data from the schema (used instead of generated mocks) */
   seedData?: EntityRow[];
@@ -98,8 +107,14 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   private stores: Map<string, Map<string, EntityRow>> = new Map();
   private schemas: Map<string, EntitySchema> = new Map();
   private idCounters: Map<string, number> = new Map();
-  /** entityId -> normalized store name, so relation lookups can prefer the id sibling over `relation.entity` name-matching. */
+  /** entityId -> store key, so relation lookups can prefer the id sibling over `relation.entity` name-matching. */
   private storeNameById: Map<string, string> = new Map();
+  /** normalized entity name -> store key (the declared collection, else the name).
+   *  Entities sharing a `persistent:` collection resolve to the same store. */
+  private storeKeyByEntity: Map<string, string> = new Map();
+  /** store key -> the first registrant's entity name, used as the minted-id label
+   *  so rows in a shared collection carry one consistent id family. */
+  private idLabelByStoreKey: Map<string, string> = new Map();
   private config: MockPersistenceConfig;
   /**
    * Every (entity, row id, column) cell `seed()` stamped with `config.ownerId`.
@@ -185,20 +200,29 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   // Store Management
   // ============================================================================
 
-  private getStore(entityName: string): Map<string, EntityRow> {
+  /** Resolve an entity name to its store key: the declared collection when the
+   *  entity is registered, the lowercased name otherwise (unregistered ad-hoc
+   *  creates keep working). */
+  private resolveStoreKey(entityName: string): string {
     const normalized = entityName.toLowerCase();
-    if (!this.stores.has(normalized)) {
-      this.stores.set(normalized, new Map());
-      this.idCounters.set(normalized, 0);
+    return this.storeKeyByEntity.get(normalized) ?? normalized;
+  }
+
+  private getStore(entityName: string): Map<string, EntityRow> {
+    const key = this.resolveStoreKey(entityName);
+    if (!this.stores.has(key)) {
+      this.stores.set(key, new Map());
+      this.idCounters.set(key, 0);
     }
-    return this.stores.get(normalized)!;
+    return this.stores.get(key)!;
   }
 
   private nextId(entityName: string): string {
-    const normalized = entityName.toLowerCase();
-    const counter = (this.idCounters.get(normalized) ?? 0) + 1;
-    this.idCounters.set(normalized, counter);
-    return `${this.capitalizeFirst(entityName)} Id ${counter}`;
+    const key = this.resolveStoreKey(entityName);
+    const counter = (this.idCounters.get(key) ?? 0) + 1;
+    this.idCounters.set(key, counter);
+    const label = this.idLabelByStoreKey.get(key) ?? entityName;
+    return `${this.capitalizeFirst(label)} Id ${counter}`;
   }
 
   // ============================================================================
@@ -212,14 +236,26 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    */
   registerEntity(schema: EntitySchema, seedCount?: number): void {
     const normalized = schema.name.toLowerCase();
+    const storeKey = (schema.collection ?? schema.name).toLowerCase();
+    this.storeKeyByEntity.set(normalized, storeKey);
+    if (!this.idLabelByStoreKey.has(storeKey)) {
+      this.idLabelByStoreKey.set(storeKey, schema.name);
+    }
     this.schemas.set(normalized, schema);
     if (schema.id) {
-      this.storeNameById.set(schema.id, normalized);
+      this.storeNameById.set(schema.id, storeKey);
     }
 
+    const alreadySeeded = (this.stores.get(storeKey)?.size ?? 0) > 0;
     if (schema.seedData && schema.seedData.length > 0) {
       // Seed with actual pre-authored instances
       this.seedFromInstances(schema.name, schema.seedData);
+    } else if (alreadySeeded) {
+      // A sibling entity on the same collection seeded this store first.
+      // Don't re-seed (one collection = one dataset); instead backfill any
+      // fields THIS schema declares that the first registrant's rows lack,
+      // so both entities' filters/renders find their columns populated.
+      this.backfillFields(storeKey, schema);
     } else {
       const requested = seedCount ?? this.config.defaultSeedCount ?? 6;
       const count = sampleRowCount(
@@ -244,26 +280,71 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * of nested-tree atoms (e.g. std-thread-comments-linear with ThreadPost.
    * replies → [ThreadPost]) render empty reply cards.
    *
-   * For self-referential relations, each row gets 2–4 sibling IDs (excluding
-   * self). For cross-entity relations, IDs are picked from the target store.
-   * The runtime caps recursion at depth=2 in `populateRelations`, so
-   * grandparent-of-self cycles render two levels deep then stop.
+   * Cross-entity relations pick random IDs from the target store. A
+   * SELF-referential `one`-cardinality relation (a parent column like
+   * `Tag.parentId : Tag`) is linked deterministically instead: row 0 stays a
+   * root (`""`) and row *i* parents to row ⌊(i−1)/2⌋ — a proper forest with
+   * real roots and no cycles, so tree views and `parentId = ""` root fetches
+   * render sensibly. Self-referential `many` relations keep the 2–4 random
+   * sibling IDs (excluding self). The runtime caps recursion at depth=2 in
+   * `populateRelations`, so deep chains render two levels then stop.
+   *
+   * Entities sharing a collection are linked once per STORE, over the union
+   * of their declared relation fields (first declarer of a field name wins).
    */
   linkRelationFields(): void {
+    // Narrowed relation-field shape — the `f is …` predicate below is what
+    // makes `field.relation` typed in the loop, no record-access casts.
+    type RelationField = NamedEntityField & {
+      type: 'relation';
+      relation: { entity: string; entityId?: EntityId; cardinality?: string; field?: string };
+    };
+    const relationFieldsByStore = new Map<string, Map<string, RelationField>>();
     for (const [normalizedName, schema] of this.schemas) {
-      const store = this.stores.get(normalizedName);
-      if (!store) continue;
-      // Narrow to RelationEntityField (with required `relation` config) via the
-      // canonical discriminator. The `f is NamedEntityField & { type: "relation" }`
-      // predicate is what makes `field.relation` typed in the loop below — no
-      // record-access casts, no unknown narrowing.
-      const relationFields = schema.fields.filter(
-        (f): f is NamedEntityField & { type: 'relation'; relation: { entity: string; entityId?: EntityId; cardinality?: string; field?: string } } =>
-          f.type === 'relation',
-      );
-      if (relationFields.length === 0) continue;
-      for (const row of store.values()) {
-        for (const field of relationFields) {
+      const storeKey = this.storeKeyByEntity.get(normalizedName) ?? normalizedName;
+      let fieldMap = relationFieldsByStore.get(storeKey);
+      if (!fieldMap) {
+        fieldMap = new Map();
+        relationFieldsByStore.set(storeKey, fieldMap);
+      }
+      for (const f of schema.fields) {
+        if (
+          ((candidate: NamedEntityField): candidate is RelationField => candidate.type === 'relation')(f) &&
+          !fieldMap.has(f.name)
+        ) {
+          fieldMap.set(f.name, f);
+        }
+      }
+    }
+
+    for (const [storeKey, fieldMap] of relationFieldsByStore) {
+      const store = this.stores.get(storeKey);
+      if (!store || fieldMap.size === 0) continue;
+      const rows = [...store.values()];
+      for (const field of fieldMap.values()) {
+        // Id-primary: prefer the `entityId` sibling via the id->store index,
+        // falling back to the `entity` name string when the id is absent
+        // or unindexed (transition-period tolerance).
+        const targetKey =
+          (field.relation.entityId && this.storeNameById.get(field.relation.entityId)) ??
+          this.resolveStoreKey(field.relation.entity);
+        const targetStore = this.stores.get(targetKey);
+        if (!targetStore || targetStore.size === 0) continue;
+        const sameStore = targetStore === store;
+        const cardinality = field.relation.cardinality ?? 'many';
+
+        if (sameStore && (cardinality === 'one' || cardinality === 'many-to-one')) {
+          // Deterministic forest for parent columns (see method doc).
+          rows.forEach((row, i) => {
+            if (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) {
+              return;
+            }
+            row[field.name] = i === 0 ? '' : (rows[Math.floor((i - 1) / 2)]!['id'] as string);
+          });
+          continue;
+        }
+
+        for (const row of rows) {
           // A schema-derived owner column IS a relation to the [identity]
           // entity, so this pass would overwrite the viewer stamp `seed()` just
           // assigned and every ownership-scoped view would render empty again.
@@ -271,26 +352,16 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
           if (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) {
             continue;
           }
-          // Id-primary: prefer the `entityId` sibling via the id->name index,
-          // falling back to the `entity` name string when the id is absent
-          // or unindexed (transition-period tolerance).
-          const targetNormalized =
-            (field.relation.entityId && this.storeNameById.get(field.relation.entityId)) ??
-            field.relation.entity.toLowerCase();
-          const targetStore = this.stores.get(targetNormalized);
-          if (!targetStore || targetStore.size === 0) continue;
           // Eligible IDs: every id in the target store, minus this row's own id
           // (only when target === self entity) so a comment doesn't list itself
           // as its own reply.
           const selfId = row['id'] as string | undefined;
-          const sameStore = targetStore === store;
           const eligible: string[] = [];
           for (const id of targetStore.keys()) {
             if (sameStore && id === selfId) continue;
             eligible.push(id);
           }
           if (eligible.length === 0) continue;
-          const cardinality = field.relation.cardinality ?? 'many';
           if (cardinality === 'one' || cardinality === 'many-to-one') {
             row[field.name] = randomArrayElement(eligible);
           } else {
@@ -301,6 +372,44 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         }
       }
     }
+  }
+
+  /**
+   * Fill fields a late-registering sibling schema declares that the shared
+   * store's existing rows lack. The first registrant on a collection seeds
+   * with ITS field list; a sibling declaring extra columns (e.g. `Tag.parentId`
+   * arriving after `WikiTagRef {id,name}`) would otherwise read `undefined`
+   * where its filters expect a value. Values come from the same canonical
+   * sample policy as seeding; relation fields are then linked by the global
+   * `linkRelationFields` pass that follows registration.
+   */
+  private backfillFields(storeKey: string, schema: EntitySchema): void {
+    const store = this.stores.get(storeKey);
+    if (!store) return;
+    const candidates = schema.fields.filter(
+      (f) => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt',
+    );
+    if (candidates.length === 0) return;
+    let index = 0;
+    for (const row of store.values()) {
+      index += 1;
+      const absent = candidates.filter((f) => row[f.name] === undefined);
+      if (absent.length === 0) continue;
+      const sample = sampleRow(
+        { name: schema.name, persistence: schema.persistence, fields: absent },
+        { index, strategy: 'seeded', persistence: schema.persistence },
+      );
+      for (const f of absent) {
+        if (sample[f.name] !== undefined) {
+          row[f.name] = sample[f.name] as FieldValue;
+        }
+      }
+    }
+    mockLog.debug('mock:backfill', {
+      storeKey,
+      entity: schema.name,
+      fields: candidates.map((f) => f.name),
+    });
   }
 
   /**
@@ -331,6 +440,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   seed(entityName: string, fields: EntityField[], count: number, persistence?: EntityPersistence): void {
     const store = this.getStore(entityName);
     const normalized = entityName.toLowerCase();
+    const storeKey = this.resolveStoreKey(entityName);
 
     if (this.config.debug) {
       mockLog.debug('seeding', { count, entity: entityName });
@@ -352,7 +462,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       if (ownerId && ownerCols.length > 0 && i % 2 === 0) {
         for (const col of ownerCols) {
           item[col] = ownerId;
-          this.ownerStampedCells.push({ entity: normalized, id: item.id as string, column: col });
+          this.ownerStampedCells.push({ entity: storeKey, id: item.id as string, column: col });
         }
       }
       store.set(item.id as string, item);
@@ -527,9 +637,9 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * Clear all data for an entity.
    */
   clear(entityName: string): void {
-    const normalized = entityName.toLowerCase();
-    this.stores.delete(normalized);
-    this.idCounters.delete(normalized);
+    const key = this.resolveStoreKey(entityName);
+    this.stores.delete(key);
+    this.idCounters.delete(key);
   }
 
   /** Clear all data + re-anchor the PRNG so the next seed loop reproduces
@@ -539,6 +649,9 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     this.stores.clear();
     this.idCounters.clear();
     this.ownerStampedCells = [];
+    this.storeKeyByEntity.clear();
+    this.idLabelByStoreKey.clear();
+    this.storeNameById.clear();
     this.resetFakerSeed();
     mockLog.debug('mock:adapter:clearAll', { reanchored: this.config.seed });
   }

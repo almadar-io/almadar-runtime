@@ -244,7 +244,11 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
     for (const transition of candidates) {
         smLog.debug('processEvent', { trait: trait.name, event: normalizedEvent, currentState: traitState.currentState, to: transition.to });
 
-        if (!transition.guard) {
+        // ABSENT means unguarded — never falsy. Resolve constant-folds
+        // config-driven guards (`when @config.selfFetch` with a false call-site
+        // value becomes the literal `false`), and `!guard` promoted exactly
+        // those always-blocked arms to always-fire.
+        if (transition.guard === undefined || transition.guard === null) {
             // Unguarded transition wins immediately.
             return {
                 executed: true,
