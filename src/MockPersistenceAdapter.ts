@@ -49,6 +49,24 @@ export type { EntityField };
  *  at the registerEntity boundary. */
 type NamedEntityField = EntityField & { name: string };
 
+/** EntityField narrowed to a relation field — the `isRelationField` guard
+ *  below is what makes `field.relation` typed, no record-access casts. */
+type RelationField = NamedEntityField & {
+  type: 'relation';
+  relation: { entity: string; entityId?: EntityId; cardinality?: string; field?: string };
+};
+
+function isRelationField(field: NamedEntityField): field is RelationField {
+  return field.type === 'relation';
+}
+
+/** Composite key for an owner-stamped (entity/store key, row id, column)
+ *  cell. `\x00`-joined — an id like "WikiPage Id 1" already contains
+ *  spaces, so a space-joined key would collide across cells. */
+function stampedCellKey(entity: string, id: string, column: string): string {
+  return `${entity}\x00${id}\x00${column}`;
+}
+
 export interface EntitySchema {
   name: string;
   /** V4 dual-carry id sibling of `name` — optional until the Phase-7 flip. */
@@ -169,20 +187,124 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * No-op when there is no new id, or it matches the current one — an
    * anonymous switch (`newOwnerId === undefined`) leaves existing stamps as
    * they are rather than clearing a non-nullable owner column.
+   *
+   * Both this re-labeling AND `seed()`'s original stamping consult the
+   * `ownerGate` hook (see `setOwnerGate`) — a re-register reseeds identical
+   * rows, so gating only the restamp path leaks the moment a client
+   * connects and the deterministic reseed stamps with the updated ownerId.
    */
   restampOwner(newOwnerId: string | undefined): void {
     const oldOwnerId = this.config.ownerId;
     this.config.ownerId = newOwnerId;
     if (!newOwnerId || newOwnerId === oldOwnerId) return;
+    let skipped = 0;
+    let fallbackStamps = 0;
     for (const cell of this.ownerStampedCells) {
       const row = this.stores.get(cell.entity)?.get(cell.id);
-      if (row) row[cell.column] = newOwnerId;
+      if (!row) continue;
+      if (this.ownerGate && !this.ownerGate(cell.entity, { ...row, [cell.column]: newOwnerId })) {
+        const fallbackId = this.firstEligibleOwner(cell.entity, cell.column, row);
+        if (fallbackId === undefined) {
+          skipped++;
+          continue;
+        }
+        row[cell.column] = fallbackId;
+        fallbackStamps++;
+        continue;
+      }
+      row[cell.column] = newOwnerId;
     }
     mockLog.debug('mock:owner-restamped', {
       from: oldOwnerId,
       to: newOwnerId,
       cells: this.ownerStampedCells.length,
+      skipped,
+      fallbackStamps,
     });
+  }
+
+  /**
+   * The host's answer to "may the current viewer OWN this row?" — evaluated
+   * against the candidate row with the owner column already re-pointed,
+   * `storeKey` being the collection key the stores are keyed by. The runtime
+   * installs the registered schema's `@create` directive here (the single
+   * authority on who authors; no role heuristics), so a read-only persona
+   * never inherits authorship of drafts from the demo stamper — neither on a
+   * persona switch (`restampOwner`) nor on a deterministic reseed (`seed`).
+   * Absent hook = stamp unconditionally (pre-role-model behavior).
+   */
+  private ownerGate?: (storeKey: string, candidateRow: EntityRow) => boolean;
+
+  setOwnerGate(gate: ((storeKey: string, candidateRow: EntityRow) => boolean) | undefined): void {
+    this.ownerGate = gate;
+  }
+
+  /**
+   * The host's answer to "may THIS identity row own this candidate row?" —
+   * evaluated per candidate rather than against the fixed default viewer, so
+   * `linkRelationFields` and the eligible-owner fallback (see
+   * `firstEligibleOwner`) can pick a policy-valid owner from the whole
+   * identity roster instead of only ever checking the current default user.
+   * Absent hook = no candidate filtering (pre-role-model behavior).
+   */
+  private ownerCandidateGate?: (
+    storeKey: string,
+    candidateRow: EntityRow,
+    candidateIdentityRow: EntityRow,
+  ) => boolean;
+
+  setOwnerCandidateGate(
+    gate:
+      | ((storeKey: string, candidateRow: EntityRow, candidateIdentityRow: EntityRow) => boolean)
+      | undefined,
+  ): void {
+    this.ownerCandidateGate = gate;
+  }
+
+  /**
+   * The store an owner column's relation field targets, resolved the same
+   * way `linkRelationFields` resolves any relation target (id sibling wins
+   * over the `entity` name string) — but keyed by STORE, mirroring that
+   * method's first-declarer-per-collection rule, so `seed()` and
+   * `restampOwner()` can find it before a `linkRelationFields` pass has run
+   * this registration. Undefined when no registered schema on `storeKey`
+   * declares `column` as a relation field.
+   */
+  private resolveOwnerColumnTargetStore(storeKey: string, column: string): string | undefined {
+    for (const [normalizedName, schema] of this.schemas) {
+      if ((this.storeKeyByEntity.get(normalizedName) ?? normalizedName) !== storeKey) continue;
+      const field = schema.fields.find((f) => f.name === column);
+      if (field && isRelationField(field)) {
+        return (
+          (field.relation.entityId && this.storeNameById.get(field.relation.entityId)) ??
+          this.resolveStoreKey(field.relation.entity)
+        );
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * The first identity-store row (seed order) whose persona is eligible, per
+   * the installed `ownerCandidateGate`, to own `row`'s `column` in `storeKey`
+   * — the deterministic replacement for "skip the stamp" when the CURRENT
+   * viewer fails the `@create` policy (e.g. a reader-default persona against
+   * an author|reviewer-only policy). Undefined when no gate is installed, the
+   * column isn't a resolvable relation, or no identity row is eligible — the
+   * caller keeps today's skip behavior in that case.
+   */
+  private firstEligibleOwner(storeKey: string, column: string, row: EntityRow): string | undefined {
+    if (!this.ownerCandidateGate) return undefined;
+    const identityStoreKey = this.resolveOwnerColumnTargetStore(storeKey, column);
+    const identityStore = identityStoreKey ? this.stores.get(identityStoreKey) : undefined;
+    if (!identityStore) return undefined;
+    for (const identityRow of identityStore.values()) {
+      const candidateId = identityRow['id'] as string;
+      if (this.ownerCandidateGate(storeKey, { ...row, [column]: candidateId }, identityRow)) {
+        return candidateId;
+      }
+    }
+    return undefined;
   }
 
   /** Re-anchor the PRNG to the configured seed. Called before every
@@ -293,12 +415,6 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * of their declared relation fields (first declarer of a field name wins).
    */
   linkRelationFields(): void {
-    // Narrowed relation-field shape — the `f is …` predicate below is what
-    // makes `field.relation` typed in the loop, no record-access casts.
-    type RelationField = NamedEntityField & {
-      type: 'relation';
-      relation: { entity: string; entityId?: EntityId; cardinality?: string; field?: string };
-    };
     const relationFieldsByStore = new Map<string, Map<string, RelationField>>();
     for (const [normalizedName, schema] of this.schemas) {
       const storeKey = this.storeKeyByEntity.get(normalizedName) ?? normalizedName;
@@ -308,20 +424,34 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         relationFieldsByStore.set(storeKey, fieldMap);
       }
       for (const f of schema.fields) {
-        if (
-          ((candidate: NamedEntityField): candidate is RelationField => candidate.type === 'relation')(f) &&
-          !fieldMap.has(f.name)
-        ) {
+        if (isRelationField(f) && !fieldMap.has(f.name)) {
           fieldMap.set(f.name, f);
         }
       }
     }
 
+    // Declared owner columns, by store — used below so a random relink never
+    // hands a policy-ineligible identity credit for a row it may not own.
+    const ownerColumnsByStore = new Map<string, Set<string>>();
+    for (const { entity, field } of this.parsedOwnerFields()) {
+      const storeKey = this.resolveStoreKey(entity);
+      const set = ownerColumnsByStore.get(storeKey) ?? new Set<string>();
+      set.add(field);
+      ownerColumnsByStore.set(storeKey, set);
+    }
+    // Cells `seed()`/`restampOwner()` already stamped (deliberately, or via
+    // the eligible-owner fallback) — never randomly relinked by this pass.
+    const stampedCellKeys = new Set(
+      this.ownerStampedCells.map((cell) => stampedCellKey(cell.entity, cell.id, cell.column)),
+    );
+
     for (const [storeKey, fieldMap] of relationFieldsByStore) {
       const store = this.stores.get(storeKey);
       if (!store || fieldMap.size === 0) continue;
       const rows = [...store.values()];
+      const ownerColumns = ownerColumnsByStore.get(storeKey);
       for (const field of fieldMap.values()) {
+        const isOwnerColumn = ownerColumns?.has(field.name) ?? false;
         // Id-primary: prefer the `entityId` sibling via the id->store index,
         // falling back to the `entity` name string when the id is absent
         // or unindexed (transition-period tolerance).
@@ -336,7 +466,10 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         if (sameStore && (cardinality === 'one' || cardinality === 'many-to-one')) {
           // Deterministic forest for parent columns (see method doc).
           rows.forEach((row, i) => {
-            if (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) {
+            if (
+              (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) ||
+              stampedCellKeys.has(stampedCellKey(storeKey, row['id'] as string, field.name))
+            ) {
               return;
             }
             row[field.name] = i === 0 ? '' : (rows[Math.floor((i - 1) / 2)]!['id'] as string);
@@ -345,21 +478,31 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         }
 
         for (const row of rows) {
+          const selfId = row['id'] as string;
           // A schema-derived owner column IS a relation to the [identity]
           // entity, so this pass would overwrite the viewer stamp `seed()` just
-          // assigned and every ownership-scoped view would render empty again.
-          // Deliberate assignment wins over random linking.
-          if (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) {
+          // assigned (or the eligible-owner fallback picked) and every
+          // ownership-scoped view would render empty, or a wrongly-credited
+          // draft, again. Deliberate/gated assignment wins over random linking.
+          if (
+            (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) ||
+            stampedCellKeys.has(stampedCellKey(storeKey, selfId, field.name))
+          ) {
             continue;
           }
           // Eligible IDs: every id in the target store, minus this row's own id
           // (only when target === self entity) so a comment doesn't list itself
           // as its own reply.
-          const selfId = row['id'] as string | undefined;
-          const eligible: string[] = [];
+          let eligible: string[] = [];
           for (const id of targetStore.keys()) {
             if (sameStore && id === selfId) continue;
             eligible.push(id);
+          }
+          if (isOwnerColumn && this.ownerCandidateGate) {
+            const gate = this.ownerCandidateGate;
+            eligible = eligible.filter((id) =>
+              gate(storeKey, { ...row, [field.name]: id }, targetStore.get(id)!),
+            );
           }
           if (eligible.length === 0) continue;
           if (cardinality === 'one' || cardinality === 'many-to-one') {
@@ -447,20 +590,34 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     }
 
     // Declared owner columns for THIS entity (see MockPersistenceConfig.ownerFields).
-    const ownerCols = (this.config.ownerFields ?? [])
-      .map((pair) => pair.split('.'))
-      .filter(([ent]) => ent?.toLowerCase() === normalized)
-      .map(([, field]) => field)
-      .filter((field): field is string => Boolean(field));
+    const ownerCols = this.parsedOwnerFields()
+      .filter(({ entity }) => entity.toLowerCase() === normalized)
+      .map(({ field }) => field);
     const ownerId = this.config.ownerId;
 
     const generated: Array<{ id: string; updatedAt: string }> = [];
+    let fallbackStamps = 0;
     for (let i = 0; i < count; i++) {
       const item = this.generateMockItem(entityName, fields, i + 1, persistence);
       // Give the viewer every other row, so an ownership-scoped view has real
-      // data while a second persona still sees a different set.
+      // data while a second persona still sees a different set — unless the
+      // ownerGate says this viewer could not have authored the row (a reseed
+      // runs AFTER a persona switch updated ownerId, so this path needs the
+      // same gate as restampOwner or the switch leaks through re-register).
       if (ownerId && ownerCols.length > 0 && i % 2 === 0) {
         for (const col of ownerCols) {
+          if (this.ownerGate && !this.ownerGate(storeKey, { ...item, [col]: ownerId })) {
+            // The default viewer can't own this row under the entity's
+            // @create policy (e.g. a reader-default persona, author-only
+            // policy) — stamp the first policy-eligible identity instead of
+            // leaving whatever random value `sampleRow` generated.
+            const fallbackId = this.firstEligibleOwner(storeKey, col, item);
+            if (fallbackId === undefined) continue;
+            item[col] = fallbackId;
+            this.ownerStampedCells.push({ entity: storeKey, id: item.id as string, column: col });
+            fallbackStamps++;
+            continue;
+          }
           item[col] = ownerId;
           this.ownerStampedCells.push({ entity: storeKey, id: item.id as string, column: col });
         }
@@ -471,7 +628,24 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : '',
       });
     }
-    mockLog.debug('mock:seed', () => ({ entityName, count, idsAndTimestamps: JSON.stringify(generated) }));
+    mockLog.debug('mock:seed', () => ({
+      entityName,
+      count,
+      idsAndTimestamps: JSON.stringify(generated),
+      fallbackStamps,
+    }));
+  }
+
+  /** Parsed `config.ownerFields` pairs — every declared "Entity.field" owner
+   *  column, split once so `seed()` and `linkRelationFields()` don't each
+   *  re-parse the same strings. */
+  private parsedOwnerFields(): Array<{ entity: string; field: string }> {
+    const out: Array<{ entity: string; field: string }> = [];
+    for (const pair of this.config.ownerFields ?? []) {
+      const [entity, field] = pair.split('.');
+      if (entity && field) out.push({ entity, field });
+    }
+    return out;
   }
 
   /**

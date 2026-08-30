@@ -225,7 +225,7 @@ export type ClientEffectTuple =
   | ClientNavigateBackTuple
   | ClientNotifyTuple;
 import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef } from "@almadar/core";
-import { ownerFieldsFromSchema, identityEntityName, entityAccessPolicies } from "@almadar/core/mock";
+import { ownerFieldsFromSchema, identityEntityName, entityAccessPolicies, entityAccessPoliciesByStoreKey } from "@almadar/core/mock";
 import { getPatternFieldsContract } from "@almadar/core/patterns";
 import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from "./entityAccess.js";
 import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
@@ -948,6 +948,7 @@ export class OrbitalServerRuntime {
     // of re-reading the raw .orb from disk. See getResolvedSchema().
     this.resolvedSchema = schema;
     this.resolvedTraitConfigs = buildResolvedTraitConfigs(schema);
+    this.installOwnerGate();
   }
 
   /**
@@ -994,7 +995,7 @@ export class OrbitalServerRuntime {
 
     this.resolvedSchema = schema;
     this.resolvedTraitConfigs = buildResolvedTraitConfigs(schema);
-    this.applyIdentityOwnerFields(schema);
+    this.installOwnerGate();
   }
 
   /**
@@ -1911,7 +1912,62 @@ export class OrbitalServerRuntime {
       user?.id !== undefined &&
       user.id !== previousId
     ) {
-      this.persistence.restampOwner(user.id);
+      this.restampOwnerGated(user);
+    }
+  }
+
+  /** setDefaultUser can land before register() finishes resolving the schema
+   *  (a dev host pins a persona right after boot). An ungated restamp there
+   *  would hand a read-only persona authorship of drafts, so the restamp is
+   *  DEFERRED until the schema exists — register()/registerSync() flush it. */
+  private pendingOwnerRestamp = false;
+
+  /**
+   * Re-point the mock seeder's owner stamps at `user`. The adapter's
+   * installed owner gate (see installOwnerGate) decides per row whether the
+   * persona could have CREATED it — a reader keeps seeing the store's
+   * published face instead of inheriting draft ownership from the demo
+   * stamper. Deferred when the schema (and so the gate) isn't resolved yet.
+   */
+  private restampOwnerGated(user: UserContext): void {
+    if (!(this.persistence instanceof MockPersistenceAdapter)) return;
+    if (!this.resolvedSchema) {
+      this.pendingOwnerRestamp = true;
+      return;
+    }
+    this.persistence.restampOwner(user.id);
+  }
+
+  /**
+   * Install the schema's `@create` directives as the mock seeder's owner
+   * gate — the single authority on who may author a row. Consulted by BOTH
+   * `restampOwner` (persona switches) and `seed()` (a client connect
+   * re-registers, and the deterministic reseed re-stamps with the current
+   * ownerId — gating only the switch path would leak right there). Reads the
+   * CURRENT default user at evaluation time so one installation covers every
+   * later switch. Then flushes any switch that arrived before the schema.
+   */
+  private installOwnerGate(): void {
+    if (!(this.persistence instanceof MockPersistenceAdapter) || !this.resolvedSchema) return;
+    const policiesByStore = entityAccessPoliciesByStoreKey(this.resolvedSchema);
+    this.persistence.setOwnerGate((storeKey, candidateRow) => {
+      const user = this.config.defaultUser;
+      if (!user) return true;
+      return checkMutationAccess(candidateRow, policiesByStore.get(storeKey)?.create, { user });
+    });
+    // Per-candidate twin of the gate above, for linkRelationFields and the
+    // eligible-owner seed fallback: may THIS identity row (not the current
+    // default user) own the candidate row? A row without a usable `id` fails
+    // closed rather than being evaluated as an unauthenticated request.
+    this.persistence.setOwnerCandidateGate((storeKey, candidateRow, candidateIdentityRow) => {
+      const persona = personaFromIdentityRow(candidateIdentityRow);
+      if (!persona) return false;
+      return checkMutationAccess(candidateRow, policiesByStore.get(storeKey)?.create, { user: persona });
+    });
+    if (this.pendingOwnerRestamp) {
+      this.pendingOwnerRestamp = false;
+      const user = this.config.defaultUser;
+      if (user?.id !== undefined) this.restampOwnerGated(user);
     }
   }
 
