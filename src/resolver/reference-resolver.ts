@@ -29,6 +29,7 @@ import type {
   TraitId,
   PageId,
   ConfigFieldDeclaration,
+  ConfigFieldItemsDeclaration,
 } from "@almadar/core";
 import {
   isEntityReference,
@@ -41,6 +42,7 @@ import {
   parseImportedTraitRef,
   isInlineTrait,
   configRefEventKnob,
+  eventListPropsOf,
   resolveConfigRefEventName,
   normalizeCallSiteConfigToValues,
   isReferenceConfigType,
@@ -315,6 +317,10 @@ function renameEventsInRenderUiConfig(
   // props.
   const obj = node as PatternConfig;
   const next: PatternConfig = { ...obj };
+  // The node's own `type:` selects which pattern's prop metadata applies —
+  // the same discriminator the compiled path reads (`inline/rewrite.rs`).
+  const rawType = (obj as { type?: unknown }).type;
+  const patternType = typeof rawType === "string" ? rawType : undefined;
   for (const [key, value] of Object.entries(obj)) {
     if (key === "action" && typeof value === "string" && !value.startsWith("@")) {
       (next as { [k: string]: PatternConfig[keyof PatternConfig] })[key] =
@@ -331,16 +337,22 @@ function renameEventsInRenderUiConfig(
         (rename(value) ?? value) as PatternConfig[keyof PatternConfig];
       continue;
     }
-    if ((key === "actions" || key === "itemActions") && Array.isArray(value)) {
+    // Descriptor arrays (`actions`, `itemActions`, `topBarActions`, …). Which
+    // props carry events, and WHICH member of each descriptor holds the event,
+    // are facts the pattern registry owns — read them, never re-list them here.
+    // A hardcoded `actions`/`itemActions` allowlist with a hardcoded `event`
+    // member used to stand in for this, and it silently missed every other
+    // event-list prop (`dashboard-layout.topBarActions`,
+    // `swipeable-row.leftActions`/`rightActions`, `breadcrumb.items`) as well
+    // as any prop whose carrier is not literally named `event`.
+    const eventField = patternType !== undefined ? eventListPropsOf(patternType).get(key) : undefined;
+    if (eventField !== undefined && Array.isArray(value)) {
       const rewrittenArray = value.map((entry): unknown => {
         if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
-        // Pattern action entries have a shared minimal contract: `event`
-        // (required event key), `label`, `icon`, `variant`. Narrow to
-        // that shape for the event rewrite; other keys pass through the
-        // spread intact.
-        const action = entry as { event?: string; [k: string]: unknown };
-        if (typeof action.event === "string" && !action.event.startsWith("@")) {
-          return { ...action, event: rename(action.event) ?? action.event };
+        const action = entry as { [k: string]: unknown };
+        const current = action[eventField];
+        if (typeof current === "string" && !current.startsWith("@")) {
+          return { ...action, [eventField]: rename(current) ?? current };
         }
         return action;
       });
@@ -350,6 +362,92 @@ function renameEventsInRenderUiConfig(
     (next as { [k: string]: unknown })[key] = renameEventsInRenderUiConfig(value, rename);
   }
   return next;
+}
+
+/**
+ * Rename event names inside a config VALUE, driven by the knob's declared
+ * item schema: a member whose declared type is `event` holds an event-name
+ * REFERENCE, so a call-site `events {}` rename must rewrite it.
+ *
+ * Type-directed, never name-directed — the member may be called anything, and
+ * a member named `event` that is NOT declared `event`-typed is left alone.
+ * Mirrors the compiled path's knob-level fold (`inline/trait.rs`), which
+ * enforces the same invariant for scalar `event`-typed knobs.
+ */
+function renameEventTypedMembers(
+  value: unknown,
+  items: ConfigFieldItemsDeclaration | undefined,
+  rename: (k: string | undefined) => string | undefined,
+): unknown {
+  if (items === undefined || value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => renameEventTypedMembers(entry, items, rename));
+  }
+  if (typeof value !== "object") return value;
+  const properties = items.properties;
+  if (properties === undefined) return value;
+  const entry = value as { [k: string]: unknown };
+  const next: { [k: string]: unknown } = { ...entry };
+  let touched = false;
+  for (const [member, decl] of Object.entries(properties)) {
+    const current = entry[member];
+    if (decl.type === "event") {
+      // `@`-bindings resolve elsewhere; "" is the default-off outlet.
+      if (typeof current === "string" && current !== "" && !current.startsWith("@")) {
+        const renamed = rename(current);
+        if (renamed !== undefined && renamed !== current) {
+          next[member] = renamed;
+          touched = true;
+        }
+      }
+      continue;
+    }
+    // Arrays/objects of objects nest — a descriptor can hold descriptors.
+    if (decl.items !== undefined && current !== undefined) {
+      const nested = renameEventTypedMembers(current, decl.items, rename);
+      if (nested !== current) {
+        next[member] = nested;
+        touched = true;
+      }
+    }
+  }
+  return touched ? next : value;
+}
+
+/**
+ * Fold a rename across a trait's DECLARED config knob defaults. The literals
+ * a render-ui node forwards as `actions: "@config.actions"` live here, not in
+ * the effect tree, so the effect walk never reaches them — the runtime twin of
+ * SCAN-DETAIL-PANEL-ACTIONS-UNTAGGED-1.
+ */
+function renameEventsInDeclaredConfig(
+  config: Trait["config"],
+  rename: (k: string | undefined) => string | undefined,
+): Trait["config"] {
+  if (config === undefined) return config;
+  let touched = false;
+  const next: { [k: string]: ConfigFieldDeclaration } = {};
+  for (const [knob, field] of Object.entries(config)) {
+    if (field.default === undefined) {
+      next[knob] = field;
+      continue;
+    }
+    // A knob declared `: event` is itself a reference (the scalar case);
+    // otherwise descend into its item schema for `event`-typed members.
+    const renamedDefault =
+      field.type === "event"
+        ? (typeof field.default === "string" && field.default !== "" && !field.default.startsWith("@")
+            ? (rename(field.default) ?? field.default)
+            : field.default)
+        : renameEventTypedMembers(field.default, field.items, rename);
+    if (renamedDefault !== field.default) {
+      next[knob] = { ...field, default: renamedDefault as ConfigFieldDeclaration["default"] };
+      touched = true;
+    } else {
+      next[knob] = field;
+    }
+  }
+  return touched ? next : config;
 }
 
 /**
@@ -1073,6 +1171,12 @@ function applyEventRenames(
       ? l
       : { ...l, event: nextEvent, triggers: nextTriggers };
   });
+  // Declared config knob defaults carry event literals the effect walk cannot
+  // reach: a render-ui node forwards `actions: "@config.actions"` as a STRING,
+  // and the array itself lives on the knob. Letting `trait.config` ride
+  // through the spread untouched is what left a renamed atom firing its
+  // pre-rename event keys from its own action buttons.
+  const nextConfig = renameEventsInDeclaredConfig(trait.config, rename);
   return {
     ...trait,
     stateMachine: sm
@@ -1084,8 +1188,44 @@ function applyEventRenames(
       : sm,
     ...(trait.ticks ? { ticks: nextTicks } : {}),
     ...(trait.listens ? { listens: nextListens } : {}),
+    ...(nextConfig !== undefined ? { config: nextConfig } : {}),
     emits: nextEmits,
   } as Trait;
+}
+
+/**
+ * Fold a rename across a CALL-SITE config block. The call site's own
+ * `config { actions: [...] }` override replaces the declared default, so the
+ * rename must reach it too — otherwise overriding a knob silently opts out of
+ * the rename. Member types come from the trait's DECLARED schema, which is the
+ * only place they are stated.
+ */
+function applyEventRenamesToCallSiteConfig(
+  config: TraitConfig | undefined,
+  declared: Trait["config"],
+  renames?: { [oldKey: string]: string },
+): TraitConfig | undefined {
+  if (config === undefined || declared === undefined) return config;
+  if (!renames || Object.keys(renames).length === 0) return config;
+  const rename = (k: string | undefined): string | undefined =>
+    k !== undefined && k in renames ? renames[k] : k;
+  let touched = false;
+  const next: { [k: string]: unknown } = { ...(config as { [k: string]: unknown }) };
+  for (const [knob, value] of Object.entries(config as { [k: string]: unknown })) {
+    const field = declared[knob];
+    if (field === undefined) continue;
+    const renamed =
+      field.type === "event"
+        ? (typeof value === "string" && value !== "" && !value.startsWith("@")
+            ? (rename(value) ?? value)
+            : value)
+        : renameEventTypedMembers(value, field.items, rename);
+    if (renamed !== value) {
+      next[knob] = renamed;
+      touched = true;
+    }
+  }
+  return touched ? (next as TraitConfig) : config;
 }
 
 /**
@@ -1891,6 +2031,7 @@ export class ReferenceResolver {
       }
       const reboundTrait = applyLinkedEntityRename(configResolvedTrait, linkedEntity);
       const renamedTrait = applyEventRenames(reboundTrait, eventRenames);
+      const renamedConfig = applyEventRenamesToCallSiteConfig(config, reboundTrait.config, eventRenames);
       const finalTrait: Trait = listensOverride !== undefined
         ? { ...renamedTrait, listens: listensOverride }
         : renamedTrait;
@@ -1908,7 +2049,7 @@ export class ReferenceResolver {
         data: {
           trait: finalTrait,
           source: { type: "imported", alias: parsed.alias, traitName: parsed.traitName },
-          config,
+          config: renamedConfig,
           linkedEntity,
         },
         warnings: [],
@@ -1929,6 +2070,7 @@ export class ReferenceResolver {
       }
       const reboundLocal = applyLinkedEntityRename(configResolvedLocal, linkedEntity);
       const renamedLocalTrait = applyEventRenames(reboundLocal, eventRenames);
+      const renamedLocalConfig = applyEventRenamesToCallSiteConfig(config, reboundLocal.config, eventRenames);
       const finalLocalTrait: Trait = listensOverride !== undefined
         ? { ...renamedLocalTrait, listens: listensOverride }
         : renamedLocalTrait;
@@ -1945,7 +2087,7 @@ export class ReferenceResolver {
         data: {
           trait: finalLocalTrait,
           source: { type: "local", name: ref },
-          config,
+          config: renamedLocalConfig,
           linkedEntity,
         },
         warnings: [],
