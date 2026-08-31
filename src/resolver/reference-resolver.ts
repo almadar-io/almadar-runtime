@@ -106,7 +106,19 @@ function indexOrbitalNodes(orbital: OrbitalDefinition, idIndex: Map<string, IdIn
       // Events are first-class (declared in `emits`, dispatched via
       // listens/emits + render-ui event-name props). Index each by its
       // stable id so an `event`-typed config knob's `refId` resolves to the
-      // event's current key after a call-site rename.
+      // event by identity rather than by name.
+      //
+      // ⚠️ It does NOT resolve to the post-rename key, which an earlier
+      // version of this comment claimed. The index is built from the SOURCE
+      // orbital's nodes, and `applyEventRenames` rebuilds `{...e, key}`
+      // copies rather than mutating them, so the indexed `EventDefinition`
+      // keeps its pre-rename `key` forever. Today that is inert rather than
+      // wrong — nothing renamed the knob default either, so
+      // `resolveConfigRefsById` finds `nextDefault === field.default` and
+      // bails — but the two facts are independent, and a future change that
+      // folds renames into the index's inputs without also re-indexing would
+      // silently resurrect the divergence. Re-index after the rename, or
+      // resolve through the renamed trait, before relying on the key here.
       for (const ev of trait.stateMachine?.events ?? []) {
         if (ev.id) {
           idIndex.set(ev.id, { kind: "event", node: ev });
