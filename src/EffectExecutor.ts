@@ -767,14 +767,31 @@ export class EffectExecutor {
                     if (action === 'batch') {
                         // Batch mode: ["persist", "batch", [...operations]]
                         const operations = args[1] as unknown[];
-                        await this.handlers.persist('batch', '', { operations } as EntityRow);
+                        const batchSummary = await this.handlers.persist('batch', '', {
+                            operations,
+                        } as EntityRow);
                         persistLog.debug('persist:success', {
                             action,
                             entityType: 'batch',
                             opCount: operations.length,
                             willEmit: emitCfg?.success,
                         });
-                        this.emitSuccess(emitCfg, 'success', operations, true);
+                        // The handler's summary — `{ operations, completedCount,
+                        // totalCount }`, the shape canonical-operators.json
+                        // declares — not the raw INPUT array this used to emit,
+                        // which left `?completedCount` / `?totalCount`
+                        // undefined. A handler with nothing to hand back
+                        // (ClientEffectHandlers' no-op stub) degrades to the one
+                        // fact this layer knows first-hand: how many operations
+                        // were submitted. That is a SUBSET of the declared
+                        // shape, so it stays honest rather than inventing
+                        // counts.
+                        this.emitSuccess(
+                            emitCfg,
+                            'success',
+                            batchSummary ?? { totalCount: operations.length },
+                            true,
+                        );
                         persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
                     } else {
                         const entityType = args[1] as string;

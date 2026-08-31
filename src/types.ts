@@ -451,6 +451,35 @@ export interface EffectHandlers {
 }
 
 /**
+ * What a `batch` persist hands back — the shape `canonical-operators.json`
+ * declares for persist's batch branch, so the `emit: { success }` envelope
+ * carries exactly what the type system promises. Before this existed the
+ * envelope emitted the raw INPUT array, so `?completedCount` / `?totalCount`
+ * read `undefined` at runtime.
+ *
+ * Structurally an {@link EntityRow} — `operations` is an array of rows and the
+ * counts are numbers, all valid `FieldValue`s — so `EffectHandlers.persist`
+ * needs no widened return type and no cast: a batch summary reaches the bus by
+ * the same path a create/update row does.
+ *
+ * Declared as a `type` alias, NOT an `interface`, deliberately: only an object
+ * type alias gets TypeScript's implicit index signature, which is what makes it
+ * assignable to `EntityRow`'s `Record<string, FieldValue | undefined>` half. As
+ * an interface it fails that assignment (TS2322) and the only way to ship it
+ * would be a cast — which the type-safety rule forbids, and rightly: the cast
+ * would have hidden that the contract, not the value, was wrong.
+ */
+export type PersistBatchSummary = {
+    /** One result row per attempted operation, in submission order. */
+    operations: EntityRow[];
+    /** How many operations completed before the batch stopped. */
+    completedCount: number;
+    /** How many were submitted. */
+    totalCount: number;
+};
+
+
+/**
  * Author-configured `emit:` block threaded into `os/watch-*` handlers.
  * Narrower than @almadar/core's `EmitConfig` — only the keys streaming
  * operators meaningfully fire.

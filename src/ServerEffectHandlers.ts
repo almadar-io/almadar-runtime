@@ -26,6 +26,7 @@ import type {
   BindingContext,
   EffectContext,
   EntityRow,
+  PersistBatchSummary,
   ServiceCallContext,
 } from "./types.js";
 import { EffectExecutor } from "./EffectExecutor.js";
@@ -232,7 +233,7 @@ export function createServerEffectHandlers(
           });
           return;
         }
-        const batchResults: unknown[] = [];
+        const batchResults: EntityRow[] = [];
         const completed: unknown[] = [];
         let batchFailed = false;
         let batchError = "";
@@ -316,18 +317,24 @@ export function createServerEffectHandlers(
           }
           if (batchFailed) break;
         }
+        const batchSummary: PersistBatchSummary = {
+          operations: batchResults,
+          completedCount: completed.length,
+          totalCount: operations.length,
+        };
         record({
           effect: "persist",
           action: "batch",
-          data: {
-            operations: batchResults,
-            completedCount: completed.length,
-            totalCount: operations.length,
-          },
+          data: batchSummary,
           success: !batchFailed,
           ...(batchFailed ? { error: batchError } : {}),
         });
-        return;
+        // Return the summary rather than dropping it: it is the shape
+        // `canonical-operators.json` declares for persist's batch branch, and
+        // the caller's `emit:{success}` envelope had been emitting the raw
+        // INPUT array instead, so `?completedCount` / `?totalCount` read
+        // undefined at runtime.
+        return batchSummary;
       }
 
       const type = targetEntityType || entityType;
