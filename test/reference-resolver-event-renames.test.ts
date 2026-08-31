@@ -171,3 +171,130 @@ describe('applyEventRenames — full rename coverage (compiled-path parity)', ()
     expect(t.ticks![0].effects).toEqual([['emit', 'BODY_MOVED', { x: 0 }]]);
   });
 });
+
+// SCAN-DETAIL-PANEL-ACTIONS-UNTAGGED-1 (runtime twin). The literals a
+// render-ui node forwards as `actions: "@config.actions"` live in the trait's
+// config KNOB, not the effect tree, so the effect walk never reaches them.
+// `applyEventRenames` returned `{...trait, stateMachine, ticks, listens,
+// emits}` — letting `trait.config` ride through the spread untouched — and the
+// call-site config was carried around it entirely. A renamed atom therefore
+// kept firing its pre-rename keys from its own action buttons.
+function knobTrait(): Trait {
+  return {
+    name: 'RecordItemDetail',
+    scope: 'instance',
+    config: {
+      actions: {
+        type: '[RecordAction]',
+        // The member types are the ONLY statement of which member is an event.
+        items: {
+          type: 'object',
+          properties: {
+            label: { name: 'label', type: 'string', required: true },
+            event: { name: 'event', type: 'event', required: true },
+            icon: { name: 'icon', type: 'string' },
+          },
+        },
+        default: [
+          { event: 'EDIT', label: 'Edit' },
+          { event: 'DELETE', label: 'Delete' },
+          { event: 'CLOSE_VIEW', label: 'Close' },
+        ],
+      },
+      // A member NAMED `event` but not declared `event`-typed must be left
+      // alone — the fold is type-directed, never name-directed.
+      legend: {
+        type: '[LegendRow]',
+        items: {
+          type: 'object',
+          properties: {
+            event: { name: 'event', type: 'string', required: true },
+          },
+        },
+        default: [{ event: 'EDIT' }],
+      },
+    },
+    stateMachine: {
+      states: [{ name: 'idle', isInitial: true }],
+      events: [{ key: 'EDIT', name: 'Edit' }, { key: 'DELETE', name: 'Delete' }],
+      transitions: [
+        {
+          from: 'idle',
+          to: 'idle',
+          event: 'EDIT',
+          effects: [['render-ui', 'main', { type: 'detail-panel', actions: '@config.actions' }]],
+        },
+      ],
+    },
+    emits: [{ event: 'EDIT' }, { event: 'DELETE' }],
+  } as unknown as Trait;
+}
+
+async function resolveKnobRenamed(callSiteConfig?: Record<string, unknown>): Promise<{
+  trait: Trait;
+  config: Record<string, unknown> | undefined;
+}> {
+  const resolver = new ReferenceResolver({
+    basePath: '.',
+    skipExternalLoading: true,
+    localTraits: new Map<string, Trait>([['RecordItemDetail', knobTrait()]]),
+  });
+  const orbital: OrbitalDefinition = {
+    name: 'App',
+    entity: {
+      name: 'Row',
+      persistence: 'runtime',
+      fields: [{ name: 'id', type: 'string', required: true }],
+    },
+    traits: [
+      {
+        ref: 'RecordItemDetail',
+        name: 'ReportViewer',
+        events: { EDIT: 'PDF_EXPORT_REQUESTED', DELETE: 'CSV_EXPORT_REQUESTED' },
+        ...(callSiteConfig ? { config: callSiteConfig } : {}),
+      },
+    ],
+    pages: [],
+  } as unknown as OrbitalDefinition;
+  const result = await resolver.resolve(orbital);
+  expect(result.success).toBe(true);
+  if (!result.success) throw new Error(result.errors.join(', '));
+  const entry = result.data.traits[0];
+  return { trait: entry.trait, config: entry.config as Record<string, unknown> | undefined };
+}
+
+describe('applyEventRenames — config knob defaults (runtime twin of the knob-level fold)', () => {
+  it('folds the rename into event-typed members of a DECLARED knob default', async () => {
+    const { trait } = await resolveKnobRenamed();
+    const actions = trait.config!.actions.default as { event: string; label: string }[];
+    expect(actions.map((a) => a.event)).toEqual([
+      'PDF_EXPORT_REQUESTED',
+      'CSV_EXPORT_REQUESTED',
+      // Not in the rename map — untouched.
+      'CLOSE_VIEW',
+    ]);
+  });
+
+  it('is type-directed: a member named `event` that is not event-TYPED is untouched', async () => {
+    const { trait } = await resolveKnobRenamed();
+    const legend = trait.config!.legend.default as { event: string }[];
+    expect(legend[0].event).toBe('EDIT');
+  });
+
+  it('folds the rename into a CALL-SITE config override too', async () => {
+    // Overriding a knob must not silently opt out of the rename.
+    const { config } = await resolveKnobRenamed({
+      actions: [{ event: 'EDIT', label: 'Download PDF' }],
+    });
+    const actions = config!.actions as { event: string }[];
+    expect(actions[0].event).toBe('PDF_EXPORT_REQUESTED');
+  });
+
+  it('leaves @-bindings alone', async () => {
+    const { config } = await resolveKnobRenamed({
+      actions: [{ event: '@config.someKnob', label: 'Dynamic' }],
+    });
+    const actions = config!.actions as { event: string }[];
+    expect(actions[0].event).toBe('@config.someKnob');
+  });
+});
