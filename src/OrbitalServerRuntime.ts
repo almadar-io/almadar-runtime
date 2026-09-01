@@ -516,6 +516,12 @@ export { InMemoryPersistence } from "./PersistenceAdapter.js";
 import type { PersistenceAdapter } from "./PersistenceAdapter.js";
 import { InMemoryPersistence } from "./PersistenceAdapter.js";
 
+/** STAGED: a persist that resolves no row key does not land. Flipping this to
+ *  `true` makes that a hard failure — the goal, once the corpus and the verify
+ *  harness's transition ordering no longer trip it (23/25 organisms did on
+ *  2026-09-01). Until then the condition is logged, not thrown. */
+const NO_ROW_KEY_IS_FATAL = false;
+
 // ============================================================================
 // OrbitalServerRuntime
 // ============================================================================
@@ -2641,6 +2647,29 @@ export class OrbitalServerRuntime {
                 // Return the updated entity
                 const updated = await this.persistence.getById(type, updateId);
                 resultData = updated || { id: updateId, ...(data || {}) };
+              } else {
+                // A write with NO row key is a FAILED write, not a silent
+                // no-op. This branch used to fall through to the unconditional
+                // `success: true` push below, so the update vanished and the
+                // caller was told it worked — `std-trait-wars`' LEVEL_UP
+                // discarded every level-up that way, and JOIN_SESSION advanced
+                // the state machine without ever joining. The compiled path
+                // resolved the same condition to the empty-string key instead;
+                // both now fail identically.
+                // STAGED. Measured 2026-09-01: throwing here reds 23 of 25 sampled
+                // organisms under `orb verify`, while the validator reports only ONE
+                // statically-unbound site — nearly all of those are the harness
+                // driving a persist BEFORE the binding transition runs. The
+                // diagnostic is unconditional so the population stays countable;
+                // flipping NO_ROW_KEY_IS_FATAL is the goal, not the default.
+                effectLog.error('persist:no-row-key', { action, entityType: type });
+                if (NO_ROW_KEY_IS_FATAL) {
+                  throw new Error(
+                    `persist ${action} ${type} resolved no row key — the id was neither `
+                    + `on the row being written nor on the request. Bind it before the `
+                    + `write, e.g. (set @entity.id ?row.id) on the transition that selects it.`,
+                  );
+                }
               }
               break;
             case "delete": {
@@ -2665,6 +2694,21 @@ export class OrbitalServerRuntime {
                 await this.enforceOnDeleteRules(type, deleteId);
                 await this.persistence.delete(type, deleteId);
                 resultData = { id: deleteId, deleted: true };
+              } else {
+                // STAGED. Measured 2026-09-01: throwing here reds 23 of 25 sampled
+                // organisms under `orb verify`, while the validator reports only ONE
+                // statically-unbound site — nearly all of those are the harness
+                // driving a persist BEFORE the binding transition runs. The
+                // diagnostic is unconditional so the population stays countable;
+                // flipping NO_ROW_KEY_IS_FATAL is the goal, not the default.
+                effectLog.error('persist:no-row-key', { action, entityType: type });
+                if (NO_ROW_KEY_IS_FATAL) {
+                  throw new Error(
+                    `persist ${action} ${type} resolved no row key — the id was neither `
+                    + `on the row being written nor on the request. Bind it before the `
+                    + `write, e.g. (set @entity.id ?row.id) on the transition that selects it.`,
+                  );
+                }
               }
               break;
             }

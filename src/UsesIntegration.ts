@@ -203,6 +203,10 @@ export async function preprocessSchema(
       name: orbitalName,
       description: resolvedOrbital.original.description,
       visual_prompt: resolvedOrbital.original.visual_prompt,
+      // The orbital's skin (registry key or inline ThemeDefinition) — dropped
+      // by this field-by-field rebuild until 2026-09-01, so `/api/schema`
+      // served theme-less orbitals and OrbitalThemeProvider no-opped.
+      theme: resolvedOrbital.original.theme,
       // Resolved entity (always inline now)
       entity: resolvedOrbital.entity,
       // Resolved traits (inline definitions)

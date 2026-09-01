@@ -34,6 +34,12 @@ import { createContextFromBindings } from "./BindingResolver.js";
 import { evaluate } from "@almadar/evaluator";
 import { createLogger } from '@almadar/logger';
 
+/** STAGED: a persist that resolves no row key does not land. Flipping this to
+ *  `true` makes that a hard failure — the goal, once the corpus and the verify
+ *  harness's transition ordering no longer trip it (23/25 organisms did on
+ *  2026-09-01). Until then the condition is logged, not thrown. */
+const NO_ROW_KEY_IS_FATAL = false;
+
 const effectLog = createLogger("almadar:runtime:effects");
 
 /**
@@ -369,6 +375,23 @@ export function createServerEffectHandlers(
               await persistence.update(type, idOrFallback, row);
               const updated = await persistence.getById(type, idOrFallback);
               resultData = updated ?? { id: idOrFallback, ...row };
+            } else {
+              // See OrbitalServerRuntime's persist handler: no row key is a
+              // failed write, not a silent success.
+              // STAGED. Measured 2026-09-01: throwing here reds 23 of 25 sampled
+              // organisms under `orb verify`, while the validator reports only ONE
+              // statically-unbound site — nearly all of those are the harness
+              // driving a persist BEFORE the binding transition runs. The
+              // diagnostic is unconditional so the population stays countable;
+              // flipping NO_ROW_KEY_IS_FATAL is the goal, not the default.
+              effectLog.error('persist:no-row-key', { action, entityType: type });
+              if (NO_ROW_KEY_IS_FATAL) {
+                throw new Error(
+                  `persist ${action} ${type} resolved no row key — the id was neither `
+                  + `on the row being written nor on the request. Bind it before the `
+                  + `write, e.g. (set @entity.id ?row.id) on the transition that selects it.`,
+                );
+              }
             }
             break;
           }
@@ -388,6 +411,21 @@ export function createServerEffectHandlers(
               }
               await persistence.delete(type, deleteId);
               resultData = { id: deleteId, deleted: true } as EntityRow;
+            } else {
+              // STAGED. Measured 2026-09-01: throwing here reds 23 of 25 sampled
+              // organisms under `orb verify`, while the validator reports only ONE
+              // statically-unbound site — nearly all of those are the harness
+              // driving a persist BEFORE the binding transition runs. The
+              // diagnostic is unconditional so the population stays countable;
+              // flipping NO_ROW_KEY_IS_FATAL is the goal, not the default.
+              effectLog.error('persist:no-row-key', { action, entityType: type });
+              if (NO_ROW_KEY_IS_FATAL) {
+                throw new Error(
+                  `persist ${action} ${type} resolved no row key — the id was neither `
+                  + `on the row being written nor on the request. Bind it before the `
+                  + `write, e.g. (set @entity.id ?row.id) on the transition that selects it.`,
+                );
+              }
             }
             break;
           }
