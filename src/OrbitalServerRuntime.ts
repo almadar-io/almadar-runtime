@@ -174,6 +174,7 @@ import type {
   TraitConfig,
   TraitConfigValue,
   BusEventSource,
+  ListenSource,
   PatternConfig,
   ResolvedPatternProps,
   SExpr,
@@ -1491,6 +1492,50 @@ export class OrbitalServerRuntime {
   }
 
   /**
+   * The id of the SOURCE event a `listens {}` entry names, derived from the
+   * emitting trait's own declared `emits[]` contract rather than trusted
+   * from `listener.eventId` alone.
+   *
+   * `TraitEventListener.eventId` is "optional until the Phase-7 flip" (see
+   * `@almadar/core`'s `trait.ts`) — the compose/resolve pipeline stamps a
+   * V4 ledger id onto every `emits[]` entry (the emitter's own contract)
+   * well before it stamps the matching id onto every `listens[]` entry that
+   * names that event (source-qualified `Trait.EVENT -> X` listens compiled
+   * from `uses`-resolved atoms carry `triggersId` for their OWN triggered
+   * event but no `eventId` for the event they're listening to). The emit
+   * handler (`executeEffects`'s `emit` closure below) always looks up and
+   * stamps `emittingTrait.emits[].eventId` when present, so during that
+   * transitional window the emit side routes under an id-qualified bus key
+   * while the listen side — reading only its own possibly-absent
+   * `eventId` — subscribes under the bare name, and the two never meet.
+   *
+   * Fix: derive the SAME id the emitter will stamp by resolving the
+   * listener's declared `source` (trait/orbital, name or id) to the actual
+   * registered trait and reading ITS `emits[]` contract for `listener.event`
+   * — the single canonical place an event's id lives. `kind: "any"` sources
+   * are left alone (no single emitter to resolve against; bare-name routing
+   * is already the correct, safe default there).
+   */
+  private resolveSourceEmitEventId(
+    source: ListenSource | undefined,
+    event: string,
+    listenerOrbital: string,
+  ): EventId | undefined {
+    if (!source || source.kind === "any") return undefined;
+
+    const ownerOrbitalName = source.kind === "orbital" ? source.orbital : listenerOrbital;
+    const owner = this.orbitals.get(ownerOrbitalName);
+    if (!owner) return undefined;
+
+    const sourceTrait = source.traitId !== undefined
+      ? owner.traits.find((t) => t.id === source.traitId)
+      : owner.traits.find((t) => t.name === source.trait);
+    if (!sourceTrait) return undefined;
+
+    return sourceTrait.emits?.find((e) => e.event === event)?.eventId;
+  }
+
+  /**
    * Set up event listeners for cross-orbital communication
    */
   private setupEventListeners(): void {
@@ -1519,7 +1564,15 @@ export class OrbitalServerRuntime {
           // event name (legacy). Source filtering happens inside the handler
           // closure so a single key can serve many listeners with different
           // scopes.
-          const routeKey = eventRouteKey(bareEvent, listener.eventId);
+          //
+          // `listener.eventId` itself may lag the emitter's own id (see
+          // `resolveSourceEmitEventId` above) — fall back to resolving it
+          // from the source trait's declared `emits[]` contract so a
+          // source-qualified listen always agrees with the id the emitter
+          // will actually stamp.
+          const effectiveEventId =
+            listener.eventId ?? this.resolveSourceEmitEventId(listener.source, bareEvent, orbitalName);
+          const routeKey = eventRouteKey(bareEvent, effectiveEventId);
           const cleanup = this.eventBus.on(routeKey, async (event) => {
             // Source filter: skip if the emit doesn't match our declared scope.
             if (!matcher(event.source)) return;
