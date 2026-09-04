@@ -3818,6 +3818,21 @@ export class OrbitalServerRuntime {
       hasGuard: !!binding.tick.guard,
     }));
   }
+
+  /** Halt every registered tick's shared clock. Delegates to `TickScheduler.pause`. */
+  pauseTicks(): void {
+    this.tickScheduler.pause();
+  }
+
+  /** Resume ticks halted by `pauseTicks()`. Delegates to `TickScheduler.resume`. */
+  resumeTicks(): void {
+    this.tickScheduler.resume();
+  }
+
+  /** True while ticks are paused. Delegates to `TickScheduler.isPaused`. */
+  areTicksPaused(): boolean {
+    return this.tickScheduler.isPaused;
+  }
 }
 
 /**

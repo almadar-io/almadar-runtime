@@ -59,6 +59,7 @@ export class TickScheduler {
   private ticks = new Map<number, ScheduledTick>();
   private nextId = 1;
   private running = false;
+  private paused = false;
   private frameHandle: number | ReturnType<typeof setInterval> | null = null;
   private readonly hasRaf: boolean;
 
@@ -123,8 +124,41 @@ export class TickScheduler {
     this.maybeStop();
   }
 
+  /** True while the scheduler is paused (no tick callback fires and no backlog accumulates). */
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  /**
+   * Halt the shared loop without dropping registered ticks. No `onDue`
+   * fires again until `resume()`. A no-op if already paused.
+   */
+  pause(): void {
+    if (this.paused) return;
+    this.paused = true;
+    this.stopLoop();
+  }
+
+  /**
+   * Restart the shared loop after `pause()`. Every registered tick's phase
+   * is reset (`lastTimestamp = null`) so the paused duration is never
+   * counted as elapsed time — the same "first pass just captures the
+   * timestamp" behavior a freshly `add()`-ed tick gets, which is what keeps
+   * resume from bursting a backlog of missed beats. A no-op if not paused.
+   */
+  resume(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    for (const tick of this.ticks.values()) {
+      tick.lastTimestamp = null;
+    }
+    if (this.ticks.size > 0) {
+      this.ensureRunning();
+    }
+  }
+
   private ensureRunning(): void {
-    if (this.running) return;
+    if (this.running || this.paused) return;
     this.running = true;
     if (this.hasRaf) {
       const loop = (timestamp: number) => {
@@ -140,6 +174,11 @@ export class TickScheduler {
 
   private maybeStop(): void {
     if (this.ticks.size > 0 || !this.running) return;
+    this.stopLoop();
+  }
+
+  /** Cancel the active rAF/interval loop, if any, and clear the running flag. */
+  private stopLoop(): void {
     this.running = false;
     if (this.frameHandle !== null) {
       if (this.hasRaf) {

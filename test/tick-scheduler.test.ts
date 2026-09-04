@@ -138,6 +138,92 @@ describe('TickScheduler', () => {
         scheduler.stopAll();
     });
 
+    describe('pause/resume', () => {
+        it('isPaused reflects state and pause()/resume() are idempotent', () => {
+            const scheduler = createTickScheduler();
+            expect(scheduler.isPaused).toBe(false);
+
+            scheduler.pause();
+            expect(scheduler.isPaused).toBe(true);
+            scheduler.pause(); // no-op, still paused
+            expect(scheduler.isPaused).toBe(true);
+
+            scheduler.resume();
+            expect(scheduler.isPaused).toBe(false);
+            scheduler.resume(); // no-op, still running
+            expect(scheduler.isPaused).toBe(false);
+
+            scheduler.stopAll();
+        });
+
+        it('a paused tick does not fire while paused, and no pending frame is scheduled', () => {
+            const scheduler = createTickScheduler();
+            const onDue = vi.fn();
+            scheduler.add(10, onDue);
+
+            tickFrame(0); // establish lastTimestamp, schedules next frame
+            expect(pendingFrameCount()).toBe(1);
+
+            scheduler.pause();
+            expect(pendingFrameCount()).toBe(0); // loop torn down — nothing left to advance
+
+            onDue.mockClear();
+            scheduler.resume();
+            expect(pendingFrameCount()).toBe(1); // loop restarted
+
+            scheduler.stopAll();
+        });
+
+        it('resume() does not burst a backlog of missed ticks from the paused duration', () => {
+            const scheduler = createTickScheduler();
+            const onDue = vi.fn();
+            scheduler.add(33, onDue);
+
+            tickFrame(0);
+            tickFrame(20); // partway through the interval, not yet due
+            expect(onDue).not.toHaveBeenCalled();
+
+            scheduler.pause();
+            scheduler.resume();
+
+            // First frame after resume just re-establishes lastTimestamp (same
+            // as a freshly add()-ed tick) — even though real time may have
+            // moved on a lot while paused, that gap is never counted.
+            tickFrame(500);
+            expect(onDue).not.toHaveBeenCalled();
+
+            // Healthy cadence resumes from here.
+            tickFrame(40);
+            expect(onDue).toHaveBeenCalledTimes(1);
+
+            scheduler.stopAll();
+        });
+
+        it('add()/addCron() while paused does not restart the loop', () => {
+            const scheduler = createTickScheduler();
+            scheduler.pause();
+            expect(pendingFrameCount()).toBe(0);
+
+            const onDue = vi.fn();
+            scheduler.add(10, onDue);
+            expect(pendingFrameCount()).toBe(0); // still paused, no loop started
+
+            scheduler.resume();
+            expect(pendingFrameCount()).toBe(1);
+
+            scheduler.stopAll();
+        });
+
+        it('pausing with no registered ticks is a harmless no-op', () => {
+            const scheduler = createTickScheduler();
+            expect(() => scheduler.pause()).not.toThrow();
+            expect(scheduler.isPaused).toBe(true);
+            expect(() => scheduler.resume()).not.toThrow();
+            expect(scheduler.isPaused).toBe(false);
+            expect(pendingFrameCount()).toBe(0); // no ticks to drive a loop
+        });
+    });
+
     describe('addCron', () => {
         beforeEach(() => {
             vi.useFakeTimers();
