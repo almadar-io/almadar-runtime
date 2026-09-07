@@ -694,7 +694,11 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   ): Promise<{ id: string }> {
     const store = this.getStore(entityType);
     this.assertFileValuesWithinCeiling(entityType, data);
-    const id = this.nextId(entityType);
+    const suppliedId = typeof data.id === 'string' && data.id.length > 0 ? data.id : undefined;
+    if (suppliedId && store.has(suppliedId)) {
+      throw new Error(`Entity ${entityType} with id ${suppliedId} already exists`);
+    }
+    const id = suppliedId ?? this.nextId(entityType);
     const now = new Date().toISOString();
 
     const withDefaults = this.applyFieldDefaults(entityType, data);

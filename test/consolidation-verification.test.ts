@@ -35,7 +35,7 @@ describe('Phase 1: interpolateProps (shared BindingResolver)', () => {
     const entityData = { name: 'Product', price: 42, nested: { deep: 'value' } };
     const payloadData = { action: 'CREATE', id: 'abc-123' };
     const ctx = createMinimalContext(
-        entityData as Record<string, unknown>,
+        entityData,
         payloadData,
         'active'
     );
@@ -589,7 +589,7 @@ describe('End-to-End: Builder Runtime Consolidation Scenario', () => {
         // Verify binding detection
         expect(containsBindings('@entity.name')).toBe(true);
         const resolvedName = interpolateValue('@entity.name', createMinimalContext(
-            entity as Record<string, unknown>, payload, 'idle'
+            entity, payload, 'idle'
         ));
         expect(resolvedName).toBe('Implement Feature X');
 

@@ -465,13 +465,28 @@ export class EffectExecutor {
                 : resolveArgs(rawArgs, this.bindings, this.strictBindings, this.contextExtensions);
 
             try {
-                await this.dispatch(operator, resolvedArgs);
-                results.push({
-                    type: operator,
-                    args: resolvedArgs,
-                    status: 'executed',
-                    durationMs: Date.now() - start,
-                });
+                const outcome = await this.dispatch(operator, resolvedArgs);
+                // A denied persist doesn't throw (it fires the declared
+                // `emit.failure` cascade instead — see the `persist` case
+                // below), so without this check every denial reported here
+                // as `status: 'executed'`, indistinguishable from a real
+                // write.
+                if (outcome?.failed) {
+                    results.push({
+                        type: operator,
+                        args: resolvedArgs,
+                        status: 'failed',
+                        error: outcome.error,
+                        durationMs: Date.now() - start,
+                    });
+                } else {
+                    results.push({
+                        type: operator,
+                        args: resolvedArgs,
+                        status: 'executed',
+                        durationMs: Date.now() - start,
+                    });
+                }
             } catch (error) {
                 const errorMessage = error instanceof Error
                     ? error.message
@@ -555,10 +570,13 @@ export class EffectExecutor {
     private emitFailure(
         emit: EmitConfig | undefined,
         err: unknown,
+        /** Extra fields merged alongside `error` — e.g. persist's `entityType`/`id`,
+         *  so a listener can act on WHICH row/entity the failure was about. */
+        extra?: EventPayload,
     ): void {
         if (!emit?.failure) return;
         const error = err instanceof Error ? err.message : String(err);
-        this.handlers.emit(emit.failure, { error } as EventPayload, this.sourceStamp());
+        this.handlers.emit(emit.failure, { ...extra, error }, this.sourceStamp());
     }
 
     /**
@@ -619,7 +637,15 @@ export class EffectExecutor {
     // Effect Dispatch
     // ==========================================================================
 
-    private async dispatch(operator: string, args: RuntimeValue[]): Promise<void> {
+    /**
+     * Dispatches one effect. Returns `void` for the ordinary case (the
+     * caller only cares whether it threw). A `persist` that resolves
+     * without throwing — the store DENIED the write, signalled by return
+     * value rather than an exception, per the "close the circuit" doctrine
+     * — reports that outcome here so `executeWithResults` can record it as
+     * `status: 'failed'` instead of the default `'executed'`.
+     */
+    private async dispatch(operator: string, args: RuntimeValue[]): Promise<{ failed: true; error: string } | void> {
         switch (operator) {
             // === Universal Effects ===
 
@@ -763,6 +789,21 @@ export class EffectExecutor {
                     success: emitCfg?.success,
                     failure: emitCfg?.failure,
                 });
+                // Bridge mode (`EffectHandlers.persistDelegated`): the server
+                // runs this persist and reports its outcome in the response;
+                // the client's handler is a placeholder. Reading its `undefined`
+                // as a denial logged an error into every browser console and
+                // fired the declared FAILURE event locally while the server
+                // had succeeded (2026-09-06, first walk on a fresh client).
+                if (this.handlers.persistDelegated === true) {
+                    persistLog.debug('persist:delegated', {
+                        action,
+                        entityType: action === 'batch' ? 'batch' : (args[1] as string),
+                        traitName: this.context.traitName,
+                        transition: this.context.transition,
+                    });
+                    return;
+                }
                 try {
                     if (action === 'batch') {
                         // Batch mode: ["persist", "batch", [...operations]]
@@ -798,21 +839,64 @@ export class EffectExecutor {
                         const data = args[2] as EntityRow | undefined;
                         // The persisted row (create: submitted data + the
                         // minted id) is the success payload — matching the
-                        // compiled path, which emits its `created` row. Falls
-                        // back to the submitted data when a handler has no row.
+                        // compiled path, which emits its `created` row.
+                        // `undefined` means the store DENIED or otherwise
+                        // failed the write (see EffectHandlers.persist) —
+                        // create/update/delete all set a real row on every
+                        // genuine success, so there is no legitimate
+                        // "succeeded with nothing to report" case here.
+                        // Falling back to the submitted DATA made a denied
+                        // delete indistinguishable from a completed one:
+                        // `persist:success` logged and the declared success
+                        // event fired for a row the store never touched.
+                        // Mirrors the `fetch` by-id-miss fix below — a
+                        // failed/missing outcome is signalled by return
+                        // value, not by throwing.
                         const persisted = await this.handlers.persist(action, entityType, data);
-                        const successPayload = persisted ?? data;
-                        const dataId = typeof successPayload === 'string'
-                            ? successPayload
-                            : (successPayload && typeof successPayload === 'object' ? ((successPayload as { id?: unknown }).id as string | undefined) : undefined);
-                        persistLog.debug('persist:success', {
-                            action,
-                            entityType,
-                            dataId,
-                            willEmit: emitCfg?.success,
-                        });
-                        this.emitSuccess(emitCfg, 'success', successPayload, true);
-                        persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
+                        if (persisted === undefined) {
+                            const attemptedId = typeof data === 'string'
+                                ? data
+                                : (data && typeof data === 'object' ? ((data as { id?: unknown }).id as string | undefined) : undefined);
+                            persistLog.error('persist:denied', { action, entityType, attemptedId });
+                            const deniedError = `persist ${action} ${entityType} was denied or failed`;
+                            this.emitFailure(
+                                emitCfg,
+                                new Error(deniedError),
+                                { entityType, id: attemptedId },
+                            );
+                            return { failed: true, error: deniedError };
+                        } else {
+                            const dataId = typeof persisted === 'string'
+                                ? persisted
+                                : (persisted as { id?: unknown }).id as string | undefined;
+                            persistLog.debug('persist:success', {
+                                action,
+                                entityType,
+                                dataId,
+                                willEmit: emitCfg?.success,
+                            });
+                            // Write the store-minted id back into the live entity
+                            // binding so later effects in this transition
+                            // (`emit … { taskId: @entity.id }`) and a same-instance
+                            // follow-up `persist update` see a real row key —
+                            // otherwise a create with no caller-supplied id leaves
+                            // `@entity.id` undefined until the next fetch.
+                            if (action === 'create' && this.bindings.entity && typeof dataId === 'string') {
+                                const boundId = this.bindings.entity.id;
+                                const submittedId = data && typeof data === 'object'
+                                    ? (data as { id?: unknown }).id
+                                    : undefined;
+                                if (boundId === undefined || boundId === submittedId) {
+                                    this.bindings.entity.id = dataId;
+                                    persistLog.debug('persist:create-bound-id', {
+                                        entityType,
+                                        id: dataId,
+                                    });
+                                }
+                            }
+                            this.emitSuccess(emitCfg, 'success', persisted, true);
+                            persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
+                        }
                     }
                 } catch (err) {
                     persistLog.error('persist:error', {
@@ -863,13 +947,30 @@ export class EffectExecutor {
                         // Authors read fetched records via `@payload.data`. The
                         // sibling `totalCount` is the pre-pagination row count so
                         // paginating consumers can compute totalPages without a
-                        // second round-trip. `result === null` means "not found";
-                        // emit success with `data: null, totalCount: 0` so the
-                        // payload shape stays stable.
-                        const payload: EventPayload = result
-                            ? { data: result.rows, totalCount: result.total }
-                            : { data: null, totalCount: 0 };
-                        this.emitSuccess(emitCfg, 'success', payload);
+                        // second round-trip.
+                        if (result === null) {
+                            if (options?.id !== undefined) {
+                                // A BY-ID miss is "not found", not "found, value
+                                // null" — the Rust kernel already treats this as
+                                // a hard failure (`orbital-core/src/effects/
+                                // executor.rs:163`, "Entity not found"). Emitting
+                                // `success` with `data: null` let a guard reading
+                                // `@payload.data` see "loaded, null" instead of
+                                // firing the transition's own FAILURE arm, so a
+                                // detail page whose row doesn't exist stranded in
+                                // its loading state instead of showing a
+                                // not-found path.
+                                this.emitFailure(emitCfg, new Error(`${entityType} ${options.id} not found`));
+                            } else {
+                                // A collection fetch matching nothing is still a
+                                // successful query — an empty result set, not a
+                                // miss.
+                                this.emitSuccess(emitCfg, 'success', { data: [], totalCount: 0 });
+                            }
+                        } else {
+                            const payload: EventPayload = { data: result.rows, totalCount: result.total };
+                            this.emitSuccess(emitCfg, 'success', payload);
+                        }
                     } catch (err) {
                         this.emitFailure(emitCfg, err);
                         throw err;

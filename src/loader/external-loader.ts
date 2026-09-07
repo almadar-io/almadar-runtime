@@ -11,7 +11,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import type { Orbital, OrbitalSchema } from "@almadar/core";
+import type { Orbital, OrbitalSchema, DeclaredTraitConfig } from "@almadar/core";
 import { OrbitalSchemaSchema } from "@almadar/core";
 
 // ============================================================================
@@ -32,6 +32,13 @@ export interface LoadedOrbital {
    * outside it. Mirrors the compiled path's `AliasEntry.orbitals`.
    */
   orbitals?: Orbital[];
+
+  /**
+   * The loaded schema's own app-level `config`, when it declares one.
+   * Traits from this orbital must resolve against THIS config, not the
+   * consumer's — omitted (never `undefined`) when the schema declares none.
+   */
+  schemaConfig?: DeclaredTraitConfig;
 
   /** Source path (resolved absolute path) */
   sourcePath: string;
@@ -357,6 +364,7 @@ export class ExternalOrbitalLoader {
       data: {
         orbital,
         orbitals: schema.orbitals,
+        ...(schema.config ? { schemaConfig: schema.config } : {}),
         sourcePath: schemaResult.data.sourcePath,
         importPath,
       },

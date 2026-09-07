@@ -58,6 +58,12 @@ export interface ServerEffectEventBus {
  * runtime's `EffectResult`. Callers who want telemetry pass an array that
  * the factory appends to; otherwise it's unused.
  */
+export interface ServerBatchSummary {
+  operations: EntityRow[];
+  completedCount: number;
+  totalCount: number;
+}
+
 export interface ServerEffectResult {
   effect:
     | "set"
@@ -70,8 +76,16 @@ export interface ServerEffectResult {
     | "atomic";
   action?: string;
   entityType?: string;
-  data?: unknown;
+  /** Entity row for CRUD/set/swap, the batch summary for `persist batch`, the raw service result for `call-service`. */
+  data?: EntityRow | ServerBatchSummary | EventPayload | null;
   success: boolean;
+  /**
+   * Set when a persist failed because an access policy rejected it or the
+   * write resolved no row key — mirrors `OrbitalServerRuntime.EffectResult`
+   * so the offline-preview and real-server persist paths report the same
+   * denial discriminator to the verification trace.
+   */
+  denied?: true;
   error?: string;
 }
 
@@ -261,10 +275,10 @@ export function createServerEffectHandlers(
                   createData,
                 );
                 batchResults.push({
+                  ...createData,
                   action: "create",
                   entityType: opEntityType,
                   id: newId,
-                  ...createData,
                 });
                 completed.push({
                   action: "create",
@@ -279,10 +293,10 @@ export function createServerEffectHandlers(
                 await persistence.update(opEntityType, updateId, updateData);
                 const updated = await persistence.getById(opEntityType, updateId);
                 batchResults.push({
+                  ...(updated || updateData),
                   action: "update",
                   entityType: opEntityType,
                   id: updateId,
-                  ...(updated || updateData),
                 });
                 completed.push({
                   action: "update",
@@ -344,16 +358,20 @@ export function createServerEffectHandlers(
       const type = targetEntityType || entityType;
       let resultData: EntityRow | undefined;
       const sizeBefore = (await persistence.list(type)).length;
+      // Distinguishes a policy/row-key REJECTION from any other thrown
+      // failure — see OrbitalServerRuntime's persist handler (same shape).
+      let deniedReason: 'access-denied' | 'no-row-key' | undefined;
       try {
         const mutationPolicy = entityAccess?.get(type)?.[action];
         switch (action) {
           case "create": {
             // `@create` is checked against the INCOMING data — no row exists yet.
             if (!checkMutationAccess((data ?? {}) as EntityRow, mutationPolicy, accessBindings(type))) {
+              deniedReason = 'access-denied';
               throw new Error(accessDeniedMessage("create", type));
             }
             const { id } = await persistence.create(type, (data ?? {}) as EntityRow);
-            resultData = { id, ...((data ?? {}) as EntityRow) };
+            resultData = { ...((data ?? {}) as EntityRow), id };
             break;
           }
           case "update": {
@@ -367,17 +385,19 @@ export function createServerEffectHandlers(
               if (mutationPolicy !== undefined) {
                 const existing = await persistence.getById(type, idOrFallback);
                 if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings(type))) {
+                  deniedReason = 'access-denied';
                   throw new Error(accessDeniedMessage("update", type));
                 }
               }
               await persistence.update(type, idOrFallback, row);
               const updated = await persistence.getById(type, idOrFallback);
-              resultData = updated ?? { id: idOrFallback, ...row };
+              resultData = updated ?? { ...row, id: idOrFallback };
             } else {
               // See OrbitalServerRuntime's persist handler: no row key is a
               // failed write, not a silent success.
               effectLog.error('persist:no-row-key', { action, entityType: type });
               if (NO_ROW_KEY_IS_FATAL) {
+                deniedReason = 'no-row-key';
                 throw new Error(
                   `persist ${action} ${type} resolved no row key — the id was neither `
                   + `on the row being written nor on the request. Bind it before the `
@@ -398,6 +418,7 @@ export function createServerEffectHandlers(
               if (mutationPolicy !== undefined) {
                 const existing = await persistence.getById(type, deleteId);
                 if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings(type))) {
+                  deniedReason = 'access-denied';
                   throw new Error(accessDeniedMessage("delete", type));
                 }
               }
@@ -407,6 +428,7 @@ export function createServerEffectHandlers(
               // No row key is a failed write, not a silent success.
               effectLog.error('persist:no-row-key', { action, entityType: type });
               if (NO_ROW_KEY_IS_FATAL) {
+                deniedReason = 'no-row-key';
                 throw new Error(
                   `persist ${action} ${type} resolved no row key — the id was neither `
                   + `on the row being written nor on the request. Bind it before the `
@@ -417,6 +439,22 @@ export function createServerEffectHandlers(
             break;
           }
         }
+
+        // `NO_ROW_KEY_IS_FATAL === false` falls through the update/delete
+        // else-branches above without setting `resultData` or throwing —
+        // that is a write that never happened, not a success.
+        if (resultData === undefined && (action === 'update' || action === 'delete')) {
+          record({
+            effect: 'persist',
+            action,
+            entityType: type,
+            success: false,
+            denied: true,
+            error: `persist ${action} ${type} resolved no row key`,
+          });
+          return undefined;
+        }
+
         const sizeAfter = (await persistence.list(type)).length;
         effectLog.debug("persist:store-mutate", {
           action,
@@ -444,6 +482,7 @@ export function createServerEffectHandlers(
           effect: "persist",
           action,
           entityType: type,
+          ...(deniedReason !== undefined ? { denied: true as const } : {}),
           success: false,
           error: err instanceof Error ? err.message : String(err),
         });

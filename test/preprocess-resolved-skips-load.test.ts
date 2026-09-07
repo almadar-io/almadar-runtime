@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { preprocessSchema } from '../src/UsesIntegration.js';
-import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
+import type { SchemaLoader, LoadResult, LoadedSchema, LoadedOrbital } from '../src/loader/schema-loader.js';
 import type { OrbitalSchema } from '@almadar/core';
 
 // A schema produced by `orbital resolve` (the canonical Rust resolver) has every
@@ -18,7 +18,7 @@ describe('preprocessSchema — already-resolved schema skips external loading', 
         touched = true;
         return { success: false, error: 'loader should not be called for a resolved schema' };
       },
-      async loadOrbital(): Promise<LoadResult<{ orbital: OrbitalSchema['orbitals'][number]; sourcePath?: string; importPath: string }>> {
+      async loadOrbital(): Promise<LoadResult<LoadedOrbital>> {
         touched = true;
         return { success: false, error: 'loader should not be called for a resolved schema' };
       },
@@ -51,13 +51,14 @@ describe('preprocessSchema — already-resolved schema skips external loading', 
               name: 'ItemView',
               linkedEntity: 'Item',
               category: 'interaction',
+              scope: 'instance',
               stateMachine: { states: [{ name: 'idle', isInitial: true }], events: [], transitions: [] },
             },
           ],
           pages: [],
         },
       ],
-    } as OrbitalSchema;
+    };
 
     const result = await preprocessSchema(schema, { basePath: '.', loader: failLoader });
 

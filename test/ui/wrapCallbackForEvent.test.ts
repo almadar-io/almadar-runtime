@@ -16,7 +16,7 @@ describe('@almadar/runtime/ui wrapCallbackForEvent', () => {
     const emitted: Array<{ event: string; payload?: EventPayload }> = [];
     const wrap = wrapCallbackForEvent(
       'UI:Orbital.Trait.FILTER_CHANGED',
-      [{ name: 'value' }, { name: 'index' }],
+      [{ name: 'value', type: 'string' }, { name: 'index', type: 'number' }],
       (event, payload) => {
         emitted.push({ event, payload });
       },

@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { EffectExecutor, type EffectHandlers } from '../src/index.js';
+import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 
 const CHUNKS = [
     { id: 'c1', content: 'Hello', index: 0 },
@@ -21,13 +22,11 @@ function makeExecutor(fetchStream: EffectHandlers['fetchStream']): {
 } {
     const emit = vi.fn();
     const executor = new EffectExecutor({
-        handlers: {
+        handlers: stubEffectHandlers({
             emit,
             fetch: vi.fn(async () => ({ rows: [], total: 0 })),
-            persist: vi.fn(async () => undefined),
-            set: vi.fn(),
             fetchStream,
-        },
+        }),
         bindings: { entity: undefined },
         context: {
             traitName: 'StreamChunkStream',

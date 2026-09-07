@@ -237,6 +237,7 @@ export class HttpLoader implements SchemaLoader {
       data: {
         orbital,
         orbitals: schema.orbitals,
+        ...(schema.config ? { schemaConfig: schema.config } : {}),
         sourcePath: schemaResult.data.sourcePath,
         importPath,
       },

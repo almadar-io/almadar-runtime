@@ -42,7 +42,7 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
 import { asOrbitalId, asEntityId, asTraitId, asEventId } from '@almadar/core';
-import type { OrbitalSchema } from '@almadar/core';
+import type { OrbitalSchema, Trait } from '@almadar/core';
 
 const ORB = asOrbitalId('orb_01HCCAAAAAAAAAAAAAAAAAAAAA');
 const ENT = asEntityId('ent_01HCCAAAAAAAAAAAAAAAAAAAAA');
@@ -60,7 +60,7 @@ const EID_RECEIVED_TICK = asEventId('evt_01HCCTICKTICKTICKTICKTIC');
  * partial-ledger shape `orb resolve` produces today.
  */
 function buildSchema(): OrbitalSchema {
-  const source: Record<string, unknown> = {
+  const source: Trait = {
     id: TID_SOURCE,
     name: 'Source',
     scope: 'instance',
@@ -78,7 +78,7 @@ function buildSchema(): OrbitalSchema {
     emits: [{ event: 'PING', eventId: EID_PING, scope: 'external' }],
   };
 
-  const listener: Record<string, unknown> = {
+  const listener: Trait = {
     id: TID_LISTENER,
     name: 'Listener',
     scope: 'instance',
@@ -117,7 +117,7 @@ function buildSchema(): OrbitalSchema {
         pages: [],
       },
     ],
-  } as unknown as OrbitalSchema;
+  };
 }
 
 describe('composed-trait listens route by the SOURCE emit contract id, not listener.eventId alone', () => {

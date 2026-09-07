@@ -323,6 +323,7 @@ export class UnifiedLoader implements SchemaLoader {
         data: {
           orbital: found,
           orbitals: schema.orbitals,
+          ...(schema.config ? { schemaConfig: schema.config } : {}),
           sourcePath: schemaResult.data.sourcePath,
           importPath,
         },
@@ -342,6 +343,7 @@ export class UnifiedLoader implements SchemaLoader {
       data: {
         orbital: schema.orbitals[0],
         orbitals: schema.orbitals,
+        ...(schema.config ? { schemaConfig: schema.config } : {}),
         sourcePath: schemaResult.data.sourcePath,
         importPath,
       },

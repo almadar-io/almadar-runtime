@@ -14,11 +14,11 @@ import {
     createContextFromBindings,
     type BindingContext,
 } from '../src/BindingResolver.js';
-import type { RenderUINode } from '@almadar/core';
+import type { RenderUINode, EntityRow, ResolvedPatternProps, RenderChildrenMap } from '@almadar/core';
 
-function makeCtx(entity: Record<string, unknown>) {
+function makeCtx(entity: EntityRow) {
     const bindings: BindingContext = {
-        entity: entity as unknown as BindingContext['entity'],
+        entity,
         payload: {},
         state: 'idle',
     };
@@ -34,7 +34,7 @@ describe('render-children map — array/map in children:', () => {
                 { title: 'Gamma', done: true },
             ],
         });
-        const pattern = {
+        const pattern: ResolvedPatternProps = {
             type: 'stack',
             children: [
                 [
@@ -53,28 +53,25 @@ describe('render-children map — array/map in children:', () => {
 
     it('preserves static entries alongside a map entry, flattened in order', () => {
         const ctx = makeCtx({ tags: [{ label: 'x' }, { label: 'y' }] });
-        const pattern = {
+        const tagsMap: RenderChildrenMap = [
+            'array/map',
+            '@entity.tags',
+            ['fn', 'item', { type: 'typography', content: '@item.label' }],
+        ];
+        const pattern: ResolvedPatternProps = {
             type: 'stack',
-            children: [
-                { type: 'heading', content: 'Tags' },
-                [
-                    'array/map',
-                    '@entity.tags',
-                    ['fn', 'item', { type: 'chip', content: '@item.label' }],
-                ],
-                { type: 'divider' },
-            ],
+            children: [{ type: 'heading', content: 'Tags' }, tagsMap, { type: 'divider' }],
         };
         const result = interpolateProps(pattern, ctx);
         const children = result.children as Array<{ type: string; content?: string }>;
-        expect(children.map((c) => c.type)).toEqual(['heading', 'chip', 'chip', 'divider']);
+        expect(children.map((c) => c.type)).toEqual(['heading', 'typography', 'typography', 'divider']);
         expect(children[1].content).toBe('x');
         expect(children[2].content).toBe('y');
     });
 
     it('empty collection yields empty (flattened away) children', () => {
         const ctx = makeCtx({ tasks: [] });
-        const pattern = {
+        const pattern: ResolvedPatternProps = {
             type: 'stack',
             children: [
                 [
@@ -90,7 +87,7 @@ describe('render-children map — array/map in children:', () => {
 
     it('non-tuple children entries are unchanged (regression)', () => {
         const ctx = makeCtx({ name: 'Osamah' });
-        const pattern = {
+        const pattern: ResolvedPatternProps = {
             type: 'stack',
             children: [
                 { type: 'typography', content: '@entity.name' },

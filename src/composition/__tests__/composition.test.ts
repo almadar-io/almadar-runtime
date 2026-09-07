@@ -25,6 +25,7 @@ function makeTrait(name: string, linkedEntity = 'TestEntity'): Trait {
         name,
         linkedEntity,
         category: 'interaction',
+        scope: 'instance',
     };
 }
 
@@ -110,8 +111,8 @@ describe('applyEventWiring', () => {
 
         expect(wired).toHaveLength(1);
         const trait = wired[0]?.traits[0];
-        expect(trait && typeof trait === 'object' && 'name' in trait).toBe(true);
-        if (trait && typeof trait === 'object' && 'name' in trait) {
+        expect(trait && typeof trait === 'object' && !('ref' in trait)).toBe(true);
+        if (trait && typeof trait === 'object' && !('ref' in trait)) {
             expect(trait.emits ?? []).toHaveLength(0);
             expect(trait.listens ?? []).toHaveLength(0);
         }
@@ -134,14 +135,14 @@ describe('applyEventWiring', () => {
         const wired = applyEventWiring(orbitals, wiring);
 
         const cartTrait = wired[0]?.traits[0];
-        if (cartTrait && typeof cartTrait === 'object' && 'name' in cartTrait) {
+        if (cartTrait && typeof cartTrait === 'object' && !('ref' in cartTrait)) {
             expect(cartTrait.emits).toEqual([
                 { event: 'CHECKOUT_REQUESTED', scope: 'external' },
             ]);
         }
 
         const checkoutTrait = wired[1]?.traits[0];
-        if (checkoutTrait && typeof checkoutTrait === 'object' && 'name' in checkoutTrait) {
+        if (checkoutTrait && typeof checkoutTrait === 'object' && !('ref' in checkoutTrait)) {
             expect(checkoutTrait.listens).toEqual([
                 {
                     event: 'CHECKOUT_REQUESTED',
@@ -168,7 +169,7 @@ describe('applyEventWiring', () => {
         const wired = applyEventWiring(orbitals, wiring);
 
         const traitA = wired[0]?.traits[0];
-        if (traitA && typeof traitA === 'object' && 'name' in traitA) {
+        if (traitA && typeof traitA === 'object' && !('ref' in traitA)) {
             // Only one EVT_1 emit despite duplicate wiring entry
             expect(traitA.emits).toEqual([
                 { event: 'EVT_1', scope: 'external' },
@@ -176,7 +177,7 @@ describe('applyEventWiring', () => {
         }
 
         const traitB = wired[1]?.traits[0];
-        if (traitB && typeof traitB === 'object' && 'name' in traitB) {
+        if (traitB && typeof traitB === 'object' && !('ref' in traitB)) {
             // Only one TRIG_1 listen
             expect(traitB.listens).toEqual([
                 {
@@ -192,7 +193,7 @@ describe('applyEventWiring', () => {
         }
 
         const traitC = wired[2]?.traits[0];
-        if (traitC && typeof traitC === 'object' && 'name' in traitC) {
+        if (traitC && typeof traitC === 'object' && !('ref' in traitC)) {
             expect(traitC.listens).toEqual([
                 {
                     event: 'EVT_2',
@@ -217,7 +218,7 @@ describe('applyEventWiring', () => {
         applyEventWiring(orbitals, wiring);
 
         const trait = orbitals[0]?.traits[0];
-        if (trait && typeof trait === 'object' && 'name' in trait) {
+        if (trait && typeof trait === 'object' && !('ref' in trait)) {
             expect(trait.emits).toBeUndefined();
             expect(trait.listens).toBeUndefined();
         }

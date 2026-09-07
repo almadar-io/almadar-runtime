@@ -130,7 +130,7 @@ describe('EffectExecutor + createServerEffectHandlers — emit success with {dat
             'fetch',
             'ListItem',
             { emit: { success: 'ListItemLoaded', failure: 'ListItemLoadFailed' } },
-        ] as unknown as Effect;
+        ];
         await exec.executeAll([fetchEffect]);
         const loaded = bus.events.find((e) => e.event === 'ListItemLoaded');
         expect(loaded).toBeDefined();
@@ -160,7 +160,7 @@ describe('EffectExecutor + createServerEffectHandlers — emit success with {dat
             'ListItem',
             { name: 'added', status: 'active' },
             { emit: { success: 'ItemCreated', failure: 'ItemCreateFailed' } },
-        ] as unknown as Effect;
+        ];
         await exec.executeAll([persistEffect]);
         const created = bus.events.find((e) => e.event === 'ItemCreated');
         expect(created).toBeDefined();

@@ -1,6 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
-import type { OrbitalDefinition, Trait } from '@almadar/core';
+import type {
+  OrbitalDefinition,
+  Trait,
+  Effect,
+  PersistData,
+  PersistEmitConfig,
+  FetchOptions,
+  RenderUIEffect,
+  PatternConfig,
+  TraitConfig,
+  TraitConfigValue,
+  TraitConfigObject,
+  CallSiteConfig,
+} from '@almadar/core';
 
 // R-CLIENT-RENAMED-CASCADE-DEAD: the call-site `events: { OLD: NEW }`
 // rename map rewrote transition triggers / render-ui props / events list /
@@ -11,6 +24,34 @@ import type { OrbitalDefinition, Trait } from '@almadar/core';
 // runtime path. The compiled path rewrites all of these at compose time
 // (orbital-compiler inline/rewrite.rs); the runtime must produce the same
 // fully-renamed trait at registration time.
+
+/** Narrows a resolved transition/tick `Effect` to the 5-tuple
+ *  `['persist', 'create', entity, data, emitConfig]` form. */
+function isPersistCreateWithEmit(
+  effect: Effect,
+): effect is ['persist', 'create', string, PersistData, PersistEmitConfig] {
+  return effect[0] === 'persist' && effect[1] === 'create' && effect.length === 5;
+}
+
+/** Narrows a resolved `Effect` to the 3-tuple `['fetch', entity, options]` form. */
+function isFetchWithOptions(effect: Effect): effect is ['fetch', string, FetchOptions] {
+  return effect[0] === 'fetch' && effect.length === 3;
+}
+
+/** Narrows a resolved `Effect` to a `render-ui` node rendering a `button` pattern. */
+function isButtonRenderUi(
+  effect: Effect,
+): effect is ['render-ui', RenderUIEffect[1], PatternConfig<'button'>] {
+  if (effect[0] !== 'render-ui' || effect.length !== 3) return false;
+  const config = effect[2];
+  return (
+    typeof config === 'object' &&
+    config !== null &&
+    !Array.isArray(config) &&
+    'type' in config &&
+    config.type === 'button'
+  );
+}
 
 function atomTrait(): Trait {
   return {
@@ -33,7 +74,7 @@ function atomTrait(): Trait {
           effects: [
             ['emit', 'BODY_MOVED', { x: 1 }],
             ['persist', 'create', 'Row', { id: '1' }, { emit: { success: 'BODY_SAVED' } }],
-            ['fetch', 'Row', { emit: 'BODY_SAVED' }],
+            ['fetch', 'Row', { emit: { success: 'BODY_SAVED' } }],
             ['render-ui', 'main', { type: 'button', action: 'BODY_MOVED', label: 'Go' }],
             ['do', ['emit', 'BODY_MOVED'], ['emit', 'UNCHANGED']],
           ],
@@ -55,7 +96,7 @@ function atomTrait(): Trait {
       // Unsourced: follows this trait's own renames.
       { event: 'BODY_MOVED', triggers: 'BODY_MOVED' },
     ],
-  } as unknown as Trait;
+  };
 }
 
 const RENAMES = {
@@ -80,7 +121,7 @@ async function resolveRenamed(): Promise<Trait> {
     },
     traits: [{ ref: 'PlatformerBody', name: 'OwBody', events: RENAMES }],
     pages: [],
-  } as unknown as OrbitalDefinition;
+  };
   const result = await resolver.resolve(orbital);
   expect(result.success).toBe(true);
   if (!result.success) throw new Error(result.errors.join(', '));
@@ -90,7 +131,7 @@ async function resolveRenamed(): Promise<Trait> {
 describe('applyEventRenames — full rename coverage (compiled-path parity)', () => {
   it('rewrites (emit OLD …) heads in transition effects', async () => {
     const t = await resolveRenamed();
-    const effects = t.stateMachine!.transitions[0].effects as unknown[][];
+    const effects = t.stateMachine!.transitions[0].effects!;
     expect(effects[0]).toEqual(['emit', 'OW_MOVED', { x: 1 }]);
     // nested inside a (do …) wrapper
     expect(effects[4]).toEqual(['do', ['emit', 'OW_MOVED'], ['emit', 'UNCHANGED']]);
@@ -100,31 +141,32 @@ describe('applyEventRenames — full rename coverage (compiled-path parity)', ()
     const t = await resolveRenamed();
     expect(t.stateMachine!.transitions[0].event).toBe('OW_MOVED');
     expect(t.stateMachine!.events!.map((e) => e.key)).toEqual(['OW_MOVED', 'OW_SAVED']);
-    expect((t.emits as { event: string }[]).map((e) => e.event)).toEqual([
-      'OW_MOVED',
-      'OW_SAVED',
-      'UNCHANGED',
-    ]);
+    expect((t.emits ?? []).map((e) => e.event)).toEqual(['OW_MOVED', 'OW_SAVED', 'UNCHANGED']);
   });
 
-  it('rewrites fetch/persist emit: option maps (object and string forms)', async () => {
+  it('rewrites fetch/persist emit: option maps', async () => {
     const t = await resolveRenamed();
-    const effects = t.stateMachine!.transitions[0].effects as unknown as [
-      unknown,
-      [string, string, string, unknown, { emit: { success: string } }],
-      [string, string, { emit: string }],
-    ];
-    expect(effects[1][4].emit.success).toBe('OW_SAVED');
-    expect(effects[2][2].emit).toBe('OW_SAVED');
+    const effects = t.stateMachine!.transitions[0].effects!;
+    const persistEffect = effects[1];
+    if (!isPersistCreateWithEmit(persistEffect)) {
+      throw new Error(`expected a persist/create effect with an emit config, got ${JSON.stringify(persistEffect)}`);
+    }
+    expect(persistEffect[4].emit?.success).toBe('OW_SAVED');
+    const fetchEffect = effects[2];
+    if (!isFetchWithOptions(fetchEffect)) {
+      throw new Error(`expected a fetch effect with options, got ${JSON.stringify(fetchEffect)}`);
+    }
+    expect(fetchEffect[2].emit?.success).toBe('OW_SAVED');
   });
 
   it('rewrites render-ui event-name props', async () => {
     const t = await resolveRenamed();
-    const effects = t.stateMachine!.transitions[0].effects as unknown as [
-      unknown, unknown, unknown,
-      [string, string, { action: string }],
-    ];
-    expect(effects[3][2].action).toBe('OW_MOVED');
+    const effects = t.stateMachine!.transitions[0].effects!;
+    const renderEffect = effects[3];
+    if (!isButtonRenderUi(renderEffect)) {
+      throw new Error(`expected a button render-ui effect, got ${JSON.stringify(renderEffect)}`);
+    }
+    expect(renderEffect[2].action).toBe('OW_MOVED');
   });
 
   it('rewrites (emit OLD …) heads in tick effects', async () => {
@@ -157,17 +199,13 @@ describe('applyEventRenames — full rename coverage (compiled-path parity)', ()
       },
       traits: [{ ref: 'PlatformerBody' }],
       pages: [],
-    } as unknown as OrbitalDefinition;
+    };
     const result = await resolver.resolve(orbital);
     expect(result.success).toBe(true);
     if (!result.success) return;
     const t = result.data.traits[0].trait;
     expect(t.stateMachine!.transitions[0].event).toBe('BODY_MOVED');
-    expect((t.stateMachine!.transitions[0].effects as unknown[][])[0]).toEqual([
-      'emit',
-      'BODY_MOVED',
-      { x: 1 },
-    ]);
+    expect(t.stateMachine!.transitions[0].effects![0]).toEqual(['emit', 'BODY_MOVED', { x: 1 }]);
     expect(t.ticks![0].effects).toEqual([['emit', 'BODY_MOVED', { x: 0 }]]);
   });
 });
@@ -227,12 +265,35 @@ function knobTrait(): Trait {
       ],
     },
     emits: [{ event: 'EDIT' }, { event: 'DELETE' }],
-  } as unknown as Trait;
+  };
 }
 
-async function resolveKnobRenamed(callSiteConfig?: Record<string, unknown>): Promise<{
+/** Narrows a `TraitConfigValue` to an array of object entries, throwing
+ *  loudly (rather than reading `undefined` off a wrong shape) otherwise. */
+function asConfigObjectArray(value: TraitConfigValue | undefined, context: string): readonly TraitConfigObject[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${context}: expected an array, got ${JSON.stringify(value)}`);
+  }
+  return value.map((item) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new Error(`${context}: expected an object item, got ${JSON.stringify(item)}`);
+    }
+    return item;
+  });
+}
+
+/** Reads a string-typed member off a `TraitConfigObject`, throwing loudly on a wrong shape. */
+function stringField(obj: TraitConfigObject, key: string, context: string): string {
+  const v = obj[key];
+  if (typeof v !== 'string') {
+    throw new Error(`${context}: expected "${key}" to be a string, got ${JSON.stringify(v)}`);
+  }
+  return v;
+}
+
+async function resolveKnobRenamed(callSiteConfig?: CallSiteConfig): Promise<{
   trait: Trait;
-  config: Record<string, unknown> | undefined;
+  config: TraitConfig | undefined;
 }> {
   const resolver = new ReferenceResolver({
     basePath: '.',
@@ -255,19 +316,19 @@ async function resolveKnobRenamed(callSiteConfig?: Record<string, unknown>): Pro
       },
     ],
     pages: [],
-  } as unknown as OrbitalDefinition;
+  };
   const result = await resolver.resolve(orbital);
   expect(result.success).toBe(true);
   if (!result.success) throw new Error(result.errors.join(', '));
   const entry = result.data.traits[0];
-  return { trait: entry.trait, config: entry.config as Record<string, unknown> | undefined };
+  return { trait: entry.trait, config: entry.config };
 }
 
 describe('applyEventRenames — config knob defaults (runtime twin of the knob-level fold)', () => {
   it('folds the rename into event-typed members of a DECLARED knob default', async () => {
     const { trait } = await resolveKnobRenamed();
-    const actions = trait.config!.actions.default as { event: string; label: string }[];
-    expect(actions.map((a) => a.event)).toEqual([
+    const actions = asConfigObjectArray(trait.config!.actions.default, 'config.actions.default');
+    expect(actions.map((a) => stringField(a, 'event', 'actions[]'))).toEqual([
       'PDF_EXPORT_REQUESTED',
       'CSV_EXPORT_REQUESTED',
       // Not in the rename map — untouched.
@@ -277,8 +338,8 @@ describe('applyEventRenames — config knob defaults (runtime twin of the knob-l
 
   it('is type-directed: a member named `event` that is not event-TYPED is untouched', async () => {
     const { trait } = await resolveKnobRenamed();
-    const legend = trait.config!.legend.default as { event: string }[];
-    expect(legend[0].event).toBe('EDIT');
+    const legend = asConfigObjectArray(trait.config!.legend.default, 'config.legend.default');
+    expect(stringField(legend[0], 'event', 'legend[0]')).toBe('EDIT');
   });
 
   it('folds the rename into a CALL-SITE config override too', async () => {
@@ -286,15 +347,15 @@ describe('applyEventRenames — config knob defaults (runtime twin of the knob-l
     const { config } = await resolveKnobRenamed({
       actions: [{ event: 'EDIT', label: 'Download PDF' }],
     });
-    const actions = config!.actions as { event: string }[];
-    expect(actions[0].event).toBe('PDF_EXPORT_REQUESTED');
+    const actions = asConfigObjectArray(config?.actions, 'config.actions');
+    expect(stringField(actions[0], 'event', 'actions[0]')).toBe('PDF_EXPORT_REQUESTED');
   });
 
   it('leaves @-bindings alone', async () => {
     const { config } = await resolveKnobRenamed({
       actions: [{ event: '@config.someKnob', label: 'Dynamic' }],
     });
-    const actions = config!.actions as { event: string }[];
-    expect(actions[0].event).toBe('@config.someKnob');
+    const actions = asConfigObjectArray(config?.actions, 'config.actions');
+    expect(stringField(actions[0], 'event', 'actions[0]')).toBe('@config.someKnob');
   });
 });

@@ -20,17 +20,17 @@ import {
     interpolateProps,
     interpolateValue,
     createContextFromBindings,
-    resolveCallSitePayloadCaptures,
     type BindingContext,
 } from '../src/BindingResolver.js';
+import type { TraitConfigObject, TraitConfigValue, EventPayload } from '@almadar/core';
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-function makeCtx(config: Record<string, unknown>) {
+function makeCtx(config: TraitConfigObject) {
     const bindings: BindingContext = {
-        entity: {} as unknown as BindingContext['entity'],
+        entity: {},
         payload: {},
         state: 'idle',
         config,
@@ -196,58 +196,89 @@ describe('@config.X — inside render-ui pattern shapes', () => {
 // ============================================================================
 // Call-site payload capture (`@callsitePayload.X`)
 //
-// A composed trait whose call-site prop binds `@payload.<f>` inside a
-// transition render effect lowers (in the compiler) to a synthesized child
-// trait whose config carries `@callsitePayload.<f>`. At execution the engine
-// resolves that capture against the COMPOSING effect's triggering event payload
-// (snapshot → literal) before merging it into the child's config. This mirrors
-// `OrbitalServerRuntime.executeEffects`'s `bindings.config` assembly.
+// A JSX render site inside a parent trait's transition lowers (in the
+// compiler) to a sibling "inline" trait whose config carries
+// `@callsitePayload.<field>` — whole-value or nested inside an
+// S-expression. `callsitePayload` is a CORE BINDING ROOT (`@almadar/core`'s
+// `CORE_BINDINGS`, `@almadar/evaluator`'s `resolveBinding`), so it is
+// surfaced on the `EvaluationContext` exactly like `@payload`/`@entity` —
+// one owner, not a `configByTrait`-only preprocessing pass (the deleted
+// `resolveCallSitePayloadCaptures`). `OrbitalServerRuntime.executeEffects` /
+// `useTraitStateMachine.executeTransitionEffects` populate
+// `BindingContext.callsitePayload` from the COMPOSING effect's triggering
+// payload before a `@trait.X`-embedded child's lifecycle transition re-runs;
+// these tests exercise the resolution end-to-end through
+// `interpolateValue`/`interpolateProps`, the same path a render-ui pattern's
+// `@config.<knob>` read goes through.
 // ============================================================================
 describe('call-site payload capture (@callsitePayload.X)', () => {
-    it('resolves a captured field to its literal against the composing event payload', () => {
-        const resolved = resolveCallSitePayloadCaptures(
+    function ctxWith(config: TraitConfigObject, callsitePayload?: EventPayload): BindingContext {
+        return { entity: {}, payload: {}, state: 'idle', config, callsitePayload };
+    }
+
+    it('resolves a whole-value capture in a declared config default through @config.X', () => {
+        const ctx = createContextFromBindings(ctxWith(
             { content: '@callsitePayload.error' },
             { error: 'Boom', code: 'E1' },
-        );
-        expect(resolved.content).toBe('Boom');
+        ));
+        expect(interpolateValue('@config.content', ctx)).toBe('Boom');
     });
 
-    it('passes non-capture config values through untouched', () => {
-        const resolved = resolveCallSitePayloadCaptures(
+    it('passes non-capture config values through untouched alongside a capture', () => {
+        const ctx = createContextFromBindings(ctxWith(
             { content: '@callsitePayload.error', variant: 'body', level: 1 },
             { error: 'Boom' },
-        );
-        expect(resolved).toEqual({ content: 'Boom', variant: 'body', level: 1 });
+        ));
+        expect(interpolateProps(
+            { content: '@config.content', variant: '@config.variant', level: '@config.level' },
+            ctx,
+        )).toEqual({ content: 'Boom', variant: 'body', level: 1 });
     });
 
     it('resolves a nested payload path', () => {
-        const resolved = resolveCallSitePayloadCaptures(
+        const ctx = createContextFromBindings(ctxWith(
             { title: '@callsitePayload.detail.title' },
             { detail: { title: 'Hi' } },
-        );
-        expect(resolved.title).toBe('Hi');
+        ));
+        expect(interpolateValue('@config.title', ctx)).toBe('Hi');
     });
 
-    it('yields null for a payload field absent on the composing event', () => {
-        const resolved = resolveCallSitePayloadCaptures(
+    it('resolves undefined for a payload field absent on the composing event', () => {
+        const ctx = createContextFromBindings(ctxWith(
             { content: '@callsitePayload.missing' },
             { error: 'Boom' },
-        );
-        expect(resolved.content).toBeNull();
+        ));
+        expect(interpolateValue('@config.content', ctx)).toBeUndefined();
     });
 
-    it('embedded child receives the resolved literal via the config merge', () => {
+    it('resolves a nested capture inside an S-expression config default (std-helpdesk `disabled` shape)', () => {
+        const disabledConfig: TraitConfigObject = {
+            disabled: ['if', ['and', ['=', '@callsitePayload.data.status', 'resolved'], true], false, true],
+        };
+        const resolvedCtx = createContextFromBindings(ctxWith(disabledConfig, { data: { status: 'resolved', csatScore: null } }));
+        expect(interpolateValue('@config.disabled', resolvedCtx)).toBe(false);
+
+        const openCtx = createContextFromBindings(ctxWith(disabledConfig, { data: { status: 'open' } }));
+        expect(interpolateValue('@config.disabled', openCtx)).toBe(true);
+    });
+
+    it('resolves undefined when no callsitePayload was set on the binding context (mount-time INIT, before any composing transition fires)', () => {
+        const ctx = createContextFromBindings(ctxWith({ content: '@callsitePayload.error' }));
+        expect(interpolateValue('@config.content', ctx)).toBeUndefined();
+    });
+
+    it('embedded child receives the resolved literal via the declared-defaults + call-site config merge', () => {
         // The child atom renders `content: @config.content`; its declared
         // default plus the resolved call-site capture assemble the effective
-        // config exactly as OrbitalServerRuntime.executeEffects does.
+        // config exactly as OrbitalServerRuntime.executeEffects does — the
+        // capture itself resolves through @config.content's binding-forward
+        // recursion, not a preprocessing pass over the merged object.
         const declaredDefaults = { content: 'Sample content', variant: 'body' };
-        const callSiteOverride = resolveCallSitePayloadCaptures(
-            { content: '@callsitePayload.error' },
-            { error: 'Load failed: timeout' },
-        );
+        const callSiteOverride = { content: '@callsitePayload.error' };
         const childConfig = { ...declaredDefaults, ...callSiteOverride };
-        expect(childConfig.content).toBe('Load failed: timeout');
-        expect(childConfig.variant).toBe('body');
+        const ctx = createContextFromBindings(ctxWith(childConfig, { error: 'Load failed: timeout' }));
+        expect(interpolateValue('@config.content', ctx)).toBe('Load failed: timeout');
+        expect(interpolateValue('@config.variant', ctx)).toBe('body');
     });
 });
 
@@ -261,9 +292,9 @@ describe('call-site payload capture (@callsitePayload.X)', () => {
 // ============================================================================
 
 describe('@config.<render-ui knob> — nested bindings inside the resolved tree', () => {
-    function makeRichCtx(config: Record<string, unknown>, payload: Record<string, unknown>) {
+    function makeRichCtx(config: TraitConfigObject, payload: EventPayload) {
         const bindings: BindingContext = {
-            entity: {} as unknown as BindingContext['entity'],
+            entity: {},
             payload,
             state: 'browsing',
             config,
@@ -305,7 +336,7 @@ describe('@config.<render-ui knob> — nested bindings inside the resolved tree'
     });
 
     it('terminates on a cyclic @config forward', () => {
-        const cyclic: Record<string, unknown> = { type: 'stack' };
+        const cyclic: Record<string, TraitConfigValue> = { type: 'stack' };
         cyclic['children'] = ['@config.bodyContent'];
         const ctx = makeRichCtx({ bodyContent: cyclic }, {});
         const result = interpolateValue('@config.bodyContent', ctx) as { children: unknown[] };

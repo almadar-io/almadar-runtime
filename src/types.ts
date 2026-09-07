@@ -235,15 +235,36 @@ export interface EffectHandlers {
      * envelope carries. Without it a `*_CREATED` listener sees no id (the
      * compiled path emits the created row), so anything routing on the new
      * row's identity — navigating to the page just created — worked in one
-     * execution path only. Implementations that have no row to hand back
-     * (batch, a denied write, a no-op stub) return undefined and the
-     * envelope falls back to the submitted data.
+     * execution path only.
+     *
+     * `create`/`update`/`delete` (batch is separate — see `PersistBatchSummary`)
+     * return `undefined` ONLY to signal the write was DENIED or otherwise
+     * failed (a policy rejection, a missing row key, a no-op stub) — never
+     * a genuine success with nothing to report, since every real success
+     * branch sets a row. The caller (`EffectExecutor`'s `persist` case)
+     * treats `undefined` as a failure: it skips the declared `success`
+     * emit entirely rather than falling back to the submitted data, which
+     * previously made a denied delete indistinguishable from a completed
+     * one.
      */
     persist: (
         action: 'create' | 'update' | 'delete' | 'batch',
         entityType: string,
         data?: EntityRow
     ) => Promise<EntityRow | undefined>;
+
+    /**
+     * Bridge mode: the SERVER executes every persist of this dispatch and
+     * returns the real outcome in its response (`effectResults`), so the
+     * client's `persist` member is a placeholder that must never be read as
+     * a denial. When `true`, `EffectExecutor` skips the persist locally —
+     * no `persist:denied` error, no client-side `failure` emit (which fired
+     * the declared failure event in the browser while the server had
+     * succeeded), no `success` emit either (the server's cascade carries it).
+     * Set by `@almadar/ui`'s `createClientEffectHandlers` when no live
+     * client entity is supplied; absent everywhere a handler really writes.
+     */
+    persistDelegated?: true;
 
     /** Set a field value on an entity */
     set: (entityId: string, field: string, value: FieldValue) => void;
@@ -562,6 +583,16 @@ export interface BindingContext {
      * `let`-bound locals.
      */
     locals?: Map<string, RuntimeValue>;
+    /**
+     * The composing effect's triggering payload, for a trait embedded via
+     * `@trait.X` inline into a parent's render-ui. Set when re-running an
+     * embedded child's lifecycle transition under its embedder's payload
+     * (see `OrbitalServerRuntime.executeEffects` / the client's
+     * `useTraitStateMachine`), so `@callsitePayload.<field>` resolves on the
+     * child's evaluation context — mirrors the compiled path's
+     * `CALLSITE_PAYLOAD_PREFIX` capture.
+     */
+    callsitePayload?: EventPayload;
     /** Additional custom bindings */
     [key: string]: unknown;
 }

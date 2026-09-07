@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
 import type { OrbitalDefinition, EntityId, Trait, TraitId } from '@almadar/core';
+import { asEventId } from '@almadar/core';
 
 // W5-4b: a config knob typed `entity`/`trait`/`event` holds a reference NAME
 // (`targetEntity: "Task"`); the stamp records the referenced node's stable id
@@ -74,17 +75,17 @@ describe('ReferenceResolver — id-primary config-reference resolution', () => {
       scope: 'instance',
       stateMachine: {
         states: [{ name: 'idle', isInitial: true }],
-        events: [{ key: 'SUBMIT_FORM', id: 'evt_1', name: 'Submit form' }],
+        events: [{ key: 'SUBMIT_FORM', id: asEventId('evt_1'), name: 'Submit form' }],
         transitions: [],
       },
       config: {
         pressEvent: {
           type: 'event',
           default: 'OLD_SUBMIT',
-          refId: 'evt_1',
+          refId: asEventId('evt_1'),
         },
       },
-    } as Trait;
+    };
     const orbital = makeOrbital(trait);
 
     const result = await resolver.resolve(orbital);

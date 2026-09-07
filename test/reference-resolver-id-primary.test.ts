@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
 import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
-import type { OrbitalDefinition, Orbital, TraitId } from '@almadar/core';
+import type { OrbitalDefinition, Orbital, TraitId, TraitReference } from '@almadar/core';
 
 // W3b/W3c-JS: the id->node index must let a trait ref carrying a valid
 // `refId` resolve to the correct trait even when its `ref` name string is
@@ -16,6 +16,7 @@ describe('ReferenceResolver — id-primary trait resolution', () => {
         id: 'trait_atoms_realtrait' as TraitId,
         name: 'RealTrait',
         linkedEntity: 'Item',
+        scope: 'instance',
         category: 'interaction',
         stateMachine: { states: [{ name: 'idle', isInitial: true }], events: [], transitions: [] },
       },
@@ -46,7 +47,7 @@ describe('ReferenceResolver — id-primary trait resolution', () => {
     };
   }
 
-  function makeOrbital(traitRef: OrbitalDefinition['traits'][number]): OrbitalDefinition {
+  function makeOrbital(traitRef: TraitReference | string): OrbitalDefinition {
     return {
       name: 'Consumer',
       uses: [{ from: './atoms.orb', as: 'Atoms' }],

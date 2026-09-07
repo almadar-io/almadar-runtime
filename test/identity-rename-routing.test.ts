@@ -18,7 +18,7 @@ import {
   StateMachineManager,
   type TraitDefinition,
 } from '../src/StateMachineCore.js';
-import type { OrbitalSchema } from '@almadar/core';
+import type { OrbitalSchema, Trait } from '@almadar/core';
 import { asOrbitalId, asEntityId, asTraitId, asEventId } from '@almadar/core';
 
 const ORB = asOrbitalId('orb_01HAAAAAAAAAAAAAAAAAAAAAAA');
@@ -35,7 +35,7 @@ const EID_RCV = asEventId('evt_01HRCVRCVRCVRCVRCVRCVRCVR');
  * `withIds` toggles the V4 dual-carry id fields on every node + reference.
  */
 function buildSchema(emitterName: string, withIds: boolean): OrbitalSchema {
-  const emitter: Record<string, unknown> = {
+  const emitter: Trait = {
     ...(withIds ? { id: TID_A } : {}),
     name: emitterName,
     scope: 'instance',
@@ -53,7 +53,7 @@ function buildSchema(emitterName: string, withIds: boolean): OrbitalSchema {
     ],
   };
 
-  const receiver: Record<string, unknown> = {
+  const receiver: Trait = {
     ...(withIds ? { id: TID_B } : {}),
     name: 'Receiver',
     scope: 'instance',
@@ -120,7 +120,7 @@ function buildSchema(emitterName: string, withIds: boolean): OrbitalSchema {
         pages: [],
       },
     ],
-  } as unknown as OrbitalSchema;
+  };
 }
 
 /** Fire `GO` and collect the bus event names emitted during the cascade. */

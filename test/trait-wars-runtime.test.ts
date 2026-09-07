@@ -10,6 +10,7 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
+import { asEntityRow } from './fixtures/effect-result.js';
 
 // Load trait-wars schema
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -143,10 +144,10 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
         const setEffects = result.effectResults.filter((e) => e.effect === 'set');
         if (setEffects.length > 0) {
           const deployedEffect = setEffects.find((e) =>
-            e.data?.field === 'deployedHeroId'
+            e.data !== undefined && asEntityRow(e.data).field === 'deployedHeroId'
           );
           if (deployedEffect) {
-            expect(deployedEffect.data!.value).toBe('hero-valor');
+            expect(asEntityRow(deployedEffect.data).value).toBe('hero-valor');
           }
         }
       }
@@ -231,8 +232,9 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
       const createEffect = persistEffects[0];
       expect(createEffect.data).toBeDefined();
-      expect(createEffect.data!.id).toBe('deployed-test-1');
-      expect(createEffect.data!.name).toBe('Test Hero');
+      const createData = asEntityRow(createEffect.data);
+      expect(createData.id).toBe('deployed-test-1');
+      expect(createData.name).toBe('Test Hero');
     });
   });
 
@@ -244,11 +246,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
       });
       await runtime.register(traitWarsSchema);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const persistence = (runtime as any).persistence as {
-        list: (type: string) => Promise<Record<string, unknown>[]>;
-      };
-      const units = await persistence.list('Unit');
+      const units = await runtime.persistence.list('Unit');
 
       expect(units.length).toBe(6);
 
@@ -265,11 +263,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
       });
       await runtime.register(traitWarsSchema);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const persistence = (runtime as any).persistence as {
-        list: (type: string) => Promise<Record<string, unknown>[]>;
-      };
-      const buildings = await persistence.list('Building');
+      const buildings = await runtime.persistence.list('Building');
 
       expect(buildings.length).toBe(5);
 
@@ -285,11 +279,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
       });
       await runtime.register(traitWarsSchema);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const persistence = (runtime as any).persistence as {
-        list: (type: string) => Promise<Record<string, unknown>[]>;
-      };
-      const hexes = await persistence.list('MapHex');
+      const hexes = await runtime.persistence.list('MapHex');
 
       expect(hexes.length).toBe(49);
 
@@ -304,11 +294,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
       });
       await runtime.register(traitWarsSchema);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const persistence = (runtime as any).persistence as {
-        list: (type: string) => Promise<Record<string, unknown>[]>;
-      };
-      const heroes = await persistence.list('Hero');
+      const heroes = await runtime.persistence.list('Hero');
 
       expect(heroes.length).toBe(3);
 
@@ -324,11 +310,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
       });
       await runtime.register(traitWarsSchema);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const persistence = (runtime as any).persistence as {
-        list: (type: string) => Promise<Record<string, unknown>[]>;
-      };
-      const resources = await persistence.list('PlayerResources');
+      const resources = await runtime.persistence.list('PlayerResources');
 
       expect(resources.length).toBe(1);
 
@@ -543,9 +525,10 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
       );
 
       expect(createEffect).toBeDefined();
-      expect(createEffect!.data!.id).toBe('binding-test-hero');
-      expect(createEffect!.data!.name).toBe('Binding Test');
-      expect(createEffect!.data!.attack).toBe(20);
+      const createData = asEntityRow(createEffect!.data);
+      expect(createData.id).toBe('binding-test-hero');
+      expect(createData.name).toBe('Binding Test');
+      expect(createData.attack).toBe(20);
     });
 
     it('should resolve @entity bindings in set effects', async () => {

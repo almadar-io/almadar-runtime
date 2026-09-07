@@ -10,7 +10,7 @@
  * @packageDocumentation
  */
 
-import type { OrbitalSchema, Orbital } from "@almadar/core";
+import type { OrbitalSchema, Orbital, DeclaredTraitConfig } from "@almadar/core";
 
 // ============================================================================
 // Types
@@ -44,6 +44,13 @@ export interface LoadedOrbital {
    * outside it. Mirrors the compiled path's `AliasEntry.orbitals`.
    */
   orbitals?: Orbital[];
+
+  /**
+   * The loaded schema's own app-level `config`, when it declares one.
+   * Traits from this orbital must resolve against THIS config, not the
+   * consumer's — omitted (never `undefined`) when the schema declares none.
+   */
+  schemaConfig?: DeclaredTraitConfig;
 
   /** Source path/URL (resolved) */
   sourcePath: string;

@@ -31,7 +31,7 @@ const emitSchema: OrbitalSchema = {
                 effects: [
                   ['emit', 'FIRST_EVENT', { msg: 'first' }],
                   ['emit', 'SECOND_EVENT', { msg: 'second' }],
-                  ['render-ui', 'main', { type: 'text', text: 'hello' }],
+                  ['render-ui', 'main', { type: 'typography', content: 'hello' }],
                 ],
               },
             ],
@@ -75,7 +75,7 @@ describe('SSE incremental streaming (Express runtime)', () => {
     app.use('/api/orbitals', runtime.router());
 
     await new Promise<void>((resolve) => {
-      server = app.listen(0, resolve);
+      server = app.listen(0, () => resolve());
     });
     const port = (server!.address() as { port: number }).port;
 
@@ -154,7 +154,7 @@ describe('SSE incremental streaming (Express runtime)', () => {
     app.use('/api/orbitals', runtime.router());
 
     await new Promise<void>((resolve) => {
-      server = app.listen(0, resolve);
+      server = app.listen(0, () => resolve());
     });
     const port = (server!.address() as { port: number }).port;
 

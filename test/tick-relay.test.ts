@@ -32,11 +32,11 @@ function tickSchema(): OrbitalSchema {
               events: [{ key: 'MOVED', name: 'MOVED' }],
               transitions: [{ from: 'idle', to: 'idle', event: 'MOVED', effects: [] }],
             },
-          } as never,
+          },
         ],
       },
     ],
-  } as unknown as OrbitalSchema;
+  };
 }
 
 describe('OrbitalServerRuntime — tick broadcast relay (T6)', () => {

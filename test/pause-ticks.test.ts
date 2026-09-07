@@ -40,11 +40,11 @@ function tickSchema(): OrbitalSchema {
               },
             ],
             emits: [{ event: 'PULSE' }],
-          } as never,
+          },
         ],
       },
     ],
-  } as unknown as OrbitalSchema;
+  };
 }
 
 describe('OrbitalServerRuntime — pauseTicks/resumeTicks/areTicksPaused', () => {

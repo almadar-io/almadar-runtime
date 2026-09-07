@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import type { OrbitalSchema } from '@almadar/core';
+import type { OrbitalSchema, Trait, TraitRef } from '@almadar/core';
 import { prepareSchemaForPreview, buildMockData, adjustSchemaForMockData } from '../../src/ui/prepareSchemaForPreview';
+
+/** `orbitals[].traits[]` is `TraitRef` (string | ref object | inline Trait) —
+ *  this fixture only ever authors the inline-`Trait` form. */
+function asTrait(ref: TraitRef): Trait {
+  if (typeof ref !== 'object' || 'ref' in ref) {
+    throw new Error('expected an inline Trait, got a string/ref TraitRef');
+  }
+  return ref;
+}
 
 const baseSchema: OrbitalSchema = {
   name: 'PreviewTestApp',
@@ -26,6 +35,7 @@ const baseSchema: OrbitalSchema = {
               { name: 'loading', isInitial: true },
               { name: 'browsing' },
             ],
+            events: [{ key: 'INIT', name: 'INIT' }],
             transitions: [
               { event: 'INIT', from: 'browsing', to: 'loading' },
             ],
@@ -51,7 +61,7 @@ describe('@almadar/runtime/ui prepareSchemaForPreview', () => {
   it('adjustSchemaForMockData flips INIT state when data exists', () => {
     const data = buildMockData(baseSchema);
     const adjusted = adjustSchemaForMockData(baseSchema, data);
-    const trait = adjusted.orbitals[0].traits[0];
+    const trait = asTrait(adjusted.orbitals[0].traits[0]);
     expect(trait.stateMachine?.states.find((s) => s.name === 'browsing')?.isInitial).toBe(true);
     expect(trait.stateMachine?.states.find((s) => s.name === 'loading')?.isInitial).toBe(false);
   });
@@ -59,7 +69,7 @@ describe('@almadar/runtime/ui prepareSchemaForPreview', () => {
   it('prepareSchemaForPreview returns schema + mockData', () => {
     const { schema, mockData } = prepareSchemaForPreview(baseSchema);
     expect(mockData.Item).toHaveLength(10);
-    const trait = schema.orbitals[0].traits[0];
+    const trait = asTrait(schema.orbitals[0].traits[0]);
     expect(trait.stateMachine?.states.find((s) => s.name === 'browsing')?.isInitial).toBe(true);
   });
 

@@ -26,7 +26,7 @@ import type { OrbitalSchema } from '@almadar/core';
 // (LayoutOwner) also fires INIT. The bug to catch is server-side, so we don't
 // need any cross-trait `@trait.X` wiring — only that effects come back tagged
 // with the correct producing trait.
-const schema = {
+const schema: OrbitalSchema = {
   name: 'trait-attribution-fixture',
   orbitals: [
     {
@@ -41,10 +41,11 @@ const schema = {
         {
           name: 'AtomA',
           category: 'interaction',
+          scope: 'instance',
           linkedEntity: 'Item',
           stateMachine: {
             states: [{ name: 'idle', isInitial: true }],
-            events: [{ key: 'INIT' }],
+            events: [{ key: 'INIT', name: 'INIT' }],
             transitions: [
               {
                 from: 'idle',
@@ -58,10 +59,11 @@ const schema = {
         {
           name: 'AtomB',
           category: 'interaction',
+          scope: 'instance',
           linkedEntity: 'Item',
           stateMachine: {
             states: [{ name: 'idle', isInitial: true }],
-            events: [{ key: 'INIT' }],
+            events: [{ key: 'INIT', name: 'INIT' }],
             transitions: [
               {
                 from: 'idle',
@@ -75,10 +77,11 @@ const schema = {
         {
           name: 'LayoutOwner',
           category: 'interaction',
+          scope: 'instance',
           linkedEntity: 'Item',
           stateMachine: {
             states: [{ name: 'composing', isInitial: true }],
-            events: [{ key: 'INIT' }],
+            events: [{ key: 'INIT', name: 'INIT' }],
             transitions: [
               {
                 from: 'composing',
@@ -189,10 +192,11 @@ describe('OrbitalServerRuntime trait attribution', () => {
           traits: [
             {
               name: 'OriginalAtomName',
+              scope: 'instance',
               linkedEntity: 'AtomEntity',
               stateMachine: {
                 states: [{ name: 'idle', isInitial: true }],
-                events: [{ key: 'INIT' }],
+                events: [{ key: 'INIT', name: 'INIT' }],
                 transitions: [
                   {
                     from: 'idle',
@@ -204,6 +208,7 @@ describe('OrbitalServerRuntime trait attribution', () => {
               },
             },
           ],
+          pages: [],
         },
       ],
     };
@@ -213,7 +218,6 @@ describe('OrbitalServerRuntime trait attribution', () => {
       orbitals: [
         {
           name: 'MoleculeOrbital',
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- `uses` not modeled in OrbitalSchema yet; it's consumed at preprocess time
           uses: [{ from: 'test://atom-schema', as: 'Atom' }],
           entity: {
             name: 'MoleculeEntity',
@@ -232,8 +236,7 @@ describe('OrbitalServerRuntime trait attribution', () => {
           pages: [
             { name: 'MoleculePage', path: '/', traits: [{ ref: 'LocalRenamedAtom' }] },
           ],
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- schema shape for test fixture
-        } as any,
+        },
       ],
     };
 
@@ -264,8 +267,9 @@ describe('OrbitalServerRuntime trait attribution', () => {
 
     const result = await preprocessSchema(moleculeSchema, { basePath: '.', loader });
     expect(result.success).toBeTruthy();
+    if (!result.success) throw new Error('expected preprocessSchema to succeed');
 
-    const resolvedTraits = result.data!.schema.orbitals[0].traits!;
+    const resolvedTraits = result.data.schema.orbitals[0].traits!;
     expect(resolvedTraits).toHaveLength(1);
 
     const first = resolvedTraits[0] as { ref?: string; _resolved?: { name: string } };
@@ -281,7 +285,7 @@ describe('OrbitalServerRuntime trait attribution', () => {
     // inline trait. register() must unwrap `_resolved` so the inlined trait
     // reaches the StateMachineManager. Without the unwrap, every embedded
     // atom in a molecule is silently dropped (see §3.1b).
-    const refShapedSchema = {
+    const refShapedSchema: OrbitalSchema = {
       name: 'ref-unwrap-fixture',
       orbitals: [
         {
@@ -300,10 +304,11 @@ describe('OrbitalServerRuntime trait attribution', () => {
               _resolved: {
                 name: 'WrappedAtom',
                 category: 'interaction',
+                scope: 'instance',
                 linkedEntity: 'Item',
                 stateMachine: {
                   states: [{ name: 'idle', isInitial: true }],
-                  events: [{ key: 'INIT' }],
+                  events: [{ key: 'INIT', name: 'INIT' }],
                   transitions: [
                     {
                       from: 'idle',
@@ -330,8 +335,7 @@ describe('OrbitalServerRuntime trait attribution', () => {
     };
 
     const runtime = new OrbitalServerRuntime({ debug: false });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fixture mimics preprocess output shape that isn't part of the public OrbitalSchema type
-    await runtime.register(refShapedSchema as any);
+    await runtime.register(refShapedSchema);
 
     const result = await runtime.processOrbitalEvent('UnwrapOrbital', {
       event: 'INIT',

@@ -68,8 +68,6 @@ export {
   createContextFromBindings,
   createMinimalContext,
   deferEntityBindings,
-  resolveCallSitePayloadCaptures,
-  CALLSITE_PAYLOAD_PREFIX,
   type DeferredPatternValue,
   type EvaluationContext,
 } from "./BindingResolver.js";
@@ -82,6 +80,7 @@ export {
   normalizeEventKey,
   processEvent,
   StateMachineManager,
+  LIFECYCLE_EVENTS,
   type ProcessEventOptions,
 } from "./StateMachineCore.js";
 

@@ -13,8 +13,21 @@ module.exports = [
     plugins: { almadar: almadarPlugin },
     rules: {
       "almadar/no-as-any": "error",
+      "almadar/no-as-unknown-as": "error",
       "almadar/no-import-generated": "error",
       "almadar/no-record-string-unknown": "error",
+    },
+  },
+  {
+    files: ["test/**/*.ts", "test/**/*.tsx"],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { ecmaVersion: "latest", sourceType: "module" },
+    },
+    plugins: { almadar: almadarPlugin },
+    rules: {
+      "almadar/no-as-any": "error",
+      "almadar/no-as-unknown-as": "error",
     },
   },
 ];

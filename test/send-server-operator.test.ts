@@ -9,18 +9,17 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { EffectExecutor, type EffectHandlers } from '../src/index.js';
+import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 
 function makeExecutor(sendServer: EffectHandlers['sendServer']): {
     executor: EffectExecutor;
 } {
     const executor = new EffectExecutor({
-        handlers: {
+        handlers: stubEffectHandlers({
             emit: vi.fn(),
             fetch: vi.fn(async () => ({ rows: [], total: 0 })),
-            persist: vi.fn(async () => undefined),
-            set: vi.fn(),
             sendServer,
-        },
+        }),
         bindings: { entity: undefined },
         context: {
             traitName: 'ChatMessageChat',
@@ -54,12 +53,10 @@ describe('send-server operator — interpreter path', () => {
 
     it('does not throw when sendServer handler is not provided', async () => {
         const executor = new EffectExecutor({
-            handlers: {
+            handlers: stubEffectHandlers({
                 emit: vi.fn(),
                 fetch: vi.fn(async () => ({ rows: [], total: 0 })),
-                persist: vi.fn(async () => undefined),
-                set: vi.fn(),
-            },
+            }),
             bindings: { entity: undefined },
             context: {
                 traitName: 'ChatMessageChat',

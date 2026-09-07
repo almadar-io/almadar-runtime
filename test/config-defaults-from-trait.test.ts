@@ -16,18 +16,14 @@
 
 import { describe, it, expect } from 'vitest';
 import { collectDeclaredConfigDefaults } from '../src/OrbitalServerRuntime.js';
+import type { DeclaredTraitConfig } from '@almadar/core';
 
-// The runtime treats the trait declaration loaded from .orb structurally
-// (not via the strict @almadar/core type). These tests build that
-// structural shape directly so they cover the same path the runtime
-// uses without requiring a full OrbitalSchema.
-function makeTrait(config: Record<string, { type: string; default?: unknown }>) {
-    return {
-        name: 'TestTrait',
-        category: 'interaction' as const,
-        stateMachine: { states: [], events: [], transitions: [] },
-        config,
-    } as unknown as Parameters<typeof collectDeclaredConfigDefaults>[0];
+// `collectDeclaredConfigDefaults` only ever reads `trait.config` — its real
+// declared param type (`{ config?: DeclaredTraitConfig } | undefined`) is the
+// exact structural shape the runtime hands it, loaded from `.orb` rather
+// than the strict `Trait` type. These tests build that same minimal shape.
+function makeTrait(config: DeclaredTraitConfig): { config?: DeclaredTraitConfig } {
+    return { config };
 }
 
 describe('collectDeclaredConfigDefaults', () => {
@@ -36,7 +32,7 @@ describe('collectDeclaredConfigDefaults', () => {
     });
 
     it('returns undefined when trait has no config schema', () => {
-        const trait = { name: 'T', category: 'interaction' as const, stateMachine: { states: [], events: [], transitions: [] } } as unknown as Parameters<typeof collectDeclaredConfigDefaults>[0];
+        const trait: { config?: DeclaredTraitConfig } = {};
         expect(collectDeclaredConfigDefaults(trait)).toBeUndefined();
     });
 

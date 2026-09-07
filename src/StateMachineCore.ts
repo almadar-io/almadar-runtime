@@ -27,6 +27,19 @@ import { createLogger } from '@almadar/logger';
 
 const smLog = createLogger('almadar:runtime:sm');
 
+// Re-export for convenience
+export type { TraitState, TraitDefinition };
+
+/**
+ * Mount-time lifecycle event kinds, in the order a trait is checked for
+ * support (`canHandleEvent`) — shared by the client hook's mount effect
+ * (`useTraitStateMachine`) and the server's capture-child re-render
+ * (`OrbitalServerRuntime.rerenderCallsiteCaptureChildren`), which both need
+ * to find "the lifecycle transition" for a trait that never advances past
+ * its own INIT/LOAD/$MOUNT self-loop.
+ */
+export const LIFECYCLE_EVENTS = ['INIT', 'LOAD', '$MOUNT'] as const;
+
 // ============================================================================
 // Core Functions
 // ============================================================================

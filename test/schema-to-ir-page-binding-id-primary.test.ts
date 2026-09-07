@@ -1,13 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { schemaToIR } from '../src/resolver/schema-to-ir.js';
-import type { OrbitalSchema } from '@almadar/core';
+import { asTraitId } from '@almadar/core';
+import type { OrbitalSchema, PageTraitRef } from '@almadar/core';
 
 // V4-W4 surface 3: page trait bindings must resolve id-primary. A page ref
 // carrying a valid `refId` resolves the (possibly renamed) inline trait by
 // stable id even when the ref's name string is stale — the name-seam the
 // factory rewriter used to paper over. Name-only refs still fall back to name.
 describe('schemaToIR — page trait binding id-primary resolution', () => {
-  function makeSchema(pageTraitRef: unknown): OrbitalSchema {
+  function makeSchema(pageTraitRef: PageTraitRef): OrbitalSchema {
     return {
       name: 'App',
       version: '1.0.0',
@@ -21,10 +22,11 @@ describe('schemaToIR — page trait binding id-primary resolution', () => {
           },
           traits: [
             {
-              id: 'trait_feature_real',
+              id: asTraitId('trt_feature_real'),
               name: 'RealTrait',
               linkedEntity: 'Item',
               category: 'interaction',
+              scope: 'instance',
               stateMachine: {
                 states: [{ name: 'idle', isInitial: true }],
                 events: [{ key: 'GO', name: 'GO' }],
@@ -41,12 +43,11 @@ describe('schemaToIR — page trait binding id-primary resolution', () => {
           ],
         },
       ],
-      // eslint-disable-next-line almadar/no-record-string-unknown -- test schema literal
-    } as unknown as OrbitalSchema;
+    };
   }
 
   it('resolves the page binding via refId when the ref name is stale', () => {
-    const ir = schemaToIR(makeSchema({ ref: 'StaleWrongName', refId: 'trait_feature_real' }), {
+    const ir = schemaToIR(makeSchema({ ref: 'StaleWrongName', refId: asTraitId('trt_feature_real') }), {
       noCache: true,
     });
     const page = ir.pages.get('Home');

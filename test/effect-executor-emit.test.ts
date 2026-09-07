@@ -15,6 +15,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 import {
     EffectExecutor,
     type EffectHandlers,
@@ -32,9 +33,14 @@ function makeContext(): {
     executor: EffectExecutor;
 } {
     const emit = vi.fn();
-    const handlers: EffectHandlers = {
+    const handlers = stubEffectHandlers({
         emit,
-        persist: vi.fn(async () => undefined),
+        // A real store returns the persisted ROW on every genuine success
+        // (create/update/delete); `undefined` is reserved for a denied or
+        // otherwise failed write (see EffectHandlers.persist). Tests that
+        // want to exercise a denial override this per-call with
+        // `mockImplementationOnce(async () => undefined)`.
+        persist: vi.fn(async (_action, _entityType, data) => data ?? { id: 'mock-persist-id' }),
         set: vi.fn(),
         callService: vi.fn(async (_s, _a, params) => ({ ok: true, echoed: params })),
         // fetch/ref now return the FetchResult shape: { rows, total }. The
@@ -47,13 +53,14 @@ function makeContext(): {
             rows: [{ id: opts?.id ?? 'none', reactive: true }],
             total: 1,
         })),
-        substrateComposeAll: vi.fn(async (config: { appName: string }) => ({
-            composed: true,
-            appName: config.appName,
+        substrateComposeAll: vi.fn(async (config: Parameters<NonNullable<EffectHandlers['substrateComposeAll']>>[0]) => ({
+            orbitalCount: config.orbitals.length,
+            composedPath: config.appName,
+            success: true,
         })),
-    };
+    });
     const bindings: BindingContext = {
-        entity: { id: 'ent-1' } as unknown as BindingContext['entity'],
+        entity: { id: 'ent-1' },
     };
     const context: EffectContext = {
         traitName: 'TestTrait',
@@ -122,6 +129,45 @@ describe('emit: — fetch', () => {
         await executor.execute(['fetch', 'Patient', { id: 'p-1' }]);
         expect(emit).not.toHaveBeenCalled();
     });
+
+    it('fires emit.failure (not success with data: null) on a BY-ID fetch miss', async () => {
+        const { emit, handlers } = makeContext();
+        (handlers.fetch as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => null);
+        const executor = new EffectExecutor({
+            handlers,
+            bindings: { entity: undefined },
+            context: { traitName: 'T', state: 's', transition: 't' },
+        });
+        await executor.execute([
+            'fetch',
+            'Patient',
+            { id: 'p-missing', emit: { success: 'PATIENT_LOADED', failure: 'PATIENT_LOAD_FAILED' } },
+        ]);
+        expect(emit).not.toHaveBeenCalledWith('PATIENT_LOADED', expect.anything(), expect.anything());
+        const failureCalls = emit.mock.calls.filter(([e]) => e === 'PATIENT_LOAD_FAILED');
+        expect(failureCalls).toHaveLength(1);
+        expect(failureCalls[0][1]).toEqual({ error: 'Patient p-missing not found' });
+    });
+
+    it('fires emit.success with data: [] (not null) when a collection fetch matches nothing', async () => {
+        const { emit, handlers } = makeContext();
+        (handlers.fetch as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => null);
+        const executor = new EffectExecutor({
+            handlers,
+            bindings: { entity: undefined },
+            context: { traitName: 'T', state: 's', transition: 't' },
+        });
+        await executor.execute([
+            'fetch',
+            'Patient',
+            { filter: { status: 'archived' }, emit: { success: 'PATIENTS_LOADED', failure: 'PATIENTS_LOAD_FAILED' } },
+        ]);
+        const failureCalls = emit.mock.calls.filter(([e]) => e === 'PATIENTS_LOAD_FAILED');
+        expect(failureCalls).toHaveLength(0);
+        const successCalls = emit.mock.calls.filter(([e]) => e === 'PATIENTS_LOADED');
+        expect(successCalls).toHaveLength(1);
+        expect(successCalls[0][1]).toEqual({ data: [], totalCount: 0 });
+    });
 });
 
 // ============================================================================
@@ -140,8 +186,123 @@ describe('emit: — persist', () => {
         ]);
         const successCalls = emit.mock.calls.filter(([e]) => e === 'PATIENT_SAVED');
         expect(successCalls).toHaveLength(1);
-        // Runtime handler returns void → payload is the input data (best available).
+        // The store handler echoes the persisted row back.
         expect(successCalls[0][1]).toEqual({ id: 'p-1', status: 'done' });
+    });
+
+    it('fires emit.success after a successful delete', async () => {
+        const { emit, executor } = makeContext();
+        await executor.execute([
+            'persist',
+            'delete',
+            'Note',
+            'note-1',
+            { emit: { success: 'NOTE_DELETED' } },
+        ]);
+        const successCalls = emit.mock.calls.filter(([e]) => e === 'NOTE_DELETED');
+        expect(successCalls).toHaveLength(1);
+    });
+
+    // B4-V3: a store that DENIES a write (policy rejection, missing row,
+    // etc.) signals it by returning `undefined` — same as a thrown error,
+    // this must never be read as success. Pre-fix, `successPayload =
+    // persisted ?? data` fell back to the submitted data, so a denied
+    // delete logged `persist:success` and fired the declared success event
+    // for a row the store never touched.
+    it('does not fire success — and fires the declared failure event — when the store denies a delete', async () => {
+        const { emit, handlers } = makeContext();
+        (handlers.persist as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => undefined);
+        const executor = new EffectExecutor({
+            handlers,
+            bindings: {},
+            context: { traitName: 'T', state: 's', transition: 't' },
+        });
+        await executor.execute([
+            'persist',
+            'delete',
+            'Note',
+            'note-1',
+            { emit: { success: 'NOTE_DELETED', failure: 'NOTE_DELETE_FAILED' } },
+        ]);
+        expect(emit.mock.calls.some(([e]) => e === 'NOTE_DELETED')).toBe(false);
+        const failureCalls = emit.mock.calls.filter(([e]) => e === 'NOTE_DELETE_FAILED');
+        expect(failureCalls).toHaveLength(1);
+        expect(failureCalls[0][1]).toMatchObject({ entityType: 'Note', id: 'note-1' });
+    });
+
+    it('does not fire success — and fires nothing — when the store denies an update with no failure event declared', async () => {
+        const { emit, handlers } = makeContext();
+        (handlers.persist as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => undefined);
+        const executor = new EffectExecutor({
+            handlers,
+            bindings: {},
+            context: { traitName: 'T', state: 's', transition: 't' },
+        });
+        await executor.execute([
+            'persist',
+            'update',
+            'Note',
+            { id: 'note-1', title: 'x' },
+            { emit: { success: 'NOTE_UPDATED' } },
+        ]);
+        expect(emit).not.toHaveBeenCalled();
+    });
+
+    // C1-V1: a denied persist doesn't throw — `dispatch` used to report
+    // `void` unconditionally, so `executeWithResults` always pushed
+    // `status: 'executed'` even for a write the store rejected. The
+    // verification trace read that as success.
+    it('executeWithResults reports status "failed" — not "executed" — when the store denies a write', async () => {
+        const { handlers } = makeContext();
+        (handlers.persist as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => undefined);
+        const executor = new EffectExecutor({
+            handlers,
+            bindings: {},
+            context: { traitName: 'T', state: 's', transition: 't' },
+        });
+        const results = await executor.executeWithResults([
+            ['persist', 'delete', 'Note', 'note-1'],
+        ]);
+        expect(results).toHaveLength(1);
+        expect(results[0].status).toBe('failed');
+        expect(results[0].error).toContain('denied or failed');
+    });
+
+    it('executeWithResults reports status "executed" when the store accepts the write', async () => {
+        const { executor } = makeContext();
+        const results = await executor.executeWithResults([
+            ['persist', 'update', 'Patient', { id: 'p-1', status: 'done' }],
+        ]);
+        expect(results).toHaveLength(1);
+        expect(results[0].status).toBe('executed');
+    });
+
+    it('never logs persist:success — and logs persist:denied — when the store denies the write', async () => {
+        const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        try {
+            const { handlers } = makeContext();
+            (handlers.persist as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => undefined);
+            const executor = new EffectExecutor({
+                handlers,
+                bindings: {},
+                context: { traitName: 'T', state: 's', transition: 't' },
+            });
+            await executor.execute([
+                'persist',
+                'delete',
+                'Note',
+                'note-1',
+                { emit: { success: 'NOTE_DELETED' } },
+            ]);
+            const debugMessages = debugSpy.mock.calls.map((call) => String(call[1] ?? ''));
+            expect(debugMessages).not.toContain('persist:success');
+            const errorMessages = errorSpy.mock.calls.map((call) => String(call[1] ?? ''));
+            expect(errorMessages).toContain('persist:denied');
+        } finally {
+            debugSpy.mockRestore();
+            errorSpy.mockRestore();
+        }
     });
 
     it('fires emit.failure when persist throws', async () => {
@@ -316,10 +477,10 @@ describe('set: — in-memory mirror without entity id (G46)', () => {
         // the alert with the new message; runtime previously dropped the
         // set as 'missing-entity-id' and rendered empty.
         const emit = vi.fn();
-        const handlers: EffectHandlers = {
+        const handlers = stubEffectHandlers({
             emit,
             set: vi.fn(),
-        };
+        });
         const bindings: BindingContext = {
             entity: undefined,
             payload: { message: 'hello', notificationType: 'info' },
@@ -344,7 +505,7 @@ describe('set: — in-memory mirror without entity id (G46)', () => {
 
     it('mirrors successive @entity.<field> writes onto the same in-memory row', async () => {
         const emit = vi.fn();
-        const handlers: EffectHandlers = { emit, set: vi.fn() };
+        const handlers = stubEffectHandlers({ emit, set: vi.fn() });
         const bindings: BindingContext = {
             entity: undefined,
             payload: { message: 'm', notificationType: 'success' },
@@ -377,21 +538,21 @@ describe('emit: — substrate operators (effect-position)', () => {
         expect(successCalls).toHaveLength(1);
         // Uniform { result } payload so `?result` captures the return value.
         expect(successCalls[0][1]).toMatchObject({
-            result: { composed: true, appName: 'demo' },
+            result: { orbitalCount: 0, composedPath: 'demo', success: true },
         });
     });
 
     it('compose/compose-all fires emit.failure with { error } on handler throw', async () => {
         const emit = vi.fn();
         const executor = new EffectExecutor({
-            handlers: {
+            handlers: stubEffectHandlers({
                 emit,
                 persist: vi.fn(async () => undefined),
                 set: vi.fn(),
                 substrateComposeAll: vi.fn(async () => {
                     throw new Error('boom');
                 }),
-            },
+            }),
             bindings: {},
             context: { traitName: 'T', state: 's', transition: 's->s' },
         });

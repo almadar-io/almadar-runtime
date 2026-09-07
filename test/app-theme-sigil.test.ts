@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
-import type { OrbitalSchema } from '@almadar/core';
+import type { OrbitalSchema, PatternConfig } from '@almadar/core';
 
 function themedSchema(appTheme?: string, orbitalTheme?: string): OrbitalSchema {
   return {
@@ -48,10 +48,11 @@ async function paintedTheme(schema: OrbitalSchema): Promise<string | undefined> 
   await runtime.register(schema);
   const result = await runtime.processOrbitalEvent('Chrome', { event: 'PAINT' });
   const render = result.clientEffects?.find(
-    (e): e is [string, string, Record<string, unknown>] =>
+    (e): e is ['render-ui', string, PatternConfig<'box'>] =>
       Array.isArray(e) && e[0] === 'render-ui',
   );
-  return render?.[2]?.['data-theme'] as string | undefined;
+  const theme = render?.[2]?.['data-theme'];
+  return typeof theme === 'string' ? theme : undefined;
 }
 
 describe('@currentTheme precedence: orbital > app > default', () => {

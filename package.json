@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "6.71.0",
+  "version": "6.72.0",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -61,17 +61,17 @@
     "build": "tsup",
     "build:watch": "tsup --watch",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest --run",
     "prepublishOnly": "pnpm run build",
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
-    "@almadar/core": "^10.84.0",
-    "@almadar/evaluator": "^2.44.0",
+    "@almadar/core": "^10.87.0",
+    "@almadar/evaluator": "^2.45.0",
     "@almadar/logger": "^1.12.0",
-    "@almadar/server": "^2.39.0",
-    "@almadar/std": "^16.204.0"
+    "@almadar/server": "^2.40.0",
+    "@almadar/std": "^16.208.0"
   },
   "peerDependencies": {
     "express": "^5.0.0"
@@ -82,7 +82,7 @@
     }
   },
   "devDependencies": {
-    "@almadar/eslint-plugin": "^2.17.0",
+    "@almadar/eslint-plugin": "^2.18.0",
     "@types/express": "^5.0.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/parser": "8.65.0",

@@ -15,9 +15,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 import {
     EffectExecutor,
-    type EffectHandlers,
     type BindingContext,
     type EffectContext,
 } from '../src/index.js';
@@ -36,14 +36,14 @@ function makeExecutor(): {
     executor: EffectExecutor;
 } {
     const emit = vi.fn();
-    const handlers: EffectHandlers = {
+    const handlers = stubEffectHandlers({
         emit,
         // Multi-row fetch — the dashboard fetches the full collection then
         // lets the listening atoms aggregate locally.
         fetch: vi.fn(async () => ({ rows: [...ROWS], total: ROWS.length })),
         persist: vi.fn(async () => undefined),
         set: vi.fn(),
-    };
+    });
     const bindings: BindingContext = {
         entity: undefined,
     };
@@ -99,12 +99,12 @@ describe('Dashboard fetch → cross-trait emit', () => {
         // @entity.chartData stay at their INIT default `[]` (matches the
         // explicit-binding contract — no transition fired, no value set).
         const emit = vi.fn();
-        const handlers: EffectHandlers = {
+        const handlers = stubEffectHandlers({
             emit,
             fetch: vi.fn().mockImplementationOnce(async () => {
                 throw new Error('db unreachable');
             }),
-        };
+        });
         const executor = new EffectExecutor({
             handlers,
             bindings: {},
@@ -120,17 +120,16 @@ describe('Dashboard fetch → cross-trait emit', () => {
         expect(failureCalls[0][1]).toMatchObject({ error: 'db unreachable' });
     });
 
-    it('null fetch result emits { data: null, totalCount: 0 } — sentinel for "not found"', async () => {
-        // When the entity collection is empty (no matching rows), the
-        // runtime emits a stable shape so listeners' `array/len`,
-        // `array/groupBy`, etc. operate on `null` (which their `?? []`
-        // guards normalize to []) instead of receiving an unexpected
-        // shape that would silently break aggregation.
+    it('null fetch result on a COLLECTION query (no id) emits { data: [], totalCount: 0 }', async () => {
+        // A filter/collection query matching no rows is still a successful
+        // query — an empty result set, not a miss — so listeners'
+        // `array/len`, `array/groupBy`, etc. get an array they can iterate
+        // directly rather than an `null` they'd have to `?? []` first.
         const emit = vi.fn();
-        const handlers: EffectHandlers = {
+        const handlers = stubEffectHandlers({
             emit,
             fetch: vi.fn(async () => null),
-        };
+        });
         const executor = new EffectExecutor({
             handlers,
             bindings: {},
@@ -138,6 +137,31 @@ describe('Dashboard fetch → cross-trait emit', () => {
         });
         await executor.execute(['fetch', 'DashboardItem', { emit: { success: 'BrowseItemLoaded' } }]);
         const [, payload] = emit.mock.calls.find(([e]) => e === 'BrowseItemLoaded')!;
-        expect(payload).toEqual({ data: null, totalCount: 0 });
+        expect(payload).toEqual({ data: [], totalCount: 0 });
+    });
+
+    it('null fetch result on a BY-ID query emits the failure event, not success with data: null', async () => {
+        // "not found" for a specific id is a miss, not an empty result —
+        // the transition's own FAILURE arm (e.g. an error state + Retry)
+        // must fire instead of a success carrying a null record a renderer
+        // would otherwise treat as "loaded, no value".
+        const emit = vi.fn();
+        const handlers = stubEffectHandlers({
+            emit,
+            fetch: vi.fn(async () => null),
+        });
+        const executor = new EffectExecutor({
+            handlers,
+            bindings: {},
+            context: { traitName: 'T', state: 's', transition: 't' },
+        });
+        await executor.execute([
+            'fetch',
+            'DashboardItem',
+            { id: 'missing-1', emit: { success: 'BrowseItemLoaded', failure: 'BrowseItemLoadFailed' } },
+        ]);
+        expect(emit).not.toHaveBeenCalledWith('BrowseItemLoaded', expect.anything(), expect.anything());
+        const [, payload] = emit.mock.calls.find(([e]) => e === 'BrowseItemLoadFailed')!;
+        expect(payload).toEqual({ error: 'DashboardItem missing-1 not found' });
     });
 });

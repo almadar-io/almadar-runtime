@@ -54,8 +54,10 @@ import {
   StateMachineManager,
   processEvent,
   createInitialTraitState,
+  LIFECYCLE_EVENTS,
 } from "./StateMachineCore.js";
 import { EffectExecutor } from "./EffectExecutor.js";
+import type { ServerEffectResult } from "./ServerEffectHandlers.js";
 import { createLogger } from '@almadar/logger';
 // Same treatment for `createOsHandlers` (uses `fs`, `net`, `child_process`).
 // The runtime auto-wires it in the constructor's Node-only branch — guarded
@@ -140,7 +142,6 @@ import type { SSEEvent } from '@almadar/server';
 import {
   interpolateProps,
   createContextFromBindings,
-  resolveCallSitePayloadCaptures,
 } from "./BindingResolver.js";
 import { evaluate, evaluateGuard, evaluateListenPayloadExpr } from "@almadar/evaluator";
 import type {
@@ -225,7 +226,7 @@ export type ClientEffectTuple =
   | ClientNavigateTuple
   | ClientNavigateBackTuple
   | ClientNotifyTuple;
-import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef } from "@almadar/core";
+import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, entityAccessPolicies, entityAccessPoliciesByStoreKey } from "@almadar/core/mock";
 import { getPatternFieldsContract } from "@almadar/core/patterns";
 import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from "./entityAccess.js";
@@ -389,7 +390,7 @@ export interface OrbitalEventResponse {
    */
   clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>;
   /** Results from server-side effects (persist, call-service, set) */
-  effectResults?: EffectResult[];
+  effectResults?: ServerEffectResult[];
   error?: string;
 }
 
@@ -397,20 +398,6 @@ export interface OrbitalEventResponse {
  * Result of a server-side effect execution.
  * Closes the circuit by returning effect outcomes to the client.
  */
-export interface EffectResult {
-  /** Effect type that was executed */
-  effect: 'persist' | 'call-service' | 'set' | 'ref' | 'deref' | 'swap' | 'atomic';
-  /** Action performed (e.g., 'create', 'update', 'delete' for persist) */
-  action?: string;
-  /** Entity type affected (for persist/set/ref/deref/swap) */
-  entityType?: string;
-  /** Result data from the effect (entity row for CRUD, summary for batch) */
-  data?: EntityRow | { operations: EntityRow[]; completedCount: number; totalCount: number };
-  /** Whether the effect succeeded */
-  success: boolean;
-  /** Error message if failed */
-  error?: string;
-}
 
 /**
  * Loader configuration for resolving `uses` imports
@@ -655,7 +642,11 @@ export class OrbitalServerRuntime {
   protected orbitals = new Map<string, RegisteredOrbital>();
   private eventBus: EventBus;
   private config: OrbitalServerRuntimeConfig;
-  private persistence: PersistenceAdapter;
+  /** The bound persistence adapter (mock/in-memory/consumer-supplied). Public
+   *  so a test can inspect committed rows honestly — `(runtime as any)
+   *  .persistence` was the alternative, and that cast is what this field
+   *  visibility replaces. */
+  public readonly persistence: PersistenceAdapter;
   private listenerCleanups: Array<() => void> = [];
   private tickBindings: TickBinding[] = [];
   // One coalesced clock for every tick this runtime registers — replaces
@@ -697,6 +688,15 @@ export class OrbitalServerRuntime {
    * `declaredDefaults` and ahead of `callSiteOverride`.
    */
   private resolvedTraitConfigs: Record<string, TraitConfig> = {};
+  /**
+   * Referrer trait name → the DIRECT children (via `@trait.X`) that need
+   * their lifecycle transition re-run under the referrer's `callsitePayload`
+   * whenever the referrer's own transition fires — computed once per
+   * `register()` via `@almadar/core`'s `collectCallsiteCaptureChildren`
+   * (merged across every orbital in the schema, same flattening
+   * `resolvedTraitConfigs` uses). See `rerenderCallsiteCaptureChildren`.
+   */
+  private callsiteCaptureChildrenByTrait: ReadonlyMap<string, ReadonlySet<string>> = new Map();
 
   constructor(config: OrbitalServerRuntimeConfig = {}) {
     this.config = {
@@ -953,6 +953,7 @@ export class OrbitalServerRuntime {
     // of re-reading the raw .orb from disk. See getResolvedSchema().
     this.resolvedSchema = schema;
     this.resolvedTraitConfigs = buildResolvedTraitConfigs(schema);
+    this.callsiteCaptureChildrenByTrait = this.buildCallsiteCaptureChildrenByTrait(schema);
     this.installOwnerGate();
   }
 
@@ -972,6 +973,25 @@ export class OrbitalServerRuntime {
       identity: identityEntityName(schema),
       columns: derived,
     });
+  }
+
+  /**
+   * Merge `collectCallsiteCaptureChildren` across every orbital in the
+   * schema into ONE flat referrer-trait-name → children map — same
+   * flattening `resolvedTraitConfigs` uses, safe because trait names are
+   * unique within one running schema (the compose/resolve pipeline already
+   * relies on that for `configByTrait` and `resolvedTraitConfigs`).
+   */
+  private buildCallsiteCaptureChildrenByTrait(
+    schema: OrbitalSchema,
+  ): ReadonlyMap<string, ReadonlySet<string>> {
+    const merged = new Map<string, ReadonlySet<string>>();
+    for (const orbital of schema.orbitals) {
+      for (const [referrer, children] of collectCallsiteCaptureChildren(orbital)) {
+        merged.set(referrer, children);
+      }
+    }
+    return merged;
   }
 
   /**
@@ -1000,6 +1020,7 @@ export class OrbitalServerRuntime {
 
     this.resolvedSchema = schema;
     this.resolvedTraitConfigs = buildResolvedTraitConfigs(schema);
+    this.callsiteCaptureChildrenByTrait = this.buildCallsiteCaptureChildrenByTrait(schema);
     this.installOwnerGate();
   }
 
@@ -1806,7 +1827,7 @@ export class OrbitalServerRuntime {
         if (tick.effects && tick.effects.length > 0) {
           const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
           const clientEffects: ClientEffectTuple[] = [];
-          const tickEffectResults: EffectResult[] = [];
+          const tickEffectResults: ServerEffectResult[] = [];
           await this.executeEffects(
             registered,
             traitName,
@@ -2255,7 +2276,7 @@ export class OrbitalServerRuntime {
     // effect to the trait that emitted it (used by `<TraitFrame>`).
     const clientEffectsByTrait: Array<{ traitName: string; effect: ClientEffectTuple }> = [];
     // Collect server-side effect results (persist, call-service, set)
-    const effectResults: EffectResult[] = [];
+    const effectResults: ServerEffectResult[] = [];
 
     // Extract active traits filter from payload (sent by client for page-specific execution)
     const activeTraits = (payload as EventPayload | undefined)?._activeTraits as string[] | undefined;
@@ -2329,6 +2350,27 @@ export class OrbitalServerRuntime {
           traitName,
           result.effects as Effect[],
           cleanPayload,
+          entityData,
+          entityId,
+          emittedEvents,
+          fetchedData,
+          clientEffects,
+          effectResults,
+          viewer,
+          clientEffectsByTrait,
+          onPush,
+          clientId,
+        );
+        // A JSX-hoisted inline child embedded via `@trait.X`
+        // (`@callsitePayload.<field>` capture) renders once at its own
+        // mount-time INIT and never again — re-run its lifecycle transition
+        // now, under THIS transition's payload, so its frame reflects the
+        // composing event instead of staying frozen at whatever it
+        // captured at mount.
+        await this.rerenderCallsiteCaptureChildren(
+          registered,
+          traitName,
+          cleanPayload ?? {},
           entityData,
           entityId,
           emittedEvents,
@@ -2437,13 +2479,21 @@ export class OrbitalServerRuntime {
     emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>,
     fetchedData: { [entityType: string]: EntityRow | EntityRow[] },
     clientEffects: ClientEffectTuple[],
-    effectResults: EffectResult[],
+    effectResults: ServerEffectResult[],
     /** Already-normalized viewer (see `processOrbitalEvent`'s `viewer`). */
     user?: UserContext,
     clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>,
     onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void,
     /** Per-request originating client (from `OrbitalEventRequest.clientId`); absent for ticks. Carried through to persist-envelope broadcast items so the sink can exclude the origin. */
     originClientId?: string,
+    /**
+     * The composing effect's triggering payload, when `traitName` is an
+     * embedded child (`@trait.X`) being re-run under its embedder's
+     * transition. Surfaced on the binding context as `@callsitePayload.<field>`
+     * — see `BindingContext.callsitePayload`. Absent for a trait's own,
+     * non-embedded execution.
+     */
+    callsitePayload?: EventPayload,
   ): Promise<void> {
     const entityType = registered.entity.name;
 
@@ -2607,7 +2657,7 @@ export class OrbitalServerRuntime {
                 case 'create': {
                   const createData = (opRest[0] as EntityRow) || {};
                   const { id: newId } = await this.persistence.create(opEntityType, createData);
-                  batchResults.push({ action: 'create', entityType: opEntityType, id: newId, ...createData });
+                  batchResults.push({ ...createData, action: 'create', entityType: opEntityType, id: newId });
                   completed.push({ action: 'create', entityType: opEntityType, id: newId });
                   break;
                 }
@@ -2616,7 +2666,7 @@ export class OrbitalServerRuntime {
                   const updateData = (opRest[1] as EntityRow) || {};
                   await this.persistence.update(opEntityType, updateId, updateData);
                   const updated = await this.persistence.getById(opEntityType, updateId);
-                  batchResults.push({ action: 'update', entityType: opEntityType, id: updateId, ...(updated || updateData) });
+                  batchResults.push({ ...(updated || updateData), action: 'update', entityType: opEntityType, id: updateId });
                   completed.push({ action: 'update', entityType: opEntityType, id: updateId });
                   break;
                 }
@@ -2662,6 +2712,11 @@ export class OrbitalServerRuntime {
         const type = targetEntityType || entityType;
         let resultData: EntityRow | undefined;
         const sizeBefore = (await this.persistence.list(type)).length;
+        // Distinguishes a policy/row-key REJECTION from any other thrown
+        // failure (a persistence-backend error, a validation exception) so
+        // the catch below can stamp `denied: true` on the pushed result —
+        // tracked explicitly rather than pattern-matching the error message.
+        let deniedReason: 'access-denied' | 'no-row-key' | undefined;
 
         try {
           // Validate relation cardinality before create/update
@@ -2679,10 +2734,11 @@ export class OrbitalServerRuntime {
           switch (action) {
             case "create": {
               if (!checkMutationAccess(data || {}, mutationPolicy, accessBindings)) {
+                deniedReason = 'access-denied';
                 throw new Error(accessDeniedMessage('create', type));
               }
               const { id } = await this.persistence.create(type, data || {});
-              resultData = { id, ...(data || {}) };
+              resultData = { ...(data || {}), id };
               break;
             }
             case "update":
@@ -2691,13 +2747,14 @@ export class OrbitalServerRuntime {
                 if (mutationPolicy !== undefined) {
                   const existing = await this.persistence.getById(type, updateId);
                   if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings)) {
+                    deniedReason = 'access-denied';
                     throw new Error(accessDeniedMessage('update', type));
                   }
                 }
                 await this.persistence.update(type, updateId, data || {});
                 // Return the updated entity
                 const updated = await this.persistence.getById(type, updateId);
-                resultData = updated || { id: updateId, ...(data || {}) };
+                resultData = updated || { ...(data || {}), id: updateId };
               } else {
                 // A write with NO row key is a FAILED write, not a silent
                 // no-op. This branch used to fall through to the unconditional
@@ -2709,6 +2766,7 @@ export class OrbitalServerRuntime {
                 // both now fail identically.
                 effectLog.error('persist:no-row-key', { action, entityType: type });
                 if (NO_ROW_KEY_IS_FATAL) {
+                  deniedReason = 'no-row-key';
                   throw new Error(
                     `persist ${action} ${type} resolved no row key — the id was neither `
                     + `on the row being written nor on the request. Bind it before the `
@@ -2732,6 +2790,7 @@ export class OrbitalServerRuntime {
                 if (mutationPolicy !== undefined) {
                   const existing = await this.persistence.getById(type, deleteId);
                   if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings)) {
+                    deniedReason = 'access-denied';
                     throw new Error(accessDeniedMessage('delete', type));
                   }
                 }
@@ -2743,6 +2802,7 @@ export class OrbitalServerRuntime {
                 // No row key is a failed write, not a silent no-op.
                 effectLog.error('persist:no-row-key', { action, entityType: type });
                 if (NO_ROW_KEY_IS_FATAL) {
+                  deniedReason = 'no-row-key';
                   throw new Error(
                     `persist ${action} ${type} resolved no row key — the id was neither `
                     + `on the row being written nor on the request. Bind it before the `
@@ -2752,6 +2812,23 @@ export class OrbitalServerRuntime {
               }
               break;
             }
+          }
+
+          // `NO_ROW_KEY_IS_FATAL === false` falls through the update/delete
+          // else-branches above without setting `resultData` or throwing —
+          // that is a write that never happened, not a success. Fail it
+          // explicitly instead of reaching the unconditional `success: true`
+          // push below with an empty `data`.
+          if (resultData === undefined && (action === 'update' || action === 'delete')) {
+            effectResults.push({
+              effect: 'persist',
+              action,
+              entityType: type,
+              success: false,
+              denied: true,
+              error: `persist ${action} ${type} resolved no row key`,
+            });
+            return undefined;
           }
 
           const sizeAfter = (await this.persistence.list(type)).length;
@@ -2783,6 +2860,7 @@ export class OrbitalServerRuntime {
             action,
             entityType: type,
             success: false,
+            ...(deniedReason !== undefined ? { denied: true as const } : {}),
             error: err instanceof Error ? err.message : String(err),
           });
         }
@@ -3186,6 +3264,16 @@ export class OrbitalServerRuntime {
       state: state?.currentState || "unknown",
       user,
     };
+    // Surface the composing effect's triggering payload for a JSX-hoisted
+    // inline child trait's `@callsitePayload.<field>` captures — both a
+    // call-site config override AND the trait's own declared config default
+    // resolve it through the standard `@config.*` binding-forward recursion
+    // in `interpolateString` once `ctx.callsitePayload` is populated (see
+    // `createContextFromBindings`). One owner: the binding root, not a
+    // preprocessing pass over `configByTrait`.
+    if (callsitePayload) {
+      bindings.callsitePayload = callsitePayload;
+    }
 
     // Call-site `config: { ... }` injection. Reference-resolver captures the
     // trait ref's config block into RegisteredOrbital.configByTrait at
@@ -3223,19 +3311,18 @@ export class OrbitalServerRuntime {
     // raw, it would clobber the resolved array back to `"@config.fields"` and
     // push an unresolved frame over the bridge — the server half of the
     // render oscillation. A concrete override (a real array/scalar) still wins.
-    // Call-site payload capture: a `@callsitePayload.<field>` override is a
-    // snapshot of THIS effect's triggering event payload, captured at the
-    // composing call site. Resolve it against `payload` (in scope here) to the
-    // literal before it merges into the child's config — the child then sees a
-    // plain value via its `@config.<knob>` read, never a payload ref.
+    // A `@callsitePayload.<field>` override — whole-value or nested inside an
+    // S-expression — passes through RAW here (no eager resolution). It
+    // resolves later through the standard `@config.*` binding-forward
+    // recursion in `interpolateString` once `bindings.callsitePayload` is
+    // populated above, the same path a declared config default carrying the
+    // same capture already goes through — one owner (the `callsitePayload`
+    // binding root), not a `configByTrait`-only preprocessing pass.
     const callSiteOverride = callSiteOverrideRaw
-      ? resolveCallSitePayloadCaptures(
-          Object.fromEntries(
-            Object.entries(callSiteOverrideRaw).filter(
-              ([, v]) => !(typeof v === 'string' && v.startsWith('@config.')),
-            ),
+      ? Object.fromEntries(
+          Object.entries(callSiteOverrideRaw).filter(
+            ([, v]) => !(typeof v === 'string' && v.startsWith('@config.')),
           ),
-          payload,
         )
       : undefined;
     if (declaredDefaults || resolvedDefaults || callSiteOverride) {
@@ -3354,6 +3441,101 @@ export class OrbitalServerRuntime {
     });
 
     await executor.executeAll(effects);
+  }
+
+  /**
+   * Re-run a JSX-hoisted inline child trait's (`@trait.X`) lifecycle
+   * transition under `callsitePayload` — the payload of the transition that
+   * just composed it — so its `@callsitePayload.<field>` captures reflect
+   * the composing event instead of staying frozen at whatever the child
+   * captured at its own mount-time INIT (a child renders once at mount and
+   * never again on its own).
+   *
+   * `this.callsiteCaptureChildrenByTrait` (built at `register()` via
+   * `@almadar/core`'s `collectCallsiteCaptureChildren`) gives `traitName`'s
+   * DIRECT children that need this — either because the child itself
+   * captures, or because it is a pass-through to a capturing descendant.
+   * The child's lifecycle event (INIT/LOAD/$MOUNT) is re-dispatched
+   * TARGETED at just that trait, from its CURRENT state (the same
+   * guard-aware `sendEvent`/`canHandleEvent` lookup a mount-time INIT
+   * uses), then its effects run through the SAME `executeEffects` used
+   * everywhere else, with `payload: {}` (a lifecycle event carries none)
+   * and `callsitePayload` set so `@callsitePayload.*` resolves — pushing
+   * into the SAME `clientEffects`/`clientEffectsByTrait`/`effectResults`
+   * so the child's refreshed frame reaches the sidecar under its own trait
+   * name. Recurses into the child's own entry in the same map (still under
+   * the SAME `callsitePayload` — the capture resolves up the embed chain to
+   * the nearest transition that actually has one) for grandchildren;
+   * `visited` guards against a malformed embed graph cycling on itself.
+   * Never goes through `processOrbitalEvent` (that would be re-entrant) —
+   * calls this internal executor directly, exactly like every other
+   * transition's effects.
+   */
+  private async rerenderCallsiteCaptureChildren(
+    registered: RegisteredOrbital,
+    traitName: string,
+    callsitePayload: EventPayload,
+    entityData: EntityRow,
+    entityId: string | undefined,
+    emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>,
+    fetchedData: { [entityType: string]: EntityRow | EntityRow[] },
+    clientEffects: ClientEffectTuple[],
+    effectResults: ServerEffectResult[],
+    user: UserContext | undefined,
+    clientEffectsByTrait: Array<{ traitName: string; effect: ClientEffectTuple }> | undefined,
+    onPush: ((item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void) | undefined,
+    originClientId: string | undefined,
+    visited: Set<string> = new Set(),
+  ): Promise<void> {
+    const children = this.callsiteCaptureChildrenByTrait.get(traitName);
+    if (!children || children.size === 0) return;
+    for (const childName of children) {
+      if (visited.has(childName)) continue;
+      visited.add(childName);
+      const lifecycleEvent = LIFECYCLE_EVENTS.find((evt) => registered.manager.canHandleEvent(childName, evt));
+      if (lifecycleEvent === undefined) continue;
+      const [entry] = registered.manager.sendEvent(lifecycleEvent, {}, entityData, undefined, undefined, childName, user);
+      if (!entry || !entry.result.executed) continue;
+      xOrbitalLog.debug('callsite-capture-child:rerender', () => ({
+        referrer: traitName,
+        child: childName,
+        lifecycleEvent,
+        callsitePayload: JSON.stringify(callsitePayload),
+      }));
+      await this.executeEffects(
+        registered,
+        childName,
+        entry.result.effects as Effect[],
+        {},
+        entityData,
+        entityId,
+        emittedEvents,
+        fetchedData,
+        clientEffects,
+        effectResults,
+        user,
+        clientEffectsByTrait,
+        onPush,
+        originClientId,
+        callsitePayload,
+      );
+      await this.rerenderCallsiteCaptureChildren(
+        registered,
+        childName,
+        callsitePayload,
+        entityData,
+        entityId,
+        emittedEvents,
+        fetchedData,
+        clientEffects,
+        effectResults,
+        user,
+        clientEffectsByTrait,
+        onPush,
+        originClientId,
+        visited,
+      );
+    }
   }
 
   // ==========================================================================
@@ -3682,6 +3864,7 @@ export class OrbitalServerRuntime {
    * Routes:
    * - GET  /              - List registered orbitals
    * - GET  /:orbital      - Get orbital info and current states
+   * - GET  /:orbital/entities/:entityType - Full mock-store row set (verification/tooling only)
    * - POST /:orbital/events - Send event to orbital (includes data from `fetch` effects)
    */
   router(): ExpressRouter {
@@ -3736,6 +3919,27 @@ export class OrbitalServerRuntime {
           })),
         },
       });
+    });
+
+    // Get an entity's FULL mock-store row set (verification/tooling only —
+    // read-only, bypasses guards). App CRUD still goes exclusively through
+    // `/:orbital/events`; this exists because a verifier reasoning from the
+    // BROWSER's rendered snapshot sees only a filtered/paged SUBSET of this
+    // same store (a trait's fetched `data`) and can pick a row a hidden
+    // sibling references, which the runtime's own `onDelete: restrict` then
+    // rejects — see `@almadar-io/verify`'s `driver/tick.ts` `listEntityRows`.
+    router.get("/:orbital/entities/:entityType", (req: Request, res: Response, next: NextFunction) => {
+      const orbitalName = req.params.orbital as string;
+      const entityType = req.params.entityType as string;
+      if (!this.orbitals.has(orbitalName)) {
+        res.status(404).json({ success: false, error: "Orbital not found" });
+        return;
+      }
+      this.persistence.list(entityType)
+        .then((rows) => {
+          res.json({ success: true, entityType, rows });
+        })
+        .catch(next);
     });
 
     // Send event to orbital - this is the ONLY data access point

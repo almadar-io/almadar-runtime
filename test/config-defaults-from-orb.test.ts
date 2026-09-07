@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { collectDeclaredConfigDefaults } from '../src/OrbitalServerRuntime.js';
+import type { DeclaredTraitConfig } from '@almadar/core';
 
 function resolveStdRegistry(): string {
     try {
@@ -31,7 +32,7 @@ const STD_REGISTRY = resolveStdRegistry();
 
 interface OrbTrait {
     name: string;
-    config?: Record<string, { type: string; default?: unknown }>;
+    config?: DeclaredTraitConfig;
     [k: string]: unknown;
 }
 interface OrbSchema {
@@ -52,9 +53,7 @@ function loadAtomTrait(orbRelative: string, traitName: string): OrbTrait {
 describe('config defaults from real std atom .orb files', () => {
     it('std-modal ModalRecordModal exposes typed config defaults', () => {
         const trait = loadAtomTrait('ui/core/atoms/std-modal.orb', 'ModalRecordModal');
-        const defaults = collectDeclaredConfigDefaults(
-            trait as unknown as Parameters<typeof collectDeclaredConfigDefaults>[0],
-        );
+        const defaults = collectDeclaredConfigDefaults(trait);
         expect(defaults).toBeDefined();
         // std-modal ships `fields : [string] = []`, `icon : string =
         // "layout-panel-top"`, `title : string = "Details"`, `mode :
@@ -71,9 +70,7 @@ describe('config defaults from real std atom .orb files', () => {
 
     it('std-search SearchResultSearch exposes string config defaults', () => {
         const trait = loadAtomTrait('ui/core/atoms/std-search.orb', 'SearchResultSearch');
-        const defaults = collectDeclaredConfigDefaults(
-            trait as unknown as Parameters<typeof collectDeclaredConfigDefaults>[0],
-        );
+        const defaults = collectDeclaredConfigDefaults(trait);
         expect(defaults).toBeDefined();
         expect(defaults).toMatchObject({
             placeholder: 'Search…',
@@ -86,9 +83,7 @@ describe('config defaults from real std atom .orb files', () => {
             'ui/core/atoms/std-pagination.orb',
             'PagedItemPagination',
         );
-        const defaults = collectDeclaredConfigDefaults(
-            trait as unknown as Parameters<typeof collectDeclaredConfigDefaults>[0],
-        );
+        const defaults = collectDeclaredConfigDefaults(trait);
         expect(defaults).toBeDefined();
         expect(defaults).toMatchObject({
             pageSize: 10,

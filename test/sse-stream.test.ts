@@ -66,7 +66,7 @@ describe('POST /:orbital/events?stream=true (Express runtime)', () => {
     app.use('/api/orbitals', runtime.router());
 
     await new Promise<void>((resolve) => {
-      server = app.listen(0, resolve);
+      server = app.listen(0, () => resolve());
     });
     const port = (server!.address() as { port: number }).port;
 
@@ -91,7 +91,7 @@ describe('POST /:orbital/events?stream=true (Express runtime)', () => {
     app.use('/api/orbitals', runtime.router());
 
     await new Promise<void>((resolve) => {
-      server = app.listen(0, resolve);
+      server = app.listen(0, () => resolve());
     });
     const port = (server!.address() as { port: number }).port;
 
@@ -137,7 +137,7 @@ describe('POST /:orbital/events?stream=true (Express runtime)', () => {
     app.use('/api/orbitals', runtime.router());
 
     await new Promise<void>((resolve) => {
-      server = app.listen(0, resolve);
+      server = app.listen(0, () => resolve());
     });
     const port = (server!.address() as { port: number }).port;
 

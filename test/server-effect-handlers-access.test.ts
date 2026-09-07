@@ -11,9 +11,9 @@
  * `entityAccess` is optional: a caller that passes nothing keeps the old
  * unrestricted behavior, which is what `@almadar/ui`'s OrbPreview does today.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { InMemoryPersistence } from '../src/PersistenceAdapter.js';
-import { createServerEffectHandlers } from '../src/ServerEffectHandlers.js';
+import { createServerEffectHandlers, type ServerEffectResult } from '../src/ServerEffectHandlers.js';
 import { accessDeniedMessage } from '../src/entityAccess.js';
 import type { EntityAccessPolicies, SExpr } from '@almadar/core';
 
@@ -86,6 +86,24 @@ describe('fetch honours the declared @read directive', () => {
   });
 });
 
+describe('persist stamps denied:true on a no-row-key write', () => {
+  it('an update with no id anywhere records denied:true, not a silent success', async () => {
+    const effectResults: ServerEffectResult[] = [];
+    const p = seeded();
+    const h = createServerEffectHandlers({
+      persistence: p,
+      eventBus: bus,
+      entityType: 'Ticket',
+      effectResults,
+    });
+    const result = await h.persist?.('update', 'Ticket', { subject: 'no id' });
+    expect(result).toBeUndefined();
+    const failure = effectResults.find((r) => !r.success);
+    expect(failure?.denied).toBe(true);
+    expect(failure?.error).toContain('resolved no row key');
+  });
+});
+
 describe('persist honours the declared mutation directives', () => {
   it('denies a create the @create policy rejects', async () => {
     const p = seeded();
@@ -113,12 +131,12 @@ describe('persist honours the declared mutation directives', () => {
   it('denies a delete the @delete policy rejects and leaves the row', async () => {
     const p = seeded();
     const h = handlers(p, { delete: supervisorOnly }, { id: 'agent-1', role: 'agent' });
-    await h.persist?.('delete', 'Ticket', 't1');
+    await h.persist?.('delete', 'Ticket', { id: 't1' });
     expect(await p.getById('Ticket', 't1')).toBeTruthy();
   });
 
-  it('records the denial as a failed effect carrying the shared message', async () => {
-    const effectResults: Array<{ success: boolean; error?: string }> = [];
+  it('records the denial as a failed effect carrying the shared message and denied:true', async () => {
+    const effectResults: ServerEffectResult[] = [];
     const p = seeded();
     const h = createServerEffectHandlers({
       persistence: p,
@@ -128,9 +146,32 @@ describe('persist honours the declared mutation directives', () => {
       entityAccess: new Map([['Ticket', { delete: supervisorOnly }]]),
       effectResults,
     });
-    await h.persist?.('delete', 'Ticket', 't1');
+    await h.persist?.('delete', 'Ticket', { id: 't1' });
     const denial = effectResults.find((r) => !r.success);
     expect(denial?.error).toBe(accessDeniedMessage('delete', 'Ticket'));
+    expect(denial?.denied).toBe(true);
+  });
+
+  // C1-V1: a genuine backend failure (not a policy/row-key rejection) must
+  // NOT carry `denied: true` — that discriminator is reserved for the two
+  // rejection kinds so the verifier can fail unconditionally on a denial
+  // without conflating it with an unrelated persistence error.
+  it('does not stamp denied:true on a non-policy failure', async () => {
+    const effectResults: ServerEffectResult[] = [];
+    const p = seeded();
+    const boom = new Error('backend unavailable');
+    vi.spyOn(p, 'create').mockRejectedValueOnce(boom);
+    const h = createServerEffectHandlers({
+      persistence: p,
+      eventBus: bus,
+      entityType: 'Ticket',
+      bindings: { user: { id: 'agent-1' } },
+      effectResults,
+    });
+    await h.persist?.('create', 'Ticket', { id: 't9', subject: 'Nine' });
+    const failure = effectResults.find((r) => !r.success);
+    expect(failure?.error).toBe('backend unavailable');
+    expect(failure?.denied).toBeUndefined();
   });
 });
 

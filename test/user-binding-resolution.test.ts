@@ -27,7 +27,7 @@ import type { TraitDefinition, TraitState } from '../src/StateMachineCore.js';
 
 function ctxFor(user: UserContext | undefined) {
     const bindings: BindingContext = {
-        entity: {} as unknown as BindingContext['entity'],
+        entity: {},
         payload: {},
         state: 'idle',
         user,
@@ -66,7 +66,7 @@ describe('@user in value expressions', () => {
         ];
         const filter = ['array/filter', '@payload.data', ['fn', 'row', ['=', ['object/get', '@row', 'memberId'], '@user.id']]];
         const bindings: BindingContext = {
-            entity: {} as unknown as BindingContext['entity'],
+            entity: {},
             payload: { data: rows },
             state: 'idle',
             user: MEMBER,
@@ -79,19 +79,25 @@ describe('@user in value expressions', () => {
 describe('@user in transition guards', () => {
     const trait: TraitDefinition = {
         name: 'Gated',
-        initialState: 'idle',
+        states: [{ name: 'idle', isInitial: true }, { name: 'promoted' }],
         transitions: [
             {
                 from: 'idle',
                 event: 'PROMOTE',
                 to: 'promoted',
-                guard: ['=', '@user.role', 'admin'] as unknown as TraitDefinition['transitions'][0]['guard'],
+                guard: ['=', '@user.role', 'admin'],
                 effects: [],
             },
         ],
-    } as unknown as TraitDefinition;
+    };
 
-    const traitState = { currentState: 'idle', context: {} } as unknown as TraitState;
+    const traitState: TraitState = {
+        traitName: 'Gated',
+        currentState: 'idle',
+        previousState: null,
+        lastEvent: null,
+        context: {},
+    };
 
     function promoteAs(user: UserContext | undefined) {
         return processEvent({ traitState, trait, eventKey: 'PROMOTE', user });

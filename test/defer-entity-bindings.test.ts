@@ -12,7 +12,8 @@
 import { describe, it, expect } from 'vitest';
 import { deferEntityBindings, createContextFromBindings } from '../src/BindingResolver.js';
 import { EffectExecutor } from '../src/EffectExecutor.js';
-import { isRenderBindingMarker, type PatternConfig } from '@almadar/core';
+import { isRenderBindingMarker, type PatternConfig, type RuntimeValue, type SExpr } from '@almadar/core';
+import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 
 const ctx = createContextFromBindings({
   entity: { hp: 7 },
@@ -86,48 +87,58 @@ describe('deferEntityBindings', () => {
   });
 
   it('recurses into literal children trees, marking nested entity leaves', () => {
-    const children = [
+    const children: SExpr[] = [
       { type: 'typography', content: 'HP: @entity.hp' },
       { type: 'button', label: 'Attack' },
     ];
     const out = deferEntityBindings(children, ctx);
     expect(Array.isArray(out)).toBe(true);
     if (!Array.isArray(out)) return;
-    const [first, second] = out as Array<Record<string, unknown>>;
-    expect(isRenderBindingMarker((first as { content: unknown }).content)).toBe(true);
-    expect((second as { label: unknown }).label).toBe('Attack');
+    const [first, second] = out;
+    if (first === null || typeof first !== 'object' || Array.isArray(first) || first instanceof Date) {
+      throw new Error('expected first child to be an object leaf');
+    }
+    if (second === null || typeof second !== 'object' || Array.isArray(second) || second instanceof Date) {
+      throw new Error('expected second child to be an object leaf');
+    }
+    expect(isRenderBindingMarker(first.content)).toBe(true);
+    expect(second.label).toBe('Attack');
   });
 });
 
 describe('EffectExecutor deferRenderBindings', () => {
-  const renderEffect = ['render-ui', 'main', { type: 'typography', content: 'HP: @entity.hp' }];
+  const renderEffect: SExpr = ['render-ui', 'main', { type: 'typography', content: 'HP: @entity.hp' }];
 
   it('carries markers into the renderUI handler when deferring', async () => {
-    let captured: PatternConfig | null = null;
+    const captured: { value: PatternConfig<'typography'> | null } = { value: null };
     const executor = new EffectExecutor({
-      handlers: {
-        renderUI: (_slot, pattern) => { captured = pattern; },
-      },
+      handlers: stubEffectHandlers({
+        emit: () => {},
+        renderUI: (_slot, pattern) => { captured.value = pattern as PatternConfig<'typography'> | null; },
+      }),
       bindings: { entity: { hp: 7 }, payload: {}, state: 'playing' },
       context: { traitName: 'T', state: 'playing', transition: 'a->b' },
       deferRenderBindings: true,
     });
     await executor.execute(renderEffect);
-    expect(captured).not.toBeNull();
-    const content = (captured as unknown as Record<string, unknown>).content;
-    expect(isRenderBindingMarker(content)).toBe(true);
+    const result = captured.value;
+    if (result === null) throw new Error('expected pattern to be captured');
+    expect(isRenderBindingMarker(result.content as RuntimeValue)).toBe(true);
   });
 
   it('resolves eagerly when not deferring (server persistent-entity path)', async () => {
-    let captured: PatternConfig | null = null;
+    const captured: { value: PatternConfig<'typography'> | null } = { value: null };
     const executor = new EffectExecutor({
-      handlers: {
-        renderUI: (_slot, pattern) => { captured = pattern; },
-      },
+      handlers: stubEffectHandlers({
+        emit: () => {},
+        renderUI: (_slot, pattern) => { captured.value = pattern as PatternConfig<'typography'> | null; },
+      }),
       bindings: { entity: { hp: 7 }, payload: {}, state: 'playing' },
       context: { traitName: 'T', state: 'playing', transition: 'a->b' },
     });
     await executor.execute(renderEffect);
-    expect((captured as unknown as Record<string, unknown>).content).toBe('HP: 7');
+    const result = captured.value;
+    if (result === null) throw new Error('expected pattern to be captured');
+    expect(result.content).toBe('HP: 7');
   });
 });

@@ -10,6 +10,7 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
+import { asEntityRow } from './fixtures/effect-result.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const schemaPath = join(__dirname, 'fixtures/trait-wars.orb');
@@ -131,8 +132,9 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
       );
 
       expect(createEffect).toBeDefined();
-      expect(createEffect!.data!.id).toBe('binding-test');
-      expect(createEffect!.data!.name).toBe('Binding Test Hero');
+      const createData = asEntityRow(createEffect!.data);
+      expect(createData.id).toBe('binding-test');
+      expect(createData.name).toBe('Binding Test Hero');
     });
   });
 
@@ -144,12 +146,7 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
       });
       await runtime.register(traitWarsSchema);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const persistence = (runtime as any).persistence as {
-        list: (type: string) => Promise<Record<string, unknown>[]>;
-      };
-
-      const units = await persistence.list('Unit');
+      const units = await runtime.persistence.list('Unit');
 
       const sirRoland = units.find((u) => u.id === 'player-knight');
       const archmage = units.find((u) => u.id === 'player-mage');
@@ -168,11 +165,7 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
       });
       await runtime.register(traitWarsSchema);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const persistence = (runtime as any).persistence as {
-        list: (type: string) => Promise<Record<string, unknown>[]>;
-      };
-      const units = await persistence.list('Unit');
+      const units = await runtime.persistence.list('Unit');
 
       expect(units.length).toBe(6);
     });
