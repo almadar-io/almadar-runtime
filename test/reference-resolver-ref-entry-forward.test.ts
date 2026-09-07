@@ -17,6 +17,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { preprocessSchema } from '../src/UsesIntegration.js';
 import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
@@ -24,6 +25,8 @@ import type { Orbital, OrbitalDefinition, OrbitalSchema, TraitRef } from '@almad
 import { normalizeCallSiteConfigToValues, isCallSiteConfigDeclaration } from '@almadar/core';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const REGISTRY_DIR = path.join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry');
+const hasCorpus = existsSync(REGISTRY_DIR);
 
 /** The upstream `Typo` behavior — one inline trait declaring `content` with
  *  no default of its own, matching `UiTypo.traits.TypographyRender`'s role
@@ -227,7 +230,7 @@ describe('ReferenceResolver — {ref}-entry call-site config forward through the
  * preprocess because `preprocessSchema` fails the whole schema on the first
  * orbital error.
  */
-describe('ReferenceResolver — {ref}-entry call-site config forward: real registry corpus', () => {
+describe.skipIf(!hasCorpus)('ReferenceResolver — {ref}-entry call-site config forward: real registry corpus', () => {
   const cases: ReadonlyArray<{
     file: string;
     trait: string;
@@ -276,7 +279,7 @@ describe('ReferenceResolver — {ref}-entry call-site config forward: real regis
  * consumer: declared defaults (`resolveForwardedSiblingConfigFrom`) and the
  * `{ref}`-entry call-site path (`resolveCallSiteConfigForwards`) tested here.
  */
-describe('ReferenceResolver — forwardedFrom provenance on a collapsed call-site forward', () => {
+describe.skipIf(!hasCorpus)('ReferenceResolver — forwardedFrom provenance on a collapsed call-site forward', () => {
   it('records the original `@config.<knob>` token on std-time-tracking.orb\'s TimesheetAppLayout.config.appName', async () => {
     const schemaPath = path.join(
       REPO_ROOT,

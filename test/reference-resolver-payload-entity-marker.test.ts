@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
 import { preprocessSchema } from '../src/UsesIntegration.js';
@@ -21,6 +22,8 @@ import type { Orbital, OrbitalDefinition, OrbitalSchema, Event, TraitRef } from 
 import { asEntityId } from '@almadar/core';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const REGISTRY_DIR = path.join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry');
+const hasCorpus = existsSync(REGISTRY_DIR);
 
 function payloadEntityOf(events: readonly Event[] | undefined, eventKey: string, fieldName: string): string | undefined {
   const event = events?.find((e) => e.key === eventKey);
@@ -341,7 +344,7 @@ describe('ReferenceResolver — payload-field entity marker rename: orbital impo
   });
 });
 
-describe('ReferenceResolver — payload-field entity marker rename: real registry corpus', () => {
+describe.skipIf(!hasCorpus)('ReferenceResolver — payload-field entity marker rename: real registry corpus', () => {
   it('preprocessSchema on std-notes.orb resolves NoteDelete\'s DELETE.payloadSchema[row].entity to "Note"', async () => {
     const schemaPath = path.join(
       REPO_ROOT,

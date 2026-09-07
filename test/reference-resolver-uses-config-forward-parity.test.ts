@@ -52,6 +52,7 @@ function shellsOf(orbital: Orbital): ShellNav[] {
 }
 
 describe.skipIf(!canRun)('uses-config override forwards the consumer app knob (last hop, both paths)', () => {
+  if (!canRun) return;
   const dir = mkdtempSync(join(tmpdir(), 'pf-uses-forward-'));
   const pfOrbPath = join(dir, 'pf.orb');
   const pfResolvedPath = join(dir, 'pf-resolved.orb');

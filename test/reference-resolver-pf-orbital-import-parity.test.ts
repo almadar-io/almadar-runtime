@@ -47,6 +47,7 @@ function isTrait(t: unknown): t is Trait {
 describe.skipIf(!canRun)(
   'ReferenceResolver — real-organism JS-vs-Rust orbital-import parity (Project Friday, B4-J6)',
   () => {
+    if (!canRun) return;
     const dir = mkdtempSync(join(tmpdir(), 'pf-parity-'));
     const pfOrbPath = join(dir, 'pf.orb');
     const pfResolvedPath = join(dir, 'pf-resolved.orb');

@@ -15,6 +15,7 @@
 
 import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
 import { preprocessSchema } from '../src/UsesIntegration.js';
@@ -22,6 +23,8 @@ import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schem
 import type { OrbitalDefinition, OrbitalSchema, Orbital } from '@almadar/core';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const REGISTRY_DIR = path.join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry');
+const hasCorpus = existsSync(REGISTRY_DIR);
 
 // Three levels: `Organism` (the top-level consumer) -> `PageAtom` (an
 // intermediate atom whose OWN trait is a REF, never inline) -> `Base` (the
@@ -124,7 +127,7 @@ describe('ReferenceResolver — nested composed trait refs (ledger (i))', () => 
   });
 });
 
-describe('ReferenceResolver — nested composed trait refs: real std-notes.orb corpus case', () => {
+describe.skipIf(!hasCorpus)('ReferenceResolver — nested composed trait refs: real std-notes.orb corpus case', () => {
   it('preprocessSchema succeeds on std-notes.orb and resolves 52 traits in NoteOrbital', async () => {
     const stdNotesPath = path.join(
       REPO_ROOT,
