@@ -14,6 +14,7 @@ import type {
   Page,
   TraitId,
   EntityId,
+  EventId,
   OrbitalId,
   PageId,
 } from '@almadar/core';
@@ -2270,5 +2271,702 @@ describe('ReferenceResolver — orbital import Stage B: siblings + mounts', () =
 
     const rosterPage = teams.pages.find((rp) => rp.page.path === '/org-teams')!;
     expect((rosterPage.page.traits ?? []).some((tr) => tr.ref === 'TeamWidgetBadge')).toBe(true);
+  });
+});
+
+// G1 (`docs/Almadar_Compiler_Gaps.md` §82): cross-import listen sources.
+// One upstream file, TWO orbitals of the SAME alias — `AlphaOrbital`'s
+// `AlphaCreate` trait, and `BetaOrbital`'s `BetaListener` trait, which
+// listens on `AlphaOrbital.AlphaCreate.CREATED` via the 3-part
+// `Orbital.Trait.EVENT` form (mirrors `std-realtime-chat`'s `ChannelCreate`
+// listening on `ChatMessageOrbital.ChatRoom.CREATE_CHANNEL`). A consumer
+// that imports BOTH orbitals must re-point that source at whichever LOCAL
+// name each import was given, regardless of declaration order.
+function alphaOrbital(): Orbital {
+  return {
+    id: 'orb_SOURCE_ALPHA00000000001' as OrbitalId,
+    name: 'AlphaOrbital',
+    entity: {
+      id: 'ent_SOURCE_ALPHATHING000001' as EntityId,
+      name: 'AlphaThing',
+      persistence: 'runtime',
+      fields: [{ name: 'id', type: 'string', required: true }],
+    },
+    traits: [
+      {
+        id: 'trt_SOURCE_ALPHACREATE00001' as TraitId,
+        name: 'AlphaCreate',
+        linkedEntity: 'AlphaThing',
+        scope: 'instance',
+        emits: [{ event: 'CREATED', scope: 'external' }],
+        stateMachine: {
+          states: [{ name: 'idle', isInitial: true }],
+          events: [{ key: 'CREATE', name: 'Create' }],
+          transitions: [{ from: 'idle', to: 'idle', event: 'CREATE', effects: [['emit', 'CREATED']] }],
+        },
+      },
+    ],
+    pages: [],
+  };
+}
+
+function betaOrbital(): Orbital {
+  return {
+    id: 'orb_SOURCE_BETA000000000001' as OrbitalId,
+    name: 'BetaOrbital',
+    entity: {
+      id: 'ent_SOURCE_BETATHING0000001' as EntityId,
+      name: 'BetaThing',
+      persistence: 'runtime',
+      fields: [{ name: 'id', type: 'string', required: true }],
+    },
+    traits: [
+      {
+        id: 'trt_SOURCE_BETALISTENER0001' as TraitId,
+        name: 'BetaListener',
+        linkedEntity: 'BetaThing',
+        scope: 'instance',
+        listens: [
+          {
+            event: 'SEEN',
+            triggers: 'REFRESH',
+            source: { kind: 'orbital', orbital: 'AlphaOrbital', trait: 'AlphaCreate' },
+          },
+        ],
+        stateMachine: {
+          states: [{ name: 'idle', isInitial: true }],
+          events: [{ key: 'REFRESH', name: 'Refresh' }],
+          transitions: [{ from: 'idle', to: 'idle', event: 'REFRESH', effects: [] }],
+        },
+      },
+    ],
+    pages: [],
+  };
+}
+
+function makeG1Loader(): SchemaLoader {
+  const alpha = alphaOrbital();
+  const beta = betaOrbital();
+  return {
+    async load(): Promise<LoadResult<LoadedSchema>> {
+      return { success: false, error: 'not used' };
+    },
+    async loadOrbital(importPath: string) {
+      if (importPath !== './g1-upstream.orb') {
+        return { success: false, error: `unexpected import path: ${importPath}` };
+      }
+      return {
+        success: true,
+        data: { orbital: alpha, orbitals: [alpha, beta], sourcePath: './g1-upstream.orb', importPath },
+      };
+    },
+    resolvePath(p: string) {
+      return { success: true, data: p };
+    },
+    clearCache() {
+      /* no-op */
+    },
+    getCacheStats() {
+      return { size: 0 };
+    },
+  };
+}
+
+function g1ConsumerOrbital(localName: string, upstreamOrbitalName: 'AlphaOrbital' | 'BetaOrbital'): OrbitalDefinition {
+  return {
+    name: localName,
+    uses: [{ from: './g1-upstream.orb', as: 'Up' }],
+    entity: { name: 'Placeholder', fields: [{ name: 'id', type: 'string', required: true }] },
+    traits: [],
+    pages: [],
+    reference: { ref: `Up.orbitals.${upstreamOrbitalName}` },
+  };
+}
+
+function assertBetaListenerResolvesToLocalAlpha(orbitals: readonly OrbitalDefinition[]): void {
+  const beta = orbitals.find((o) => o.name === 'LocalBeta');
+  expect(beta).toBeDefined();
+  const listener = findTrait(beta!, 'LocalBetaBetaListener');
+  const source = listener.listens?.[0]?.source;
+  expect(source).toBeDefined();
+  if (source?.kind !== 'orbital') throw new Error(`expected an orbital-kind source, got ${source?.kind}`);
+  expect(source.orbital).toBe('LocalAlpha');
+  expect(source.trait).toBe('LocalAlphaAlphaCreate');
+  expect(source.traitId).toBeDefined();
+}
+
+describe('ReferenceResolver — orbital import G1: cross-import listen sources', () => {
+  it('re-points a listen source naming a SIBLING import of the same alias (target declared first)', async () => {
+    const resolver = new ReferenceResolver({ basePath: '.', loader: makeG1Loader() });
+    const schema: OrbitalSchema = {
+      name: 'S',
+      orbitals: [g1ConsumerOrbital('LocalAlpha', 'AlphaOrbital'), g1ConsumerOrbital('LocalBeta', 'BetaOrbital')],
+    };
+    const result = await resolver.resolveOrbitalImports(schema);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    assertBetaListenerResolvesToLocalAlpha(result.data);
+  });
+
+  it('is order-independent: resolves the same way when the listener import is declared FIRST', async () => {
+    const resolver = new ReferenceResolver({ basePath: '.', loader: makeG1Loader() });
+    const schema: OrbitalSchema = {
+      name: 'S',
+      orbitals: [g1ConsumerOrbital('LocalBeta', 'BetaOrbital'), g1ConsumerOrbital('LocalAlpha', 'AlphaOrbital')],
+    };
+    const result = await resolver.resolveOrbitalImports(schema);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    assertBetaListenerResolvesToLocalAlpha(result.data);
+  });
+});
+
+// G2 (`docs/Almadar_Compiler_Gaps.md` §82): `entity <Name>` does not rewrite
+// `entity`-typed config knob VALUES. Mirrors `std-hr-portal.lolo`'s real
+// shape: `WidgetSync`'s `targetEntity : entity` knob's literal default names
+// the SAME orbital's OWN primary entity ("Widget", exactly like
+// `TimeOffCalendarSync.config.targetEntity` defaulting to `TimeOff`,
+// `TimeOffOrbital`'s own primary). `entity Gadget` on the reference clones
+// the primary as `GadgetOrbitalWidget` — the config VALUE must follow.
+function g2UpstreamOrbital(): Orbital {
+  return {
+    id: 'orb_SOURCE_SYNCORBITAL000001' as OrbitalId,
+    name: 'SyncOrbital',
+    entity: {
+      id: 'ent_SOURCE_WIDGET00000000001' as EntityId,
+      name: 'Widget',
+      persistence: 'runtime',
+      fields: [{ name: 'id', type: 'string', required: true }],
+    },
+    traits: [
+      {
+        id: 'trt_SOURCE_WIDGETSYNC000001' as TraitId,
+        name: 'WidgetSync',
+        linkedEntity: 'Widget',
+        scope: 'instance',
+        config: { targetEntity: { type: 'entity', default: 'Widget' } } satisfies DeclaredTraitConfig,
+        stateMachine: {
+          states: [{ name: 'idle', isInitial: true }],
+          events: [{ key: 'SYNC', name: 'Sync' }],
+          transitions: [{ from: 'idle', to: 'idle', event: 'SYNC', effects: [['fetch', '@config.targetEntity']] }],
+        },
+      },
+    ],
+    pages: [],
+  };
+}
+
+function makeG2Loader(): SchemaLoader {
+  const orbital = g2UpstreamOrbital();
+  return {
+    async load(): Promise<LoadResult<LoadedSchema>> {
+      return { success: false, error: 'not used' };
+    },
+    async loadOrbital(importPath: string) {
+      if (importPath !== './g2-upstream.orb') {
+        return { success: false, error: `unexpected import path: ${importPath}` };
+      }
+      return {
+        success: true,
+        data: { orbital, orbitals: [orbital], sourcePath: './g2-upstream.orb', importPath },
+      };
+    },
+    resolvePath(p: string) {
+      return { success: true, data: p };
+    },
+    clearCache() {
+      /* no-op */
+    },
+    getCacheStats() {
+      return { size: 0 };
+    },
+  };
+}
+
+describe('ReferenceResolver — orbital import G2: entity-typed config knob values', () => {
+  it('rewrites an `entity`-typed config knob default through the SAME entity rename `entity <Name>` applies everywhere else', async () => {
+    const resolver = new ReferenceResolver({ basePath: '.', loader: makeG2Loader() });
+    const schema: OrbitalSchema = {
+      name: 'S',
+      orbitals: [
+        {
+          name: 'GadgetOrbital',
+          uses: [{ from: './g2-upstream.orb', as: 'Up' }],
+          entity: { name: 'Placeholder', fields: [{ name: 'id', type: 'string', required: true }] },
+          traits: [],
+          pages: [],
+          reference: { ref: 'Up.orbitals.SyncOrbital', entity: 'Gadget' },
+        },
+      ],
+    };
+    const result = await resolver.resolveOrbitalImports(schema);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [orbital] = result.data;
+    expect((orbital.entity as Entity).name).toBe('Gadget');
+    const primaryId = (orbital.entity as Entity).id;
+
+    const sync = findTrait(orbital, 'GadgetOrbitalWidgetSync');
+    const targetEntity = sync.config?.targetEntity;
+    expect(targetEntity?.default).toBe('Gadget');
+    expect(targetEntity?.refId).toBe(primaryId);
+  });
+});
+
+// ============================================================================
+// G3 (`docs/Almadar_Compiler_Gaps.md` §82): `fields {}` reaches every
+// structurally-recognized field-reference position, not just `@entity.<f>`.
+// ============================================================================
+
+function g3UpstreamOrbital(): Orbital {
+  return {
+    id: 'orb_SOURCE_DEALORBITAL00001' as OrbitalId,
+    name: 'DealOrbital',
+    entity: {
+      id: 'ent_SOURCE_DEAL00000000001' as EntityId,
+      name: 'Deal',
+      persistence: 'runtime',
+      read_policy: ['=', ['object/get', '@entity', 'title'], '@user.id'],
+      fields: [
+        { name: 'id', type: 'string', required: true },
+        { name: 'title', type: 'string' },
+        { name: 'amount', type: 'number' },
+      ],
+    },
+    traits: [
+      {
+        id: 'trt_SOURCE_DEALBOARD000001' as TraitId,
+        name: 'DealBoard',
+        linkedEntity: 'Deal',
+        scope: 'instance',
+        config: {
+          formFields: { type: '[string]', default: ['title', 'amount'] },
+          searchField: { type: 'string', default: 'title' },
+          cardTitleBinding: { type: 'string', default: '@item.title' },
+        } satisfies DeclaredTraitConfig,
+        stateMachine: {
+          states: [{ name: 'idle', isInitial: true }],
+          events: [{ key: 'INIT', name: 'Initialize' }],
+          transitions: [{ from: 'idle', to: 'idle', event: 'INIT' }],
+        },
+      },
+    ],
+    pages: [],
+  };
+}
+
+function makeG3Loader(): SchemaLoader {
+  const orbital = g3UpstreamOrbital();
+  return {
+    async load(): Promise<LoadResult<LoadedSchema>> {
+      return { success: false, error: 'not used' };
+    },
+    async loadOrbital(importPath: string) {
+      if (importPath !== './g3-upstream.orb') {
+        return { success: false, error: `unexpected import path: ${importPath}` };
+      }
+      return {
+        success: true,
+        data: { orbital, orbitals: [orbital], sourcePath: './g3-upstream.orb', importPath },
+      };
+    },
+    resolvePath(p: string) {
+      return { success: true, data: p };
+    },
+    clearCache() {
+      /* no-op */
+    },
+    getCacheStats() {
+      return { size: 0 };
+    },
+  };
+}
+
+describe('ReferenceResolver — orbital import G3: fields {} reaches bare config defaults, @item, and object/get', () => {
+  it('rewrites formFields (bare [string]), searchField (bare string), cardTitleBinding (@item.<f>), and the entity read_policy (object/get @entity <f>)', async () => {
+    const resolver = new ReferenceResolver({ basePath: '.', loader: makeG3Loader() });
+    const schema: OrbitalSchema = {
+      name: 'S',
+      orbitals: [
+        {
+          name: 'LeadOrbital',
+          uses: [{ from: './g3-upstream.orb', as: 'Up' }],
+          entity: { name: 'Placeholder', fields: [{ name: 'id', type: 'string', required: true }] },
+          traits: [],
+          pages: [],
+          reference: {
+            ref: 'Up.orbitals.DealOrbital',
+            entity: 'Lead',
+            fields: { title: 'company', amount: 'value' },
+          },
+        },
+      ],
+    };
+    const result = await resolver.resolveOrbitalImports(schema);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [orbital] = result.data;
+    const entity = orbital.entity as Entity;
+    expect(entity.name).toBe('Lead');
+    expect(entity.fields.some((f) => f.name === 'company')).toBe(true);
+    expect(entity.read_policy).toEqual(['=', ['object/get', '@entity', 'company'], '@user.id']);
+
+    const board = findTrait(orbital, 'LeadOrbitalDealBoard');
+    expect(board.config?.formFields?.default).toEqual(['company', 'value']);
+    expect(board.config?.searchField?.default).toBe('company');
+    expect(board.config?.cardTitleBinding?.default).toBe('@item.company');
+  });
+});
+
+// ============================================================================
+// G5 (`docs/Almadar_Compiler_Gaps.md` §82): `events {}` reaches a SOURCED
+// listen's source-side `event` key when the source trait is within this
+// same import.
+// ============================================================================
+
+function g5UpstreamOrbital(): Orbital {
+  return {
+    id: 'orb_SOURCE_DOCORBITAL000001' as OrbitalId,
+    name: 'DocOrbital',
+    entity: {
+      id: 'ent_SOURCE_DOCUMENT0000001' as EntityId,
+      name: 'Document',
+      persistence: 'runtime',
+      fields: [{ name: 'id', type: 'string', required: true }],
+    },
+    traits: [
+      {
+        id: 'trt_SOURCE_INBOX000000001' as TraitId,
+        name: 'Inbox',
+        linkedEntity: 'Document',
+        scope: 'instance',
+        emits: [{ event: 'APPROVE' }],
+        stateMachine: {
+          states: [{ name: 'idle', isInitial: true }],
+          events: [{ key: 'INIT', name: 'Initialize' }],
+          transitions: [{ from: 'idle', to: 'idle', event: 'INIT' }],
+        },
+      },
+      {
+        id: 'trt_SOURCE_DECISION00001' as TraitId,
+        name: 'Decision',
+        linkedEntity: 'Document',
+        scope: 'instance',
+        stateMachine: {
+          states: [{ name: 'idle', isInitial: true }],
+          events: [{ key: 'APPROVE', name: 'Approve' }],
+          transitions: [{ from: 'idle', to: 'idle', event: 'APPROVE' }],
+        },
+        listens: [
+          {
+            event: 'APPROVE',
+            triggers: 'APPROVE',
+            source: { kind: 'trait', trait: 'Inbox' },
+          },
+        ],
+      },
+    ],
+    pages: [],
+  };
+}
+
+function makeG5Loader(): SchemaLoader {
+  const orbital = g5UpstreamOrbital();
+  return {
+    async load(): Promise<LoadResult<LoadedSchema>> {
+      return { success: false, error: 'not used' };
+    },
+    async loadOrbital(importPath: string) {
+      if (importPath !== './g5-upstream.orb') {
+        return { success: false, error: `unexpected import path: ${importPath}` };
+      }
+      return {
+        success: true,
+        data: { orbital, orbitals: [orbital], sourcePath: './g5-upstream.orb', importPath },
+      };
+    },
+    resolvePath(p: string) {
+      return { success: true, data: p };
+    },
+    clearCache() {
+      /* no-op */
+    },
+    getCacheStats() {
+      return { size: 0 };
+    },
+  };
+}
+
+describe('ReferenceResolver — orbital import G5: events {} reaches a sourced listen within the same import', () => {
+  it('renames Inbox\'s own emit AND Decision\'s sourced-listen event key, not just the local trigger', async () => {
+    const resolver = new ReferenceResolver({ basePath: '.', loader: makeG5Loader() });
+    const schema: OrbitalSchema = {
+      name: 'S',
+      orbitals: [
+        {
+          name: 'AssetLibraryOrbital',
+          uses: [{ from: './g5-upstream.orb', as: 'Up' }],
+          entity: { name: 'Placeholder', fields: [{ name: 'id', type: 'string', required: true }] },
+          traits: [],
+          pages: [],
+          reference: {
+            ref: 'Up.orbitals.DocOrbital',
+            events: { APPROVE: 'ASSET_REVIEW_APPROVE' },
+          },
+        },
+      ],
+    };
+    const result = await resolver.resolveOrbitalImports(schema);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [orbital] = result.data;
+
+    const inbox = findTrait(orbital, 'AssetLibraryOrbitalInbox');
+    expect(inbox.emits?.[0]).toMatchObject({ event: 'ASSET_REVIEW_APPROVE' });
+
+    const decision = findTrait(orbital, 'AssetLibraryOrbitalDecision');
+    const listen = decision.listens?.[0];
+    expect(listen?.event).toBe('ASSET_REVIEW_APPROVE');
+    expect(listen?.triggers).toBe('ASSET_REVIEW_APPROVE');
+  });
+});
+
+// G5 id reconciliation: `events {}` renames the event KEY, but the
+// declaration's id keeps naming its PRE-rename key in `schema.ledger`
+// (copied in wholesale from the upstream file at load time) unless
+// `reconcileOrbitalRefEventIdRenames` (`resolveOrbitalImports`'s own
+// post-flatten pass) re-derives it — the JS mirror of the compiled path's
+// `reconcileOrbitalRefEventIdRenames` (`orbital-rust/.../inline/mod.rs`).
+function g5UpstreamOrbitalWithEventId(): Orbital {
+  const orbital = g5UpstreamOrbital();
+  return {
+    ...orbital,
+    traits: orbital.traits.map((tr) => {
+      const trait = tr as Trait;
+      if (trait.name !== 'Decision') return tr;
+      return {
+        ...trait,
+        stateMachine: {
+          ...trait.stateMachine!,
+          events: [{ key: 'APPROVE', name: 'Approve', id: 'evt_G5APPROVEEVT0000000001' as EventId }],
+          transitions: [
+            { from: 'idle', to: 'idle', event: 'APPROVE', eventId: 'evt_G5APPROVEEVT0000000001' as EventId },
+          ],
+        },
+        listens: [
+          {
+            event: 'APPROVE',
+            eventId: 'evt_G5APPROVEEVT0000000001' as EventId,
+            triggers: 'APPROVE',
+            triggersId: 'evt_G5APPROVEEVT0000000001' as EventId,
+            source: { kind: 'trait' as const, trait: 'Inbox' },
+          },
+        ],
+      };
+    }),
+  };
+}
+
+function makeG5LedgerLoader(): SchemaLoader {
+  const orbital = g5UpstreamOrbitalWithEventId();
+  return {
+    async load(): Promise<LoadResult<LoadedSchema>> {
+      return { success: false, error: 'not used' };
+    },
+    async loadOrbital(importPath: string) {
+      if (importPath !== './g5-upstream.orb') {
+        return { success: false, error: `unexpected import path: ${importPath}` };
+      }
+      return {
+        success: true,
+        data: { orbital, orbitals: [orbital], sourcePath: './g5-upstream.orb', importPath },
+      };
+    },
+    resolvePath(p: string) {
+      return { success: true, data: p };
+    },
+    clearCache() {
+      /* no-op */
+    },
+    getCacheStats() {
+      return { size: 0 };
+    },
+  };
+}
+
+describe('ReferenceResolver — orbital import G5: events {} re-derives the shared event id', () => {
+  it('renames the ledger entry in place (sole owner) instead of orphaning it', async () => {
+    const resolver = new ReferenceResolver({ basePath: '.', loader: makeG5LedgerLoader() });
+    const schema: OrbitalSchema = {
+      name: 'S',
+      ledger: {
+        schemaVersion: 1,
+        entries: {
+          evt_G5APPROVEEVT0000000001: {
+            id: 'evt_G5APPROVEEVT0000000001',
+            kind: 'event',
+            bakedName: 'APPROVE',
+            curName: 'APPROVE',
+            renames: [],
+            owner: 'workspace',
+            parent: 'trt_SOURCE_DECISION00001' as TraitId,
+          },
+        },
+      },
+      orbitals: [
+        {
+          name: 'AssetLibraryOrbital',
+          uses: [{ from: './g5-upstream.orb', as: 'Up' }],
+          entity: { name: 'Placeholder', fields: [{ name: 'id', type: 'string', required: true }] },
+          traits: [],
+          pages: [],
+          reference: {
+            ref: 'Up.orbitals.DocOrbital',
+            events: { APPROVE: 'ASSET_REVIEW_APPROVE' },
+          },
+        },
+      ],
+    };
+    const result = await resolver.resolveOrbitalImports(schema);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [orbital] = result.data;
+    const decision = findTrait(orbital, 'AssetLibraryOrbitalDecision');
+
+    // Sole owner in this whole schema — the id itself must NOT change (only
+    // the ledger's curName does); minting a fresh id here would orphan the
+    // original row with nothing left to explain it.
+    const finalId = decision.listens?.[0]?.eventId;
+    expect(finalId).toBe('evt_G5APPROVEEVT0000000001');
+    expect(decision.stateMachine?.events?.[0]?.id).toBe(finalId);
+    expect(decision.stateMachine?.transitions?.[0]?.eventId).toBe(finalId);
+    expect(decision.listens?.[0]?.triggersId).toBe(finalId);
+
+    const entry = schema.ledger?.entries[finalId!];
+    expect(entry?.curName).toBe('ASSET_REVIEW_APPROVE');
+    expect(entry?.renames).toContainEqual(
+      expect.objectContaining({ from: 'APPROVE', to: 'ASSET_REVIEW_APPROVE' }),
+    );
+  });
+});
+
+// G3 follow-up (`docs/Almadar_Compiler_Gaps.md` §82): a `fields {}` rename
+// must also reach a config-forward's DESTINATION, not just its declaring
+// trait — a JSX-hoisted inline render's `columns: @config.columns` forward
+// resolves to its embedder's declared literal AFTER this trait's own field
+// rewrite already ran, in the SAME per-trait loop iteration.
+function g3HoistUpstreamOrbital(): Orbital {
+  return {
+    id: 'orb_G3HOISTORBITALID00000000' as OrbitalId,
+    name: 'TimeEntryPanelOrbital',
+    entity: {
+      id: 'ent_G3HOISTENTITYID000000000' as EntityId,
+      name: 'TimeEntry',
+      persistence: 'runtime',
+      fields: [
+        { name: 'id', type: 'string', required: true },
+        { name: 'hourlyRate', type: 'number' },
+      ],
+    },
+    traits: [
+      {
+        id: 'trt_G3HOISTPANELID00000000' as TraitId,
+        name: 'TimeEntryPanel',
+        linkedEntity: 'TimeEntry',
+        scope: 'instance',
+        config: {
+          columns: {
+            type: '[ColumnSpec]',
+            default: [{ field: 'hourlyRate', key: 'hourlyRate', header: 'Rate' }],
+          },
+        },
+        stateMachine: {
+          states: [{ name: 'idle', isInitial: true }],
+          events: [{ key: 'INIT', name: 'Initialize' }],
+          transitions: [
+            {
+              from: 'idle',
+              to: 'idle',
+              event: 'INIT',
+              effects: [['render-ui', 'main', '@trait.InlineTableViewRender']],
+            },
+          ],
+        },
+      },
+      {
+        id: 'trt_G3HOISTRENDERID0000000' as TraitId,
+        name: 'InlineTableViewRender',
+        linkedEntity: 'TimeEntry',
+        scope: 'instance',
+        config: {
+          columns: { type: 'unknown', default: '@config.columns' },
+        },
+        stateMachine: {
+          states: [{ name: 'idle', isInitial: true }],
+          events: [{ key: 'INIT', name: 'Initialize' }],
+          transitions: [{ from: 'idle', to: 'idle', event: 'INIT' }],
+        },
+      },
+    ],
+    pages: [],
+  };
+}
+
+function makeG3HoistLoader(): SchemaLoader {
+  const orbital = g3HoistUpstreamOrbital();
+  return {
+    async load(): Promise<LoadResult<LoadedSchema>> {
+      return { success: false, error: 'not used' };
+    },
+    async loadOrbital(importPath: string) {
+      if (importPath !== './g3-hoist-upstream.orb') {
+        return { success: false, error: `unexpected import path: ${importPath}` };
+      }
+      return {
+        success: true,
+        data: { orbital, orbitals: [orbital], sourcePath: './g3-hoist-upstream.orb', importPath },
+      };
+    },
+    resolvePath(p: string) {
+      return { success: true, data: p };
+    },
+    clearCache() {
+      /* no-op */
+    },
+    getCacheStats() {
+      return { size: 0 };
+    },
+  };
+}
+
+describe('ReferenceResolver — orbital import G3: fields {} reaches a hoisted render\'s forwarded columns', () => {
+  it('rewrites the forwarded columns[].field/key, not just the declaring trait\'s own default', async () => {
+    const resolver = new ReferenceResolver({ basePath: '.', loader: makeG3HoistLoader() });
+    const schema: OrbitalSchema = {
+      name: 'S',
+      orbitals: [
+        {
+          name: 'TimeEntryOrbital',
+          uses: [{ from: './g3-hoist-upstream.orb', as: 'Up' }],
+          entity: { name: 'Placeholder', fields: [{ name: 'id', type: 'string', required: true }] },
+          traits: [],
+          pages: [],
+          reference: {
+            ref: 'Up.orbitals.TimeEntryPanelOrbital',
+            entity: 'TimeEntry',
+            fields: { hourlyRate: 'billRate' },
+          },
+        },
+      ],
+    };
+    const result = await resolver.resolveOrbitalImports(schema);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [orbital] = result.data;
+
+    const render = findTrait(orbital, 'TimeEntryOrbitalInlineTableViewRender');
+    const columns = render.config?.columns?.default as Array<{ field?: string; key?: string }> | undefined;
+    expect(columns?.[0]?.field).toBe('billRate');
+    expect(columns?.[0]?.key).toBe('billRate');
   });
 });

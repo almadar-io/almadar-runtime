@@ -32,6 +32,7 @@ import type {
   OrbitalId,
   TraitId,
   EntityId,
+  EventId,
   PageId,
   ConfigFieldDeclaration,
   ConfigFieldItemsDeclaration,
@@ -39,6 +40,8 @@ import type {
   TraitConfigValue,
   CallSiteConfig,
   IdKind,
+  IdentityLedger,
+  LedgerEntry,
 } from "@almadar/core";
 import {
   isEntityReference,
@@ -59,11 +62,13 @@ import {
   isReferenceConfigType,
   overrideDeclaredKnobs,
   deriveId,
+  ledgerRename,
   idPrefix,
   asTraitId,
   asEntityId,
   asOrbitalId,
   asPageId,
+  asEventId,
 } from "@almadar/core";
 import { identityEntitiesOf, roleVocabularyOf } from "@almadar/core/mock";
 import type {
@@ -1526,7 +1531,7 @@ function applyLinkedEntityRename(
   const atomLinked = trait.linkedEntity;
   const entitySubs = consumerKnownEntityRebindSubs(trait, entityIds);
   if (!linkedEntity || !atomLinked || linkedEntity === atomLinked) {
-    return rewriteEntityRefIds(trait, entitySubs, entityIds);
+    return rewriteEntityTypedConfigValues(rewriteEntityRefIds(trait, entitySubs, entityIds), entitySubs, entityIds);
   }
   for (const [from, to] of staleEntityRebindSubs(trait, linkedEntity)) {
     entitySubs.set(from, to);
@@ -1540,7 +1545,11 @@ function applyLinkedEntityRename(
     linkedEntityId: entityIds.get(linkedEntity),
   };
   if (!sm) {
-    return renamePayloadEntityMarkers(rewriteEntityRefIds(rebound, entitySubs, entityIds), rename);
+    return rewriteEntityTypedConfigValues(
+      renamePayloadEntityMarkers(rewriteEntityRefIds(rebound, entitySubs, entityIds), rename),
+      entitySubs,
+      entityIds,
+    );
   }
   const nextTransitions = (sm.transitions ?? []).map((t) => {
     const nextEffects = t.effects
@@ -1562,13 +1571,17 @@ function applyLinkedEntityRename(
     to: linkedEntity,
     transitionCount: nextTransitions.length,
   });
-  return renamePayloadEntityMarkers(
-    rewriteEntityRefIds(
-      { ...rebound, stateMachine: { ...sm, transitions: nextTransitions } },
-      entitySubs,
-      entityIds,
+  return rewriteEntityTypedConfigValues(
+    renamePayloadEntityMarkers(
+      rewriteEntityRefIds(
+        { ...rebound, stateMachine: { ...sm, transitions: nextTransitions } },
+        entitySubs,
+        entityIds,
+      ),
+      rename,
     ),
-    rename,
+    entitySubs,
+    entityIds,
   );
 }
 
@@ -1735,9 +1748,21 @@ function resolveConfigRefsById(
   return { ...trait, config: nextSchema };
 }
 
+/**
+ * G5 (`docs/Almadar_Compiler_Gaps.md` §82): pass the ORBITAL-IMPORT kept
+ * traits' final (post-prefix) names so a sourced listen's source-side
+ * `event` key renames too, when the source trait is itself part of THIS
+ * import — `renames` is scoped to one orbital reference, so within it every
+ * trait shares the SAME renamed vocabulary, unlike the ordinary (non-
+ * import) trait-ref path, where a sourced listen's source trait belongs to
+ * an INDEPENDENT call site's own (unrelated) `events {}` and must stay
+ * untouched. `undefined` (the ordinary trait-ref call sites) preserves the
+ * original "never touch a sourced listen's `event`" behavior exactly.
+ */
 function applyEventRenames(
   trait: Trait,
   renames?: { [oldKey: string]: string },
+  keptFinalNames?: ReadonlySet<string>,
 ): Trait {
   if (!renames || Object.keys(renames).length === 0) return trait;
   const rename = (k: string | undefined): string | undefined =>
@@ -1778,10 +1803,17 @@ function applyEventRenames(
   // A listen's `triggers` names THIS trait's transition event — rename it.
   // A listen's `event` names the SOURCE trait's vocabulary when sourced
   // (kind trait/orbital); unsourced/`any` listens follow this trait's own
-  // renames. Mirrors the compiled path's `rewrite_trait_event_fields`.
+  // renames. Mirrors the compiled path's `rewrite_trait_event_fields` — EXCEPT
+  // when `keptFinalNames` says the source trait is part of THIS SAME
+  // orbital-import rename (G5), in which case the source-side key follows
+  // the SAME map too (the source trait's own vocabulary was renamed by this
+  // exact call, not by an independent call site).
   const nextListens = (trait.listens ?? []).map((l) => {
     const sourced = l.source !== undefined && l.source.kind !== "any";
-    const nextEvent = sourced ? l.event : (rename(l.event) ?? l.event);
+    const sourceTraitName = l.source && l.source.kind !== "any" ? l.source.trait : undefined;
+    const fromThisImport =
+      sourceTraitName !== undefined && keptFinalNames !== undefined && keptFinalNames.has(sourceTraitName);
+    const nextEvent = sourced && !fromThisImport ? l.event : (rename(l.event) ?? l.event);
     const nextTriggers = rename(l.triggers) ?? l.triggers;
     return nextEvent === l.event && nextTriggers === l.triggers
       ? l
@@ -2067,30 +2099,150 @@ function foldCallSiteConfigOntoTrait(trait: Trait, callSiteConfig: CallSiteConfi
 const ENTITY_FIELD_TOKEN_PREFIX = "@entity.";
 
 /**
- * Rewrite `@entity.<from>` field-binding roots to `@entity.<to>` anywhere in
- * a value tree — the `OrbitalRefObject.fields` sibling of
- * {@link renameTraitEmbedsInValue}'s `@trait.` rewrite. Boundary-checked the
- * same way (`.`/`[`) so `@entity.dueDateRange` is not matched by a `dueDate`
- * substitution.
+ * Sigils whose `.field` suffix addresses a field of the trait's bound
+ * entity/row — `@entity` (the bound entity itself) plus `@item`/`@row`, the
+ * two row-iteration binding roots a `*Binding`-suffixed config default
+ * hands out for override (`cardTitleBinding : string = @item.title`,
+ * `std-board`'s `BoardItemBoard`; `filter: (fn row (= @row.stage won))`,
+ * `std-stats`'s `StatsItemStats`) — the only two named alongside `@entity`
+ * in `Almadar_LOLO.md`'s own sigil list (G3, `docs/
+ * Almadar_Compiler_Gaps.md` §82). Rust twin: `ROW_ALIAS_SIGILS`
+ * (`orbital-rust/.../inline/rewrite.rs`) — keep in lockstep.
+ */
+const ROW_ALIAS_TOKEN_PREFIXES: readonly string[] = ["@entity.", "@item.", "@row."];
+const ROW_ALIAS_ROOTS: ReadonlySet<string> = new Set(["@entity", "@item", "@row"]);
+
+/** Struct-descriptor member keys treated as "this value names a field" —
+ * the SAME set Rust's `collect_extend_field_reads`/`config_value_names_
+ * field` already canonizes for a column/form/metric entry (`{ field:
+ * "title" }`, `{ key: "title" }`, `{ name: "title" }`); this JS resolver
+ * has no `ORB_O_EXTEND_FIELD_UNREAD` twin to link to, so the set is ported
+ * directly from the Rust doc rather than an existing local sibling. */
+const FIELD_NAME_MEMBER_KEYS: readonly string[] = ["key", "name", "field"];
+
+/**
+ * Rewrite `@entity.<from>` / `@item.<from>` / `@row.<from>` field-binding
+ * roots to their `<to>` counterpart anywhere in a value tree — the
+ * `OrbitalRefObject.fields` sibling of {@link renameTraitEmbedsInValue}'s
+ * `@trait.` rewrite. Boundary-checked the same way (`.`/`[`) so
+ * `@entity.dueDateRange` is not matched by a `dueDate` substitution. Also
+ * rewrites the call-form of the same read, `["object/get", "<sigil>",
+ * "<from>"]` (an access-policy/guard comparison like `["object/get",
+ * "@entity", "csm"]`, which never reaches the sigil-string case above since
+ * the field name sits in its own array element — G3, `docs/
+ * Almadar_Compiler_Gaps.md` §82), and a struct descriptor's `key`/`name`/
+ * `field` member. Rust twin: `rewrite_entity_field_paths`.
  */
 function rewriteEntityFieldTokensInValue(node: unknown, subs: ReadonlyMap<string, string>): unknown {
   if (node === null || node === undefined) return node;
   if (typeof node === "string") {
-    if (!node.startsWith(ENTITY_FIELD_TOKEN_PREFIX)) return node;
-    const rest = node.slice(ENTITY_FIELD_TOKEN_PREFIX.length);
-    const dot = rest.search(/[.[]/);
-    const name = dot === -1 ? rest : rest.slice(0, dot);
-    const suffix = dot === -1 ? "" : rest.slice(dot);
-    const to = subs.get(name);
-    return to === undefined ? node : `${ENTITY_FIELD_TOKEN_PREFIX}${to}${suffix}`;
+    for (const prefix of ROW_ALIAS_TOKEN_PREFIXES) {
+      if (!node.startsWith(prefix)) continue;
+      const rest = node.slice(prefix.length);
+      const dot = rest.search(/[.[]/);
+      const name = dot === -1 ? rest : rest.slice(0, dot);
+      const suffix = dot === -1 ? "" : rest.slice(dot);
+      const to = subs.get(name);
+      return to === undefined ? node : `${prefix}${to}${suffix}`;
+    }
+    return node;
   }
-  if (Array.isArray(node)) return node.map((item) => rewriteEntityFieldTokensInValue(item, subs));
+  if (Array.isArray(node)) {
+    if (
+      node.length >= 3 &&
+      node[0] === "object/get" &&
+      typeof node[1] === "string" &&
+      ROW_ALIAS_ROOTS.has(node[1]) &&
+      typeof node[2] === "string"
+    ) {
+      const to = subs.get(node[2]);
+      if (to !== undefined) {
+        const rewritten = node.map((item) => rewriteEntityFieldTokensInValue(item, subs));
+        rewritten[2] = to;
+        return rewritten;
+      }
+    }
+    return node.map((item) => rewriteEntityFieldTokensInValue(item, subs));
+  }
   if (typeof node !== "object") return node;
   const next: { [k: string]: unknown } = {};
   for (const [key, value] of Object.entries(node as { [k: string]: unknown })) {
+    if (FIELD_NAME_MEMBER_KEYS.includes(key) && typeof value === "string") {
+      const to = subs.get(value);
+      next[key] = to === undefined ? value : to;
+      continue;
+    }
     next[key] = rewriteEntityFieldTokensInValue(value, subs);
   }
   return next;
+}
+
+/**
+ * A `fields {}` rename must also reach a config knob's OWN default value
+ * when the default value itself IS the field-name reference: a bare string
+ * equal to the renamed field (`searchField : string = title`) or a bare
+ * list of them (`formFields : [string] = (title contactId amount stage
+ * closedAt)`) — G3, `docs/Almadar_Compiler_Gaps.md` §82. The struct/array-
+ * of-struct case (`columns : [ColumnSpec]`) is already covered by {@link
+ * rewriteEntityFieldTokensInValue}'s `key`/`name`/`field` member rule.
+ * Scoped to config DEFAULTS ONLY (never guards/effects, where a bare string
+ * literal is far more likely to be an unrelated comparison value than a
+ * field name) — `fieldSubs`'s domain is the small, closed set of field
+ * names actually being renamed on THIS import, bounding the risk to a
+ * config default whose value happens to literally equal one of those few
+ * old names. Rust twin: `rewrite_bare_field_name_config_default`.
+ */
+function rewriteBareFieldNameConfigDefault(value: unknown, fieldSubs: ReadonlyMap<string, string>): unknown {
+  if (typeof value === "string") {
+    if (value === "" || value.startsWith("@")) return value;
+    return fieldSubs.get(value) ?? value;
+  }
+  if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
+    return value.map((v) => (v === "" || (v as string).startsWith("@") ? v : (fieldSubs.get(v as string) ?? v)));
+  }
+  return value;
+}
+
+/**
+ * Rewrite every config default in `config` through the field-rename map —
+ * the two-rewriter pair (`rewriteEntityFieldTokensInValue` +
+ * `rewriteBareFieldNameConfigDefault`) {@link rewriteEntityFieldsInTrait}
+ * applies to a trait's OWN declared config. Factored out so the SAME pass
+ * can ALSO run a second time, AFTER `materializeOrbitalRef`'s per-trait
+ * loop resolves a knob's `@config.<parent>` reference into a literal value
+ * via `resolveForwardedSiblingConfigFrom` (three call sites: embedder rung,
+ * multi-hop fallback, no-embedder fallback) — those steps read from
+ * `parentConfigs`, a snapshot of every kept trait's OWN declared config
+ * taken BEFORE this same loop's field rewrite ran, so a forward can hand a
+ * trait a brand-new literal that still names the PRE-rename field, invisible
+ * to this trait's OWN earlier rewrite pass (G3, `docs/
+ * Almadar_Compiler_Gaps.md` §82: a JSX-hoisted `InlineTableViewRender`'s
+ * `columns: @config.columns` forward pulled in its embedder's declared
+ * `[{ field: hourlyRate, key: hourlyRate, … }]` verbatim, AFTER
+ * `InlineTableViewRender` itself had already been field-rewritten — the
+ * same ordering `rewriteTraitConfigPagePaths` was already moved past the
+ * forward to fix for page paths; this is that same fix for field renames).
+ * Idempotent — re-running it on already-correct config is a no-op.
+ */
+function rewriteEntityFieldsInConfig(
+  config: Trait["config"],
+  fieldSubs: ReadonlyMap<string, string>,
+): Trait["config"] {
+  if (fieldSubs.size === 0 || !config) return config;
+  const rewrite = (v: unknown): unknown => rewriteEntityFieldTokensInValue(v, fieldSubs);
+  const nextConfig: { [k: string]: ConfigFieldDeclaration } = {};
+  for (const [key, field] of Object.entries(config)) {
+    if (field.default === undefined) {
+      nextConfig[key] = field;
+      continue;
+    }
+    const afterSigils = rewrite(field.default) as ConfigFieldDeclaration["default"];
+    nextConfig[key] = {
+      ...field,
+      default: rewriteBareFieldNameConfigDefault(afterSigils, fieldSubs) as ConfigFieldDeclaration["default"],
+    };
+  }
+  return nextConfig;
 }
 
 /**
@@ -2133,14 +2285,7 @@ function rewriteEntityFieldsInTrait(trait: Trait, fieldSubs: ReadonlyMap<string,
     next.initialEffects = rewrite(trait.initialEffects) as typeof trait.initialEffects;
   }
   if (trait.config) {
-    const nextConfig: { [k: string]: ConfigFieldDeclaration } = {};
-    for (const [key, field] of Object.entries(trait.config)) {
-      nextConfig[key] =
-        field.default === undefined
-          ? field
-          : { ...field, default: rewrite(field.default) as ConfigFieldDeclaration["default"] };
-    }
-    next.config = nextConfig;
+    next.config = rewriteEntityFieldsInConfig(trait.config, fieldSubs);
   }
   return next;
 }
@@ -2529,15 +2674,32 @@ function renamePayloadEntityMarkers(trait: Trait, rename: EntityRename): Trait {
   // saying required (defensive, not a `?? []` coercion) — an absent events
   // array must stay absent, never become a fresh `[]` the parity comparator
   // then sees as a new field nobody asked for.
+  // G4 (`Almadar_Compiler_Gaps.md` §82): `payloadEntity` (the bare `type X =
+  // Event <EntityName>` marker, distinct from a per-field `entity` marker)
+  // must follow the SAME rename — a stale name here means the later
+  // `resolvePayloadEntitySchema` re-derive step looks it up under the wrong
+  // key and silently leaves the payload frozen.
   const nextEvents = sm?.events
-    ? sm.events.map((ev) =>
-        ev.payloadSchema ? { ...ev, payloadSchema: renamePayloadEntity(ev.payloadSchema, rename) } : ev,
-      )
+    ? sm.events.map((ev) => {
+        const renamedEntity = ev.payloadEntity !== undefined ? rename(ev.payloadEntity) : undefined;
+        if (!ev.payloadSchema && renamedEntity === undefined) return ev;
+        return {
+          ...ev,
+          ...(ev.payloadSchema ? { payloadSchema: renamePayloadEntity(ev.payloadSchema, rename) } : {}),
+          ...(renamedEntity !== undefined ? { payloadEntity: renamedEntity } : {}),
+        };
+      })
     : undefined;
   const nextEmits = trait.emits
-    ? trait.emits.map((em) =>
-        em.payloadSchema ? { ...em, payloadSchema: renamePayloadEntity(em.payloadSchema, rename) } : em,
-      )
+    ? trait.emits.map((em) => {
+        const renamedEntity = em.payloadEntity !== undefined ? rename(em.payloadEntity) : undefined;
+        if (!em.payloadSchema && renamedEntity === undefined) return em;
+        return {
+          ...em,
+          ...(em.payloadSchema ? { payloadSchema: renamePayloadEntity(em.payloadSchema, rename) } : {}),
+          ...(renamedEntity !== undefined ? { payloadEntity: renamedEntity } : {}),
+        };
+      })
     : undefined;
   return {
     ...trait,
@@ -2571,8 +2733,16 @@ function walkEntityInPayloadMapping(
  * whole primary+auxiliary entity set an orbital import renames at once —
  * `applyLinkedEntityRename` itself is untouched and still drives the
  * ordinary trait-ref `-> Entity` rebind path.
+ *
+ * `entityIds` (G2, `docs/Almadar_Compiler_Gaps.md` §82) additionally drives
+ * {@link rewriteEntityTypedConfigValues} — a config knob declared `: entity`
+ * holds an entity-name VALUE none of the surfaces above reach.
  */
-function renameEntitiesInTrait(trait: Trait, entitySubs: ReadonlyMap<string, string>): Trait {
+function renameEntitiesInTrait(
+  trait: Trait,
+  entitySubs: ReadonlyMap<string, string>,
+  entityIds: ReadonlyMap<string, EntityId>,
+): Trait {
   if (entitySubs.size === 0) return trait;
   const rename: EntityRename = (name) => entitySubs.get(name);
   // `renameEntityInEffect`'s POSITION table (fetch/persist/ref/deref/spawn
@@ -2627,16 +2797,20 @@ function renameEntitiesInTrait(trait: Trait, entitySubs: ReadonlyMap<string, str
         REBIND_ENTITY_PROPS,
       )) as typeof trait.initialEffects
     : trait.initialEffects;
-  return renamePayloadEntityMarkers(
-    {
-      ...trait,
-      linkedEntity: nextLinked,
-      ...(sm ? { stateMachine: { ...sm, transitions: nextTransitions ?? [] } } : {}),
-      ...(nextTicks !== undefined ? { ticks: nextTicks } : {}),
-      ...(nextListens !== undefined ? { listens: nextListens } : {}),
-      ...(nextInitial !== undefined ? { initialEffects: nextInitial } : {}),
-    },
-    rename,
+  return rewriteEntityTypedConfigValues(
+    renamePayloadEntityMarkers(
+      {
+        ...trait,
+        linkedEntity: nextLinked,
+        ...(sm ? { stateMachine: { ...sm, transitions: nextTransitions ?? [] } } : {}),
+        ...(nextTicks !== undefined ? { ticks: nextTicks } : {}),
+        ...(nextListens !== undefined ? { listens: nextListens } : {}),
+        ...(nextInitial !== undefined ? { initialEffects: nextInitial } : {}),
+      },
+      rename,
+    ),
+    entitySubs,
+    entityIds,
   );
 }
 
@@ -2681,6 +2855,41 @@ function rewriteEntityRefIds(
     out[name] = entityIds.get(name) ?? oldId;
   }
   return { ...trait, entityRefIds: out };
+}
+
+/**
+ * Rewrite a trait's `config[].default` VALUE for every knob whose DECLARED
+ * type is `entity` (`targetEntity : entity`, `Almadar_LOLO.md` §12) through
+ * the same `entitySubs` map every other entity-rename call site applies —
+ * dispatch is on the field's declared `type`, never on the knob's NAME (G2,
+ * `docs/Almadar_Compiler_Gaps.md` §82: `entity <Name>` renamed the primary
+ * but left `targetEntity: TimeOff` naming the pre-rename upstream entity).
+ * JS twin of the compiled path's `rewrite_entity_typed_config_values`
+ * (`orbital-compiler/src/phases/inline/rewrite.rs`). A rewritten field's
+ * V4-W5 dual-carry `refId` is refreshed to the RENAMED entity's current id
+ * from `entityIds` (or cleared — same "no reliable id to carry" rule
+ * {@link rewriteEntityRefIds} already applies) — never left pointing at the
+ * pre-rename upstream entity's id. Called from the SAME two sites as {@link
+ * rewriteEntityRefIds}: the orbital-import materializer (via {@link
+ * renameEntitiesInTrait}) and the ordinary trait-ref `-> Entity` rebind
+ * (via {@link applyLinkedEntityRename}).
+ */
+function rewriteEntityTypedConfigValues(
+  trait: Trait,
+  entitySubs: ReadonlyMap<string, string>,
+  entityIds: ReadonlyMap<string, EntityId>,
+): Trait {
+  if (entitySubs.size === 0 || !trait.config) return trait;
+  let changed = false;
+  const nextConfig: Record<string, ConfigFieldDeclaration> = { ...trait.config };
+  for (const [key, field] of Object.entries(trait.config)) {
+    if (field.type !== "entity" || typeof field.default !== "string") continue;
+    const to = entitySubs.get(field.default);
+    if (to === undefined) continue;
+    changed = true;
+    nextConfig[key] = { ...field, default: to, refId: entityIds.get(to) };
+  }
+  return changed ? { ...trait, config: nextConfig } : trait;
 }
 
 /**
@@ -2800,16 +3009,31 @@ function relationTargetsOfEntity(entity: Entity, candidates: ReadonlySet<string>
  * implementation (refactor, not duplication — sibling-pull's own collision
  * behaviour is unchanged, it just calls through this now).
  *
- * `orbitalRename`, when given, additionally repoints a `ListenSource` of
- * kind `"orbital"` whose `orbital` matches `orbitalRename.from` at the local
- * orbital name — the 3-part `Orbital.Trait.EVENT` form, which sibling-pull
- * never needed (a pulled sibling's owner is always the SAME orbital).
+ * A `ListenSource` of kind `"orbital"` (the 3-part `Orbital.Trait.EVENT`
+ * form, which sibling-pull never needed — a pulled sibling's owner is
+ * always the SAME orbital) names a DIFFERENT orbital, two ways: (1) the
+ * SAME upstream orbital currently being spliced — `orbitalRename`, when
+ * given, repoints a source whose `orbital` matches `orbitalRename.from` at
+ * the local orbital name, resolved through THIS call's own `subs`/
+ * `idByName`; (2) ANOTHER reference-form orbital of the same upstream
+ * `alias` also imported elsewhere in the schema (G1,
+ * `docs/Almadar_Compiler_Gaps.md` §82, order-independent) — resolved
+ * through `listenSourceTargets`, keyed by {@link siblingImportKey}. (1) is
+ * checked FIRST and is authoritative for `orbitalRename.from`: two imports
+ * of the SAME upstream orbital under different local names each own their
+ * SELF case this way, so neither can clobber the other in the shared map
+ * (which, keyed only by alias + upstream name, cannot hold two different
+ * local names for one key at once). A source naming an upstream orbital
+ * imported NOWHERE in this schema matches neither and is left exactly
+ * as-is, so `ORB_X_LISTEN_SOURCE_UNRESOLVED` still fires correctly for it.
  */
 function rewriteListenSources(
   trait: Trait,
   subs: ReadonlyMap<string, string>,
   idByName: ReadonlyMap<string, TraitId | undefined>,
   orbitalRename?: { from: string; to: string },
+  alias?: string,
+  listenSourceTargets?: ReadonlyMap<string, SiblingImportInfo>,
 ): Trait {
   const listens = trait.listens;
   if (!listens || listens.length === 0) return trait;
@@ -2827,19 +3051,35 @@ function rewriteListenSources(
         source: { kind: "trait" as const, trait: target, ...(traitId ? { traitId } : {}) },
       };
     }
-    if (source.kind === "orbital" && orbitalRename && source.orbital === orbitalRename.from) {
-      const targetTrait = subs.get(source.trait) ?? source.trait;
-      changed = true;
-      const traitId = idByName.get(targetTrait);
-      return {
-        ...listen,
-        source: {
-          kind: "orbital" as const,
-          orbital: orbitalRename.to,
-          trait: targetTrait,
-          ...(traitId ? { traitId } : {}),
-        },
-      };
+    if (source.kind === "orbital") {
+      if (orbitalRename && source.orbital === orbitalRename.from) {
+        const targetTrait = subs.get(source.trait) ?? source.trait;
+        changed = true;
+        const traitId = idByName.get(targetTrait);
+        return {
+          ...listen,
+          source: {
+            kind: "orbital" as const,
+            orbital: orbitalRename.to,
+            trait: targetTrait,
+            ...(traitId ? { traitId } : {}),
+          },
+        };
+      }
+      const info = alias && listenSourceTargets ? listenSourceTargets.get(siblingImportKey(alias, source.orbital)) : undefined;
+      if (info) {
+        const target = info.traitSubs.get(source.trait);
+        changed = true;
+        return {
+          ...listen,
+          source: {
+            kind: "orbital" as const,
+            orbital: info.localName,
+            trait: target?.finalName ?? source.trait,
+            ...(target?.finalId ? { traitId: target.finalId } : {}),
+          },
+        };
+      }
     }
     return listen;
   });
@@ -3231,6 +3471,59 @@ function materializedPrimaryEntity(
     deriveMaterializedId(upstreamEntity.id, upstreamOrbitalId, upstreamEntity.name, localName, "entity"),
   );
   return { name, id };
+}
+
+/**
+ * One entry per reference-form orbital in a schema, built ONCE (before any
+ * reference-form orbital in the schema actually resolves) by
+ * {@link ReferenceResolver.precomputeReferenceFormListenTargets} — G1
+ * (`docs/Almadar_Compiler_Gaps.md` §82). JS twin of the compiled path's
+ * `SiblingImportInfo` (`orbital-compiler/src/phases/inline/orbital.rs`).
+ */
+interface SiblingImportInfo {
+  readonly localName: string;
+  /** upstream (pre-prefix) trait name -> final local name + derived id */
+  readonly traitSubs: ReadonlyMap<string, { readonly finalName: string; readonly finalId: TraitId | undefined }>;
+}
+
+/**
+ * Every KEPT (post `omit`/`only`) upstream trait a reference-form orbital
+ * will bring in, keyed by its upstream declared name, mapped to its final
+ * prefixed name + derived id. JS twin of the compiled path's
+ * `materialized_trait_subs`. Takes the upstream orbital's OWN id
+ * (`upstreamId`) and its ALREADY-RESOLVED trait list separately (rather
+ * than a raw `Orbital`) so {@link ReferenceResolver.precomputeReferenceFormListenTargets}
+ * can hand in traits resolved the SAME way {@link ReferenceResolver.materializeOrbitalRef}
+ * resolves its own upstream, without trying to derive a trait id from an
+ * UNRESOLVED composed-form reference — the JS identity model has no
+ * pre-resolve declaration id for those, unlike the compiled path's V4
+ * dual-carry `TraitReference::Reference.id`.
+ */
+function materializedTraitSubs(
+  upstreamId: string | undefined,
+  traits: readonly { readonly trait: Trait }[],
+  ref: { readonly only?: readonly string[]; readonly omit?: readonly string[] },
+  localName: string,
+): Map<string, { finalName: string; finalId: TraitId | undefined }> {
+  const onlySet = ref.only ? new Set(ref.only) : undefined;
+  const omitSet = new Set(ref.omit ?? []);
+  const out = new Map<string, { finalName: string; finalId: TraitId | undefined }>();
+  for (const rt of traits) {
+    const name = rt.trait.name;
+    if (!name) continue;
+    const keep = onlySet ? onlySet.has(name) : !omitSet.has(name);
+    if (!keep) continue;
+    out.set(name, {
+      finalName: `${localName}${name}`,
+      finalId: asTraitId(deriveMaterializedId(rt.trait.id, upstreamId, name, localName, "trait")),
+    });
+  }
+  return out;
+}
+
+/** Composite key for {@link SiblingImportInfo} maps: upstream alias + upstream orbital name. */
+function siblingImportKey(alias: string, upstreamOrbitalName: string): string {
+  return `${alias} ${upstreamOrbitalName}`;
 }
 
 /** {@link applyExtendFields}'s return shape. */
@@ -5691,6 +5984,12 @@ export class ReferenceResolver {
     for (const [name, id] of await this.precomputeReferenceFormPrimaryIds(schema, chain)) {
       if (!consumerEntityIds.has(name)) consumerEntityIds.set(name, id);
     }
+    // G1 (`docs/Almadar_Compiler_Gaps.md` §82): same order-free precompute,
+    // for listen-source rewriting instead of entity ids — built once, before
+    // any reference-form orbital in `schema` resolves, so a listen source
+    // naming ANY reference-form orbital of this schema resolves regardless
+    // of declaration order.
+    const listenSourceTargets = await this.precomputeReferenceFormListenTargets(schema.orbitals, chain);
     const consumerRoster = identityEntitiesOf(schema.orbitals);
     for (const orbital of schema.orbitals) {
       if (!orbital.reference) {
@@ -5710,14 +6009,50 @@ export class ReferenceResolver {
         flattened.push(orbital);
         continue;
       }
-      const result = await this.resolveOrbitalRefChain(orbital, undefined, chain, visiting, consumerEntityIds, consumerRoster);
+      const result = await this.resolveOrbitalRefChain(
+        orbital,
+        undefined,
+        chain,
+        visiting,
+        consumerEntityIds,
+        consumerRoster,
+        listenSourceTargets,
+      );
       if (!result.success) {
         errors.push(...result.errors);
         continue;
       }
+      // G4 (`Almadar_Compiler_Gaps.md` §82): `materializeOrbitalRef`'s own
+      // `resolve(upstream)` call (inside `resolveOrbitalRefChain` above)
+      // only resolves sentinels against the UPSTREAM's pre-splice entity —
+      // it runs BEFORE this reference's `fields{}`/`extend{}` apply. An
+      // entity-shaped payload (`payloadEntity`, or an unresolved `@entity`/
+      // `$<param>` sentinel on a trait this reference's own splice pulled
+      // in) must be re-derived AGAIN here, against the FINAL materialized
+      // orbital — the local primary + auxiliary entities `result.data` now
+      // carries — mirroring Rust's `resolve_orbital_type_param_sentinels`,
+      // called once per TOP-LEVEL orbital after `inline_orbital` fully
+      // resolves it, unconditionally (reference-form or not).
+      if (!opts?.skipTypeParamSentinels && isInlineEntity(result.data.entity)) {
+        resolveOrbitalTypeParamSentinels(
+          result.data.traits.filter(isInlineTrait).map((t) => ({ trait: t as Trait })),
+          result.data.entity,
+          (result.data.auxiliaryEntities ?? []).filter(isInlineEntity),
+          result.data.types,
+        );
+      }
       flattened.push(result.data);
     }
     if (errors.length > 0) return { success: false, errors };
+    // G5 (`docs/Almadar_Compiler_Gaps.md` §82): `materializeOrbitalRef` (via
+    // `applyEventRenames` above) renames every event KEY an `events {}`
+    // reference touches, but it operates on one `Orbital`, not the whole
+    // `schema` — it has no `schema.ledger` to update. Reconcile here, now
+    // that every reference-form orbital in `schema` has flattened, mirroring
+    // the compiled path's `reconcileOrbitalRefEventIdRenames` (`orbital-
+    // rust/.../inline/mod.rs`) exactly: same sole-owner-renames-in-place vs
+    // shared-mints-a-fresh-id split, same reasoning.
+    reconcileOrbitalRefEventIdRenames(schema, flattened);
     return { success: true, data: flattened, warnings: [] };
   }
 
@@ -5766,6 +6101,66 @@ export class ReferenceResolver {
   }
 
   /**
+   * G1 (`docs/Almadar_Compiler_Gaps.md` §82): every reference-form
+   * orbital's OWN materialized trait set, keyed by {@link siblingImportKey}
+   * (upstream alias + upstream orbital name), mapped to that import's local
+   * orbital name + every kept trait's final name/id ({@link
+   * materializedTraitSubs}). Computed order-free — WITHOUT requiring any
+   * other orbital in `schema` to have resolved first — same precompute
+   * shape as {@link precomputeReferenceFormPrimaryIds}, but for LISTEN-
+   * SOURCE rewriting: consulted by {@link rewriteListenSources} so a source
+   * naming ANY reference-form orbital of this schema resolves regardless of
+   * declaration order. Unlike the entity-id precompute, this resolves the
+   * upstream's OWN traits via the ordinary `this.resolve()` pass (the same
+   * call {@link materializeOrbitalRef} makes on its own upstream, with the
+   * same `schemaConfig` save/restore) rather than reading the raw unresolved
+   * schema — the JS identity model has no pre-resolve declaration id for a
+   * COMPOSED trait reference (unlike the compiled path's V4 dual-carry
+   * `TraitReference::Reference.id`), so a shallow read would silently
+   * under-report every composed trait's id.
+   *
+   * Best-effort: a reference this pre-pass cannot resolve (unknown alias,
+   * malformed reference string, upstream orbital not found, itself still
+   * reference-form, load/resolve failure) is silently skipped here — the
+   * REAL `resolveOrbitalRefChain`/`materializeOrbitalRef` call moments
+   * later still surfaces the actual error for it.
+   */
+  private async precomputeReferenceFormListenTargets(
+    orbitals: readonly OrbitalDefinition[],
+    chain: ImportChainLike,
+  ): Promise<Map<string, SiblingImportInfo>> {
+    const out = new Map<string, SiblingImportInfo>();
+    for (const orbital of orbitals) {
+      const ref = orbital.reference;
+      if (!ref) continue;
+      const parsed = parseOrbitalRef(ref.ref);
+      if (!parsed) continue;
+      const importsResult = await this.resolveImports(orbital.uses ?? [], undefined, chain);
+      if (!importsResult.success) continue;
+      const imported = importsResult.data.orbitals.get(parsed.alias);
+      if (!imported) continue;
+      const upstream = importedOrbitals(imported).find((o) => o.name === parsed.orbitalName);
+      // A reference-form upstream is left to the REAL chain's own recursion
+      // (`resolveOrbitalRefChain`'s `if (upstream.reference) { … }`) — this
+      // pre-pass never recurses, matching the compiled path's own shallow
+      // (non-recursive) precompute scope.
+      if (!upstream || upstream.reference) continue;
+      const savedSchemaConfig = this.schemaConfig;
+      this.schemaConfig = imported.schemaConfig;
+      let resolvedUpstream: ResolveResult<ResolvedOrbital>;
+      try {
+        resolvedUpstream = await this.resolve(upstream, imported.sourcePath, chain);
+      } finally {
+        this.schemaConfig = savedSchemaConfig;
+      }
+      if (!resolvedUpstream.success) continue;
+      const traitSubs = materializedTraitSubs(upstream.id, resolvedUpstream.data.traits, ref, orbital.name);
+      out.set(siblingImportKey(parsed.alias, parsed.orbitalName), { localName: orbital.name, traitSubs });
+    }
+    return out;
+  }
+
+  /**
    * Resolve one reference-form orbital, recursing into the upstream first
    * when IT is also reference-form ("already fully inlined because inline
    * recursed into every loaded orbital" — docs/Almadar_Orbital_Import.md §9
@@ -5779,6 +6174,11 @@ export class ReferenceResolver {
     visiting: Set<string>,
     consumerEntityIds: ReadonlyMap<string, EntityId>,
     consumerRoster: readonly Entity[],
+    // G1 (`docs/Almadar_Compiler_Gaps.md` §82): every reference-form orbital
+    // AMONG THIS CALL'S OWN SIBLINGS (the top-level schema's own orbitals,
+    // or — for a recursive call loading a nested reference-form upstream —
+    // that alias's own orbitals), keyed by {@link siblingImportKey}.
+    listenSourceTargets: ReadonlyMap<string, SiblingImportInfo>,
   ): Promise<ResolveResult<OrbitalDefinition>> {
     const ref = orbital.reference;
     if (!ref) return { success: true, data: orbital, warnings: [] };
@@ -5828,6 +6228,12 @@ export class ReferenceResolver {
     }
     visiting.add(cycleKey);
     if (upstream.reference) {
+      // G1: a nested reference-form upstream's OWN orbitals are a DIFFERENT
+      // `uses`-namespace than the caller's — a sibling-import listen source
+      // inside one of THEM resolves against THEIR OWN reference-form
+      // orbitals (`candidates`, this alias's whole orbital list), never the
+      // caller's `listenSourceTargets`.
+      const nestedListenSourceTargets = await this.precomputeReferenceFormListenTargets(candidates, chain);
       const nested = await this.resolveOrbitalRefChain(
         upstream,
         imported.sourcePath,
@@ -5835,6 +6241,7 @@ export class ReferenceResolver {
         visiting,
         consumerEntityIds,
         consumerRoster,
+        nestedListenSourceTargets,
       );
       if (!nested.success) {
         visiting.delete(cycleKey);
@@ -5855,6 +6262,8 @@ export class ReferenceResolver {
       consumerEntityIds,
       consumerRoster,
       imported.schemaConfig,
+      parsed.alias,
+      listenSourceTargets,
     );
     if (!materialized.success) return materialized;
     // Sibling trait declarations legal inside the reference body (§ Stage B
@@ -5911,6 +6320,13 @@ export class ReferenceResolver {
      * orbital's own resolution.
      */
     importedSchemaConfig: DeclaredTraitConfig | undefined,
+    // G1 (`docs/Almadar_Compiler_Gaps.md` §82): this reference's own upstream
+    // alias name, and the schema-wide precomputed sibling-import map — both
+    // threaded down to the `rewriteListenSources` call below so a listen
+    // source naming ANOTHER reference-form orbital of the same alias
+    // resolves too, not just a self-reference to `upstream`.
+    alias: string,
+    listenSourceTargets: ReadonlyMap<string, SiblingImportInfo>,
   ): Promise<ResolveResult<OrbitalDefinition>> {
     // Upstream traits must be inline first: resolve the upstream's OWN trait
     // refs, sibling pulls, and config-forward chain in ITS OWN import scope
@@ -5990,6 +6406,11 @@ export class ReferenceResolver {
     let auxEntities = upstreamAuxiliaryEntities ?? [];
     const subs = new Map<string, string>();
     for (const rt of keptTraits) subs.set(rt.trait.name, `${localName}${rt.trait.name}`);
+    // G5 (`docs/Almadar_Compiler_Gaps.md` §82): every FINAL name this import
+    // produces — passed to `applyEventRenames` below so a sourced listen
+    // whose source trait is itself part of THIS import gets its source-side
+    // `event` key renamed too, not just the local `triggers`.
+    const keptFinalNames = new Set(subs.values());
     const { name: primaryFinalName, id: primaryId } = materializedPrimaryEntity(
       upstreamEntity,
       upstream.id,
@@ -6318,7 +6739,7 @@ export class ReferenceResolver {
     const orbitalRename = upstream.name !== localName ? { from: upstream.name, to: localName } : undefined;
     const finalTraits: Trait[] = materializedTraits.map((trait) => {
       let next = renameTraitEmbeds(trait, subs);
-      next = renameEntitiesInTrait(next, subs);
+      next = renameEntitiesInTrait(next, subs, entityIds);
       // Rust sets `linkedEntityId` on every materialized trait — the FINAL
       // (post-rename) `linkedEntity`'s own id, whether that's the primary,
       // an aux (declared or cloned), or an `entities {}` out-of-orbital
@@ -6335,7 +6756,7 @@ export class ReferenceResolver {
       next = renameSourceEntityDefinition(next, subs, entityIds);
       next = rewriteRoleLiteralsInTrait(next, roleFields, ref.roles ?? {});
       if (fieldSubs.size > 0) next = rewriteEntityFieldsInTrait(next, fieldSubs);
-      next = rewriteListenSources(next, subs, idByName, orbitalRename);
+      next = rewriteListenSources(next, subs, idByName, orbitalRename, alias, listenSourceTargets);
       if (pathMap.size > 0) {
         next = rewriteTraitNavigateTargets(next, pathMap);
       }
@@ -6358,6 +6779,18 @@ export class ReferenceResolver {
       // `@config.` string).
       next = resolveForwardedSiblingConfigFrom(next, transitiveEmbedderChain(trait.name));
       next = resolveForwardedSiblingConfigFrom(next, [], foldedConfig, importedSchemaConfig);
+      // G3 follow-up (`docs/Almadar_Compiler_Gaps.md` §82): a config-forward
+      // step just above can hand this trait a brand-new literal (e.g. a
+      // JSX-hoisted render's `columns: @config.columns` resolving to its
+      // embedder's declared array) that still names a PRE-rename field —
+      // this trait's own field rewrite already ran, earlier in this same
+      // loop iteration, before the forward existed. Same "moved past the
+      // forward" fix already applied to page paths just below, applied
+      // here to field renames — see {@link rewriteEntityFieldsInConfig}'s
+      // doc.
+      if (fieldSubs.size > 0 && next.config) {
+        next = { ...next, config: rewriteEntityFieldsInConfig(next.config, fieldSubs) };
+      }
       // AFTER the config forward (planning find i): a page-path-shaped
       // config default (`navItems[].href`) is often ITSELF a `@config.`
       // forward (an app-level `navItems` knob) — rewriting page paths before
@@ -6366,7 +6799,7 @@ export class ReferenceResolver {
       if (pathMap.size > 0) {
         next = rewriteTraitConfigPagePaths(next, pathMap);
       }
-      next = applyEventRenames(next, ref.events);
+      next = applyEventRenames(next, ref.events, keptFinalNames);
       return next;
     });
 
@@ -6545,6 +6978,176 @@ export class ReferenceResolver {
   clearCache(): void {
     this.loader?.clearCache();
   }
+}
+
+// ============================================================================
+// Orbital-reference `events {}` id reconciliation (G5)
+// ============================================================================
+//
+// `materializeOrbitalRef` (via `applyEventRenames`) renames every event KEY
+// an `events { OLD: NEW }` reference touches, but it operates on one
+// `OrbitalDefinition`, not the whole `OrbitalSchema` — it has no
+// `schema.ledger` to update. A renamed declaration's id is therefore left
+// naming its PRE-rename key in the ledger (copied in wholesale from the
+// upstream behavior file at load time), and the next dual-carry read
+// (`almadar-verify`'s `id-integrity.ts`, the JS mirror of the compiled
+// path's own `id_integrity.rs`) trips `ORB_ID_NAME_MISMATCH`. Rust twin:
+// `reconcileOrbitalRefEventIdRenames` (`orbital-rust/.../inline/mod.rs`).
+
+/** One event declaration this pass found still naming a PRE-rename id. */
+interface EventIdRenameSite {
+  orbitalName: string;
+  traitName: string;
+  oldId: string;
+  newKey: string;
+}
+
+function isInlineTraitWithStateMachine(tr: TraitRef): tr is Trait {
+  return isInlineTrait(tr);
+}
+
+/**
+ * Re-derive the id of every event declaration an orbital reference's
+ * `events {}` rename actually renamed.
+ *
+ * Whether that means minting a FRESH id or renaming the existing one IN
+ * PLACE depends on a whole-schema census: exactly one (orbital, trait)
+ * declaration carrying the id in this whole schema means it is this
+ * schema's alone to rename, so the ledger entry updates in place (no
+ * orphaned row, no `ORB_ID_LEDGER_ORPHAN`); more than one means some OTHER,
+ * untouched declaration still legitimately holds the OLD id under the OLD
+ * name, so only the renamed trait's occurrence is repointed at a freshly
+ * derived id, leaving the original entry intact for that other owner. A
+ * schema with no `events {}` orbital reference, or no ledger at all, is a
+ * no-op.
+ */
+function reconcileOrbitalRefEventIdRenames(schema: OrbitalSchema, flattened: readonly OrbitalDefinition[]): void {
+  if (!schema.ledger) return;
+  const renamedRefs = schema.orbitals
+    .filter((o) => o.reference?.events && Object.keys(o.reference.events).length > 0)
+    .map((o) => ({ localName: o.name, eventSubs: o.reference!.events! }));
+  if (renamedRefs.length === 0) return;
+
+  // Pass 1 (read-only): every declaration site whose id still disagrees
+  // with the ledger's recorded name for one of THIS rename's new keys.
+  const sites: EventIdRenameSite[] = [];
+  for (const { localName, eventSubs } of renamedRefs) {
+    const newKeys = new Set(Object.values(eventSubs));
+    const orbital = flattened.find((o) => o.name === localName);
+    if (!orbital) continue;
+    for (const tr of orbital.traits) {
+      if (!isInlineTraitWithStateMachine(tr)) continue;
+      for (const ev of tr.stateMachine?.events ?? []) {
+        if (!ev.id || !newKeys.has(ev.key)) continue;
+        const entry = schema.ledger.entries[ev.id];
+        if (!entry || entry.curName === ev.key) continue;
+        sites.push({ orbitalName: orbital.name, traitName: tr.name, oldId: ev.id, newKey: ev.key });
+      }
+    }
+  }
+  if (sites.length === 0) return;
+
+  // Whole-schema owner census for just the candidate ids — how many
+  // DIFFERENT (orbital, trait) declarations carry each one, regardless of
+  // whether they were touched by a rename.
+  const candidateIds = new Set(sites.map((s) => s.oldId));
+  const owners = new Map<string, Set<string>>();
+  for (const orbital of flattened) {
+    for (const tr of orbital.traits) {
+      if (!isInlineTraitWithStateMachine(tr)) continue;
+      for (const ev of tr.stateMachine?.events ?? []) {
+        if (ev.id && candidateIds.has(ev.id)) {
+          const ownerKey = `${orbital.name} ${tr.name}`;
+          const set = owners.get(ev.id) ?? new Set<string>();
+          set.add(ownerKey);
+          owners.set(ev.id, set);
+        }
+      }
+    }
+  }
+
+  // Sole-owner ids rename their ledger entry in place; shared ids mint a
+  // fresh derived id, scoped to exactly the (orbital, trait) that needs it.
+  const renameInPlace = new Map<string, string>(); // oldId -> newKey
+  const deriveSites: Array<{ site: EventIdRenameSite; newId: EventId }> = [];
+  const seen = new Set<string>();
+  for (const site of sites) {
+    const ownerCount = owners.get(site.oldId)?.size ?? 1;
+    if (ownerCount <= 1) {
+      renameInPlace.set(site.oldId, site.newKey);
+    } else if (!seen.has(site.oldId)) {
+      seen.add(site.oldId);
+      deriveSites.push({ site, newId: asEventId(deriveId(site.oldId, site.newKey)) });
+    }
+  }
+
+  // Pass 2 (write): swap the shared-id sites' declarations to their fresh
+  // id, scoped to the ONE named (orbital, trait) so a same-id,
+  // still-unrenamed declaration elsewhere is never touched.
+  for (const { site, newId } of deriveSites) {
+    const orbital = flattened.find((o) => o.name === site.orbitalName);
+    if (!orbital) continue;
+    orbital.traits = orbital.traits.map((tr) => {
+      if (!isInlineTraitWithStateMachine(tr) || tr.name !== site.traitName) return tr;
+      let next: Trait = tr;
+      if (next.stateMachine?.events) {
+        next = {
+          ...next,
+          stateMachine: {
+            ...next.stateMachine,
+            events: next.stateMachine.events.map((ev) => (ev.id === site.oldId ? { ...ev, id: newId } : ev)),
+            transitions: (next.stateMachine.transitions ?? []).map((t) =>
+              t.eventId === site.oldId ? { ...t, eventId: newId } : t,
+            ),
+          },
+        };
+      }
+      if (next.emits) {
+        next = {
+          ...next,
+          emits: next.emits.map((e) =>
+            typeof e !== "string" && e.eventId === site.oldId ? { ...e, eventId: newId } : e,
+          ),
+        };
+      }
+      if (next.listens) {
+        next = {
+          ...next,
+          listens: next.listens.map((l) => {
+            const eventId = l.eventId === site.oldId ? newId : l.eventId;
+            const triggersId = l.triggersId === site.oldId ? newId : l.triggersId;
+            return eventId === l.eventId && triggersId === l.triggersId ? l : { ...l, eventId, triggersId };
+          }),
+        };
+      }
+      return next;
+    });
+  }
+
+  // Pass 3: apply the ledger side of both branches.
+  const at = new Date().toISOString();
+  let ledger: IdentityLedger = schema.ledger;
+  for (const [oldId, newKey] of renameInPlace) {
+    ledger = ledgerRename(ledger, oldId, newKey, at);
+  }
+  for (const { site, newId } of deriveSites) {
+    const src = ledger.entries[site.oldId];
+    if (!src) continue;
+    const ownerTrait = flattened
+      .find((o) => o.name === site.orbitalName)
+      ?.traits.find((tr): tr is Trait => isInlineTraitWithStateMachine(tr) && tr.name === site.traitName);
+    const newEntry: LedgerEntry = {
+      id: newId,
+      kind: src.kind,
+      bakedName: src.bakedName,
+      curName: site.newKey,
+      renames: [...src.renames, { from: src.curName, to: site.newKey, at }],
+      owner: src.owner,
+      ...(ownerTrait?.id !== undefined ? { parent: ownerTrait.id } : {}),
+    };
+    ledger = { ...ledger, entries: { ...ledger.entries, [newId]: newEntry } };
+  }
+  schema.ledger = ledger;
 }
 
 // ============================================================================

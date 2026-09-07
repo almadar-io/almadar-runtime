@@ -242,6 +242,38 @@ export function resolveSentinelFields(
 }
 
 /**
+ * G4 (`Almadar_Compiler_Gaps.md` §82): re-derive an entity-shaped payload
+ * (`payloadEntity: "<Name>"` — the bare `type X = Event <EntityName>` alias
+ * form) from that entity's CURRENT field set — twin of Rust's
+ * `resolve_payload_entity_schema` (`orbital-compiler/phases/inline/
+ * rewrite.rs`). `entitiesByName` is this trait's own orbital, already post
+ * `fields{}`-rename / `extend{}` by the time this runs (called after the
+ * orbital/trait reference fully materializes, see
+ * `resolveOrbitalTypeParamSentinels`). Without this, an orbital-import's or
+ * trait-reference's `fields{}`/`extend{}` override renamed or grew the
+ * entity but the payload flattened at the ATOM's OWN compile time kept
+ * describing the entity's ORIGINAL shape.
+ *
+ * Orthogonal to the `@entity`/`$<param>` sentinel mechanism below (a
+ * payload never carries both markers), so this always takes precedence when
+ * present. Mutates the field carrying `payloadSchema` in place via the
+ * setter; returns whether it recomputed (`false` — no-op — when
+ * `payloadEntity` is absent or names an entity gone from this orbital's
+ * set).
+ */
+function resolvePayloadEntitySchema(
+  payloadEntity: string | undefined,
+  setPayloadSchema: (schema: EventPayloadField[]) => void,
+  entitiesByName: ReadonlyMap<string, Entity>,
+): boolean {
+  if (!payloadEntity) return false;
+  const entity = entitiesByName.get(payloadEntity);
+  if (!entity) return false;
+  setPayloadSchema(entityFieldsToPayloadFields(entity));
+  return true;
+}
+
+/**
  * Resolve every sentinel on ONE trait's `emits`/`stateMachine.events`
  * payload schemas — twin of Rust's `resolve_type_param_sentinels`. For each
  * declared type param: a call-site `typeArgs` entry (`ResolvedTrait.typeArgs`,
@@ -278,6 +310,18 @@ export function resolveTraitTypeParamSentinels(
   let changed = false;
   for (const emit of trait.emits ?? []) {
     if (!emit.payloadSchema) continue;
+    if (
+      resolvePayloadEntitySchema(
+        emit.payloadEntity,
+        (schema) => {
+          emit.payloadSchema = schema;
+        },
+        entitiesByName,
+      )
+    ) {
+      changed = true;
+      continue;
+    }
     const schema = emit.payloadSchema as EventPayloadField[];
     if (flattenBareEntityPayload(schema, entityDef, subs)) {
       changed = true;
@@ -287,6 +331,18 @@ export function resolveTraitTypeParamSentinels(
   }
   for (const ev of trait.stateMachine?.events ?? []) {
     if (!ev.payloadSchema) continue;
+    if (
+      resolvePayloadEntitySchema(
+        ev.payloadEntity,
+        (schema) => {
+          ev.payloadSchema = schema;
+        },
+        entitiesByName,
+      )
+    ) {
+      changed = true;
+      continue;
+    }
     const schema = ev.payloadSchema as EventPayloadField[];
     if (flattenBareEntityPayload(schema, entityDef, subs)) {
       changed = true;
