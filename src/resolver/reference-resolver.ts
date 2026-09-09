@@ -1177,10 +1177,19 @@ function resolveForwardedSiblingConfigFrom(
   parentChain: readonly DeclaredTraitConfig[],
   orbitalConfig?: DeclaredTraitConfig,
   schemaConfig?: DeclaredTraitConfig,
+  schemaOnlyKeys?: Set<string>,
 ): Trait {
   const declared = trait.config;
   if (!declared) return trait;
-  const next = resolveConfigForwards(declared, parentChain, orbitalConfig, undefined, undefined, schemaConfig);
+  const next = resolveConfigForwards(
+    declared,
+    parentChain,
+    orbitalConfig,
+    undefined,
+    undefined,
+    schemaConfig,
+    schemaOnlyKeys,
+  );
   return next ? { ...trait, config: next } : trait;
 }
 
@@ -1224,6 +1233,31 @@ function callSiteRungValue(rungConfig: CallSiteConfig, knob: string): TraitConfi
  * to (Rust twin: `forwarded_sibling_config_from`'s `upstream_orbital_config`/
  * `upstream_schema_config` params, `orbital-compiler`'s `phases::inline::trait`).
  */
+/**
+ * `walkConfigForwardChain`, plus an optional out-set of the resolved knobs
+ * whose value came ONLY from the outermost `schemaConfig` rung — the
+ * CONSUMER's single app-level `config {}`, shared by every orbital import
+ * in the schema, as opposed to `parentChain`/`orbitalConfig`/`upstream*`,
+ * each scoped to the one import/trait doing the resolving. Used by the
+ * orbital-import splice (`rewriteTraitConfigPagePaths`, Gap (D)) to tell
+ * "this trait's own literal page-path data, safe to remap onto this
+ * import's local paths" (any other rung) apart from "the consumer's own
+ * unrelated, possibly multi-orbital data that happened to reach this trait
+ * via a bare `@config.<knob>` forward" (schemaConfig) — rewriting the
+ * latter by literal string match risks stomping an unrelated sibling's
+ * href that coincidentally equals this import's upstream path. JS twin of
+ * Rust's `forwarded_sibling_config_from_tracked`.
+ */
+/** Return shape for {@link walkConfigForwardChain}: the resolved value (if
+ *  any), plus whether reaching it required falling all the way through to
+ *  the outermost `schemaConfig` rung — the caller tracks this against ITS
+ *  OWN field key (the resolver may have chased the forward under a
+ *  DIFFERENT intermediate knob name via a mid-chain relay). */
+interface ConfigForwardResult {
+  readonly value: TraitConfigValue | undefined;
+  readonly reachedSchemaConfigOnly: boolean;
+}
+
 function walkConfigForwardChain(
   forward: string,
   parentChain: readonly CallSiteConfig[],
@@ -1231,9 +1265,10 @@ function walkConfigForwardChain(
   upstreamOrbitalConfig: DeclaredTraitConfig | undefined,
   upstreamSchemaConfig: DeclaredTraitConfig | undefined,
   schemaConfig: DeclaredTraitConfig | undefined,
-): TraitConfigValue | undefined {
+): ConfigForwardResult {
+  const unresolved: ConfigForwardResult = { value: undefined, reachedSchemaConfigOnly: false };
   let knob = forward.slice("@config.".length);
-  if (knob.length === 0 || knob.includes(".")) return undefined;
+  if (knob.length === 0 || knob.includes(".")) return unresolved;
   let value: TraitConfigValue | undefined;
   let currentForward: string = forward;
   for (const rungConfig of parentChain) {
@@ -1254,9 +1289,12 @@ function walkConfigForwardChain(
   if (value === undefined || value === currentForward) value = orbitalConfig?.[knob]?.default;
   if (value === undefined || value === currentForward) value = upstreamOrbitalConfig?.[knob]?.default;
   if (value === undefined || value === currentForward) value = upstreamSchemaConfig?.[knob]?.default;
-  if (value === undefined || value === currentForward) value = schemaConfig?.[knob]?.default;
-  if (value === undefined || value === currentForward) return undefined;
-  return value;
+  // Every nearer rung came up empty or self-forwarding — whatever
+  // `schemaConfig` supplies next is ONLY reachable through it.
+  const reachesSchemaConfigRung = value === undefined || value === currentForward;
+  if (reachesSchemaConfigRung) value = schemaConfig?.[knob]?.default;
+  if (value === undefined || value === currentForward) return unresolved;
+  return { value, reachedSchemaConfigOnly: reachesSchemaConfigRung };
 }
 
 /**
@@ -1273,12 +1311,13 @@ function resolveConfigForwards(
   upstreamOrbitalConfig?: DeclaredTraitConfig,
   upstreamSchemaConfig?: DeclaredTraitConfig,
   schemaConfig?: DeclaredTraitConfig,
+  schemaOnlyKeys?: Set<string>,
 ): DeclaredTraitConfig | undefined {
   let next: Record<string, ConfigFieldDeclaration> | undefined;
   for (const [key, field] of Object.entries(declared)) {
     const forward = field.default;
     if (typeof forward !== "string" || !forward.startsWith("@config.")) continue;
-    const value = walkConfigForwardChain(
+    const { value, reachedSchemaConfigOnly } = walkConfigForwardChain(
       forward,
       parentChain,
       orbitalConfig,
@@ -1287,6 +1326,7 @@ function resolveConfigForwards(
       schemaConfig,
     );
     if (value === undefined) continue;
+    if (reachedSchemaConfigOnly) schemaOnlyKeys?.add(key);
     next ??= { ...declared };
     // `forwardedFrom` — the field's OWN original `@config.<knob>` token —
     // survives the collapse so a dead-knob check can still recognize the
@@ -1319,7 +1359,7 @@ function resolveCallSiteConfigForwards(
   for (const [key, entry] of Object.entries(config)) {
     const forward = isCallSiteConfigDeclaration(entry) ? entry.default : entry;
     if (typeof forward !== "string" || !forward.startsWith("@config.")) continue;
-    const value = walkConfigForwardChain(forward, parentChain, orbitalConfig, undefined, undefined, schemaConfig);
+    const { value } = walkConfigForwardChain(forward, parentChain, orbitalConfig, undefined, undefined, schemaConfig);
     if (value === undefined) continue;
     next ??= { ...config };
     // `forwardedFrom` only has a slot on the annotated declaration form — a
@@ -3719,13 +3759,33 @@ function rewriteConfigPagePaths(node: unknown, pathMap: ReadonlyMap<string, stri
   return node;
 }
 
-/** Apply {@link rewriteConfigPagePaths} across every declared config field's default on one trait. */
-function rewriteTraitConfigPagePaths(trait: Trait, pathMap: ReadonlyMap<string, string>): Trait {
+/**
+ * Apply {@link rewriteConfigPagePaths} across every declared config field's
+ * default on one trait — but skip a field named in `schemaOnlyKeys`: its
+ * value didn't come from anywhere scoped to THIS import (an embedder, the
+ * imported orbital's own `config {}`, or a §B4-R5 upstream rung), it fell
+ * all the way through to the consumer's own schema-level `config {}` —
+ * shared by every orbital import in the schema. `std-notes.lolo`'s own
+ * literal `navItems` (the case this rewrite exists for) resolves from the
+ * orbital's own config and is never in this set, so it's still rewritten
+ * as before. Without the exclusion, e.g. `project-friday.lolo`'s single
+ * shared `navItems` reaching every AppLayout via `navItems: @config.navItems`
+ * got its WHOLE shared structure walked and exact-string-matched against
+ * just this one import's upstream path, so an unrelated sibling nav entry
+ * whose href happened to equal it (two different imports each naming a
+ * page `/pipeline`) silently got stomped too — a page-path collision, not
+ * a rename. JS twin of Rust's `rewrite_trait_config_page_paths`.
+ */
+function rewriteTraitConfigPagePaths(
+  trait: Trait,
+  pathMap: ReadonlyMap<string, string>,
+  schemaOnlyKeys: ReadonlySet<string>,
+): Trait {
   if (pathMap.size === 0 || !trait.config) return trait;
   const nextConfig: { [k: string]: ConfigFieldDeclaration } = {};
   for (const [key, field] of Object.entries(trait.config)) {
     nextConfig[key] =
-      field.default === undefined
+      field.default === undefined || schemaOnlyKeys.has(key)
         ? field
         : { ...field, default: rewriteConfigPagePaths(field.default, pathMap) as ConfigFieldDeclaration["default"] };
   }
@@ -6760,6 +6820,14 @@ export class ReferenceResolver {
       if (pathMap.size > 0) {
         next = rewriteTraitNavigateTargets(next, pathMap);
       }
+      // Keys whose config-forward resolution reached all the way out to
+      // `importedSchemaConfig`/the consumer's schema config (the CONSUMER's
+      // single app-level `config {}`, shared by every orbital import in
+      // the schema) — populated below, consumed by the page-path rewrite
+      // just after so it never touches one of these: that data isn't this
+      // trait's own, it's the consumer's outer, possibly multi-orbital
+      // structure passing through.
+      const schemaOnlyKeys = new Set<string>();
       // Embedder rung first — precedence embedder → orbital → schema (§
       // resolveForwardedSiblingConfigFrom). Each embedder-only pass only
       // moves keys that embedder actually declares (any still-`@config.`
@@ -6768,7 +6836,13 @@ export class ReferenceResolver {
       // equivalent to "first embedder to declare the knob wins" per key.
       for (const embedderName of embeddersOf.get(trait.name) ?? []) {
         const embedderConfig = parentConfigs.get(embedderName);
-        next = resolveForwardedSiblingConfigFrom(next, embedderConfig ? [embedderConfig] : []);
+        next = resolveForwardedSiblingConfigFrom(
+          next,
+          embedderConfig ? [embedderConfig] : [],
+          undefined,
+          undefined,
+          schemaOnlyKeys,
+        );
       }
       // Multi-hop fallback (ledger (n)-JS): the direct-embedder loop above
       // only ever tries the trait's IMMEDIATE embedders one rung each — a
@@ -6777,8 +6851,14 @@ export class ReferenceResolver {
       // falling through to the orbital/schema rungs. A no-op for any field
       // the loop above already resolved (its default is no longer a
       // `@config.` string).
-      next = resolveForwardedSiblingConfigFrom(next, transitiveEmbedderChain(trait.name));
-      next = resolveForwardedSiblingConfigFrom(next, [], foldedConfig, importedSchemaConfig);
+      next = resolveForwardedSiblingConfigFrom(
+        next,
+        transitiveEmbedderChain(trait.name),
+        undefined,
+        undefined,
+        schemaOnlyKeys,
+      );
+      next = resolveForwardedSiblingConfigFrom(next, [], foldedConfig, importedSchemaConfig, schemaOnlyKeys);
       // G3 follow-up (`docs/Almadar_Compiler_Gaps.md` §82): a config-forward
       // step just above can hand this trait a brand-new literal (e.g. a
       // JSX-hoisted render's `columns: @config.columns` resolving to its
@@ -6797,7 +6877,7 @@ export class ReferenceResolver {
       // the forward resolves leaves every href pointing at the raw string
       // `"@config.navItems"`, missing the rewrite entirely.
       if (pathMap.size > 0) {
-        next = rewriteTraitConfigPagePaths(next, pathMap);
+        next = rewriteTraitConfigPagePaths(next, pathMap, schemaOnlyKeys);
       }
       next = applyEventRenames(next, ref.events, keptFinalNames);
       return next;
