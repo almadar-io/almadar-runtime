@@ -228,7 +228,6 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
             callService: [],
             renderUI: [],
             navigate: [],
-            notify: [],
         };
 
         const handlers: EffectHandlers = {
@@ -251,9 +250,6 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
             },
             navigate: (path, params) => {
                 calls.navigate.push([path, params]);
-            },
-            notify: (message, type) => {
-                calls.notify.push([message, type]);
             },
         };
 
@@ -327,7 +323,7 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         expect(calls.navigate[0][0]).toBe('/tasks/task-1');
     });
 
-    it('dispatches notify effects', async () => {
+    it('dispatches render-ui toast effects (notify sugar)', async () => {
         const { handlers, calls } = createMockHandlers();
         const executor = new EffectExecutor({
             handlers,
@@ -335,11 +331,17 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
             context: createBasicContext(),
         });
 
-        await executor.execute(['notify', 'Task saved!', 'success']);
+        await executor.execute([
+            'render-ui',
+            'toast',
+            { type: 'alert', variant: 'success', message: 'Task saved!', dismissible: true },
+        ]);
 
-        expect(calls.notify).toHaveLength(1);
-        expect(calls.notify[0][0]).toBe('Task saved!');
-        expect(calls.notify[0][1]).toBe('success');
+        expect(calls.renderUI).toHaveLength(1);
+        expect(calls.renderUI[0][0]).toBe('toast');
+        const pattern = calls.renderUI[0][1] as Record<string, unknown>;
+        expect(pattern.message).toBe('Task saved!');
+        expect(pattern.variant).toBe('success');
     });
 
     it('dispatches persist effects (logged as warning on client)', async () => {
@@ -400,12 +402,12 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         await executor.executeAll([
             ['render-ui', 'main', { type: 'entity-detail', entity: 'Task' }],
             ['emit', 'TASK_VIEWED'],
-            ['notify', 'Viewing task', 'info'],
+            ['render-ui', 'toast', { type: 'alert', variant: 'info', message: 'Viewing task', dismissible: true }],
         ]);
 
-        expect(calls.renderUI).toHaveLength(1);
+        expect(calls.renderUI).toHaveLength(2);
         expect(calls.emit).toHaveLength(1);
-        expect(calls.notify).toHaveLength(1);
+        expect(calls.renderUI[1][0]).toBe('toast');
     });
 
     it('handles compound do effects', async () => {
@@ -420,13 +422,14 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
             'do',
             ['emit', 'STEP_1'],
             ['emit', 'STEP_2'],
-            ['notify', 'Done', 'success'],
+            ['render-ui', 'toast', { type: 'alert', variant: 'success', message: 'Done', dismissible: true }],
         ]);
 
         expect(calls.emit).toHaveLength(2);
         expect(calls.emit[0][0]).toBe('STEP_1');
         expect(calls.emit[1][0]).toBe('STEP_2');
-        expect(calls.notify).toHaveLength(1);
+        expect(calls.renderUI).toHaveLength(1);
+        expect(calls.renderUI[0][0]).toBe('toast');
     });
 
     it('handles conditional when effects (truthy)', async () => {
@@ -443,12 +446,12 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         await executor.execute([
             'when',
             '@entity.isAdmin',
-            ['notify', 'Admin access granted', 'success'],
-            ['notify', 'Access denied', 'error'],
+            ['render-ui', 'toast', { type: 'alert', variant: 'success', message: 'Admin access granted', dismissible: true }],
+            ['render-ui', 'toast', { type: 'alert', variant: 'error', message: 'Access denied', dismissible: true }],
         ]);
 
-        expect(calls.notify).toHaveLength(1);
-        expect(calls.notify[0][0]).toBe('Admin access granted');
+        expect(calls.renderUI).toHaveLength(1);
+        expect((calls.renderUI[0][1] as Record<string, unknown>).message).toBe('Admin access granted');
     });
 
     it('handles conditional when effects (falsy)', async () => {
@@ -465,12 +468,12 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         await executor.execute([
             'when',
             '@entity.isAdmin',
-            ['notify', 'Admin access granted', 'success'],
-            ['notify', 'Access denied', 'error'],
+            ['render-ui', 'toast', { type: 'alert', variant: 'success', message: 'Admin access granted', dismissible: true }],
+            ['render-ui', 'toast', { type: 'alert', variant: 'error', message: 'Access denied', dismissible: true }],
         ]);
 
-        expect(calls.notify).toHaveLength(1);
-        expect(calls.notify[0][0]).toBe('Access denied');
+        expect(calls.renderUI).toHaveLength(1);
+        expect((calls.renderUI[0][1] as Record<string, unknown>).message).toBe('Access denied');
     });
 
     it('silently skips invalid effects', async () => {
@@ -494,13 +497,13 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         /**
          * This test mirrors how useTraitStateMachine.ts now constructs
          * EffectHandlers after Phase 4 consolidation:
-         * - emit, renderUI, navigate, notify → wired to runtime services
+         * - emit, renderUI, navigate → wired to runtime services (the toast
+         *   slot carries what used to be the separate notify effect)
          * - persist, set, callService → stub with console.warn
          */
         const emitted: Array<{ event: string; payload?: Record<string, unknown> }> = [];
         const rendered: Array<{ slot: string; pattern: unknown }> = [];
         const navigated: string[] = [];
-        const notified: string[] = [];
 
         const handlers: EffectHandlers = {
             emit: (event, payload) => {
@@ -521,9 +524,6 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
             },
             navigate: (path) => {
                 navigated.push(path);
-            },
-            notify: (message) => {
-                notified.push(message);
             },
         };
 
@@ -547,12 +547,12 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         await executor.executeAll([
             ['render-ui', 'main', { type: 'entity-detail', entity: 'Order' }],
             ['emit', 'ORDER_CONFIRMED', { orderId: '@entity.id', total: '@entity.total' }],
-            ['notify', 'Order confirmed!', 'success'],
+            ['render-ui', 'toast', { type: 'alert', variant: 'success', message: 'Order confirmed!', dismissible: true }],
             ['persist', 'update', 'Order', { status: 'confirmed' }],
         ]);
 
         // Client effects executed
-        expect(rendered).toHaveLength(1);
+        expect(rendered).toHaveLength(2);
         expect(rendered[0].slot).toBe('main');
 
         expect(emitted).toHaveLength(1);
@@ -560,8 +560,8 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         expect(emitted[0].payload?.orderId).toBe('order-1'); // binding resolved
         expect(emitted[0].payload?.total).toBe(99.99);       // binding resolved
 
-        expect(notified).toHaveLength(1);
-        expect(notified[0]).toBe('Order confirmed!');
+        expect(rendered[1].slot).toBe('toast');
+        expect((rendered[1].pattern as Record<string, unknown>).message).toBe('Order confirmed!');
 
         // Navigate wasn't in the sequence
         expect(navigated).toHaveLength(0);
@@ -609,7 +609,6 @@ describe('End-to-End: Builder Runtime Consolidation Scenario', () => {
                 rendered.push({ slot, pattern });
             },
             navigate: () => { },
-            notify: () => { },
         };
 
         const context: EffectContext = {

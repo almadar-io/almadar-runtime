@@ -148,7 +148,7 @@ export interface CreateServerEffectHandlersOptions {
  * transition, call this factory again.
  *
  * Intentionally does NOT implement:
- * - `renderUI` / `notify` / `navigate` — these are client-side, provided
+ * - `renderUI` / `navigate` — these are client-side, provided
  *   by `createClientEffectHandlers`. A mock runtime merges both handler
  *   sets.
  * - `os/watch-*` observers — these are a no-op outside the server.

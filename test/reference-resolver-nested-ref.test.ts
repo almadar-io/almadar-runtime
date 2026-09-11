@@ -128,7 +128,7 @@ describe('ReferenceResolver — nested composed trait refs (ledger (i))', () => 
 });
 
 describe.skipIf(!hasCorpus)('ReferenceResolver — nested composed trait refs: real std-notes.orb corpus case', () => {
-  it('preprocessSchema succeeds on std-notes.orb and resolves 52 traits in NoteOrbital', async () => {
+  it('preprocessSchema succeeds on std-notes.orb and resolves the nested NoteSubpages ref in NoteOrbital', async () => {
     const stdNotesPath = path.join(
       REPO_ROOT,
       'packages/almadar-behaviors/behaviors/registry/app/organisms/std-notes.orb',
@@ -146,6 +146,17 @@ describe.skipIf(!hasCorpus)('ReferenceResolver — nested composed trait refs: r
     if (!result.success) return;
     const noteOrbital = result.data.schema.orbitals.find((o) => o.name === 'NoteOrbital');
     expect(noteOrbital).toBeDefined();
-    expect(noteOrbital!.traits).toHaveLength(52);
+    // The property under test is that the third-alias ref resolves — never a
+    // trait count, which moves whenever a composed std atom changes shape.
+    const subpages = noteOrbital!.traits.find(
+      (t) => typeof t === 'object' && t !== null && 'ref' in t && t.ref === 'NoteSubpages',
+    );
+    expect(subpages).toBeDefined();
+    expect(subpages !== undefined && '_resolved' in subpages && subpages._resolved !== undefined).toBe(true);
+    for (const entry of noteOrbital!.traits) {
+      if (typeof entry === 'object' && entry !== null && 'ref' in entry) {
+        expect('_resolved' in entry && entry._resolved !== undefined, `unresolved ref ${entry.ref}`).toBe(true);
+      }
+    }
   });
 });

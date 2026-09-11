@@ -20,6 +20,7 @@ import type {
 import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings, deferEntityBindings } from './BindingResolver.js';
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
+import { omitFrameFields } from '@almadar/core';
 import type { FieldValue, SExpr, Orbital, TraitConfig, RuntimeValue } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
 import type { SExpressionEvaluator } from '@almadar/evaluator';
@@ -67,6 +68,16 @@ export interface EffectExecutorOptions {
      * SSE-pushed props stay concrete.
      */
     deferRenderBindings?: boolean;
+    /**
+     * Names of an entity's `@intrinsic` fields — trait-owned view state
+     * (never a persisted column) — keyed by entity type. Supplied only by a
+     * caller holding the registered schema (`OrbitalServerRuntime`); the
+     * `persist` case uses it to strip those keys from a bare `@entity`
+     * binding before the write reaches the store. Absent means "no schema
+     * available" (e.g. a browser/offline-preview handler set), in which case
+     * persist writes verbatim exactly as before.
+     */
+    resolveIntrinsicFields?: (entityType: string) => readonly string[];
 }
 
 // ============================================================================
@@ -170,6 +181,7 @@ export class EffectExecutor {
     private contextExtensions?: EvaluationContextExtensions;
     private evaluator?: SExpressionEvaluator;
     private deferRenderBindings: boolean;
+    private resolveIntrinsicFields?: (entityType: string) => readonly string[];
 
     constructor(options: EffectExecutorOptions) {
         this.handlers = options.handlers;
@@ -180,6 +192,23 @@ export class EffectExecutor {
         this.contextExtensions = options.contextExtensions;
         this.evaluator = options.evaluator;
         this.deferRenderBindings = options.deferRenderBindings ?? false;
+        this.resolveIntrinsicFields = options.resolveIntrinsicFields;
+    }
+
+    /**
+     * `@intrinsic` fields are NEVER a persisted column — strips them from
+     * `data` before a `persist create`/`persist update` write, regardless of
+     * what expression produced `data` (bare `@entity`, an explicit literal
+     * that names one, an `object/merge` result, …). Deterministic on the
+     * entity's declared schema, not on how the value was constructed. A
+     * no-op when no schema was supplied (`resolveIntrinsicFields` absent,
+     * e.g. a browser/offline-preview handler set) or the entity declares no
+     * intrinsic fields.
+     */
+    private stripFrameFields(entityType: string, data: EntityRow | undefined): EntityRow | undefined {
+        if (data === undefined || !this.resolveIntrinsicFields) return data;
+        const intrinsicFields = this.resolveIntrinsicFields(entityType);
+        return intrinsicFields.length > 0 ? omitFrameFields(data, intrinsicFields) : data;
     }
 
     private _evaluator?: EvaluatorInstance;
@@ -258,7 +287,6 @@ export class EffectExecutor {
             'render': this.handlers.renderUI,
             'navigate': this.handlers.navigate,
             'navigate-back': this.handlers.navigateBack,
-            'notify': this.handlers.notify,
             'log': this.handlers.log,
             'ref': this.handlers.ref,
             'deref': this.handlers.deref,
@@ -807,7 +835,23 @@ export class EffectExecutor {
                 try {
                     if (action === 'batch') {
                         // Batch mode: ["persist", "batch", [...operations]]
-                        const operations = args[1] as unknown[];
+                        // Each operation: ["create", "collection", {...data}],
+                        //                 ["update", "collection", "id", {...data}]
+                        // Every create/update operand gets the same @intrinsic
+                        // strip as the single-op path below.
+                        const operations = (args[1] as unknown[]).map((op) => {
+                            if (!Array.isArray(op) || op.length < 2) return op;
+                            const [opAction, opEntityType, ...opRest] = op as [string, string, ...unknown[]];
+                            if (opAction === 'create') {
+                                const stripped = this.stripFrameFields(opEntityType, opRest[0] as EntityRow | undefined);
+                                return [opAction, opEntityType, stripped, ...opRest.slice(1)];
+                            }
+                            if (opAction === 'update') {
+                                const stripped = this.stripFrameFields(opEntityType, opRest[1] as EntityRow | undefined);
+                                return [opAction, opEntityType, opRest[0], stripped, ...opRest.slice(2)];
+                            }
+                            return op;
+                        });
                         const batchSummary = await this.handlers.persist('batch', '', {
                             operations,
                         } as EntityRow);
@@ -836,7 +880,9 @@ export class EffectExecutor {
                         persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
                     } else {
                         const entityType = args[1] as string;
-                        const data = args[2] as EntityRow | undefined;
+                        const data = (action === 'create' || action === 'update')
+                            ? this.stripFrameFields(entityType, args[2] as EntityRow | undefined)
+                            : args[2] as EntityRow | undefined;
                         // The persisted row (create: submitted data + the
                         // minted id) is the success payload — matching the
                         // compiled path, which emits its `created` row.
@@ -1211,15 +1257,12 @@ export class EffectExecutor {
             }
 
             case 'notify': {
-                if (this.handlers.notify) {
-                    const message = args[0] as string;
-                    const type = (args[1] as 'success' | 'error' | 'warning' | 'info') || 'info';
-                    this.handlers.notify(message, type);
-                } else {
-                    const category = typeof args[1] === 'string' ? args[1] : 'info';
-                    const message = typeof args[0] === 'string' ? args[0] : JSON.stringify(args[0] ?? null);
-                    effectLog.info('notify', { category, message });
-                }
+                // Retired effect kind: `.lolo` now lowers `(notify …)` to
+                // `(render-ui toast …)` at L1. A registry `.orb` compiled
+                // before that lowering can still carry a `notify` tuple —
+                // treat it like any other unsupported-on-platform operator
+                // instead of crashing the effect chain.
+                this.logUnsupported('notify');
                 break;
             }
 

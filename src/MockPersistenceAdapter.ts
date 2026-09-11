@@ -10,7 +10,7 @@
 import type { PersistenceAdapter } from './OrbitalServerRuntime.js';
 import type { EntityRow } from './types.js';
 import type { EntityField, EntityId, EntityPersistence, FieldValue } from '@almadar/core';
-import { sampleRow, sampleRowCount } from '@almadar/core/mock';
+import { linkSelfRelationField, sampleRow, sampleRowCount } from '@almadar/core/mock';
 import { createLogger } from '@almadar/logger';
 import {
   seedRandom,
@@ -402,14 +402,18 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * of nested-tree atoms (e.g. std-thread-comments-linear with ThreadPost.
    * replies → [ThreadPost]) render empty reply cards.
    *
-   * Cross-entity relations pick random IDs from the target store. A
-   * SELF-referential `one`-cardinality relation (a parent column like
-   * `Tag.parentId : Tag`) is linked deterministically instead: row 0 stays a
-   * root (`""`) and row *i* parents to row ⌊(i−1)/2⌋ — a proper forest with
-   * real roots and no cycles, so tree views and `parentId = ""` root fetches
-   * render sensibly. Self-referential `many` relations keep the 2–4 random
-   * sibling IDs (excluding self). The runtime caps recursion at depth=2 in
-   * `populateRelations`, so deep chains render two levels then stop.
+   * Cross-entity relations pick random IDs from the target store. EVERY
+   * self-referential relation, any cardinality, is linked deterministically
+   * instead via `@almadar/core/mock`'s `linkSelfRelationField`: row 0 stays a
+   * root (never referenced), row *i* parents to row ⌊(i−1)/2⌋ — one shared
+   * forest, real roots, no cycles. `one`/`many-to-one` self-relations (a
+   * parent column like `Tag.parentId : Tag`) store the scalar parent id;
+   * `many`/`one-to-many`/`many-to-many` self-relations (a children list like
+   * `ChatMessage.replies : [ChatMessage]`) store the forest's children-id
+   * list — no more random cross-linking, so the root row is never referenced
+   * and stays deletable under `onDelete: restrict`. The runtime caps
+   * recursion at depth=2 in `populateRelations`, so deep chains render two
+   * levels then stop.
    *
    * Entities sharing a collection are linked once per STORE, over the union
    * of their declared relation fields (first declarer of a field name wins).
@@ -463,17 +467,15 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         const sameStore = targetStore === store;
         const cardinality = field.relation.cardinality ?? 'many';
 
-        if (sameStore && (cardinality === 'one' || cardinality === 'many-to-one')) {
-          // Deterministic forest for parent columns (see method doc).
-          rows.forEach((row, i) => {
-            if (
-              (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) ||
-              stampedCellKeys.has(stampedCellKey(storeKey, row['id'] as string, field.name))
-            ) {
-              return;
-            }
-            row[field.name] = i === 0 ? '' : (rows[Math.floor((i - 1) / 2)]!['id'] as string);
-          });
+        if (sameStore) {
+          // Deterministic forest — see @almadar/core/mock's
+          // `linkSelfRelationField` doc. Every cardinality on a self-relation
+          // goes through the SAME forest: scalar parent for one/many-to-one,
+          // children-id list for many/one-to-many/many-to-many.
+          linkSelfRelationField(rows, { name: field.name, cardinality }, (row, i) =>
+            (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) ||
+            stampedCellKeys.has(stampedCellKey(storeKey, row['id'] as string, field.name)),
+          );
           continue;
         }
 
@@ -490,14 +492,8 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
           ) {
             continue;
           }
-          // Eligible IDs: every id in the target store, minus this row's own id
-          // (only when target === self entity) so a comment doesn't list itself
-          // as its own reply.
-          let eligible: string[] = [];
-          for (const id of targetStore.keys()) {
-            if (sameStore && id === selfId) continue;
-            eligible.push(id);
-          }
+          // Eligible IDs: every id in the (cross-entity) target store.
+          let eligible: string[] = [...targetStore.keys()];
           if (isOwnerColumn && this.ownerCandidateGate) {
             const gate = this.ownerCandidateGate;
             eligible = eligible.filter((id) =>

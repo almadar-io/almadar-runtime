@@ -49,8 +49,6 @@ export interface CreateClientEffectHandlersOptions {
     navigate?: (path: string, params?: { [key: string]: string }, crumb?: string) => void;
     /** Navigate-back function: pop the orbital-scoped navigation stack. */
     navigateBack?: () => void;
-    /** Notify function for notification effects */
-    notify?: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;
     /**
      * Send-server handler for `send-server` effects.
      * When omitted, defaults to a lazy WebSocket transport connecting to the
@@ -140,7 +138,7 @@ function sendServerEvent(orbital: string, event: string, payload?: EventPayload)
 /**
  * Create client-side effect handlers for trait state machine execution.
  *
- * Client handles: emit, renderUI, navigate, notify, sendServer
+ * Client handles: emit, renderUI, navigate, sendServer
  * Server handles: persist, set, callService (logged as warnings on client)
  *
  * @example
@@ -152,14 +150,13 @@ function sendServerEvent(orbital: string, event: string, payload?: EventPayload)
  *     clearSlot: (slot) => pendingSlots.set(slot, []),
  *   },
  *   navigate: (path) => router.push(path),
- *   notify: (msg, type) => toast[type](msg),
  * });
  * ```
  */
 export function createClientEffectHandlers(
     options: CreateClientEffectHandlersOptions
 ): EffectHandlers {
-    const { eventBus, slotSetter, navigate, navigateBack, notify, sendServer, orbitalName = '' } = options;
+    const { eventBus, slotSetter, navigate, navigateBack, sendServer, orbitalName = '' } = options;
 
     return {
         emit: (event: string, payload?: EventPayload) => {
@@ -205,10 +202,6 @@ export function createClientEffectHandlers(
 
         navigateBack: navigateBack ?? (() => {
             log.warn('navigate-back-no-handler');
-        }),
-
-        notify: notify ?? ((msg: string, type?: string) => {
-            log.debug('notify', { type: type ?? null, message: msg });
         }),
 
         sendServer: sendServer ?? ((event: string, payload?: EventPayload) => {
