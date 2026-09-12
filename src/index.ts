@@ -39,6 +39,7 @@ export type {
 
 // Constants
 export { HANDLER_MANIFEST } from "./types.js";
+export type { EntityRow } from "./types.js";
 
 // EventBus
 export { EventBus } from "./EventBus.js";

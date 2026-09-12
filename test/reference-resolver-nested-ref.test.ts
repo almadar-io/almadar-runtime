@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
 import { preprocessSchema } from '../src/UsesIntegration.js';
 import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
-import type { OrbitalDefinition, OrbitalSchema, Orbital } from '@almadar/core';
+import type { OrbitalDefinition, OrbitalSchema, Orbital, TraitRef } from '@almadar/core';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const REGISTRY_DIR = path.join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry');
@@ -149,7 +149,8 @@ describe.skipIf(!hasCorpus)('ReferenceResolver — nested composed trait refs: r
     // The property under test is that the third-alias ref resolves — never a
     // trait count, which moves whenever a composed std atom changes shape.
     const subpages = noteOrbital!.traits.find(
-      (t) => typeof t === 'object' && t !== null && 'ref' in t && t.ref === 'NoteSubpages',
+      (t): t is Extract<TraitRef, { ref: string }> =>
+        typeof t === 'object' && t !== null && 'ref' in t && t.ref === 'NoteSubpages',
     );
     expect(subpages).toBeDefined();
     expect(subpages !== undefined && '_resolved' in subpages && subpages._resolved !== undefined).toBe(true);
