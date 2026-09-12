@@ -10,7 +10,7 @@
 import type { PersistenceAdapter } from './OrbitalServerRuntime.js';
 import type { EntityRow } from './types.js';
 import type { EntityField, EntityId, EntityPersistence, FieldValue } from '@almadar/core';
-import { linkSelfRelationField, sampleRow, sampleRowCount } from '@almadar/core/mock';
+import { linkSelfRelationField, RESERVED_FIELD_NAMES, sampleRow, sampleRowCount } from '@almadar/core/mock';
 import { createLogger } from '@almadar/logger';
 import {
   seedRandom,
@@ -526,7 +526,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     const store = this.stores.get(storeKey);
     if (!store) return;
     const candidates = schema.fields.filter(
-      (f) => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt',
+      (f) => f.name === undefined || !RESERVED_FIELD_NAMES.has(f.name),
     );
     if (candidates.length === 0) return;
     let index = 0;
@@ -749,7 +749,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     if (!schema) return data;
     const result: EntityRow = { ...data };
     for (const field of schema.fields) {
-      if (field.name === 'id' || field.name === 'createdAt' || field.name === 'updatedAt') continue;
+      if (field.name !== undefined && RESERVED_FIELD_NAMES.has(field.name)) continue;
       if (result[field.name] !== undefined) continue;
       if (field.default === undefined) continue;
       result[field.name] = field.default === '@now'

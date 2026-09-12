@@ -2136,26 +2136,40 @@ export class OrbitalServerRuntime {
     return false;
   }
 
-  /** Names of an entity's `@intrinsic` fields — trait-owned view state
-   *  (`ChatMessage.activeChannel`, `ChannelMember.pendingChannelId`, …) that
-   *  is NEVER a persisted column. Resolves the entity by name the same way
-   *  `isSharedEntity` does: the orbital's own entity, its auxiliary
-   *  entities, then other registered orbitals' primary entities. */
-  private intrinsicFieldNames(registered: RegisteredOrbital, entityName: string): string[] {
-    const namesOf = (entity: Entity): string[] =>
-      entity.fields
-        .filter((field): field is EntityField & { name: string } => field.intrinsic === true && typeof field.name === 'string')
-        .map((field) => field.name);
-    if (registered.entity.name === entityName) return namesOf(registered.entity);
+  /** Resolve an entity by name the same way `isSharedEntity` does: the
+   *  orbital's own entity, its auxiliary entities, then other registered
+   *  orbitals' primary entities (cross-orbital binds like a membership rail
+   *  in the chat page). The one entity-resolution walk shared by every
+   *  field-level lookup (`intrinsicFieldNames`, `entityFieldsFor`) so a new
+   *  lookup never grows a second copy of this walk. */
+  private resolveEntityByName(registered: RegisteredOrbital, entityName: string): Entity | undefined {
+    if (registered.entity.name === entityName) return registered.entity;
     for (const aux of registered.schema.auxiliaryEntities ?? []) {
       if (typeof aux === 'object' && !isEntityCall(aux) && aux.name === entityName) {
-        return namesOf(aux);
+        return aux;
       }
     }
     for (const other of this.orbitals.values()) {
-      if (other.entity.name === entityName) return namesOf(other.entity);
+      if (other.entity.name === entityName) return other.entity;
     }
-    return [];
+    return undefined;
+  }
+
+  /** Names of an entity's `@intrinsic` fields — trait-owned view state
+   *  (`ChatMessage.activeChannel`, `ChannelMember.pendingChannelId`, …) that
+   *  is NEVER a persisted column. */
+  private intrinsicFieldNames(registered: RegisteredOrbital, entityName: string): string[] {
+    return this.entityFieldsFor(registered, entityName)
+      .filter((field): field is EntityField & { name: string } => field.intrinsic === true && typeof field.name === 'string')
+      .map((field) => field.name);
+  }
+
+  /** Full declared field list for an entity — the schema source `persist
+   *  create`'s required-column check reads (`EffectExecutor.
+   *  resolveEntityFields`), via the same `resolveEntityByName` walk
+   *  `intrinsicFieldNames` uses. */
+  private entityFieldsFor(registered: RegisteredOrbital, entityName: string): EntityField[] {
+    return this.resolveEntityByName(registered, entityName)?.fields ?? [];
   }
 
   /**
@@ -3210,6 +3224,7 @@ export class OrbitalServerRuntime {
           // (including the [shared]-defers-regardless-of-persistence rule).
           deferRenderBindings: registered.entity === undefined || isRuntimeEntity(registered.entity) || registered.entity.shared === true,
           resolveIntrinsicFields: (type) => this.intrinsicFieldNames(registered, type),
+          resolveEntityFields: (type) => this.entityFieldsFor(registered, type),
         });
 
         for (const innerEffect of atomicEffects) {
@@ -3487,6 +3502,7 @@ export class OrbitalServerRuntime {
       // the server's flush-time "" on every keystroke round-trip.
       deferRenderBindings: registered.entity === undefined || isRuntimeEntity(registered.entity) || registered.entity.shared === true,
       resolveIntrinsicFields: (type) => this.intrinsicFieldNames(registered, type),
+      resolveEntityFields: (type) => this.entityFieldsFor(registered, type),
     });
 
     await executor.executeAll(effects);

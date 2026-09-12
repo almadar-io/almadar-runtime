@@ -21,7 +21,8 @@ import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings, deferEntityBindings } from './BindingResolver.js';
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
 import { omitFrameFields } from '@almadar/core';
-import type { FieldValue, SExpr, Orbital, TraitConfig, RuntimeValue } from '@almadar/core';
+import { RESERVED_FIELD_NAMES } from '@almadar/core/mock';
+import type { FieldValue, SExpr, Orbital, TraitConfig, RuntimeValue, EntityField } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
 import type { SExpressionEvaluator } from '@almadar/evaluator';
 import { SExpressionEvaluator as EvaluatorInstance } from '@almadar/evaluator';
@@ -78,6 +79,16 @@ export interface EffectExecutorOptions {
      * persist writes verbatim exactly as before.
      */
     resolveIntrinsicFields?: (entityType: string) => readonly string[];
+    /**
+     * Full declared field list for an entity, keyed by entity type. Supplied
+     * by the same caller as `resolveIntrinsicFields` (`OrbitalServerRuntime`,
+     * via the same entity-resolution walk — no second lookup path); the
+     * `persist create` case uses it to fail a write missing a REQUIRED
+     * column before it reaches the store, mirroring the Rust kernel's check.
+     * Absent means "no schema available", in which case `persist create`
+     * writes verbatim exactly as before.
+     */
+    resolveEntityFields?: (entityType: string) => readonly EntityField[];
 }
 
 // ============================================================================
@@ -182,6 +193,7 @@ export class EffectExecutor {
     private evaluator?: SExpressionEvaluator;
     private deferRenderBindings: boolean;
     private resolveIntrinsicFields?: (entityType: string) => readonly string[];
+    private resolveEntityFields?: (entityType: string) => readonly EntityField[];
 
     constructor(options: EffectExecutorOptions) {
         this.handlers = options.handlers;
@@ -193,6 +205,7 @@ export class EffectExecutor {
         this.evaluator = options.evaluator;
         this.deferRenderBindings = options.deferRenderBindings ?? false;
         this.resolveIntrinsicFields = options.resolveIntrinsicFields;
+        this.resolveEntityFields = options.resolveEntityFields;
     }
 
     /**
@@ -209,6 +222,37 @@ export class EffectExecutor {
         if (data === undefined || !this.resolveIntrinsicFields) return data;
         const intrinsicFields = this.resolveIntrinsicFields(entityType);
         return intrinsicFields.length > 0 ? omitFrameFields(data, intrinsicFields) : data;
+    }
+
+    /**
+     * Names of `data`'s missing REQUIRED columns for a `persist create` —
+     * shared with the Rust kernel's definition: an entity field with
+     * `required: true`, excluding the framework-stamped columns
+     * (`RESERVED_FIELD_NAMES` — id/audit timestamps the store mints, the
+     * same set `@almadar/core`'s mock synthesis and `MockPersistenceAdapter`
+     * already exempt), any `@intrinsic` field, any field declaring a
+     * `default` (the store fills it in), and any field carrying `mergedFrom`
+     * (a rebind-merged field's `required` is the imported atom's own write
+     * contract, never this host writer's). "Missing" is key-absent or
+     * `undefined`/`null`/`''`. A no-op (`[]`) when no schema was supplied
+     * (`resolveEntityFields` absent).
+     */
+    private missingRequiredFields(entityType: string, data: EntityRow | undefined): string[] {
+        if (!this.resolveEntityFields) return [];
+        const row = data ?? {};
+        const missing: string[] = [];
+        for (const field of this.resolveEntityFields(entityType)) {
+            if (field.required !== true || !field.name) continue;
+            if (RESERVED_FIELD_NAMES.has(field.name)) continue;
+            if (field.intrinsic === true) continue;
+            if (field.default !== undefined) continue;
+            if (field.mergedFrom !== undefined) continue;
+            const value = row[field.name];
+            if (value === undefined || value === null || value === '') {
+                missing.push(field.name);
+            }
+        }
+        return missing;
     }
 
     private _evaluator?: EvaluatorInstance;
@@ -838,12 +882,16 @@ export class EffectExecutor {
                         // Each operation: ["create", "collection", {...data}],
                         //                 ["update", "collection", "id", {...data}]
                         // Every create/update operand gets the same @intrinsic
-                        // strip as the single-op path below.
+                        // strip as the single-op path below; every create
+                        // operand gets the same required-column check too.
+                        const requiredMissing: { entityType: string; missing: string[] }[] = [];
                         const operations = (args[1] as unknown[]).map((op) => {
                             if (!Array.isArray(op) || op.length < 2) return op;
                             const [opAction, opEntityType, ...opRest] = op as [string, string, ...unknown[]];
                             if (opAction === 'create') {
                                 const stripped = this.stripFrameFields(opEntityType, opRest[0] as EntityRow | undefined);
+                                const missing = this.missingRequiredFields(opEntityType, stripped);
+                                if (missing.length > 0) requiredMissing.push({ entityType: opEntityType, missing });
                                 return [opAction, opEntityType, stripped, ...opRest.slice(1)];
                             }
                             if (opAction === 'update') {
@@ -852,6 +900,14 @@ export class EffectExecutor {
                             }
                             return op;
                         });
+                        if (requiredMissing.length > 0) {
+                            persistLog.error('persist:required-missing', { action, entityType: 'batch', requiredMissing });
+                            const missingError = requiredMissing
+                                .map(({ entityType: t, missing }) => `persist create ${t}: required field(s) ${missing.join(', ')} missing`)
+                                .join('; ');
+                            this.emitFailure(emitCfg, new Error(missingError));
+                            return { failed: true, error: missingError };
+                        }
                         const batchSummary = await this.handlers.persist('batch', '', {
                             operations,
                         } as EntityRow);
@@ -883,6 +939,15 @@ export class EffectExecutor {
                         const data = (action === 'create' || action === 'update')
                             ? this.stripFrameFields(entityType, args[2] as EntityRow | undefined)
                             : args[2] as EntityRow | undefined;
+                        if (action === 'create') {
+                            const missing = this.missingRequiredFields(entityType, data);
+                            if (missing.length > 0) {
+                                persistLog.error('persist:required-missing', { entityType, missing });
+                                const missingError = `persist create ${entityType}: required field(s) ${missing.join(', ')} missing`;
+                                this.emitFailure(emitCfg, new Error(missingError), { entityType });
+                                return { failed: true, error: missingError };
+                            }
+                        }
                         // The persisted row (create: submitted data + the
                         // minted id) is the success payload — matching the
                         // compiled path, which emits its `created` row.

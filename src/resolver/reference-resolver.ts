@@ -3367,7 +3367,9 @@ function rewriteSelfRelationTarget(
  * depth-propagation case); `requiredData` (the trait's own
  * `entityContract.requires`) is NEVER auto-merged unless the field is itself
  * intrinsic — a required DATA read must be satisfied by the target, not
- * silently masked by a merge. Mutates `callerEntity.fields` in place.
+ * silently masked by a merge. Each added field is stamped `mergedFrom:
+ * <importedEntity.name>` — its `required` is the atom's own write contract,
+ * never the host writer's. Mutates `callerEntity.fields` in place.
  */
 function mergeImportedEntityFields(
   callerEntity: Entity,
@@ -3388,6 +3390,7 @@ function mergeImportedEntityFields(
     if (existingNames.has(field.name)) continue;
     const cloned = structuredClone(field);
     rewriteSelfRelationTarget(cloned, oldName, newName, newId);
+    cloned.mergedFrom = oldName;
     callerEntity.fields.push(cloned);
   }
 }
