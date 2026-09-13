@@ -100,6 +100,14 @@ export interface EffectExecutorOptions {
 /**
  * Parse an effect into operator and arguments.
  */
+/** The text a failure route carries: an Error's message, a thrown result object's
+ *  string `message` (integration errors are plain `{code, message}` objects), else String(). */
+function failureMessage(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    if (typeof err === 'object' && err !== null && 'message' in err && typeof err.message === 'string') return err.message;
+    return String(err);
+}
+
 function parseEffect(effect: RuntimeValue): { operator: string; args: RuntimeValue[] } | null {
     if (!Array.isArray(effect) || effect.length === 0) {
         return null;
@@ -647,8 +655,7 @@ export class EffectExecutor {
         extra?: EventPayload,
     ): void {
         if (!emit?.failure) return;
-        const error = err instanceof Error ? err.message : String(err);
-        this.handlers.emit(emit.failure, { ...extra, error }, this.sourceStamp());
+        this.handlers.emit(emit.failure, { ...extra, error: failureMessage(err) }, this.sourceStamp());
     }
 
     /**
@@ -1027,12 +1034,23 @@ export class EffectExecutor {
                 const params = args[2] as ServiceParams | undefined;
                 // Optional trailing options object carrying `emit:` at args[3].
                 const emitCfg = this.extractEmitConfig(args[3]);
+                // Bridge mode (`EffectHandlers.callServiceDelegated`): the server
+                // already ran this call-service and its cascade carries the
+                // result — no local call, no local emit (mirrors `persistDelegated`).
+                if (this.handlers.callServiceDelegated === true) {
+                    effectLog.debug('call-service:delegated', { service, action, traitName: this.context.traitName, transition: this.context.transition });
+                    break;
+                }
                 try {
                     const result = await this.handlers.callService(service, action, params);
                     this.emitSuccess(emitCfg, 'success', result);
                 } catch (err) {
+                    // A declared failure route IS the handling: emit it and let the
+                    // transition complete, as `persist` does. Rethrowing aborted the
+                    // whole transition, so the failure arm never reached the client.
+                    if (!emitCfg?.failure) throw err;
                     this.emitFailure(emitCfg, err);
-                    throw err;
+                    return { failed: true, error: failureMessage(err) };
                 }
                 break;
             }

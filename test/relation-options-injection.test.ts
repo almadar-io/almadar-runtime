@@ -1,12 +1,14 @@
 /**
  * Server-side relation-option injection — the interpreter's mirror of the
  * compiled path's build-time `relationsData` generation (orbital-rust
- * registry.rs). A render-ui carrying a form-section or detail-panel whose
- * linked entity declares a relation-typed field must ship with
+ * registry.rs). A render-ui carrying a form-section, detail-panel, or a
+ * column-bearing display pattern (table-view/data-list/data-grid/
+ * entity-table, which author `columns` instead of `fields`) whose linked
+ * entity declares a relation-typed field must ship with
  * `relationsData: { <field>: [{value, label}] }` read from the persistence
  * adapter, label contract `name || title || id`. Without this, every
- * relation select on the runtime path renders EMPTY and detail views show
- * raw foreign ids ("Staff Id 1").
+ * relation select on the runtime path renders EMPTY and detail/table views
+ * show raw foreign ids ("Staff Id 1").
  */
 import { describe, it, expect } from 'vitest';
 import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/OrbitalServerRuntime.js';
@@ -71,6 +73,17 @@ function relationSchema(): OrbitalSchema {
                           {
                             type: 'detail-panel',
                             fields: [{ key: 'title' }, { key: 'assignee' }],
+                          },
+                          {
+                            type: 'table-view',
+                            columns: [
+                              { key: 'title' },
+                              // `field` is the column's entity-field override
+                              // (its `key` is only the stable column id) —
+                              // relationsData must key by `assignee`, the
+                              // relation field, not the column's `key`.
+                              { key: 'assigneeCol', field: 'assignee' },
+                            ],
                           },
                         ],
                       },
@@ -141,8 +154,9 @@ describe('relation-option injection (runtime path)', () => {
     const children = node.children ?? [];
     const formNode = children.find((c) => c.type === 'form-section');
     const detailNode = children.find((c) => c.type === 'detail-panel');
+    const tableNode = children.find((c) => c.type === 'table-view');
 
-    for (const node of [formNode, detailNode]) {
+    for (const node of [formNode, detailNode, tableNode]) {
       expect(node?.relationsData, `${node?.type} must carry relationsData`).toBeTruthy();
       const options = node?.relationsData?.['assignee'] ?? [];
       expect(options.length, 'seeded Staff rows must become options').toBeGreaterThan(0);
@@ -152,6 +166,10 @@ describe('relation-option injection (runtime path)', () => {
       expect(typeof first.label).toBe('string');
       expect(first.label.length).toBeGreaterThan(0);
     }
+
+    // The table-view column's `key` ("assigneeCol") is a display id, not an
+    // entity field — relationsData must never key by it.
+    expect(tableNode?.relationsData?.['assigneeCol']).toBeUndefined();
   });
 
   it('leaves patterns without relation fields untouched', async () => {

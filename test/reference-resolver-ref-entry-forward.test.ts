@@ -272,8 +272,9 @@ describe.skipIf(!hasCorpus)('ReferenceResolver — {ref}-entry call-site config 
 });
 
 /**
- * `ConfigFieldDeclaration.forwardedFrom` (B4-J5, core type + zod; `lintWiring`
- * consumes it) — the collapsed field's ORIGINAL `@config.<knob>` token
+ * `ConfigFieldDeclaration.forwardedFrom` (B4-J5, core type + zod; `orb
+ * validate`'s `ORB_O_CONFIG_DEAD_KNOB` check consumes it) — the collapsed
+ * field's ORIGINAL `@config.<knob>` token
  * survives the fold so a dead-knob check can still recognize the knob as
  * forwarded on an already-resolved schema. Set at every `walkConfigForwardChain`
  * consumer: declared defaults (`resolveForwardedSiblingConfigFrom`) and the

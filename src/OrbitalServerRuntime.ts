@@ -1208,11 +1208,13 @@ export class OrbitalServerRuntime {
   /**
    * Server-side relation-option injection — the interpreter's mirror of the
    * compiled path's build-time `relationsData` generation (orbital-rust
-   * registry.rs). Walks a render-ui pattern tree; for every form pattern
-   * (form / form-section / inline-edit-form / wizard-step) and detail-panel
-   * whose linked entity declares relation-typed fields among the node's
-   * `fields`, reads the relation TARGET entity's rows from the persistence
-   * adapter and attaches `relationsData: { <field>: [{value, label}] }`.
+   * registry.rs). Walks a render-ui pattern tree; for every pattern declaring
+   * a `@fieldsContract` (form / form-section / inline-edit-form / wizard-step,
+   * detail-panel, and the column-bearing display patterns — table-view /
+   * data-list / data-grid / entity-table) whose linked entity declares
+   * relation-typed fields among the node's `fields`/`columns`, reads the
+   * relation TARGET entity's rows from the persistence adapter and attaches
+   * `relationsData: { <field>: [{value, label}] }`.
    * Label contract identical to codegen: `name || title || id`. Options are
    * re-read on every render-ui, so they refresh with each re-render exactly
    * like any fetch. Authored `relationsData` is never overwritten.
@@ -1251,7 +1253,11 @@ export class OrbitalServerRuntime {
       }
       const record = node as MutableRenderPattern;
       const nodeType = record['type'];
-      const fields = record['fields'];
+      // Column-bearing display patterns (table-view/data-list/data-grid/
+      // entity-table) wire their entity-bound field list under `columns`;
+      // form/detail patterns use `fields`. Try both — never a hardcoded
+      // pattern-name list, same doctrine as the `@fieldsContract` lookup below.
+      const fields = record['fields'] ?? record['columns'];
       if (
         typeof nodeType === 'string' &&
         // Which patterns consume entity-bound field lists is DECLARED per
@@ -1269,7 +1275,11 @@ export class OrbitalServerRuntime {
               ? fieldEntry
               : fieldEntry !== null && typeof fieldEntry === 'object' && !Array.isArray(fieldEntry)
                 ? String(
-                    (fieldEntry as MutableRenderPattern)['name'] ??
+                    // `field` is TableView's column-to-entity-field override
+                    // (defaults to `key`); `name`/`key` cover every other
+                    // field-def shape (DetailPanel, DataList, DataGrid, DataTable).
+                    (fieldEntry as MutableRenderPattern)['field'] ??
+                      (fieldEntry as MutableRenderPattern)['name'] ??
                       (fieldEntry as MutableRenderPattern)['key'] ??
                       '',
                   )
@@ -3256,7 +3266,7 @@ export class OrbitalServerRuntime {
       // Client-side effects - collect for forwarding to client
       renderUI: async (slot, pattern, props, priority) => {
         // Relation-option injection (server-side, mirrors compiled codegen):
-        // form/detail patterns with relation-typed fields get relationsData
+        // fieldsContract patterns with relation-typed fields get relationsData
         // read from the persistence adapter before the effect ships.
         await this.injectRelationOptions(pattern, registered, traitName);
         // Snapshot the resolved row reference (if any) so the log can

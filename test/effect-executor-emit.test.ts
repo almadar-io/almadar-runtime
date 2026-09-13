@@ -399,6 +399,45 @@ describe('emit: — call-service', () => {
         // Service returns whatever — verify it flows through intact.
         expect(successCalls[0][1]).toMatchObject({ ok: true });
     });
+
+    it('fires emit.failure and completes the transition when the service throws', async () => {
+        const { emit, handlers, executor } = makeContext();
+        (handlers.callService as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+            throw new Error('Rigger /render returned 502: part has no pixels');
+        });
+        const results = await executor.executeWithResults([
+            ['call-service', 'rigger', 'render', { preset: 'walk' }, { emit: { success: 'RENDER_DONE', failure: 'RENDER_FAILED' } }],
+            ['set', '@entity.after', true],
+        ]);
+        const failureCalls = emit.mock.calls.filter(([e]) => e === 'RENDER_FAILED');
+        expect(failureCalls).toHaveLength(1);
+        expect(failureCalls[0][1]).toMatchObject({ error: 'Rigger /render returned 502: part has no pixels' });
+        expect(results[0]).toMatchObject({ status: 'failed', error: 'Rigger /render returned 502: part has no pixels' });
+        expect(results[1]).toMatchObject({ status: 'executed' });
+    });
+
+    it('carries a thrown result object\'s message on the failure route (integration errors are {code, message})', async () => {
+        const { emit, handlers, executor } = makeContext();
+        (handlers.callService as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+            throw { code: 'VALIDATION_ERROR', message: 'preset: expected string' };
+        });
+        await executor.executeWithResults([
+            ['call-service', 'rigger', 'pose', { preset: null }, { emit: { success: 'POSE_DONE', failure: 'POSE_FAILED' } }],
+        ]);
+        const failureCalls = emit.mock.calls.filter(([e]) => e === 'POSE_FAILED');
+        expect(failureCalls).toHaveLength(1);
+        expect(failureCalls[0][1]).toMatchObject({ error: 'preset: expected string' });
+    });
+
+    it('still throws when no failure route is declared', async () => {
+        const { handlers, executor } = makeContext();
+        (handlers.callService as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+            throw new Error('boom');
+        });
+        await expect(executor.execute([
+            'call-service', 'rigger', 'render', {}, { emit: { success: 'RENDER_DONE' } },
+        ])).rejects.toThrow('boom');
+    });
 });
 
 // ============================================================================

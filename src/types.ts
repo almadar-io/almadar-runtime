@@ -266,6 +266,14 @@ export interface EffectHandlers {
      */
     persistDelegated?: true;
 
+    /**
+     * Bridge mode: the SERVER runs every `call-service` of this dispatch and
+     * its cascade carries the success/failure emits, so the client's mock
+     * `callService` must not also run one. Set by `@almadar/ui`'s
+     * `createClientEffectHandlers` when no consumer `callService` is wired.
+     */
+    callServiceDelegated?: true;
+
     /** Set a field value on an entity */
     set: (entityId: string, field: string, value: FieldValue) => void;
 
