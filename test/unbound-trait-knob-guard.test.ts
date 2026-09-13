@@ -14,11 +14,12 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
+import type { TraitConfigObject } from '@almadar/core';
 import { EffectExecutor, type BindingContext, type EffectContext } from '../src/index.js';
 
-function makeExecutor(config: Record<string, unknown>) {
+function makeExecutor(config: TraitConfigObject) {
     const set = vi.fn();
-    const handlers = stubEffectHandlers({ set });
+    const handlers = stubEffectHandlers({ emit: vi.fn(), set });
     const bindings: BindingContext = {
         entity: { id: 'ent-1' },
         config,
