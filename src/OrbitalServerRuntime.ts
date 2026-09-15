@@ -57,6 +57,7 @@ import {
   LIFECYCLE_EVENTS,
 } from "./StateMachineCore.js";
 import { EffectExecutor } from "./EffectExecutor.js";
+import { parseOrbitalTraits } from "./OrbitalTraitParsing.js";
 import type { ServerEffectResult } from "./ServerEffectHandlers.js";
 import { createLogger } from '@almadar/logger';
 // Same treatment for `createOsHandlers` (uses `fs`, `net`, `child_process`).
@@ -157,7 +158,7 @@ import type {
   RuntimeRenderPattern,
   RuntimePatternValue,
 } from "./types.js";
-import { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults, normalizeCallSiteConfigToValues } from "./config-defaults.js";
+import { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults } from "./config-defaults.js";
 // Backward-compat: `collectDeclaredConfigDefaults` used to live here. The package
 // index now re-exports it from the browser-safe `./config-defaults.js` (so it
 // doesn't drag this node-only module into a browser bundle), but keep the
@@ -221,7 +222,7 @@ export type ClientEffectTuple =
   | ClientRenderUITuple
   | ClientNavigateTuple
   | ClientNavigateBackTuple;
-import { isInlineTrait, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, omitFrameFields, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef } from "@almadar/core";
+import { isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, omitFrameFields, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, entityAccessPolicies, entityAccessPoliciesByStoreKey } from "@almadar/core/mock";
 import { getPatternFieldsContract } from "@almadar/core/patterns";
 import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from "./entityAccess.js";
@@ -1312,48 +1313,9 @@ export class OrbitalServerRuntime {
    * Register a single orbital
    */
   private async registerOrbitalAsync(orbital: OrbitalDefinition): Promise<void> {
-    // Unwrap preprocessed ref-traits: `preprocessSchema` keeps entries with
-    // `config` or `linkedEntity` wrapped as `{ ref, linkedEntity, _resolved }`
-    // (see UsesIntegration.ts:209-222) — the `_resolved` field carries the
-    // fully inlined trait. `isInlineTrait` excludes anything with a `ref`
-    // key, so without this unwrap every preprocessed atom would be dropped
-    // and only the layout-owner survives (see Almadar_Std_Gaps.md §3.1b).
-    // Unwrap preprocessed ref-traits while capturing their call-site `config`
-    // for later binding-context injection. The wrapper has shape
-    // `{ ref, name?, config?, linkedEntity?, _resolved: Trait }`; we keep the
-    // config keyed by the resolved trait name so effects can read `@config.X`.
-    const configByTrait = new Map<string, TraitConfig>();
-    const unwrapped = (orbital.traits || []).map((t) => {
-      if (t && typeof t === 'object' && 'ref' in t && '_resolved' in t) {
-        const wrapper = t as {
-          _resolved: Trait;
-          config?: TraitConfig;
-        };
-        const inner = wrapper._resolved;
-        const normalizedConfig = normalizeCallSiteConfigToValues(wrapper.config);
-        if (normalizedConfig && inner?.name) {
-          configByTrait.set(inner.name, normalizedConfig);
-        }
-        return inner;
-      }
-      return t;
-    });
-    const inlineTraits = unwrapped.filter(isInlineTrait);
-    const traitDefs: TraitDefinition[] = inlineTraits.map((t: Trait) => {
-      const sm = t.stateMachine;
-      const states = sm?.states || [];
-      const transitions = sm?.transitions || [];
-
-      return {
-        // V4 dual-carry: thread the trait id so the manager's id index is
-        // populated for ledger-backed schemas (undefined → name-keyed only).
-        ...(t.id !== undefined ? { id: t.id } : {}),
-        name: t.name,
-        states: states as TraitDefinition['states'],
-        transitions: transitions as TraitDefinition['transitions'],
-        listens: t.listens,
-      };
-    });
+    // Trait unwrap + config-by-trait + entity resolution — shared with the
+    // stateless per-request transition path, see OrbitalTraitParsing.ts.
+    const { traits: traitDefs, inlineTraits, configByTrait, entity } = parseOrbitalTraits(orbital);
 
     const manager = new StateMachineManager(traitDefs, {
       contextExtensions: this.config.contextExtensions,
@@ -1368,25 +1330,6 @@ export class OrbitalServerRuntime {
     // traits with no call-site config supplied.
     for (const [traitName, traitConfig] of configByTrait) {
       manager.setTraitConfig(traitName, traitConfig);
-    }
-
-    const entityRef = orbital.entity;
-    let entity: Entity;
-    if (typeof entityRef === 'string') {
-      entity = { name: entityRef, fields: [] };  // Fallback for string refs
-    } else if (isEntityCall(entityRef)) {
-      // EntityCall (Phase F): synthesize Entity placeholder from the call shape.
-      // The compiler's inline phase produces a fully resolved Entity in OIR;
-      // this branch is the runtime fallback when an unresolved EntityCall reaches us.
-      const fallbackName = entityRef.name ?? entityRef.extends.replace(/\.entity$/, '');
-      entity = {
-        name: fallbackName,
-        fields: entityRef.fields ?? [],
-        ...(entityRef.persistence ? { persistence: entityRef.persistence } : {}),
-        ...(entityRef.collection ? { collection: entityRef.collection } : {}),
-      };
-    } else {
-      entity = entityRef;
     }
 
     this.orbitals.set(orbital.name, {

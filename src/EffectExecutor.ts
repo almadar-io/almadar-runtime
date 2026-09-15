@@ -361,19 +361,23 @@ export class EffectExecutor {
     }
 
     /**
-     * Execute a single effect.
+     * Resolve one effect's raw args before dispatch — shared by `execute()`
+     * (and `executeAll()`, which loops it) and `executeWithResults()`
+     * (RCG-04). Both must apply the SAME special-casing: compound operators
+     * carry nested effects, not values to resolve; `set` with an
+     * `@entity.<field>` path literal uses that first arg as a binding PATH;
+     * fetch-like ops preserve their `filter` SExpression instead of
+     * collapsing it against the outer trait's entity; render-ui on the
+     * deferring path keeps `@entity`-dependent leaves as render-time
+     * markers. `executeWithResults()` used to carry its own independent,
+     * incomplete copy of this list (missing all three special cases) —
+     * verified live: it silently corrupted `(set @entity.<field> value)`
+     * (arg[0] resolved away to the field's CURRENT value before
+     * `dispatch('set', ...)` could parse the path out of it) while still
+     * reporting `status: 'executed'`. One shared method converges them so a
+     * future special-case added here can't be missed on the other path.
      */
-    async execute(effect: RuntimeValue): Promise<void> {
-        const parsed = parseEffect(effect);
-        if (!parsed) {
-            if (this.debug) {
-                effectLog.warn('invalid-effect-format', () => ({ effectJson: JSON.stringify(effect ?? null) }));
-            }
-            return;
-        }
-
-        const { operator, args } = parsed;
-
+    private async resolveEffectArgs(operator: string, args: RuntimeValue[]): Promise<RuntimeValue[]> {
         // Compound operators ('do', 'when', 'let', 'if') contain nested
         // effects / unresolved expressions as arguments. Skip resolveArgs for
         // these — the handler evaluates the condition / binding values through
@@ -426,15 +430,16 @@ export class EffectExecutor {
             (operator === 'render-ui' || operator === 'render') &&
             this.deferRenderBindings;
 
-        let resolvedArgs: RuntimeValue[];
         if (isCompound) {
-            resolvedArgs = args;
-        } else if (isDeferringRenderUI) {
+            return args;
+        }
+        if (isDeferringRenderUI) {
             const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
-            resolvedArgs = args.map((arg, index) =>
+            return args.map((arg, index) =>
                 index === 0 ? interpolateValue(arg, ctx) : deferEntityBindings(arg as SExpr, ctx),
             );
-        } else if (isSetPathForm) {
+        }
+        if (isSetPathForm) {
             const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
             // Preserve args[0] (the @entity.<path> literal); resolve the rest.
             // S-expression values (arrays like ['llm/generate', ...]) are
@@ -452,8 +457,9 @@ export class EffectExecutor {
                     resolvedRest.push(interpolateValue(a, ctx));
                 }
             }
-            resolvedArgs = [args[0], ...resolvedRest];
-        } else if (isFetchLike) {
+            return [args[0], ...resolvedRest];
+        }
+        if (isFetchLike) {
             const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
             const opts = args[1] as FetchOptions;
             const resolvedOpts: FetchOptions = {
@@ -464,14 +470,29 @@ export class EffectExecutor {
                 ...(opts.include !== undefined && { include: interpolateValue(opts.include, ctx) as string[] }),
                 ...(opts.emit !== undefined && { emit: interpolateValue(opts.emit, ctx) as FetchOptions['emit'] }),
             };
-            resolvedArgs = [
+            return [
                 interpolateValue(args[0], ctx),
                 resolvedOpts,
                 ...args.slice(2).map((a) => interpolateValue(a, ctx)),
             ];
-        } else {
-            resolvedArgs = resolveArgs(args, this.bindings, this.strictBindings, this.contextExtensions);
         }
+        return resolveArgs(args, this.bindings, this.strictBindings, this.contextExtensions);
+    }
+
+    /**
+     * Execute a single effect.
+     */
+    async execute(effect: RuntimeValue): Promise<void> {
+        const parsed = parseEffect(effect);
+        if (!parsed) {
+            if (this.debug) {
+                effectLog.warn('invalid-effect-format', () => ({ effectJson: JSON.stringify(effect ?? null) }));
+            }
+            return;
+        }
+
+        const { operator, args } = parsed;
+        const resolvedArgs = await this.resolveEffectArgs(operator, args);
 
         effectLog.debug('execute', { operator, argCount: resolvedArgs.length, context: this.context.traitName });
 
@@ -535,14 +556,7 @@ export class EffectExecutor {
 
             const start = Date.now();
             const { operator, args: rawArgs } = parsed;
-            const isCompound =
-                operator === 'do' ||
-                operator === 'when' ||
-                operator === 'let' ||
-                operator === 'if';
-            const resolvedArgs = isCompound
-                ? rawArgs
-                : resolveArgs(rawArgs, this.bindings, this.strictBindings, this.contextExtensions);
+            const resolvedArgs = await this.resolveEffectArgs(operator, rawArgs);
 
             try {
                 const outcome = await this.dispatch(operator, resolvedArgs);
@@ -808,7 +822,7 @@ export class EffectExecutor {
                             }
                             (this.bindings.entity as EntityRow)[field] =
                                 value as EntityRow[string];
-                            this.handlers.set(entityId ?? '', field, value);
+                            await this.handlers.set(entityId ?? '', field, value);
                             this.emitSuccess(emitCfg, 'success', value);
                             break;
                         }
@@ -820,7 +834,7 @@ export class EffectExecutor {
                     emitCfg = this.extractEmitConfig(args[3]);
                 }
 
-                this.handlers.set(entityId, field, value);
+                await this.handlers.set(entityId, field, value);
                 // Mirror the write into the in-memory bindings so later
                 // effects in the same transition (and any `when`/`if`
                 // guards evaluated against @entity.*) observe the new

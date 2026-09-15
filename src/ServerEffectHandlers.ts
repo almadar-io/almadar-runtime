@@ -15,6 +15,11 @@
 
 import type { EntityAccessPolicies, EventPayload, SExpr, ServiceParams, RuntimeValue } from "@almadar/core";
 import type { PersistenceAdapter } from "./PersistenceAdapter.js";
+// Type-only — erased before runtime (isolatedModules), so this does not pull
+// OrbitalServerRuntime's Express/Node code into this browser-safe module.
+// Mirrors the identical reverse edge OrbitalServerRuntime.ts already has
+// (`import type { ServerEffectResult } from "./ServerEffectHandlers.js"`).
+import type { ClientEffectTuple } from "./OrbitalServerRuntime.js";
 import {
   applyRowAccess,
   checkMutationAccess,
@@ -115,6 +120,19 @@ export interface CreateServerEffectHandlersOptions {
   fetchedData?: Record<string, EntityRow[]>;
   /** Per-event emit log. Optional — telemetry only. */
   emittedEvents?: Array<{ event: string; payload?: EventPayload }>;
+  /**
+   * Per-event `render-ui`/`navigate`/`navigate-back` capture sinks. When
+   * supplied, `renderUI`/`navigate`/`navigateBack` handlers are wired to
+   * push into them (wire-format-identical to `OrbitalServerRuntime`'s own
+   * `pushClientEffect`) instead of the default no-op — a caller that needs
+   * to hand these effects back to a remote client (e.g. an HTTP response)
+   * supplies both; a caller that doesn't (offline preview) leaves them
+   * unset and gets today's `EffectExecutor.logUnsupported` no-op exactly
+   * as before.
+   */
+  clientEffects?: ClientEffectTuple[];
+  /** Same effects as `clientEffects`, tagged per originating trait — see `context.traitName`. */
+  clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>;
   /** Source stamp applied to all emits. */
   source?: { orbital?: string; trait?: string };
   /** Consumer-supplied `call-service` handler. When absent, calls warn and return null. */
@@ -147,10 +165,15 @@ export interface CreateServerEffectHandlersOptions {
  * `bindings`, `context`, and the sink arrays at build time. For a new
  * transition, call this factory again.
  *
+ * `renderUI` / `navigate` / `navigateBack` ARE implemented, but only
+ * capture into the `clientEffects`/`clientEffectsByTrait` sinks (mirroring
+ * `OrbitalServerRuntime`'s own `pushClientEffect` wire format exactly) —
+ * they never actually render/navigate here. A caller with no use for these
+ * effects (e.g. the client offline-preview path, which still prefers its
+ * own `createClientEffectHandlers` for REAL rendering) simply omits the
+ * sinks and gets `EffectExecutor`'s default no-op, unchanged from before.
+ *
  * Intentionally does NOT implement:
- * - `renderUI` / `navigate` — these are client-side, provided
- *   by `createClientEffectHandlers`. A mock runtime merges both handler
- *   sets.
  * - `os/watch-*` observers — these are a no-op outside the server.
  * - Schema-aware relation cardinality / on-delete cascades — those live
  *   in `OrbitalServerRuntime` and depend on the full registered schema.
@@ -170,11 +193,18 @@ export function createServerEffectHandlers(
     effectResults,
     fetchedData,
     emittedEvents,
+    clientEffects,
+    clientEffectsByTrait,
     source,
     callService: consumerCallService,
     entityAccess,
     debug,
   } = opts;
+
+  const pushClientEffect = (effect: ClientEffectTuple): void => {
+    clientEffects?.push(effect);
+    clientEffectsByTrait?.push({ traitName: context?.traitName ?? "", effect });
+  };
 
   /**
    * Bindings every access check evaluates against. `config` is load-bearing:
@@ -763,6 +793,22 @@ export function createServerEffectHandlers(
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    },
+
+    renderUI: (slot, pattern, props, priority) => {
+      pushClientEffect(["render-ui", slot, pattern, props, priority]);
+    },
+
+    navigate: (path, params, crumb) => {
+      if (crumb !== undefined) {
+        pushClientEffect(["navigate", path, params, { crumb }]);
+      } else {
+        pushClientEffect(["navigate", path, params]);
+      }
+    },
+
+    navigateBack: () => {
+      pushClientEffect(["navigate-back"]);
     },
   };
 

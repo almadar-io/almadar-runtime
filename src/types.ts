@@ -274,8 +274,18 @@ export interface EffectHandlers {
      */
     callServiceDelegated?: true;
 
-    /** Set a field value on an entity */
-    set: (entityId: string, field: string, value: FieldValue) => void;
+    /**
+     * Set a field value on an entity. `void` for a client-side/in-memory
+     * handler (synchronous mutation); `Promise<void>` for a server-side
+     * handler backed by real persistence (e.g. `createServerEffectHandlers`,
+     * Firestore) — callers MUST `await` this, not just call it, or the
+     * write (and any telemetry it records) can still be in flight when the
+     * caller moves on. Verified 2026-09-15: `EffectExecutor.dispatch`'s
+     * 'set' case called this without `await`, invisible against every
+     * existing (synchronous, in-memory) test but a real dropped-write race
+     * the instant a real async persistence backend (Firestore) was wired in.
+     */
+    set: (entityId: string, field: string, value: FieldValue) => void | Promise<void>;
 
     /** Call an external service. `context` carries the caller's identity
      * (the same viewer entity ACL enforces against) so role-gated services

@@ -18,11 +18,11 @@ importers:
         specifier: ^1.12.0
         version: 1.12.0
       '@almadar/server':
-        specifier: ^2.41.0
-        version: 2.41.0(express@5.2.1)
+        specifier: ^2.42.0
+        version: 2.42.0(express@5.2.1)
       '@almadar/std':
-        specifier: ^16.213.0
-        version: 16.213.0
+        specifier: ^16.217.0
+        version: 16.217.0
     devDependencies:
       '@almadar/eslint-plugin':
         specifier: ^2.18.0
@@ -74,17 +74,17 @@ packages:
   '@almadar/logger@1.12.0':
     resolution: {integrity: sha512-LcNpduM3Mx36u2b9G7ofR0ekYZuJCB8eGTYq9THe00gpnkVJVewbvJxsEza1bRcUa5e81MbYs0NCZsTSWio6Xg==}
 
-  '@almadar/server@2.41.0':
-    resolution: {integrity: sha512-JeWuCI5EHkDxo8VJH5tRrmsaVn4dTEndqrskrdwU6YngIkXSLzJun1VFElhLjOxOUFqqwK2RcSNj0l7VEfljtA==}
+  '@almadar/server@2.42.0':
+    resolution: {integrity: sha512-T/n0w2IlIlUn+/GgaUekRnipu25JYJo42wF/wNyk4JupfZWStzJy55hmSrdl5Wg0aDkM0wwXfqgGON7X92Cjew==}
     peerDependencies:
-      '@almadar-io/rabit': ^0.65.29
+      '@almadar-io/rabit': ^0.65.31
       express: ^5.0.0
     peerDependenciesMeta:
       '@almadar-io/rabit':
         optional: true
 
-  '@almadar/std@16.213.0':
-    resolution: {integrity: sha512-JFu6cpsDOA4SzyS93ZBaN4NwI+HOmzqiOLbpjx7V2zdRwaCd3zdzJoNIOon0Gj84RGm10UZAh8q0/dtipMLQ1A==}
+  '@almadar/std@16.217.0':
+    resolution: {integrity: sha512-L0gyB3isGa2wlG8WR5O3ykNzxowUzixpqn0IDKVKp7v6JDTnUECkgynxIPqS2E63QNYjgy72YoIdUOndEv6W3g==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -2788,13 +2788,13 @@ snapshots:
   '@almadar/evaluator@2.45.0':
     dependencies:
       '@almadar/core': 10.92.0
-      '@almadar/std': 16.213.0
+      '@almadar/std': 16.217.0
 
   '@almadar/logger@1.12.0':
     dependencies:
       '@almadar/core': 10.92.0
 
-  '@almadar/server@2.41.0(express@5.2.1)':
+  '@almadar/server@2.42.0(express@5.2.1)':
     dependencies:
       '@almadar/core': 10.92.0
       '@almadar/logger': 1.12.0
@@ -2814,7 +2814,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@almadar/std@16.213.0':
+  '@almadar/std@16.217.0':
     dependencies:
       '@almadar/core': 10.92.0
 

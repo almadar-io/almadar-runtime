@@ -13,6 +13,7 @@ import { InMemoryPersistence } from '../src/PersistenceAdapter.js';
 import { createServerEffectHandlers } from '../src/ServerEffectHandlers.js';
 import { EffectExecutor } from '../src/EffectExecutor.js';
 import type { Effect, BindingContext, EffectContext } from '../src/types.js';
+import type { ClientEffectTuple } from '../src/OrbitalServerRuntime.js';
 
 function makeBus() {
     const events: Array<{ event: string; payload?: unknown }> = [];
@@ -165,5 +166,84 @@ describe('EffectExecutor + createServerEffectHandlers — emit success with {dat
         const created = bus.events.find((e) => e.event === 'ItemCreated');
         expect(created).toBeDefined();
         expect((await p.list('ListItem'))).toHaveLength(1);
+    });
+});
+
+describe('createServerEffectHandlers — render-ui/navigate capture (Part G1)', () => {
+    it('captures a render-ui effect into both clientEffects and clientEffectsByTrait', async () => {
+        const p = seeded(0);
+        const bus = makeBus();
+        const clientEffects: ClientEffectTuple[] = [];
+        const clientEffectsByTrait: Array<{ traitName: string; effect: ClientEffectTuple }> = [];
+        const bindings: BindingContext = {} as BindingContext;
+        const context: EffectContext = {
+            traitName: 'ListItemViewer',
+            state: 'idle',
+            transition: 'idle->idle',
+        } as EffectContext;
+        const handlers = createServerEffectHandlers({
+            persistence: p,
+            eventBus: bus,
+            entityType: 'ListItem',
+            context,
+            clientEffects,
+            clientEffectsByTrait,
+        });
+        const exec = new EffectExecutor({ handlers, bindings, context });
+        const renderEffect: Effect = ['render-ui', 'main', { type: 'card' }];
+        await exec.executeAll([renderEffect]);
+        expect(clientEffects).toEqual([['render-ui', 'main', { type: 'card' }, undefined, undefined]]);
+        expect(clientEffectsByTrait).toEqual([
+            { traitName: 'ListItemViewer', effect: ['render-ui', 'main', { type: 'card' }, undefined, undefined] },
+        ]);
+    });
+
+    it('captures navigate (with and without crumb) and navigate-back', async () => {
+        const p = seeded(0);
+        const bus = makeBus();
+        const clientEffects: ClientEffectTuple[] = [];
+        const handlers = createServerEffectHandlers({
+            persistence: p,
+            eventBus: bus,
+            entityType: 'ListItem',
+            clientEffects,
+        });
+        const bindings: BindingContext = {} as BindingContext;
+        const context: EffectContext = {
+            traitName: 'ListItemViewer',
+            state: 'idle',
+            transition: 'idle->idle',
+        } as EffectContext;
+        const exec = new EffectExecutor({ handlers, bindings, context });
+        await exec.executeAll([
+            ['navigate', '/items/1'] as Effect,
+            ['navigate', '/items/2', undefined, { crumb: 'Item 2' }] as Effect,
+            ['navigate-back'] as Effect,
+        ]);
+        expect(clientEffects).toEqual([
+            ['navigate', '/items/1', undefined],
+            ['navigate', '/items/2', undefined, { crumb: 'Item 2' }],
+            ['navigate-back'],
+        ]);
+    });
+
+    it('without the sinks supplied, render-ui/navigate stay a no-op (unchanged pre-existing behavior)', async () => {
+        const p = seeded(0);
+        const bus = makeBus();
+        const handlers = createServerEffectHandlers({
+            persistence: p,
+            eventBus: bus,
+            entityType: 'ListItem',
+        });
+        const bindings: BindingContext = {} as BindingContext;
+        const context: EffectContext = {
+            traitName: 'ListItemViewer',
+            state: 'idle',
+            transition: 'idle->idle',
+        } as EffectContext;
+        const exec = new EffectExecutor({ handlers, bindings, context });
+        // Must not throw — EffectExecutor.logUnsupported handles the absence.
+        const renderEffect: Effect = ['render-ui', 'main', { type: 'card' }];
+        await expect(exec.executeAll([renderEffect])).resolves.toBeUndefined();
     });
 });
