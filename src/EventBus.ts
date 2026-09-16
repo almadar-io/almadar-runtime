@@ -72,12 +72,20 @@ export class EventBus implements IEventBus {
             source,
         };
 
-        // V4 identity routing: subscriptions are keyed under `routingKey`
+               // V4 identity routing: subscriptions are keyed under `routingKey`
         // (an event-id key when the schema carries ids) while the envelope
         // keeps the human `type`. Absent → key by name (legacy, unchanged).
         const deliveryKey = routingKey ?? type;
-        const listeners = this.listeners.get(deliveryKey);
-        const listenerCount = listeners?.size ?? 0;
+        // Dual-carry delivery: an id-keyed emit must ALSO reach bare-name
+        // subscribers — any-kind (`*.EVENT`) listens and legacy id-free
+        // subscriptions route by name only, and the emit side always stamps
+        // an id post-V4, so without this hop they never fire. A listener
+        // subscribed under both keys receives the event exactly once.
+        const primary = this.listeners.get(deliveryKey);
+        const secondary = routingKey !== undefined && routingKey !== type
+            ? this.listeners.get(type)
+            : undefined;
+        const listenerCount = (primary?.size ?? 0) + (secondary?.size ?? 0);
 
         if (listenerCount > 0) {
             log.debug('emit', { type, listenerCount, depth: this.depth });
@@ -93,17 +101,22 @@ export class EventBus implements IEventBus {
 
         this.depth++;
         try {
-            if (listeners) {
+            const delivered = new Set<EventListener>();
+            const deliverTo = (set: Set<EventListener> | undefined): void => {
+                if (!set) return;
                 // Copy to avoid mutation during iteration
-                const listenersCopy = Array.from(listeners);
-                for (const listener of listenersCopy) {
+                for (const listener of Array.from(set)) {
+                    if (delivered.has(listener)) continue;
+                    delivered.add(listener);
                     try {
                         listener(event);
                     } catch (error) {
                         log.error('listener threw', { type, error: error instanceof Error ? error : String(error) });
                     }
                 }
-            }
+            };
+            deliverTo(primary);
+            deliverTo(secondary);
 
             // Wildcard listeners receive all events
             if (type !== '*') {

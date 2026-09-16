@@ -137,6 +137,223 @@ describe('composed-trait listens route by the SOURCE emit contract id, not liste
 });
 
 // ---------------------------------------------------------------------------
+// PF-16 regressions (docs/oppurtunities/krulz/Almadar_Project_Friday.md).
+// Two dual-carry routing holes beyond the no-eventId case above:
+//  (a) STALE listener eventId — L1 mints every listen entry's eventId from
+//      the listener's own declaration; orbital-kind sources into
+//      reference-form orbitals are never re-pointed post-inline, so the
+//      listener subscribes under an id the emitter never publishes to.
+//  (b) ANY-KIND (`*.EVENT`) listens carry NO eventId and subscribe under the
+//      bare name, while the emit side routes ONLY under the id key.
+// Fixes: source-first id resolution in `setupEventListeners` (the source
+// trait's emits[] contract is the canonical id the emitter stamps), and
+// name-channel dual-publish in `EventBus.emit` for id-keyed emits.
+// ---------------------------------------------------------------------------
+const ORB_B = asOrbitalId('orb_01HCCBBBBBBBBBBBBBBBBBBBBB');
+const TID_SOURCE_B = asTraitId('trt_01HCCSOURCEBSOURCEBSOURC');
+const EID_STALE = asEventId('evt_01HCCSTALESTALESTALESTAL');
+
+function buildCrossOrbitalSchema(mode: 'stale-id' | 'any-kind'): OrbitalSchema {
+  const source: Trait = {
+    id: TID_SOURCE_B,
+    name: 'Source',
+    scope: 'instance',
+    linkedEntity: 'Ping',
+    linkedEntityId: ENT,
+    stateMachine: {
+      states: [{ name: 'idle', isInitial: true }],
+      events: [{ key: 'FIRE', name: 'Fire' }],
+      transitions: [
+        { from: 'idle', to: 'idle', event: 'FIRE', effects: [['emit', 'PING', {}]] },
+      ],
+    },
+    emits: [{ event: 'PING', eventId: EID_PING, scope: 'external' }],
+  };
+
+  const listener: Trait = {
+    id: TID_LISTENER,
+    name: 'Listener',
+    scope: 'instance',
+    linkedEntity: 'Ping',
+    linkedEntityId: ENT,
+    stateMachine: {
+      states: [{ name: 'active', isInitial: true }],
+      events: [{ key: 'TICK', name: 'Tick' }],
+      transitions: [
+        { from: 'active', to: 'active', event: 'TICK', effects: [['emit', 'RECEIVED', {}]] },
+      ],
+    },
+    emits: [{ event: 'RECEIVED', eventId: EID_RECEIVED_TICK, scope: 'external' }],
+    listens: [
+      mode === 'stale-id'
+        ? {
+            event: 'PING',
+            // L1-minted on the listener, never re-pointed to the source's id.
+            eventId: EID_STALE,
+            triggers: 'TICK',
+            scope: 'external',
+            source: {
+              kind: 'orbital',
+              orbital: 'SourceOrbital',
+              trait: 'Source',
+              orbitalId: ORB_B,
+              traitId: TID_SOURCE_B,
+            },
+          }
+        : {
+            event: 'PING',
+            triggers: 'TICK',
+            scope: 'external',
+            source: { kind: 'any' },
+          },
+    ],
+  };
+
+  const entity = { name: 'Ping', persistence: 'runtime' as const, fields: [{ name: 'id', type: 'string' }] };
+  return {
+    name: 'CrossApp',
+    schemaVersion: 4,
+    orbitals: [
+      { id: ORB_B, name: 'SourceOrbital', entity, traits: [source], pages: [] },
+      { id: ORB, name: 'ListenerOrbital', entity, traits: [listener], pages: [] },
+    ],
+  };
+}
+
+describe('PF-16 dual-carry routing holes', () => {
+  it('a stale listener-minted eventId loses to the source trait emits[] contract (orbital-kind source)', async () => {
+    const runtime = new OrbitalServerRuntime({ debug: false });
+    await runtime.register(buildCrossOrbitalSchema('stale-id'));
+
+    const seen: string[] = [];
+    runtime.getEventBus().onAny((e) => seen.push(e.type));
+
+    await runtime.processOrbitalEvent('SourceOrbital', { event: 'FIRE', targetTrait: 'Source' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(seen).toContain('PING');
+    expect(seen).toContain('RECEIVED');
+  });
+
+  it('an any-kind (*.EVENT) listen receives an id-stamped emit via name-channel dual-publish', async () => {
+    const runtime = new OrbitalServerRuntime({ debug: false });
+    await runtime.register(buildCrossOrbitalSchema('any-kind'));
+
+    const seen: string[] = [];
+    runtime.getEventBus().onAny((e) => seen.push(e.type));
+
+    await runtime.processOrbitalEvent('SourceOrbital', { event: 'FIRE', targetTrait: 'Source' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(seen).toContain('PING');
+    expect(seen).toContain('RECEIVED');
+  });
+
+  it('an any-kind listen carrying a stale L1-minted eventId still receives the emit (bare-name routing)', async () => {
+    // The PF global-search shape: `listens { *.MODULE_SEARCH_REQUESTED -> … }`
+    // compiles to source {kind:'any'} PLUS an L1-minted listener eventId that
+    // no emitter stamps. The `?? listener.eventId` fallback re-subscribed
+    // under that stale id; any-scope must route bare-name unconditionally.
+    const schema = buildCrossOrbitalSchema('any-kind');
+    schema.orbitals[1].traits[0].listens![0].eventId = EID_STALE;
+
+    const runtime = new OrbitalServerRuntime({ debug: false });
+    await runtime.register(schema);
+
+    const seen: string[] = [];
+    runtime.getEventBus().onAny((e) => seen.push(e.type));
+
+    await runtime.processOrbitalEvent('SourceOrbital', { event: 'FIRE', targetTrait: 'Source' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(seen).toContain('PING');
+    expect(seen).toContain('RECEIVED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Listen-level guard parity (orbital-core listener.rs evaluates `guard`
+// against the raw payload in a payload-only context and skips on false/error;
+// the JS server path dispatched unconditionally — every guarded listen
+// over-fired, e.g. all five PF search responders answering every request).
+// ---------------------------------------------------------------------------
+function buildGuardedListenSchema(): OrbitalSchema {
+  const source: Trait = {
+    id: TID_SOURCE_B,
+    name: 'Source',
+    scope: 'instance',
+    linkedEntity: 'Ping',
+    linkedEntityId: ENT,
+    stateMachine: {
+      states: [{ name: 'idle', isInitial: true }],
+      events: [
+        { key: 'FIRE_TASKS', name: 'FireTasks' },
+        { key: 'FIRE_CLIENTS', name: 'FireClients' },
+      ],
+      transitions: [
+        { from: 'idle', to: 'idle', event: 'FIRE_TASKS', effects: [['emit', 'PING', { moduleKey: 'tasks' }]] },
+        { from: 'idle', to: 'idle', event: 'FIRE_CLIENTS', effects: [['emit', 'PING', { moduleKey: 'clients' }]] },
+      ],
+    },
+    emits: [{ event: 'PING', eventId: EID_PING, scope: 'external' }],
+  };
+
+  const listener: Trait = {
+    id: TID_LISTENER,
+    name: 'Listener',
+    scope: 'instance',
+    linkedEntity: 'Ping',
+    linkedEntityId: ENT,
+    stateMachine: {
+      states: [{ name: 'active', isInitial: true }],
+      events: [{ key: 'TICK', name: 'Tick' }],
+      transitions: [
+        { from: 'active', to: 'active', event: 'TICK', effects: [['emit', 'RECEIVED', {}]] },
+      ],
+    },
+    emits: [{ event: 'RECEIVED', eventId: EID_RECEIVED_TICK, scope: 'external' }],
+    listens: [
+      {
+        event: 'PING',
+        triggers: 'TICK',
+        scope: 'external',
+        source: { kind: 'any' },
+        guard: ['==', '@payload.moduleKey', 'tasks'],
+      },
+    ],
+  };
+
+  const entity = { name: 'Ping', persistence: 'runtime' as const, fields: [{ name: 'id', type: 'string' }] };
+  return {
+    name: 'GuardApp',
+    schemaVersion: 4,
+    orbitals: [
+      { id: ORB_B, name: 'SourceOrbital', entity, traits: [source], pages: [] },
+      { id: ORB, name: 'ListenerOrbital', entity, traits: [listener], pages: [] },
+    ],
+  };
+}
+
+describe('listen-level guard evaluation (kernel parity)', () => {
+  it('a guarded listen skips dispatch when the guard fails and fires when it passes', async () => {
+    const runtime = new OrbitalServerRuntime({ debug: false });
+    await runtime.register(buildGuardedListenSchema());
+
+    const seen: string[] = [];
+    runtime.getEventBus().onAny((e) => seen.push(e.type));
+
+    await runtime.processOrbitalEvent('SourceOrbital', { event: 'FIRE_CLIENTS', targetTrait: 'Source' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(seen).toContain('PING');
+    expect(seen).not.toContain('RECEIVED');
+
+    await runtime.processOrbitalEvent('SourceOrbital', { event: 'FIRE_TASKS', targetTrait: 'Source' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(seen).toContain('RECEIVED');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Real plugin end-to-end: resolves the checked-in vim-mode registry .orb the
 // way the studio does (`resolveSchemaWithOrbitalCLI`, i.e. `orb resolve`),
 // then drives the exact host-event loop a Monaco/CodeMirror shell would.
