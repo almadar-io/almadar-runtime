@@ -80,6 +80,7 @@ export {
   findTransition,
   normalizeEventKey,
   processEvent,
+  selectDispatchCandidates,
   StateMachineManager,
   LIFECYCLE_EVENTS,
   type ProcessEventOptions,
@@ -148,7 +149,11 @@ export {
 // Resolved-schema → TraitDefinition[] parsing — extracted from
 // OrbitalServerRuntime.registerOrbitalAsync so a stateless per-request
 // caller (no OrbitalServerRuntime instance) can parse a schema the same way.
-export { parseOrbitalTraits, type ParsedOrbitalTraits } from "./OrbitalTraitParsing.js";
+export {
+  parseOrbitalTraits,
+  findEntityAmongOrbitals,
+  type ParsedOrbitalTraits,
+} from "./OrbitalTraitParsing.js";
 
 export type { ServerBridgeConfig, ServerBridgeState } from "./ServerBridge.js";
 

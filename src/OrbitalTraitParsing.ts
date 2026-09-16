@@ -85,3 +85,23 @@ export function parseOrbitalTraits(orbital: OrbitalDefinition): ParsedOrbitalTra
 
   return { traits, inlineTraits, configByTrait, entity };
 }
+
+/**
+ * Find an entity by name among a set of orbitals' own resolved entities.
+ * Shared by `OrbitalServerRuntime.findEntityDefByName` (searches its
+ * registered orbitals' entities) and the stateless per-request transition
+ * path (searches a resolved schema's orbitals' entities) — a trait's
+ * `linkedEntity` can name a DIFFERENT orbital's own primary entity than its
+ * host orbital's (e.g. a browse-list trait bound to a sibling entity), and
+ * both callers need the identical answer for that case. Pure — no I/O, no
+ * instance state.
+ */
+export function findEntityAmongOrbitals(
+  entities: Iterable<Entity | undefined>,
+  name: string,
+): Entity | undefined {
+  for (const entity of entities) {
+    if (entity?.name === name) return entity;
+  }
+  return undefined;
+}

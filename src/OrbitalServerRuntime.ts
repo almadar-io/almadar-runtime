@@ -57,7 +57,7 @@ import {
   LIFECYCLE_EVENTS,
 } from "./StateMachineCore.js";
 import { EffectExecutor } from "./EffectExecutor.js";
-import { parseOrbitalTraits } from "./OrbitalTraitParsing.js";
+import { parseOrbitalTraits, findEntityAmongOrbitals } from "./OrbitalTraitParsing.js";
 import type { ServerEffectResult } from "./ServerEffectHandlers.js";
 import { createLogger } from '@almadar/logger';
 // Same treatment for `createOsHandlers` (uses `fs`, `net`, `child_process`).
@@ -144,7 +144,7 @@ import {
   interpolateProps,
   createContextFromBindings,
 } from "./BindingResolver.js";
-import { evaluate, evaluateGuard, evaluateListenPayloadExpr } from "@almadar/evaluator";
+import { evaluate, evaluateGuard, evaluateListenPayloadExpr, createMinimalContext } from "@almadar/evaluator";
 import type {
   TraitDefinition,
   TraitState,
@@ -1200,10 +1200,10 @@ export class OrbitalServerRuntime {
    * relation TARGET entity (usually another orbital's primary).
    */
   private findEntityDefByName(name: string): Entity | undefined {
-    for (const registered of this.orbitals.values()) {
-      if (registered.entity?.name === name) return registered.entity;
-    }
-    return undefined;
+    return findEntityAmongOrbitals(
+      Array.from(this.orbitals.values(), (registered) => registered.entity),
+      name,
+    );
   }
 
   /**
@@ -1534,13 +1534,24 @@ export class OrbitalServerRuntime {
           // closure so a single key can serve many listeners with different
           // scopes.
           //
-          // `listener.eventId` itself may lag the emitter's own id (see
-          // `resolveSourceEmitEventId` above) — fall back to resolving it
-          // from the source trait's declared `emits[]` contract so a
-          // source-qualified listen always agrees with the id the emitter
-          // will actually stamp.
-          const effectiveEventId =
-            listener.eventId ?? this.resolveSourceEmitEventId(listener.source, bareEvent, orbitalName);
+          // The listener's own `eventId` can be STALE: L1 mints it from the
+          // listener's declaration and nothing re-points orbital-kind sources
+          // into reference-form orbitals post-inline, so it may not match the
+          // id the emitter actually stamps. The source trait's `emits[]`
+          // contract is the single canonical place the emitter's id lives
+          // (the emit handler stamps exactly that), so resolve it FIRST and
+          // fall back to the listener's own id only when the source cannot be
+          // resolved (unregistered orbital, legacy source-free form, or
+          // `kind: "any"` — which carries no id and routes by bare name).
+          // Any-scope listeners (explicit `kind: "any"` or the legacy `*.EVENT`
+          // form) must route bare-name UNCONDITIONALLY: L1 mints a listener
+          // eventId for them too, and the `?? listener.eventId` fallback would
+          // re-subscribe them under that stale id, which no emitter stamps.
+          const isAnyScope =
+            listener.source?.kind === 'any' || listener.event.startsWith('*.');
+          const effectiveEventId = isAnyScope
+            ? undefined
+            : this.resolveSourceEmitEventId(listener.source, bareEvent, orbitalName) ?? listener.eventId;
           const routeKey = eventRouteKey(bareEvent, effectiveEventId);
           const cleanup = this.eventBus.on(routeKey, async (event) => {
             // Source filter: skip if the emit doesn't match our declared scope.
@@ -1569,6 +1580,33 @@ export class OrbitalServerRuntime {
                 sourceOrbital: event.source?.orbital ?? '?',
                 sourceTrait: event.source?.trait ?? '?',
               }));
+            }
+
+            // Listen-level guard, kernel parity (orbital-core listener.rs):
+            // evaluated against the RAW payload in a payload-only context,
+            // before payload mapping; false OR evaluation error skips the
+            // dispatch. Without this every guarded listen over-fires (e.g.
+            // all five search responders answering every module request).
+            if (listener.guard) {
+              const guardPassed = (() => {
+                try {
+                  return evaluateGuard(
+                    listener.guard as SExpr,
+                    createMinimalContext({}, event.payload as EventPayload | undefined),
+                  );
+                } catch {
+                  return false;
+                }
+              })();
+              if (!guardPassed) {
+                if (this.config.debug) {
+                  xOrbitalLog.debug('listen:guard-blocked', {
+                    receiverTrait: trait.name,
+                    event: listener.event,
+                  });
+                }
+                return;
+              }
             }
 
             // Apply payload mapping (shared contract with the client wiring)

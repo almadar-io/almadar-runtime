@@ -419,6 +419,39 @@ function compositeKey(traitName: string, scope: string): string {
     return `${traitName}::${scope}`;
 }
 
+/**
+ * Which trait names are eligible to receive `event`, given the same
+ * scoped-listen / page-scope contract `StateMachineManager.sendEvent` and
+ * the stateless per-request transition path (`transition-handler.ts`) both
+ * need to honor identically. Extracted so there is exactly one place that
+ * decides this, instead of two independently-written copies that only
+ * happen to agree — `targetTrait` (scoped-listen delivery) wins outright
+ * and skips every other check; otherwise `activeTraits`, when given,
+ * narrows to the page's own trait set (off-page traits neither transition
+ * nor mutate state); `canHandle` is consulted last, only when neither of
+ * the above already decided the answer. Pure — no I/O, no instance state.
+ */
+export function selectDispatchCandidates(
+    traitNames: Iterable<string>,
+    options: {
+        targetTrait?: string;
+        activeTraits?: ReadonlySet<string>;
+        canHandle?: (traitName: string) => boolean;
+    },
+): string[] {
+    const candidates: string[] = [];
+    for (const traitName of traitNames) {
+        if (options.targetTrait !== undefined) {
+            if (traitName === options.targetTrait) candidates.push(traitName);
+            continue;
+        }
+        if (options.activeTraits && !options.activeTraits.has(traitName)) continue;
+        if (options.canHandle && !options.canHandle(traitName)) continue;
+        candidates.push(traitName);
+    }
+    return candidates;
+}
+
 export class StateMachineManager {
     private traits: Map<string, TraitDefinition> = new Map();
     /**
@@ -727,13 +760,12 @@ export class StateMachineManager {
     ): Array<{ traitName: string; result: TransitionResult }> {
         const results: Array<{ traitName: string; result: TransitionResult }> = [];
         const scope = scopeOf(entityData);
+        const candidates = new Set(
+            selectDispatchCandidates(this.traits.keys(), { targetTrait, activeTraits: allowedTraits }),
+        );
 
         for (const [traitName, trait] of this.traits) {
-            if (targetTrait !== undefined) {
-                if (traitName !== targetTrait) continue;
-            } else if (allowedTraits !== undefined && !allowedTraits.has(traitName)) {
-                continue;
-            }
+            if (!candidates.has(traitName)) continue;
             const traitState = this.getOrInitState(traitName, scope);
             if (!traitState) continue;
             const key = compositeKey(traitName, scope);
