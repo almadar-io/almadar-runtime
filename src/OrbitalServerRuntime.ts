@@ -222,7 +222,7 @@ export type ClientEffectTuple =
   | ClientRenderUITuple
   | ClientNavigateTuple
   | ClientNavigateBackTuple;
-import { isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, omitFrameFields, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef } from "@almadar/core";
+import { isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, omitFrameFields, orbitalInlineEntities, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, entityAccessPolicies, entityAccessPoliciesByStoreKey } from "@almadar/core/mock";
 import { getPatternFieldsContract } from "@almadar/core/patterns";
 import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from "./entityAccess.js";
@@ -1196,12 +1196,22 @@ export class OrbitalServerRuntime {
 
   /**
    * Resolve an entity definition by name across every registered orbital's
-   * resolved primary entity. Used by relation-option injection to find the
-   * relation TARGET entity (usually another orbital's primary).
+   * resolved primary entity AND auxiliary entities (Gap #22 — an imported
+   * atom's own entity, surfaced on `schema.auxiliaryEntities` when a trait
+   * reference omits the `-> Entity` rebind, is a legitimate relation TARGET
+   * too: e.g. `WebhookOrbitalWebhookDeliveryBrowseList`'s `linkedEntity`
+   * names `WebhookOrbitalWebhookDelivery`, which is that orbital's auxiliary
+   * entity, not its primary `WebhookEndpoint`). Used by relation-option
+   * injection to find the relation TARGET entity.
    */
   private findEntityDefByName(name: string): Entity | undefined {
     return findEntityAmongOrbitals(
       Array.from(this.orbitals.values(), (registered) => registered.entity),
+      name,
+    ) ?? findEntityAmongOrbitals(
+      Array.from(this.orbitals.values()).flatMap((registered) =>
+        orbitalInlineEntities(registered.schema).filter((e) => e.name !== registered.entity.name),
+      ),
       name,
     );
   }
