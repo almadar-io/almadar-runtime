@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "6.82.0",
+  "version": "6.82.1",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -67,7 +67,7 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
-    "@almadar/core": "^10.92.0",
+    "@almadar/core": "^10.94.0",
     "@almadar/evaluator": "^2.45.0",
     "@almadar/logger": "^1.12.0",
     "@almadar/server": "^2.42.0",

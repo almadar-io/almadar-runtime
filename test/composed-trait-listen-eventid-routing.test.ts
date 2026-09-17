@@ -41,8 +41,8 @@ import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
-import { asOrbitalId, asEntityId, asTraitId, asEventId } from '@almadar/core';
-import type { OrbitalSchema, Trait } from '@almadar/core';
+import { asOrbitalId, asEntityId, asTraitId, asEventId, isInlineTrait } from '@almadar/core';
+import type { OrbitalSchema, Trait, Entity } from '@almadar/core';
 
 const ORB = asOrbitalId('orb_01HCCAAAAAAAAAAAAAAAAAAAAA');
 const ENT = asEntityId('ent_01HCCAAAAAAAAAAAAAAAAAAAAA');
@@ -209,7 +209,7 @@ function buildCrossOrbitalSchema(mode: 'stale-id' | 'any-kind'): OrbitalSchema {
     ],
   };
 
-  const entity = { name: 'Ping', persistence: 'runtime' as const, fields: [{ name: 'id', type: 'string' }] };
+  const entity: Entity = { name: 'Ping', persistence: 'runtime', fields: [{ name: 'id', type: 'string' }] };
   return {
     name: 'CrossApp',
     schemaVersion: 4,
@@ -255,7 +255,9 @@ describe('PF-16 dual-carry routing holes', () => {
     // no emitter stamps. The `?? listener.eventId` fallback re-subscribed
     // under that stale id; any-scope must route bare-name unconditionally.
     const schema = buildCrossOrbitalSchema('any-kind');
-    schema.orbitals[1].traits[0].listens![0].eventId = EID_STALE;
+    const listenerTrait = schema.orbitals[1].traits[0];
+    if (!isInlineTrait(listenerTrait)) throw new Error('expected an inline trait');
+    listenerTrait.listens![0].eventId = EID_STALE;
 
     const runtime = new OrbitalServerRuntime({ debug: false });
     await runtime.register(schema);
@@ -323,7 +325,7 @@ function buildGuardedListenSchema(): OrbitalSchema {
     ],
   };
 
-  const entity = { name: 'Ping', persistence: 'runtime' as const, fields: [{ name: 'id', type: 'string' }] };
+  const entity: Entity = { name: 'Ping', persistence: 'runtime', fields: [{ name: 'id', type: 'string' }] };
   return {
     name: 'GuardApp',
     schemaVersion: 4,
