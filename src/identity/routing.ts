@@ -86,3 +86,69 @@ export function buildSourceMatcher(
   return (source) =>
     !!source && source.orbital === wantedOrbital && source.trait === wantedTrait;
 }
+
+/**
+ * Parse one `listens {}` entry into its bare event name + source matcher.
+ * Relocated here (was module-private to `OrbitalServerRuntime.ts`) so the
+ * stateless `@almadar-io/playground-runtime` path can reuse the EXACT same
+ * matching predicate for its own cross-orbital cascade (Fix A2) instead of
+ * a second, divergent copy — this function only ever depended on
+ * `ListenSourceDescriptor`/`buildSourceMatcher`, both already local to this
+ * module.
+ */
+export function parseListenSource(
+  listener: { event: string; source?: unknown },
+  listenerOrbital: string,
+): {
+  bareEvent: string;
+  matcher: (source: RouteSourceMeta | undefined) => boolean;
+} {
+  // 1. Explicit source field from the new core schema (preferred). Carries
+  //    V4 dual-carry `traitId`/`orbitalId` when the schema has ids, so the
+  //    matcher can compare ids (rename-proof) instead of names.
+  const explicit = (listener as { source?: ListenSourceDescriptor }).source;
+  if (explicit && typeof explicit === 'object') {
+    return {
+      bareEvent: listener.event,
+      matcher: buildSourceMatcher(explicit, listenerOrbital),
+    };
+  }
+
+  // 2. Fall back to parsing the legacy concatenated string (no ids present).
+  const key = listener.event;
+  const parts = key.split('.');
+  if (parts.length === 1) {
+    // Bare `EVENT` — no source prefix. Accept any source (this is the
+    // safest default; callers who want strict scoping should author the
+    // full two-segment form).
+    return { bareEvent: key, matcher: () => true };
+  }
+
+  if (parts.length === 2) {
+    const [sourceOrStar, eventName] = parts;
+    if (sourceOrStar === '*') {
+      return { bareEvent: eventName, matcher: () => true };
+    }
+    // Single-segment source: intra-orbital trait reference.
+    return {
+      bareEvent: eventName,
+      matcher: buildSourceMatcher(
+        { kind: 'trait', trait: sourceOrStar },
+        listenerOrbital,
+      ),
+    };
+  }
+
+  if (parts.length >= 3) {
+    const eventName = parts[parts.length - 1];
+    const trait = parts[parts.length - 2];
+    const orbital = parts.slice(0, parts.length - 2).join('.');
+    return {
+      bareEvent: eventName,
+      matcher: buildSourceMatcher({ kind: 'orbital', orbital, trait }, listenerOrbital),
+    };
+  }
+
+  // Unreachable given the split above — defensive default.
+  return { bareEvent: key, matcher: () => true };
+}

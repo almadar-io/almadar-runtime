@@ -468,6 +468,29 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         const cardinality = field.relation.cardinality ?? 'many';
 
         if (sameStore) {
+          if (isOwnerColumn) {
+            // A self-relation `ownerFieldsFromSchema` also flags as an owner
+            // column (e.g. `Person.staffAccount : Person`) means "this row's
+            // own account IS itself" — an identity self-pointer, not a
+            // parent-child tree. The forest below would otherwise leave row
+            // 0 (the root) with a permanently blank value — exactly the row
+            // most likely to BE the current viewer, so the one self-lookup
+            // that matters (`staffAccount == @user.id`) always missed.
+            // Every row gets its own id, skipping only cells `seed()`
+            // already owner-stamped (same guard `linkSelfRelationField`
+            // itself receives below, so the two mechanisms keep composing).
+            for (const row of rows) {
+              const selfId = row['id'] as string;
+              if (
+                (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) ||
+                stampedCellKeys.has(stampedCellKey(storeKey, selfId, field.name))
+              ) {
+                continue;
+              }
+              row[field.name] = selfId;
+            }
+            continue;
+          }
           // Deterministic forest — see @almadar/core/mock's
           // `linkSelfRelationField` doc. Every cardinality on a self-relation
           // goes through the SAME forest: scalar parent for one/many-to-one,

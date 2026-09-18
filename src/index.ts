@@ -86,6 +86,27 @@ export {
   type ProcessEventOptions,
 } from "./StateMachineCore.js";
 
+// TraitCascade — same-trait fetch->emit->self-apply cascade completion,
+// shared by OrbitalServerRuntime and any stateless-server caller.
+export {
+  runTraitCascade,
+  type RunTraitCascadeOptions,
+  type TraitCascadeResult,
+  type CascadeEmittedEvent,
+  type CascadeStepEffectsResult,
+} from "./TraitCascade.js";
+
+// identity/routing — `listens {}` source-matching (`parseListenSource`),
+// shared by OrbitalServerRuntime's cross-trait fan-out and any
+// stateless-server caller building the same cross-orbital cascade (Fix A2).
+export {
+  eventRouteKey,
+  buildSourceMatcher,
+  parseListenSource,
+  type ListenSourceDescriptor,
+  type RouteSourceMeta,
+} from "./identity/routing.js";
+
 // EffectExecutor
 export {
   EffectExecutor,

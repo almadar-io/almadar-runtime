@@ -46,7 +46,7 @@ import type {
   NextFunction,
 } from "express";
 import { EventBus } from "./EventBus.js";
-import { eventRouteKey, buildSourceMatcher, type ListenSourceDescriptor as IdListenSourceDescriptor } from "./identity/routing.js";
+import { eventRouteKey, parseListenSource } from "./identity/routing.js";
 import { createTickScheduler, type TickHandle, type TickScheduler } from "./TickScheduler.js";
 import { isValidCronExpression } from "./cron.js";
 import { parseDurationString } from "./duration.js";
@@ -56,6 +56,7 @@ import {
   createInitialTraitState,
   LIFECYCLE_EVENTS,
 } from "./StateMachineCore.js";
+import { runTraitCascade } from "./TraitCascade.js";
 import { EffectExecutor } from "./EffectExecutor.js";
 import { parseOrbitalTraits, findEntityAmongOrbitals } from "./OrbitalTraitParsing.js";
 import type { ServerEffectResult } from "./ServerEffectHandlers.js";
@@ -2391,46 +2392,109 @@ export class OrbitalServerRuntime {
       }));
     }
 
-    // Execute effects only for active traits
+    // Execute effects only for active traits. Wrapped in `runTraitCascade`
+    // (Fix A, Almadar_Rabit_V3_Deepseek_Gaps.md-style universal gap): a
+    // trait's own `INIT -> (fetch Entity {emit: {success: Loaded}})` and a
+    // SEPARATE `Loaded -> (set @entity.X ...)` arm never used to complete on
+    // this path — `sendEvent` above computed exactly one hop, effects ran
+    // once, and the second arm was only ever reached via a browser's own
+    // client-side self-subscribe (`useTraitStateMachine.ts`). A headless
+    // caller (`orbital_play`, a webhook) had nothing to complete it.
+    // `runTraitCascade` re-invokes `processEvent` for the SAME trait's own
+    // emitted events until no further arm matches or the step cap is hit —
+    // it does not touch the EXISTING cross-trait `listens` fan-out
+    // (`setupEventListeners`/`originClientId`) at all.
     for (const { traitName, result } of filteredResults) {
       if (result.effects.length > 0) {
-        await this.executeEffects(
-          registered,
-          traitName,
-          result.effects as Effect[],
-          cleanPayload,
-          entityData,
-          entityId,
-          emittedEvents,
-          fetchedData,
-          clientEffects,
-          effectResults,
-          viewer,
-          clientEffectsByTrait,
-          onPush,
-          clientId,
-        );
-        // A JSX-hoisted inline child embedded via `@trait.X`
-        // (`@callsitePayload.<field>` capture) renders once at its own
-        // mount-time INIT and never again — re-run its lifecycle transition
-        // now, under THIS transition's payload, so its frame reflects the
-        // composing event instead of staying frozen at whatever it
-        // captured at mount.
-        await this.rerenderCallsiteCaptureChildren(
-          registered,
-          traitName,
-          cleanPayload ?? {},
-          entityData,
-          entityId,
-          emittedEvents,
-          fetchedData,
-          clientEffects,
-          effectResults,
-          viewer,
-          clientEffectsByTrait,
-          onPush,
-          clientId,
-        );
+        // `registered.traits` is `Trait[]` (nested `stateMachine.*`, from
+        // `@almadar/core`) — NOT the same shape `sendEvent`/`processEvent`
+        // use internally. `getTraitDefinition` returns the manager's own
+        // flat `TraitDefinition`, the shape `runTraitCascade` needs.
+        const trait = registered.manager.getTraitDefinition(traitName);
+        // Freshly-persisted row only, re-read per cascade step — the SAME
+        // value `executeEffects` always received as its `entityData` param
+        // (that call already 3-layer-merges it with `traitFieldStates` +
+        // declared defaults internally, see `sharedFieldKey`'s doc). Do NOT
+        // let `traitFieldStates` override wholesale here (that's the SEPARATE
+        // precedence `entityByTrait` uses below for guard evaluation) — doing
+        // so fed `executeEffects` a partial row missing every field besides
+        // the trait's own `(set)`-written ones, and the persist's 3-layer
+        // merge then fell through to declared defaults for the rest.
+        const readPersistedEntity = async (): Promise<EntityRow> => {
+          if (entityId) {
+            const stored = await this.persistence.getById(registered.entity.name, entityId);
+            if (stored) return stored;
+          }
+          return entityData;
+        };
+        // Guard/transition evaluation precedence — mirrors `entityByTrait`
+        // above exactly (traitFieldStates wholesale override when non-empty,
+        // else a fresh persisted read) so a `(set @entity.X Y)` from an
+        // earlier cascade step is visible to the next step's guard exactly
+        // like a fresh request's `sendEvent` call would see it.
+        const readGuardEntity = async (): Promise<EntityRow> => {
+          const fields = registered.traitFieldStates.get(this.sharedFieldKey(registered, traitName));
+          if (fields && Object.keys(fields).length > 0) return fields;
+          return readPersistedEntity();
+        };
+        if (trait) {
+          const cascade = await runTraitCascade<void>({
+            trait,
+            fromState: result.previousState,
+            eventKey: event,
+            payload: cleanPayload,
+            getEntityData: readGuardEntity,
+            user: viewer,
+            runEffects: async (effects, step) => {
+              const emittedStart = emittedEvents.length;
+              const stepEntity = await readPersistedEntity();
+              await this.executeEffects(
+                registered,
+                traitName,
+                effects as Effect[],
+                step.payload,
+                stepEntity,
+                entityId,
+                emittedEvents,
+                fetchedData,
+                clientEffects,
+                effectResults,
+                viewer,
+                clientEffectsByTrait,
+                onPush,
+                clientId,
+              );
+              // A JSX-hoisted inline child embedded via `@trait.X`
+              // (`@callsitePayload.<field>` capture) renders once at its own
+              // mount-time INIT and never again — re-run its lifecycle
+              // transition now, under THIS step's payload, so its frame
+              // reflects the composing event instead of staying frozen at
+              // whatever it captured at mount.
+              await this.rerenderCallsiteCaptureChildren(
+                registered,
+                traitName,
+                step.payload ?? {},
+                stepEntity,
+                entityId,
+                emittedEvents,
+                fetchedData,
+                clientEffects,
+                effectResults,
+                viewer,
+                clientEffectsByTrait,
+                onPush,
+                clientId,
+              );
+              return { effectResults: [], emitted: emittedEvents.slice(emittedStart) };
+            },
+            logContext: { orbitalName: registered.schema.name },
+          });
+          // `sendEvent` already committed hop 1's state; a cascade that
+          // advanced further needs the manager's own tracking updated too,
+          // or `getAllStates()`/the next request's `canHandleEvent()` would
+          // see a stale, one-hop-behind state.
+          registered.manager.setCascadeFinalState(traitName, entityId, cascade.finalState, event);
+        }
       }
     }
 
@@ -4170,84 +4234,8 @@ export function createOrbitalServerRuntime(
 // ============================================================================
 // Source-scoped listen support
 // ============================================================================
-
-/**
- * Parse a `TraitEventListener`'s event key into its bare event name and a
- * source-matcher predicate.
- *
- * Supports both authoring layers:
- *
- * 1. **New core schema**: `listener.source` is an explicit object describing
- *    the scope (`any` / `trait` / `orbital`). Used as-is.
- * 2. **Legacy concatenated string** in `listener.event`:
- *    - `"*.EVENT"`            → `{ kind: "any" }`, bare = EVENT
- *    - `"Trait.EVENT"`        → `{ kind: "trait", trait: "Trait" }`, bare = EVENT
- *    - `"Orbital.Trait.EVENT"`→ `{ kind: "orbital", orbital, trait }`, bare = EVENT
- *    - `"EVENT"`              → `{ kind: "any" }`, bare = EVENT (no prefix
- *      means "I don't know where it came from, accept any").
- *
- * The matcher is invoked on every emit that matches the bare event key; it
- * returns `true` iff the emit's source metadata matches the listener's scope.
- *
- * `listenerOrbital` is the orbital that owns the listener; it's used to
- * resolve intra-orbital trait references for `{ kind: "trait" }` scopes.
- */
-function parseListenSource(
-  listener: { event: string; source?: unknown },
-  listenerOrbital: string,
-): {
-  bareEvent: string;
-  matcher: (source: EventSourceMeta | undefined) => boolean;
-} {
-  // 1. Explicit source field from the new core schema (preferred). Carries
-  //    V4 dual-carry `traitId`/`orbitalId` when the schema has ids, so the
-  //    matcher can compare ids (rename-proof) instead of names.
-  const explicit = (listener as { source?: IdListenSourceDescriptor }).source;
-  if (explicit && typeof explicit === 'object') {
-    return {
-      bareEvent: listener.event,
-      matcher: buildSourceMatcher(explicit, listenerOrbital),
-    };
-  }
-
-  // 2. Fall back to parsing the legacy concatenated string (no ids present).
-  const key = listener.event;
-  const parts = key.split('.');
-  if (parts.length === 1) {
-    // Bare `EVENT` — no source prefix. Accept any source (this is the
-    // safest default; callers who want strict scoping should author the
-    // full two-segment form).
-    return { bareEvent: key, matcher: () => true };
-  }
-
-  if (parts.length === 2) {
-    const [sourceOrStar, eventName] = parts;
-    if (sourceOrStar === '*') {
-      return { bareEvent: eventName, matcher: () => true };
-    }
-    // Single-segment source: intra-orbital trait reference.
-    return {
-      bareEvent: eventName,
-      matcher: buildSourceMatcher(
-        { kind: 'trait', trait: sourceOrStar },
-        listenerOrbital,
-      ),
-    };
-  }
-
-  if (parts.length >= 3) {
-    const eventName = parts[parts.length - 1];
-    const trait = parts[parts.length - 2];
-    const orbital = parts.slice(0, parts.length - 2).join('.');
-    return {
-      bareEvent: eventName,
-      matcher: buildSourceMatcher({ kind: 'orbital', orbital, trait }, listenerOrbital),
-    };
-  }
-
-  // Unreachable given the split above — defensive default.
-  return { bareEvent: key, matcher: () => true };
-}
-
-/** Shape of `RuntimeEvent.source` (names + V4 dual-carry ids). */
-type EventSourceMeta = BusEventSource;
+//
+// `parseListenSource` moved to `./identity/routing.js` (2026-09-18) so the
+// stateless `@almadar-io/playground-runtime` path can reuse the exact same
+// `listens {}` matching predicate for its own cross-orbital cascade instead
+// of a second, divergent copy — see that module's doc comment.

@@ -528,6 +528,20 @@ export class StateMachineManager {
     }
 
     /**
+     * Resolve a trait by its name, in the SAME `TraitDefinition` shape
+     * `sendEvent`/`processEvent` use internally (flat `states`/`transitions`,
+     * not `Trait` from `@almadar/core`'s nested `stateMachine.*` — the two
+     * are NOT structurally interchangeable, confirmed by a `tsup` DTS build
+     * failure when a caller tried passing a raw `Trait` to `runTraitCascade`
+     * directly). Needed by callers that must re-invoke `processEvent` for a
+     * trait outside `sendEvent`'s own loop (same-trait cascade continuation
+     * — see `TraitCascade.ts`).
+     */
+    getTraitDefinition(traitName: string): TraitDefinition | undefined {
+        return this.traits.get(traitName);
+    }
+
+    /**
      * Resolve a trait by its V4 id. Returns undefined when no trait carries
      * that id (legacy schema, or unknown id). Exact-match only — no name
      * similarity.
@@ -815,6 +829,31 @@ export class StateMachineManager {
         }
 
         return results;
+    }
+
+    /**
+     * Commit a same-trait cascade's FINAL state (see `runTraitCascade` in
+     * `TraitCascade.ts`). `sendEvent` above already committed the state for
+     * the single hop it computed; when a caller then drives that trait's own
+     * emitted event through additional hops via `runTraitCascade` (bypassing
+     * `sendEvent` for those extra hops, since they're same-trait continuations
+     * rather than a new external dispatch), the manager's tracked state is
+     * stale until this is called — otherwise `getAllStates()`/`canHandleEvent()`
+     * would report the FIRST hop's state even though the trait actually
+     * settled further along. A no-op if the trait has no tracked state yet
+     * for this scope (nothing to update).
+     */
+    setCascadeFinalState(traitName: string, entityId: string | undefined, finalState: string, lastEvent: string): void {
+        const scope = entityId ?? SINGLETON_SCOPE;
+        const key = compositeKey(traitName, scope);
+        const existing = this.states.get(key);
+        if (!existing) return;
+        this.states.set(key, {
+            ...existing,
+            previousState: existing.currentState,
+            currentState: finalState,
+            lastEvent: normalizeEventKey(lastEvent),
+        });
     }
 
     // ========================================================================
