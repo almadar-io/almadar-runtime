@@ -104,7 +104,7 @@ import {
  */
 import * as nodeModule from 'module';
 let _resolvedNodeRequire: NodeRequire | null = null;
-function nodeRequire<T = unknown>(modulePath: string): T {
+function nodeRequire<T>(modulePath: string): T {
   if (!_resolvedNodeRequire) {
     const evalRequire = (0, eval)('typeof require !== "undefined" ? require : null') as NodeRequire | null;
     if (evalRequire) {
@@ -179,51 +179,35 @@ import type {
   BusEventSource,
   ListenSource,
   PatternConfig,
-  ResolvedPatternProps,
   SExpr,
   EventId,
   UserContext,
   RawUserClaims,
+  RuntimeValue,
 } from "@almadar/core";
 
-/**
- * Client-side effect tuple shipped in `OrbitalEventResponse.clientEffects`.
- * Restricted to the effect kinds the client knows how to apply to the
- * UI: render-ui (slot mutation, including the `toast` slot that carries
- * what used to be the separate notify effect) and navigate (route change).
- * Server-only effects (persist, set, fetch, ...) execute on the server and
- * surface their results via `effectResults` and `emittedEvents`, not here.
- *
- * Shape note: the wire form is broader than `RenderUIEffect` /
- * `NavigateEffect` from `@almadar/core/types/effect.ts` in two places — the
- * runtime appends an interpolated `props` object plus an optional `priority`
- * slot to render-ui (slot 4 + 5), and `navigate`'s optional argument may
- * surface as `undefined` rather than absent. The local union spells those
- * variants out explicitly so consumers (ServerBridge.tsx parser, debugger
- * inspector) get accurate completions instead of `unknown[]`.
- *
- * `slot` is a plain `string` in this wire shape (not `UISlot`'s literal
- * union) because the runtime forwards the raw string from the trait's
- * `(render-ui slot ...)` SExpr without re-validating against the registry —
- * registry validation lives in `orbital validate` / `lolo` parse, not here.
- */
-export type ClientRenderUITuple =
-  | ['render-ui', string, PatternConfig | null]
-  | ['render-ui', string, PatternConfig | null, ResolvedPatternProps]
-  | ['render-ui', string, PatternConfig | null, ResolvedPatternProps | undefined, number | undefined];
-
-export type ClientNavigateTuple =
-  | ['navigate', string]
-  | ['navigate', string, Record<string, string> | undefined]
-  | ['navigate', string, Record<string, string> | undefined, { crumb?: string }];
-
-export type ClientNavigateBackTuple = ['navigate-back'];
-
-export type ClientEffectTuple =
-  | ClientRenderUITuple
-  | ClientNavigateTuple
-  | ClientNavigateBackTuple;
-import { isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, omitFrameFields, orbitalInlineEntities, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef } from "@almadar/core";
+// Single upstream owner (`@almadar/core`'s `types/bus.ts`) — both execution
+// paths (this runtime and orbital-shell-typescript's generated handlers,
+// mirrored 1:1 in orbital-core) carry the same wire shapes, so they cannot
+// drift. Re-exported here so every existing importer of these names from
+// `@almadar/runtime` keeps working unchanged.
+export type {
+  OrbitalEventRequest,
+  OrbitalEventResponse,
+  ClientEffectTuple,
+  ClientRenderUITuple,
+  ClientNavigateTuple,
+  ClientNavigateBackTuple,
+} from "@almadar/core";
+import type {
+  OrbitalEventRequest,
+  OrbitalEventResponse,
+  ClientEffectTuple,
+} from "@almadar/core";
+import { isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, omitFrameFields, orbitalInlineEntities, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef,
+  getNestedValue,
+  isPersistBatchOperation,
+} from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, entityAccessPolicies, entityAccessPoliciesByStoreKey } from "@almadar/core/mock";
 import { getPatternFieldsContract } from "@almadar/core/patterns";
 import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from "./entityAccess.js";
@@ -304,41 +288,8 @@ export interface RegisteredOrbital {
   traitFieldStates: Map<string, EntityRow>;
 }
 
-/**
- * Event sent from client to server
- */
-export interface OrbitalEventRequest {
-  event: string;
-  /**
-   * V4 dual-carry id sibling of `event` — the fired event's id, when known
-   * (e.g. threaded from a `listens[].triggersId`). Optional; absent means
-   * the state machine dispatches by name only (legacy).
-   */
-  eventId?: EventId;
-  payload?: EventPayload;
-  entityId?: string;
-  /**
-   * Scoped-listen delivery: dispatch to THIS trait only. A listens-matched
-   * trigger is addressed to the listening trait; without this, a trigger
-   * renamed to INIT broadcast orbital-wide and re-ran every trait's
-   * initializer (R-SCOPED-LISTEN-INIT-RENAME-FREEZE re-fire cascade).
-   */
-  targetTrait?: string;
-  /** Provider claims for `@user` bindings, normalized by `normalizeUserContext`. */
-  user?: RawUserClaims;
-  /** Per-tab client identity (UUID) — excludes this request's origin from live-broadcast delivery. */
-  clientId?: string;
-  /**
-   * Broadcast-class marker (T6, docs/Almadar_Tick_Loop.md §3a): the name of
-   * the tick that emitted this event. Tick-stamped dispatches are
-   * latest-state broadcasts — the client fires them without awaiting the
-   * response, and the server relays them to OTHER tabs coalesced
-   * (newest-per-key) at a snapshot rate instead of 1:1.
-   */
-  tick?: string;
-  /** Emitting trait for a tick-stamped dispatch — builds the relay's BusEventSource (sourceless emits are dropped client-side). */
-  sourceTrait?: string;
-}
+// `OrbitalEventRequest` — event sent from client to server — is owned by
+// `@almadar/core` (re-exported above).
 
 /**
  * One persist-envelope success emit, handed to the live-broadcast sink
@@ -355,46 +306,8 @@ export interface LiveBroadcastItem {
   originClientId?: string;
 }
 
-/**
- * Response from event processing
- */
-export interface OrbitalEventResponse {
-  success: boolean;
-  transitioned: boolean;
-  states: Record<string, string>;
-  /**
-   * Events emitted during processing, in declaration order. Payloads are
-   * typed against `@almadar/core`'s `EventPayload` — the recursive record of
-   * primitive + nested EventPayload values the state machine already uses
-   * internally. Kept as the single source of truth for emit-payload shape.
-   *
-   * Each entry carries a `source: BusEventSource` so the client-side
-   * ServerBridge can re-broadcast on the qualified `UI:Orbital.Trait.EVENT`
-   * bus key. Without source the re-broadcast skips the entry and downstream
-   * listeners (e.g. ContactBrowse waiting for ContactLoaded after a fetch)
-   * never fire — the dashboard-layout that ContactLoaded renders disappears.
-   */
-  emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>;
-  /** Client-side effects to execute (render-ui, navigate) */
-  clientEffects?: ClientEffectTuple[];
-  /**
-   * Same effects as `clientEffects`, paired with the producing trait name.
-   * Consumers that need per-trait attribution (e.g. `<TraitFrame>` resolving
-   * `@trait.X` bindings) read from this field; legacy consumers ignore it
-   * and continue with the flat `clientEffects` array unchanged.
-   *
-   * Same length and ordering as `clientEffects`; entries are 1:1 by index.
-   */
-  clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>;
-  /** Results from server-side effects (persist, call-service, set) */
-  effectResults?: ServerEffectResult[];
-  error?: string;
-}
-
-/**
- * Result of a server-side effect execution.
- * Closes the circuit by returning effect outcomes to the client.
- */
+// `OrbitalEventResponse` — response from event processing — is owned by
+// `@almadar/core` (re-exported above).
 
 /**
  * Loader configuration for resolving `uses` imports
@@ -551,19 +464,11 @@ const NO_ROW_KEY_IS_FATAL = true;
  */
 function needsPreprocessing(schema: OrbitalSchema): boolean {
   for (const orbital of schema.orbitals) {
-    const uses = (orbital as { uses?: unknown[] }).uses;
-    if (Array.isArray(uses) && uses.length > 0) {
+    if (orbital.uses && orbital.uses.length > 0) {
       return true;
     }
-    const traits = (orbital as { traits?: unknown[] }).traits ?? [];
-    for (const t of traits) {
-      if (!t || typeof t !== 'object') continue;
-      const obj = t as { ref?: unknown; stateMachine?: unknown };
-      if (
-        typeof obj.ref === 'string' &&
-        obj.ref.includes('.') &&
-        !obj.stateMachine
-      ) {
+    for (const t of orbital.traits ?? []) {
+      if (typeof t === 'object' && 'ref' in t && t.ref.includes('.')) {
         return true;
       }
     }
@@ -2333,8 +2238,8 @@ export class OrbitalServerRuntime {
     // Remove _activeTraits from payload before processing (internal use only)
     const cleanPayload = payload ? { ...payload } : undefined;
     if (cleanPayload) {
-      delete (cleanPayload as EventPayload & { _activeTraits?: unknown })._activeTraits;
-      delete (cleanPayload as EventPayload & { _targetTrait?: unknown })._targetTrait;
+      delete cleanPayload['_activeTraits'];
+      delete cleanPayload['_targetTrait'];
     }
 
     // Get entity data if entityId provided
@@ -2391,6 +2296,19 @@ export class OrbitalServerRuntime {
         activeTraits: activeTraits.join(','),
       }));
     }
+
+    // Guard-rejection diagnostic (`OrbitalEventResponse.guardFailed`).
+    // `dispatchTargetTraits` is computed by `canHandleEvent` /
+    // `findTransition`, which is GUARD-UNAWARE — it reports a trait as a
+    // candidate whenever some transition matches `from`/`event`, guard or
+    // no guard. `sendEvent` above only pushes a trait into `results` when
+    // `processEvent` actually executed a transition. So a trait present in
+    // `dispatchTargetTraits` but absent from the executed set had a
+    // candidate whose guard(s) all rejected (or, in strict `guardMode`, a
+    // guard evaluation error blocked it) — the only other way `processEvent`
+    // returns `executed: false` for a trait `canHandleEvent` said yes to.
+    const executedTraitNames = new Set(filteredResults.map(({ traitName }) => traitName));
+    const guardRejectedTrait = dispatchTargetTraits.find((trait) => !executedTraitNames.has(trait.name));
 
     // Execute effects only for active traits. Wrapped in `runTraitCascade`
     // (Fix A, Almadar_Rabit_V3_Deepseek_Gaps.md-style universal gap): a
@@ -2531,6 +2449,30 @@ export class OrbitalServerRuntime {
       states,
       emittedEvents,
     };
+
+    // Guard that rejected the event, addressed as `"<Trait>.<event>"` — see
+    // the `guardRejectedTrait` computation above.
+    if (guardRejectedTrait) {
+      response.guardFailed = `${guardRejectedTrait.name}.${event}`;
+    }
+
+    // Response-side twin of the request's `entityByTrait`: the `@entity`
+    // fields this transition's server-side `set` effects wrote, POST-effect,
+    // keyed by trait name (`OrbitalEventResponse.entityByTrait`'s contract).
+    // Re-read `traitFieldStates` now (same per-trait resolution as the
+    // pre-dispatch `entityByTrait` built above for guard evaluation) so this
+    // reflects writes the cascade loop just made, not the pre-dispatch
+    // snapshot.
+    const responseEntityByTrait: Record<string, EntityRow> = {};
+    for (const trait of registered.traits) {
+      const fields = registered.traitFieldStates.get(this.sharedFieldKey(registered, trait.name));
+      if (fields && Object.keys(fields).length > 0) {
+        responseEntityByTrait[trait.name] = fields;
+      }
+    }
+    if (Object.keys(responseEntityByTrait).length > 0) {
+      response.entityByTrait = responseEntityByTrait;
+    }
 
     // V2 Phase 6: `response.data` is gone. Fetched entities are surfaced via
     // typed emit payloads on `emittedEvents` and through the rendered effect
@@ -2739,7 +2681,7 @@ export class OrbitalServerRuntime {
         //                 ["delete", "collection", "id"]
         // ----------------------------------------------------------------
         if (action === 'batch') {
-          const operations = (data as EntityRow | undefined)?.operations as unknown[] | undefined;
+          const operations = data?.operations;
           if (!Array.isArray(operations) || operations.length === 0) {
             effectResults.push({
               effect: 'persist',
@@ -2756,17 +2698,20 @@ export class OrbitalServerRuntime {
           let batchFailed = false;
           let batchError = '';
 
-          for (const op of operations) {
-            if (!Array.isArray(op) || op.length < 2) {
+          // Widened to the guard's own input type so the predicate narrows to
+          // every variant, not to the one tuple assignable to `string[]`.
+          const ops: readonly RuntimeValue[] = operations;
+          for (const op of ops) {
+            if (!isPersistBatchOperation(op)) {
               batchFailed = true;
               batchError = `Invalid batch operation format: ${JSON.stringify(op)}`;
               break;
             }
-
-            const [opAction, opEntityType, ...opRest] = op as [string, string, ...unknown[]];
+            const opAction = op[0];
+            const opEntityType = op[1];
 
             try {
-              switch (opAction) {
+              switch (op[0]) {
                 case 'create': {
                   // `@intrinsic` fields are NEVER a persisted column — strip
                   // them from every create write, whatever expression form
@@ -2776,19 +2721,19 @@ export class OrbitalServerRuntime {
                   // how the value was constructed.
                   const createIntrinsicFields = this.intrinsicFieldNames(registered, opEntityType);
                   const createData = createIntrinsicFields.length > 0
-                    ? omitFrameFields((opRest[0] as EntityRow) || {}, createIntrinsicFields)
-                    : (opRest[0] as EntityRow) || {};
+                    ? omitFrameFields(op[2] ?? {}, createIntrinsicFields)
+                    : op[2] ?? {};
                   const { id: newId } = await this.persistence.create(opEntityType, createData);
                   batchResults.push({ ...createData, action: 'create', entityType: opEntityType, id: newId });
                   completed.push({ action: 'create', entityType: opEntityType, id: newId });
                   break;
                 }
                 case 'update': {
-                  const updateId = opRest[0] as string;
+                  const updateId = op[2];
                   const updateIntrinsicFields = this.intrinsicFieldNames(registered, opEntityType);
                   const updateData = updateIntrinsicFields.length > 0
-                    ? omitFrameFields((opRest[1] as EntityRow) || {}, updateIntrinsicFields)
-                    : (opRest[1] as EntityRow) || {};
+                    ? omitFrameFields(op[3] ?? {}, updateIntrinsicFields)
+                    : op[3] ?? {};
                   await this.persistence.update(opEntityType, updateId, updateData);
                   const updated = await this.persistence.getById(opEntityType, updateId);
                   batchResults.push({ ...(updated || updateData), action: 'update', entityType: opEntityType, id: updateId });
@@ -2796,7 +2741,7 @@ export class OrbitalServerRuntime {
                   break;
                 }
                 case 'delete': {
-                  const deleteId = opRest[0] as string;
+                  const deleteId = op[2];
                   // Snapshot before delete for potential rollback info
                   await this.persistence.delete(opEntityType, deleteId);
                   batchResults.push({ action: 'delete', entityType: opEntityType, id: deleteId, deleted: true });
@@ -3202,7 +3147,7 @@ export class OrbitalServerRuntime {
           const current = await this.persistence.getById(swapEntityType, swapEntityId);
           if (!current) {
             effectResults.push({
-              effect: 'swap',
+              effect: 'swap!',
               entityType: swapEntityType,
               success: false,
               error: `Entity ${swapEntityType}/${swapEntityId} not found`,
@@ -3236,7 +3181,7 @@ export class OrbitalServerRuntime {
             newData = { ...current, ...(transform as EntityRow) };
           } else {
             effectResults.push({
-              effect: 'swap',
+              effect: 'swap!',
               entityType: swapEntityType,
               success: false,
               error: 'swap! transform must be an S-expression or object',
@@ -3248,7 +3193,7 @@ export class OrbitalServerRuntime {
           await this.persistence.update(swapEntityType, swapEntityId, newData);
 
           effectResults.push({
-            effect: 'swap',
+            effect: 'swap!',
             entityType: swapEntityType,
             data: { id: swapEntityId, ...newData },
             success: true,
@@ -3257,7 +3202,7 @@ export class OrbitalServerRuntime {
           return newData;
         } catch (error) {
           effectResults.push({
-            effect: 'swap',
+            effect: 'swap!',
             entityType: swapEntityType,
             success: false,
             error: error instanceof Error ? error.message : String(error),
@@ -3475,12 +3420,7 @@ export class OrbitalServerRuntime {
       const resolved: Record<string, TraitConfigValue> = {};
       for (const [key, value] of Object.entries(bindings.config)) {
         if (typeof value === 'string' && USER_FORWARD.test(value)) {
-          let cur: unknown = user;
-          for (const seg of value.slice('@user.'.length).split('.')) {
-            cur = cur !== null && typeof cur === 'object'
-              ? (cur as EventPayload)[seg]
-              : undefined;
-          }
+          const cur = getNestedValue(user, value.slice('@user.'.length));
           resolved[key] =
             typeof cur === 'string' || typeof cur === 'number' || typeof cur === 'boolean'
               ? cur
@@ -3713,7 +3653,7 @@ export class OrbitalServerRuntime {
           if (typeof value === 'string') {
             data[fieldName] = [value];
           } else if (Array.isArray(value)) {
-            const nonStrings = value.filter((v: unknown) => typeof v !== 'string');
+            const nonStrings = value.filter((v) => typeof v !== 'string');
             if (nonStrings.length > 0) {
               throw new Error(
                 `Cardinality violation: ${entityType}.${fieldName} has cardinality '${cardinality}' but array contains non-string values.`
@@ -3787,7 +3727,7 @@ export class OrbitalServerRuntime {
                 const update: EntityRow = {};
                 const fkValue = record[fieldName];
                 if (Array.isArray(fkValue)) {
-                  update[fieldName] = fkValue.filter((id: unknown) => id !== deletedId);
+                  update[fieldName] = fkValue.filter((id) => id !== deletedId);
                 } else {
                   update[fieldName] = null;
                 }

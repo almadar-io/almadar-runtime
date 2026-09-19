@@ -14,6 +14,13 @@
  */
 
 import type { EntityAccessPolicies, EventPayload, SExpr, ServiceParams, RuntimeValue } from "@almadar/core";
+import { isPersistBatchOperation } from "@almadar/core";
+// Single upstream owner (`@almadar/core`'s `types/effect-result.ts`) —
+// promoted from this file (the JS interpreter's own definition, canonical
+// per CLAUDE.md's "converge on the TypeScript implementation" ruling).
+// Re-exported here so every existing importer keeps working unchanged.
+import type { ServerBatchSummary, ServerEffectResult } from "@almadar/core";
+export type { ServerBatchSummary, ServerEffectResult } from "@almadar/core";
 import type { PersistenceAdapter } from "./PersistenceAdapter.js";
 // Type-only — erased before runtime (isolatedModules), so this does not pull
 // OrbitalServerRuntime's Express/Node code into this browser-safe module.
@@ -58,41 +65,8 @@ export interface ServerEffectEventBus {
   ): void;
 }
 
-/**
- * Result entry recorded for each effect invocation. Mirrors the server
- * runtime's `EffectResult`. Callers who want telemetry pass an array that
- * the factory appends to; otherwise it's unused.
- */
-export interface ServerBatchSummary {
-  operations: EntityRow[];
-  completedCount: number;
-  totalCount: number;
-}
-
-export interface ServerEffectResult {
-  effect:
-    | "set"
-    | "persist"
-    | "call-service"
-    | "fetch"
-    | "ref"
-    | "deref"
-    | "swap"
-    | "atomic";
-  action?: string;
-  entityType?: string;
-  /** Entity row for CRUD/set/swap, the batch summary for `persist batch`, the raw service result for `call-service`. */
-  data?: EntityRow | ServerBatchSummary | EventPayload | null;
-  success: boolean;
-  /**
-   * Set when a persist failed because an access policy rejected it or the
-   * write resolved no row key — mirrors `OrbitalServerRuntime.EffectResult`
-   * so the offline-preview and real-server persist paths report the same
-   * denial discriminator to the verification trace.
-   */
-  denied?: true;
-  error?: string;
-}
+// `ServerBatchSummary` / `ServerEffectResult` are owned by `@almadar/core`
+// (re-exported above).
 
 export interface CreateServerEffectHandlersOptions {
   /** Persistent store backing `fetch` / `persist` / `ref` / `deref` / `swap`. */
@@ -271,7 +245,7 @@ export function createServerEffectHandlers(
 
     persist: async (action, targetEntityType, data) => {
       if (action === "batch") {
-        const operations = (data as { operations?: unknown[] } | undefined)?.operations;
+        const operations = data?.operations;
         if (!Array.isArray(operations) || operations.length === 0) {
           record({
             effect: "persist",
@@ -282,24 +256,22 @@ export function createServerEffectHandlers(
           return;
         }
         const batchResults: EntityRow[] = [];
-        const completed: unknown[] = [];
+        const completed: Array<{ action: string; entityType: string; id?: string }> = [];
         let batchFailed = false;
         let batchError = "";
-        for (const op of operations) {
-          if (!Array.isArray(op) || op.length < 2) {
+        const ops: readonly RuntimeValue[] = operations;
+        for (const op of ops) {
+          if (!isPersistBatchOperation(op)) {
             batchFailed = true;
             batchError = `Invalid batch operation format: ${JSON.stringify(op)}`;
             break;
           }
-          const [opAction, opEntityType, ...opRest] = op as [
-            string,
-            string,
-            ...unknown[],
-          ];
+          const opAction = op[0];
+          const opEntityType = op[1];
           try {
-            switch (opAction) {
+            switch (op[0]) {
               case "create": {
-                const createData = (opRest[0] as EntityRow) || ({} as EntityRow);
+                const createData = op[2] ?? {};
                 const { id: newId } = await persistence.create(
                   opEntityType,
                   createData,
@@ -318,8 +290,8 @@ export function createServerEffectHandlers(
                 break;
               }
               case "update": {
-                const updateId = opRest[0] as string;
-                const updateData = (opRest[1] as EntityRow) || ({} as EntityRow);
+                const updateId = op[2];
+                const updateData = op[3] ?? {};
                 await persistence.update(opEntityType, updateId, updateData);
                 const updated = await persistence.getById(opEntityType, updateId);
                 batchResults.push({
@@ -336,7 +308,7 @@ export function createServerEffectHandlers(
                 break;
               }
               case "delete": {
-                const deleteId = opRest[0] as string;
+                const deleteId = op[2];
                 await persistence.delete(opEntityType, deleteId);
                 batchResults.push({
                   action: "delete",
@@ -713,7 +685,7 @@ export function createServerEffectHandlers(
         const current = await persistence.getById(swapEntityType, swapEntityId);
         if (!current) {
           record({
-            effect: "swap",
+            effect: "swap!",
             entityType: swapEntityType,
             success: false,
             error: `Entity ${swapEntityType}/${swapEntityId} not found`,
@@ -740,7 +712,7 @@ export function createServerEffectHandlers(
           newData = { ...current, ...transform };
         } else {
           record({
-            effect: "swap",
+            effect: "swap!",
             entityType: swapEntityType,
             success: false,
             error: "swap! transform must be an S-expression or object",
@@ -749,7 +721,7 @@ export function createServerEffectHandlers(
         }
         await persistence.update(swapEntityType, swapEntityId, newData);
         record({
-          effect: "swap",
+          effect: "swap!",
           entityType: swapEntityType,
           data: { id: swapEntityId, ...newData },
           success: true,
@@ -757,7 +729,7 @@ export function createServerEffectHandlers(
         return newData;
       } catch (err) {
         record({
-          effect: "swap",
+          effect: "swap!",
           entityType: swapEntityType,
           success: false,
           error: err instanceof Error ? err.message : String(err),

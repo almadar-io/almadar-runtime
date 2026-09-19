@@ -20,7 +20,9 @@ import type {
 import { HANDLER_MANIFEST } from './types.js';
 import { interpolateValue, createContextFromBindings, deferEntityBindings } from './BindingResolver.js';
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
-import { omitFrameFields } from '@almadar/core';
+import { omitFrameFields,
+    isPersistBatchOperation,
+} from '@almadar/core';
 import { RESERVED_FIELD_NAMES } from '@almadar/core/mock';
 import type { FieldValue, SExpr, Orbital, TraitConfig, RuntimeValue, EntityField } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
@@ -906,18 +908,19 @@ export class EffectExecutor {
                         // strip as the single-op path below; every create
                         // operand gets the same required-column check too.
                         const requiredMissing: { entityType: string; missing: string[] }[] = [];
-                        const operations = (args[1] as unknown[]).map((op) => {
-                            if (!Array.isArray(op) || op.length < 2) return op;
-                            const [opAction, opEntityType, ...opRest] = op as [string, string, ...unknown[]];
-                            if (opAction === 'create') {
-                                const stripped = this.stripFrameFields(opEntityType, opRest[0] as EntityRow | undefined);
-                                const missing = this.missingRequiredFields(opEntityType, stripped);
-                                if (missing.length > 0) requiredMissing.push({ entityType: opEntityType, missing });
-                                return [opAction, opEntityType, stripped, ...opRest.slice(1)];
+                        // A non-conforming op passes through untouched so the
+                        // handler reports it (`Invalid batch operation format`).
+                        const rawOps: readonly RuntimeValue[] = Array.isArray(args[1]) ? args[1] : [];
+                        const operations = rawOps.map((op): RuntimeValue => {
+                            if (!isPersistBatchOperation(op)) return op;
+                            if (op[0] === 'create') {
+                                const stripped = this.stripFrameFields(op[1], op[2]);
+                                const missing = this.missingRequiredFields(op[1], stripped);
+                                if (missing.length > 0) requiredMissing.push({ entityType: op[1], missing });
+                                return ['create', op[1], stripped];
                             }
-                            if (opAction === 'update') {
-                                const stripped = this.stripFrameFields(opEntityType, opRest[1] as EntityRow | undefined);
-                                return [opAction, opEntityType, opRest[0], stripped, ...opRest.slice(2)];
+                            if (op[0] === 'update') {
+                                return ['update', op[1], op[2], this.stripFrameFields(op[1], op[3])];
                             }
                             return op;
                         });
