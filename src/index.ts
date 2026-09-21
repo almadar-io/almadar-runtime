@@ -110,6 +110,7 @@ export {
 // EffectExecutor
 export {
   EffectExecutor,
+  clientResolvesRenderBindings,
   createTestExecutor,
   type EffectExecutorOptions,
 } from "./EffectExecutor.js";

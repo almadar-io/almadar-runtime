@@ -22,9 +22,10 @@ import { interpolateValue, createContextFromBindings, deferEntityBindings } from
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
 import { omitFrameFields,
     isPersistBatchOperation,
+    isRuntimeEntity,
 } from '@almadar/core';
 import { RESERVED_FIELD_NAMES } from '@almadar/core/mock';
-import type { FieldValue, SExpr, Orbital, TraitConfig, RuntimeValue, EntityField } from '@almadar/core';
+import type { FieldValue, SExpr, Orbital, TraitConfig, RuntimeValue, EntityField, Entity } from '@almadar/core';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
 import type { SExpressionEvaluator } from '@almadar/evaluator';
 import { SExpressionEvaluator as EvaluatorInstance } from '@almadar/evaluator';
@@ -193,6 +194,22 @@ function interpolateFilterTraitRefs(value: SExpr, ctx: ReturnType<typeof createC
  * ]);
  * ```
  */
+/**
+ * Whether render-ui `@entity` leaves for a trait bound to `entity` are the
+ * CLIENT's to resolve — carried as `RenderBindingMarker`s (`deferRenderBindings`)
+ * and evaluated against the client's live frame on every render — rather
+ * than resolved eagerly by a server. True for a `[runtime]` entity (the
+ * client's local writes and ticks own the row; a server-evaluated literal
+ * would clobber them) and for a `[shared]` entity regardless of persistence
+ * (one live frame across its bound traits is client-held by contract); an
+ * unbound trait has no server row to resolve against. Persistent, non-shared
+ * entities stay server-resolved: their `@entity` merges persistence rows the
+ * client does not hold. The ONE rule every server on the event wire applies.
+ */
+export function clientResolvesRenderBindings(entity: Entity | undefined): boolean {
+    return entity === undefined || isRuntimeEntity(entity) || entity.shared === true;
+}
+
 export class EffectExecutor {
     private handlers: EffectHandlers;
     private bindings: BindingContext;
