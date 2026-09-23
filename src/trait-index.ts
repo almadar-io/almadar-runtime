@@ -64,6 +64,10 @@ export interface TraitIndex {
   byName: Map<string, IndexedTrait>;
   /** Every orbital's primary + auxiliary entities (persistence routing, entity lookups). */
   allEntities: Entity[];
+  /** The source orbitals with their resolved primary entities — the
+   *  `registeredOrbitals` view the effect stage's relation/entity-def
+   *  walks consume. */
+  orbitals: Array<{ schema: OrbitalDefinition; entity: Entity }>;
 }
 
 /**
@@ -76,6 +80,7 @@ export interface TraitIndex {
 export function buildTraitIndex(orbitals: readonly OrbitalDefinition[]): TraitIndex {
   const parsed = orbitals.map((orbital) => ({ orbital, parsed: parseOrbitalTraits(orbital) }));
   const allEntities = parsed.flatMap(({ orbital }) => orbitalInlineEntities(orbital));
+  const orbitalsView = parsed.map(({ orbital, parsed: p }) => ({ schema: orbital, entity: p.entity }));
   const byName = new Map<string, IndexedTrait>();
 
   for (const { orbital, parsed: p } of parsed) {
@@ -122,7 +127,7 @@ export function buildTraitIndex(orbitals: readonly OrbitalDefinition[]): TraitIn
       });
     }
   }
-  return { byName, allEntities };
+  return { byName, allEntities, orbitals: orbitalsView };
 }
 
 /**
@@ -144,5 +149,5 @@ export function buildTraitIndexForOrbital(
   for (const [name, entry] of full.byName) {
     if (hostNames.has(name)) byName.set(name, entry);
   }
-  return { byName, allEntities: full.allEntities };
+  return { byName, allEntities: full.allEntities, orbitals: full.orbitals };
 }

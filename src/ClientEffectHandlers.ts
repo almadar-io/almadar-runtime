@@ -8,8 +8,8 @@
  */
 
 import { createLogger } from '@almadar/logger';
-import type { PatternConfig } from '@almadar/core';
-import type { EffectHandlers, EventPayload, PatternProps, BrowserFilePickerOptions, BrowserGeolocationOptions } from './types.js';
+import type { PatternConfig, BusEventSource, FieldValue } from '@almadar/core';
+import type { EffectHandlers, EventPayload, EntityRow, ServiceParams, PatternProps, BrowserFilePickerOptions, BrowserGeolocationOptions } from './types.js';
 
 const log = createLogger('almadar:runtime:effects:client');
 
@@ -21,7 +21,11 @@ const log = createLogger('almadar:runtime:effects:client');
  * Minimal event bus interface required by the factory.
  */
 export interface ClientEventBus {
-    emit: (type: string, payload?: EventPayload) => void;
+    /** `source` is `EffectExecutor.sourceStamp()` ({orbital, trait, transition,
+     * …ids}) — forwarded so the bus can tell a machine-originated emit (bare
+     * key by design, delivered via manager/bare-cascade) from a component
+     * emit missing its TraitScopeProvider. */
+    emit: (type: string, payload?: EventPayload, source?: BusEventSource) => void;
 }
 
 /**
@@ -30,7 +34,7 @@ export interface ClientEventBus {
  */
 export interface SlotSetter {
     /** Accumulate a pattern into the pending slot map */
-    addPattern: (slot: string, pattern: PatternConfig, props?: PatternProps) => void;
+    addPattern: (slot: string, pattern: PatternConfig | null, props?: PatternProps) => void;
     /** Mark a slot for clearing */
     clearSlot: (slot: string) => void;
 }
@@ -49,6 +53,42 @@ export interface CreateClientEffectHandlersOptions {
     navigate?: (path: string, params?: { [key: string]: string }, crumb?: string) => void;
     /** Navigate-back function: pop the orbital-scoped navigation stack. */
     navigateBack?: () => void;
+    /**
+     * Live client-entity write target for `[runtime]` entities. `(set
+     * @entity.<field> value)` runs entirely in the browser for in-memory
+     * entities (game boards, wizards): there is no server row to persist to,
+     * so the canonical client `set` must mutate THIS object — the same object
+     * `EffectExecutor` reads `@entity.*` from for the current `executeAll` and
+     * the next tick seeds from. When omitted, `set` is a no-op (bridge mode:
+     * the server owns persistence). One store, read live by render-ui, guards,
+     * and ticks — no guard-vs-render split.
+     */
+    liveEntity?: EntityRow;
+    /**
+     * Bridge mode — no local persistence adapter is wired, so the SERVER
+     * executes every persist and returns its outcome. Sets
+     * `EffectHandlers.persistDelegated` so the executor skips the placeholder
+     * `persist` below instead of reading its `undefined` as a denial
+     * (an error in every browser console + a client-side `failure` emit
+     * while the server had succeeded). The hook decides this from whether a
+     * `persistence` adapter was supplied — `liveEntity` says nothing about
+     * it (the hook always binds one for `(set @entity.X)`).
+     */
+    persistDelegated?: boolean;
+    /** Same bridge-mode delegation as `persistDelegated`, for `(call-service …)`: set when no consumer `callService` is wired, so the executor skips the mock fallback below and the server's cascade carries the result. */
+    callServiceDelegated?: boolean;
+    /**
+     * Optional consumer-supplied call-service handler. When set, it runs
+     * instead of the default mock fallback — use to wire the playground
+     * to real backends. When omitted, `callService` returns a synthetic
+     * mock result so service-atom chains advance end-to-end in offline /
+     * standalone-preview mode (see OrbitalServerRuntime's mock parallel).
+     */
+    callService?: (
+        service: string,
+        action: string,
+        params?: ServiceParams
+    ) => Promise<EventPayload>;
     /**
      * Send-server handler for `send-server` effects.
      * When omitted, defaults to a lazy WebSocket transport connecting to the
@@ -138,8 +178,12 @@ function sendServerEvent(orbital: string, event: string, payload?: EventPayload)
 /**
  * Create client-side effect handlers for trait state machine execution.
  *
- * Client handles: emit, renderUI, navigate, sendServer
- * Server handles: persist, set, callService (logged as warnings on client)
+ * Client handles: emit, renderUI, navigate, sendServer, set (when a
+ * `liveEntity` is wired), callService (mock fallback or consumer-supplied).
+ * Bridge mode (no `liveEntity` / no consumer `callService`): `persist`/`set`
+ * are no-ops and `persistDelegated`/`callServiceDelegated` tell the executor
+ * the SERVER already carried the write, so it never reads the local no-op as
+ * a denial.
  *
  * @example
  * ```ts
@@ -156,32 +200,72 @@ function sendServerEvent(orbital: string, event: string, payload?: EventPayload)
 export function createClientEffectHandlers(
     options: CreateClientEffectHandlersOptions
 ): EffectHandlers {
-    const { eventBus, slotSetter, navigate, navigateBack, sendServer, orbitalName = '' } = options;
+    const {
+        eventBus, slotSetter, navigate, navigateBack, sendServer, orbitalName = '',
+        callService: consumerCallService, liveEntity, persistDelegated, callServiceDelegated,
+    } = options;
 
     return {
-        emit: (event: string, payload?: EventPayload) => {
-            // The event bus emits with shape `{ type, payload, source }` per
-            // IEventBus. Subscribers read `event.payload` to get the trait-
-            // supplied payload. Wrapping it again as `{ payload }` here
-            // produced a doubly-nested envelope — `@payload.X` bindings on
-            // the receiving render-ui then resolved to `undefined` because
-            // the real keys lived one level deeper. Pass the payload through
-            // directly so the subscriber sees exactly what the trait emitted.
+        emit: (event: string, payload?: EventPayload, source?: BusEventSource) => {
+            // The event bus wraps its second arg AS the event's `payload`
+            // field (see IEventBus contract). Double-wrapping as `{ payload }`
+            // here made subscribers see `event.payload = { payload: realPayload }`,
+            // and `@payload.X` binding resolution failed (one level too deep).
+            // Pass the caller's payload through directly.
             const prefixedEvent = event.startsWith('UI:') ? event : `UI:${event}`;
-            eventBus.emit(prefixedEvent, payload);
+            eventBus.emit(prefixedEvent, payload, source);
         },
 
         persist: async () => {
-            log.warn('persist-server-side-only');
+            log.debug('persist is server-side only, ignored on client');
+            return undefined;
+        },
+        // Bridge mode: the server runs every persist and the response
+        // carries its outcome — tell the executor so the placeholder above is
+        // never read as a denial (see `EffectHandlers.persistDelegated`).
+        ...(persistDelegated === true ? { persistDelegated: true as const } : {}),
+        ...(callServiceDelegated === true ? { callServiceDelegated: true as const } : {}),
+
+        // `[runtime]` entities live only in the browser — `(set @entity.X)`
+        // must land in the live client store so the same `executeAll`'s
+        // render-ui, the next tick, and guards all read the advanced value.
+        // Without a `liveEntity` we are in bridge mode (server persists),
+        // so the write is a no-op here.
+        set: (_entityId: string, field: string, value: FieldValue) => {
+            if (!liveEntity) {
+                log.warn('set is server-side only, ignored on client (no live entity)');
+                return;
+            }
+            liveEntity[field] = value;
         },
 
-        set: () => {
-            log.warn('set-server-side-only');
-        },
-
-        callService: async () => {
-            log.warn('call-service-server-side-only');
-            return {};
+        callService: async (service: string, action: string, params?: ServiceParams) => {
+            // Consumer-supplied handler wins — playgrounds wire real backends here.
+            if (consumerCallService) return consumerCallService(service, action, params);
+            // Mock fallback: return a synthetic result that satisfies common
+            // service-atom emit shapes (id, clientSecret, success, status,
+            // params-echo). Mirrors OrbitalServerRuntime's mock-mode default
+            // so client-side state machines (offline preview, runtime-verify
+            // standalone) advance instead of stalling at null payloads. The
+            // server-side parallel exists for bridge mode where the SERVER
+            // processes call-service; this branch is the same intent for
+            // browser-only execution.
+            const mockId = `mock_${service}_${action}_${Math.random().toString(36).slice(2, 10)}`;
+            const paramsEcho: Partial<EntityRow> = {};
+            if (params) {
+                for (const [k, v] of Object.entries(params)) {
+                    if (v !== undefined && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null || v instanceof Date)) {
+                        paramsEcho[k] = v;
+                    }
+                }
+            }
+            return {
+                id: mockId,
+                clientSecret: `secret_${mockId}`,
+                success: true,
+                status: 'succeeded',
+                ...paramsEcho,
+            };
         },
 
         renderUI: (slot: string, pattern: PatternConfig | null, props?: PatternProps) => {

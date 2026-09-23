@@ -124,6 +124,31 @@ export {
   type StampEmitIdentity,
 } from "./emit-stamp.js";
 
+// evaluateOrbitalEvent — THE event-evaluation composition, one owner for
+// every server-side execution path (stateful sessions vs stateless
+// per-request evaluations differ only in the deps supplied).
+export {
+  evaluateOrbitalEvent,
+  type EvaluateOrbitalEventDeps,
+  type EvaluateEffectRunner,
+} from "./evaluateOrbitalEvent.js";
+
+// stage-runner — the TraitIndex → effect-stage bridge for index-based
+// hosts (stateless per-request, embedded/headless).
+export {
+  createIndexStageRunner,
+  type IndexStageRunnerOptions,
+} from "./stage-runner.js";
+
+// effect-stage — the server effect-execution stage extracted from
+// OrbitalServerRuntime.executeEffects (behavior-identical move); the
+// stateless/stateful composition lands on top of it next.
+export {
+  runServerEffectStage,
+  type ServerEffectStageDeps,
+  type ServerEffectStageArgs,
+} from "./effect-stage.js";
+
 // EffectExecutor
 export {
   EffectExecutor,

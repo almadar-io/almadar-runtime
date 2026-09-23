@@ -33,6 +33,8 @@
 
 import { createLogger } from '@almadar/logger';
 import type { IEventBus, RuntimeEvent, EventPayload } from "./types.js";
+import { createHttpTransport, type EventTransport } from "./EventTransport.js";
+import type { EmittedEvent, OrbitalEventRequest } from "@almadar/core";
 
 const log = createLogger('almadar:runtime:server-bridge');
 
@@ -86,6 +88,8 @@ export class ServerBridge {
   private pollTimer?: ReturnType<typeof setInterval>;
   private ws?: WebSocket;
   private fetchFn: typeof fetch;
+  /** The one HTTP request/response leg — shared with `@almadar/ui`'s transport (P5, EventTransport.ts). */
+  private transport: EventTransport;
 
   constructor(config: ServerBridgeConfig) {
     this.config = {
@@ -93,6 +97,7 @@ export class ServerBridge {
       ...config,
     };
     this.fetchFn = config.fetch || fetch.bind(globalThis);
+    this.transport = createHttpTransport({ serverUrl: config.serverUrl, fetch: this.fetchFn });
   }
 
   // ==========================================================================
@@ -227,25 +232,8 @@ export class ServerBridge {
     orbitalName: string,
     event: RuntimeEvent,
   ): Promise<void> {
-    const { serverUrl } = this.config;
-    const url = `${serverUrl}/${orbitalName}/events`;
-
-    const response = await this.fetchFn(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        event: event.type,
-        payload: event.payload,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Server returned ${response.status}`);
-    }
-
-    const result = (await response.json()) as {
-      emittedEvents?: Array<{ event: string; payload?: EventPayload }>;
-    };
+    const request: OrbitalEventRequest = { event: event.type, payload: event.payload };
+    const result = await this.transport.send(orbitalName, request);
 
     // If server emitted events, put them on client EventBus
     if (result.emittedEvents && result.emittedEvents.length > 0) {
@@ -337,24 +325,16 @@ export class ServerBridge {
   ): Promise<{
     success: boolean;
     states?: Record<string, string>;
-    emittedEvents?: Array<{ event: string; payload?: unknown }>;
+    emittedEvents?: EmittedEvent[];
     error?: string;
   }> {
-    const { serverUrl } = this.config;
-    const url = `${serverUrl}/${orbitalName}/events`;
-
     try {
-      const response = await this.fetchFn(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ event, payload }),
-      });
-
-      return (await response.json()) as {
-        success: boolean;
-        states?: Record<string, string>;
-        emittedEvents?: Array<{ event: string; payload?: unknown }>;
-        error?: string;
+      const result = await this.transport.send(orbitalName, { event, payload });
+      return {
+        success: result.success,
+        states: result.states,
+        emittedEvents: result.emittedEvents,
+        error: result.error,
       };
     } catch (error) {
       return { success: false, error: String(error) };
