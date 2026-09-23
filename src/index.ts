@@ -107,6 +107,23 @@ export {
   type RouteSourceMeta,
 } from "./identity/routing.js";
 
+// trait-index — the ONE per-trait evaluation index builder (resolved
+// linkedEntity, merged config, frame keys, V4 ids) shared by the unified
+// `evaluateOrbitalEvent` composition's stateful and stateless callers.
+export {
+  buildTraitIndex,
+  buildTraitIndexForOrbital,
+  type IndexedTrait,
+  type TraitIndex,
+} from "./trait-index.js";
+
+// emit-stamp — the ONE emit-source stamper (V4 identity triple +
+// originClientId); G-RUNTIME-030's hole stays closed by having one owner.
+export {
+  stampEmitSource,
+  type StampEmitIdentity,
+} from "./emit-stamp.js";
+
 // EffectExecutor
 export {
   EffectExecutor,

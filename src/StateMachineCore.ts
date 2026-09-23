@@ -888,6 +888,68 @@ export class StateMachineManager {
         });
     }
 
+    /**
+     * Seed a trait's current state directly (upsert) — the per-request
+     * lifecycle hook: a stateless deployment replays the client's own
+     * round-tripped states into a fresh manager at request start, so
+     * `canHandleEvent`/`getState` see the client's truth without the
+     * server holding anything after the response. No-op for an
+     * unregistered trait (same contract as `getOrInitState`).
+     */
+    seedState(traitName: string, currentState: string, entityId?: string): void {
+        const trait = this.traits.get(traitName);
+        if (!trait) return;
+        const scope = entityId ?? SINGLETON_SCOPE;
+        const key = compositeKey(traitName, scope);
+        const existing = this.states.get(key);
+        this.states.set(key, {
+            ...createInitialTraitState(trait),
+            ...existing,
+            currentState,
+            previousState: existing?.currentState ?? null,
+        });
+    }
+
+    /**
+     * Commit a trait's final state (upsert) and notify the observer per
+     * executed hop — the commit half of a caller-driven cascade
+     * (`runTraitCascade`), replacing `sendEvent`'s built-in commit +
+     * observer notification for callers that drive the cascade themselves.
+     * `executedSteps` carries the cascade's per-hop from/to/event so the
+     * verification registry sees the same trace shape `sendEvent` emits.
+     */
+    commitState(
+        traitName: string,
+        currentState: string,
+        entityId: string | undefined,
+        lastEvent: string,
+        executedSteps?: ReadonlyArray<{ from: string; to: string; event: string; guardResult?: boolean }>
+    ): void {
+        const trait = this.traits.get(traitName);
+        if (!trait) return;
+        const scope = entityId ?? SINGLETON_SCOPE;
+        const key = compositeKey(traitName, scope);
+        const existing = this.states.get(key) ?? createInitialTraitState(trait);
+        this.states.set(key, {
+            ...existing,
+            previousState: existing.currentState,
+            currentState,
+            lastEvent: normalizeEventKey(lastEvent),
+        });
+        if (this.observer && executedSteps) {
+            for (const step of executedSteps) {
+                this.observer.onTransition({
+                    traitName,
+                    from: step.from,
+                    to: step.to,
+                    event: step.event,
+                    ...(step.guardResult !== undefined ? { guardResult: step.guardResult } : {}),
+                    effects: [],
+                });
+            }
+        }
+    }
+
     // ========================================================================
     // Actor-Model Queue API (opt-in, does not affect sendEvent)
     // ========================================================================
