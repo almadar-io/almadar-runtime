@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   mapBrowseSpecifier,
   ExternalOrbitalLoader,
-} from '../src/loader/external-loader.js';
+} from '../src/entities/loader/external-loader.js';
 
 // FC-3: the browse-form specifier the free-compose agent reads (`@std/…`,
 // `@behaviors/…`) must map deterministically to the canonical loader form,

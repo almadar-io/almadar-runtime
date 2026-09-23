@@ -13,13 +13,13 @@
  * @packageDocumentation
  */
 import type { EntityField, EntityRow, OrbitalSchema, TraitConfig } from '@almadar/core';
-import { runServerEffectStage, type DeliverEmit, type ServerEffectStageArgs } from './effect-stage.js';
-import { findEntityAmongOrbitals } from './OrbitalTraitParsing.js';
+import { runServerEffectStage, type DeliverEmit, type ServerEffectStageArgs } from '../effects/effect-stage.js';
+import { findEntityAmongOrbitals } from '../traits/OrbitalTraitParsing.js';
 import type { EvaluateEffectRunner } from './evaluateOrbitalEvent.js';
-import type { EffectHandlers } from './types.js';
-import type { PersistenceAdapter } from './PersistenceAdapter.js';
-import type { TraitIndex } from './trait-index.js';
-import type { StateMachineManager } from './StateMachineCore.js';
+import type { EffectHandlers } from '../types.js';
+import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
+import type { TraitIndex } from '../traits/trait-index.js';
+import type { StateMachineManager } from '../traits/StateMachineCore.js';
 
 export interface IndexStageRunnerOptions {
   traitIndex: TraitIndex;

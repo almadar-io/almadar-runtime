@@ -9,7 +9,7 @@
  */
 
 import type { PayloadField } from '@almadar/core';
-import type { TraitDefinition, EventPayload } from './types.js';
+import type { TraitDefinition, EventPayload } from '../types.js';
 import type { SExpr } from '@almadar/core';
 
 // ============================================================================

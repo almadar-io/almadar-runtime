@@ -19,8 +19,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { resolveSchema } from '../src/resolver/reference-resolver.js';
-import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
+import { resolveSchema } from '../src/entities/resolver/reference-resolver.js';
+import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 import type { Orbital, OrbitalSchema } from '@almadar/core';
 import { asEntityId } from '@almadar/core';
 

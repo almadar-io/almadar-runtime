@@ -3,7 +3,7 @@
  * linkedEntity resolution, config merge precedence, frame keys, V4 ids.
  */
 import { describe, it, expect } from 'vitest';
-import { buildTraitIndex, buildTraitIndexForOrbital } from '../src/trait-index.js';
+import { buildTraitIndex, buildTraitIndexForOrbital } from '../src/traits/trait-index.js';
 import type { OrbitalDefinition, Trait } from '@almadar/core';
 
 const trait = (name: string, extra: Partial<Trait> = {}): Trait =>

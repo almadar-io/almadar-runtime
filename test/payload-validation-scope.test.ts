@@ -19,7 +19,7 @@
  * (`StateMachineManager.canHandleEvent`).
  */
 import { describe, it, expect } from 'vitest';
-import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { asOrbitalId, asEntityId, asTraitId } from '@almadar/core';
 import type { OrbitalSchema, Trait } from '@almadar/core';
 

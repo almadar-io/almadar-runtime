@@ -15,7 +15,7 @@
  * write a shared slot.
  *
  * The walker is a structural twin of
- * `packages/almadar-runtime/src/resolver/reference-resolver.ts`'s
+ * `packages/almadar-runtime/src/entities/resolver/reference-resolver.ts`'s
  * `renameEventsInRenderUiConfig` — same recursive pattern shape, just
  * collecting `@trait.X` substrings instead of renaming events.
  *

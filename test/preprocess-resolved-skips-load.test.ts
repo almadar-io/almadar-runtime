@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { preprocessSchema } from '../src/UsesIntegration.js';
-import type { SchemaLoader, LoadResult, LoadedSchema, LoadedOrbital } from '../src/loader/schema-loader.js';
+import { preprocessSchema } from '../src/traits/UsesIntegration.js';
+import type { SchemaLoader, LoadResult, LoadedSchema, LoadedOrbital } from '../src/entities/loader/schema-loader.js';
 import type { OrbitalSchema } from '@almadar/core';
 
 // A schema produced by `orbital resolve` (the canonical Rust resolver) has every

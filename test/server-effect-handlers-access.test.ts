@@ -12,9 +12,9 @@
  * unrestricted behavior, which is what `@almadar/ui`'s OrbPreview does today.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { InMemoryPersistence } from '../src/PersistenceAdapter.js';
-import { createServerEffectHandlers, type ServerEffectResult } from '../src/ServerEffectHandlers.js';
-import { accessDeniedMessage } from '../src/entityAccess.js';
+import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { createServerEffectHandlers, type ServerEffectResult } from '../src/effects/ServerEffectHandlers.js';
+import { accessDeniedMessage } from '../src/entities/entityAccess.js';
 import type { EntityAccessPolicies, SExpr } from '@almadar/core';
 
 /** `assignee == @user.id` — the ownership-scoping shape helpdesk declares. */

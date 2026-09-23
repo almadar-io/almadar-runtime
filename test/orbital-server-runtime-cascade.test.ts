@@ -15,8 +15,8 @@
  * manager-backed path instead of the stateless per-request one.
  */
 import { describe, it, expect } from 'vitest';
-import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/PersistenceAdapter.js';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
+import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
 import type { OrbitalSchema, EventPayload } from '@almadar/core';
 
 function aggregatorSchema(): OrbitalSchema {

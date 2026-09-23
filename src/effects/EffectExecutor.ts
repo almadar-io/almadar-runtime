@@ -16,10 +16,11 @@ import type {
     ExecutionEnvironment,
     BrowserFilePickerOptions,
     BrowserGeolocationOptions,
-} from './types.js';
-import { HANDLER_MANIFEST } from './types.js';
-import { interpolateValue, createContextFromBindings, deferEntityBindings } from './BindingResolver.js';
-import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from './types.js';
+} from '../types.js';
+import { HANDLER_MANIFEST } from '../types.js';
+import type { EffectDelegate } from '../server-leg.js';
+import { interpolateValue, createContextFromBindings, deferEntityBindings } from '../evaluation/BindingResolver.js';
+import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from '../types.js';
 import { omitFrameFields,
     isPersistBatchOperation,
     isRuntimeEntity,
@@ -92,6 +93,24 @@ export interface EffectExecutorOptions {
      * writes verbatim exactly as before.
      */
     resolveEntityFields?: (entityType: string) => readonly EntityField[];
+    /**
+     * Client|Server twin of orbital-core's `RuntimeEnvironment` — governs
+     * whether `persist`/`fetch`/`call-service` execute locally (`'server'`,
+     * the default — matches every existing caller, none of which sets this)
+     * or route to `delegate` instead (`'client'`), mirroring `executor.rs`'s
+     * `do_persist`/`do_fetch`/`do_call_service` early-return on
+     * `environment.is_client()`. Independent of `ExecutionEnvironment`
+     * (`HANDLER_MANIFEST`'s broader client/server/test/ssr classification,
+     * used only for handler-manifest validation).
+     */
+    environment?: 'client' | 'server';
+    /**
+     * Cross-environment effect delegate — the JS twin of orbital-core's
+     * `KernelConfig.delegate` (`EffectExecutor::with_delegate`). Only
+     * consulted when `environment` is `'client'`; typically a
+     * `ServerLegCollector` (`./server-leg.js`).
+     */
+    delegate?: EffectDelegate;
 }
 
 // ============================================================================
@@ -221,6 +240,8 @@ export class EffectExecutor {
     private deferRenderBindings: boolean;
     private resolveIntrinsicFields?: (entityType: string) => readonly string[];
     private resolveEntityFields?: (entityType: string) => readonly EntityField[];
+    private environment: 'client' | 'server';
+    private delegate?: EffectDelegate;
 
     constructor(options: EffectExecutorOptions) {
         this.handlers = options.handlers;
@@ -233,6 +254,24 @@ export class EffectExecutor {
         this.deferRenderBindings = options.deferRenderBindings ?? false;
         this.resolveIntrinsicFields = options.resolveIntrinsicFields;
         this.resolveEntityFields = options.resolveEntityFields;
+        this.environment = options.environment ?? 'server';
+        this.delegate = options.delegate;
+    }
+
+    /**
+     * Route a server-only effect (`persist`/`fetch`/`call-service`) to the
+     * configured `delegate` instead of executing it locally — the twin of
+     * `executor.rs`'s `do_persist`/`do_fetch`/`do_call_service` early-return
+     * when `self.environment.is_client()`. Returns `true` when the caller
+     * must not also execute the effect (delegated, or silently dropped as
+     * server-only with no delegate configured — Rust's `noop` case).
+     * `environment` defaults to `'server'`, so this is a no-op for every
+     * existing caller — none of which set it.
+     */
+    private delegateIfClient(operator: string, args: RuntimeValue[]): boolean {
+        if (this.environment !== 'client') return false;
+        this.delegate?.delegate([operator, ...args], 'server');
+        return true;
     }
 
     /**
@@ -659,8 +698,8 @@ export class EffectExecutor {
     }
 
     /** Build the source metadata stamp for an emit fired from this trait. */
-    private sourceStamp(event?: string): import('./types.js').RuntimeEvent['source'] {
-        const stamp: import('./types.js').RuntimeEvent['source'] = {
+    private sourceStamp(event?: string): import('../types.js').RuntimeEvent['source'] {
+        const stamp: import('../types.js').RuntimeEvent['source'] = {
             orbital: this.context.orbitalName,
             trait: this.context.traitName,
             transition: this.context.transition,
@@ -711,7 +750,7 @@ export class EffectExecutor {
      */
     private osEmit(
         emit: EmitConfig | undefined,
-    ): import('./types.js').OsEmitConfig | undefined {
+    ): import('../types.js').OsEmitConfig | undefined {
         if (!emit || (!emit.on_message && !emit.failure)) return undefined;
         return {
             on_message: emit.on_message,
@@ -913,6 +952,20 @@ export class EffectExecutor {
                     success: emitCfg?.success,
                     failure: emitCfg?.failure,
                 });
+                // Client-role environment (`options.environment === 'client'`):
+                // route to `options.delegate` instead of executing — the twin
+                // of `executor.rs`'s `do_persist` client branch. Checked before
+                // the legacy bridge flag below so a caller setting BOTH gets
+                // leg collection, never a silent drop.
+                if (this.delegateIfClient('persist', args)) {
+                    persistLog.debug('persist:delegated-to-server-leg', {
+                        action,
+                        entityType: action === 'batch' ? 'batch' : String(args[1]),
+                        traitName: this.context.traitName,
+                        transition: this.context.transition,
+                    });
+                    return;
+                }
                 // Bridge mode (`EffectHandlers.persistDelegated`): the server
                 // runs this persist and reports its outcome in the response;
                 // the client's handler is a placeholder. Reading its `undefined`
@@ -1080,6 +1133,12 @@ export class EffectExecutor {
                 const params = args[2] as ServiceParams | undefined;
                 // Optional trailing options object carrying `emit:` at args[3].
                 const emitCfg = this.extractEmitConfig(args[3]);
+                // Client-role environment: route to `options.delegate` instead
+                // of calling the handler — see the `persist` case above.
+                if (this.delegateIfClient('call-service', args)) {
+                    effectLog.debug('call-service:delegated-to-server-leg', { service, action, traitName: this.context.traitName, transition: this.context.transition });
+                    break;
+                }
                 // Bridge mode (`EffectHandlers.callServiceDelegated`): the server
                 // already ran this call-service and its cascade carries the
                 // result — no local call, no local emit (mirrors `persistDelegated`).
@@ -1102,6 +1161,15 @@ export class EffectExecutor {
             }
 
             case 'fetch': {
+                // Client-role environment: route to `options.delegate` instead
+                // of calling the handler — see the `persist` case above.
+                // Checked before the `handlers.fetch` presence check, mirroring
+                // `executor.rs`'s `do_fetch`, which gates on environment before
+                // consulting `self.fetch_handler`.
+                if (this.delegateIfClient('fetch', args)) {
+                    effectLog.debug('fetch:delegated-to-server-leg', { entityType: String(args[0]), traitName: this.context.traitName, transition: this.context.transition });
+                    break;
+                }
                 if (this.handlers.fetch) {
                     const entityType = args[0] as string;
                     const rawOpt = args[1];

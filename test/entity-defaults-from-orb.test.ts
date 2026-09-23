@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { collectDeclaredEntityDefaults } from '../src/config-defaults.js';
+import { collectDeclaredEntityDefaults } from '../src/traits/config-defaults.js';
 import type { Entity } from '@almadar/core';
 
 function resolveStdRegistry(): string {

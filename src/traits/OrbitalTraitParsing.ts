@@ -19,7 +19,7 @@ import {
   type Trait,
   type TraitConfig,
 } from "@almadar/core";
-import type { TraitDefinition } from "./types.js";
+import type { TraitDefinition } from "../types.js";
 
 export interface ParsedOrbitalTraits {
   /** Inline (unwrapped) traits, ready for `processEvent`. */

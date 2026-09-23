@@ -9,9 +9,9 @@
  * effect pipeline.
  */
 import { describe, it, expect } from 'vitest';
-import { InMemoryPersistence } from '../src/PersistenceAdapter.js';
-import { createServerEffectHandlers } from '../src/ServerEffectHandlers.js';
-import { EffectExecutor } from '../src/EffectExecutor.js';
+import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { createServerEffectHandlers } from '../src/effects/ServerEffectHandlers.js';
+import { EffectExecutor } from '../src/effects/EffectExecutor.js';
 import type { BindingContext, EffectContext } from '../src/types.js';
 
 const FETCH_EFFECT: unknown[] = [

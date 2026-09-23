@@ -15,9 +15,9 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
-import { preprocessSchema } from '../src/UsesIntegration.js';
-import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
+import { ReferenceResolver } from '../src/entities/resolver/reference-resolver.js';
+import { preprocessSchema } from '../src/traits/UsesIntegration.js';
+import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 import type { Orbital, OrbitalDefinition, OrbitalSchema, Event, TraitRef } from '@almadar/core';
 import { asEntityId } from '@almadar/core';
 

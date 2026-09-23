@@ -3,7 +3,7 @@
  * every path fills the V4 triple identically, never overwrites).
  */
 import { describe, it, expect } from 'vitest';
-import { stampEmitSource } from '../src/emit-stamp.js';
+import { stampEmitSource } from '../src/events/emit-stamp.js';
 import type { BusEventSource } from '@almadar/core';
 
 describe('stampEmitSource', () => {

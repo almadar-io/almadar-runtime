@@ -19,9 +19,9 @@ import type {
     EventPayload,
     ConfigContext,
     EvaluationContextExtensions,
-} from './types.js';
+} from '../types.js';
 import type { EventId, UserContext } from '@almadar/core';
-import { interpolateValue, createContextFromBindings } from './BindingResolver.js';
+import { interpolateValue, createContextFromBindings } from '../evaluation/BindingResolver.js';
 import { evaluateGuard } from '@almadar/evaluator';
 import { createLogger } from '@almadar/logger';
 

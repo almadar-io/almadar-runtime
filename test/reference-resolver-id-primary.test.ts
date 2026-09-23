@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
-import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
+import { ReferenceResolver } from '../src/entities/resolver/reference-resolver.js';
+import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 import type { OrbitalDefinition, Orbital, TraitId, TraitReference } from '@almadar/core';
 
 // W3b/W3c-JS: the id->node index must let a trait ref carrying a valid

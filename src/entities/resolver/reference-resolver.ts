@@ -79,7 +79,7 @@ import type {
   ImportChainLike,
 } from "../loader/schema-loader.js";
 import { createLogger } from '@almadar/logger';
-import { spliceLambdaTraitRefs, LambdaSpliceError } from "../ui/splice-lambda-traits.js";
+import { spliceLambdaTraitRefs, LambdaSpliceError } from "../../ui/splice-lambda-traits.js";
 import { resolveOrbitalTypeParamSentinels } from "./sentinel-resolution.js";
 
 const refResolverLog = createLogger("almadar:runtime:ref-resolver");

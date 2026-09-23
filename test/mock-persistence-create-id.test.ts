@@ -8,7 +8,7 @@
  * minted id.
  */
 import { describe, it, expect } from 'vitest';
-import { MockPersistenceAdapter } from '../src/MockPersistenceAdapter.js';
+import { MockPersistenceAdapter } from '../src/entities/MockPersistenceAdapter.js';
 
 describe('MockPersistenceAdapter.create — id contract', () => {
     it('keeps an explicit data.id and the row is retrievable via getById', async () => {

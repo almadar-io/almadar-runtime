@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
+import { ReferenceResolver } from '../src/entities/resolver/reference-resolver.js';
 import type {
   OrbitalDefinition,
   Trait,

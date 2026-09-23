@@ -11,7 +11,7 @@
  * show raw foreign ids ("Staff Id 1").
  */
 import { describe, it, expect } from 'vitest';
-import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/OrbitalServerRuntime.js';
+import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/server/OrbitalServerRuntime.js';
 import type { OrbitalSchema, RuntimeValue } from '@almadar/core';
 
 function relationSchema(): OrbitalSchema {

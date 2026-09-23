@@ -10,8 +10,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { deferEntityBindings, createContextFromBindings } from '../src/BindingResolver.js';
-import { EffectExecutor } from '../src/EffectExecutor.js';
+import { deferEntityBindings, createContextFromBindings } from '../src/evaluation/BindingResolver.js';
+import { EffectExecutor } from '../src/effects/EffectExecutor.js';
 import { isRenderBindingMarker, type PatternConfig, type RuntimeValue, type SExpr } from '@almadar/core';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 

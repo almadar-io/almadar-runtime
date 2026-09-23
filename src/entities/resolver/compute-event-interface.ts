@@ -22,7 +22,7 @@ import type {
     EventPayloadField,
 } from '@almadar/core';
 import { isInlineTrait, getTraitName } from '@almadar/core';
-import { namespaceEvent } from '../utils/event-namespace.js';
+import { namespaceEvent } from '../../events/event-namespace.js';
 import { resolveConfigRefEmitNames } from './reference-resolver.js';
 
 // ============================================================================

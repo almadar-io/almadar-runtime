@@ -10,8 +10,8 @@
  * row that must never be blank.
  */
 import { describe, it, expect } from 'vitest';
-import { MockPersistenceAdapter } from '../src/MockPersistenceAdapter.js';
-import type { EntitySchema } from '../src/MockPersistenceAdapter.js';
+import { MockPersistenceAdapter } from '../src/entities/MockPersistenceAdapter.js';
+import type { EntitySchema } from '../src/entities/MockPersistenceAdapter.js';
 
 const personSchema: EntitySchema = {
   name: 'Person',

@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const schemaPath = join(__dirname, 'fixtures/trait-wars.orb');

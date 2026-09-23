@@ -17,7 +17,7 @@
 import { evaluate } from '@almadar/evaluator';
 import type { SExpr, UserContext, EntityRow, EventPayload } from '@almadar/core';
 import type { TraitConfigObject } from '@almadar/core';
-import { createContextFromBindings } from './BindingResolver.js';
+import { createContextFromBindings } from '../evaluation/BindingResolver.js';
 
 /** Bind shape every access check evaluates against. */
 export interface AccessBindings {

@@ -16,9 +16,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
-import { preprocessSchema } from '../src/UsesIntegration.js';
-import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
+import { preprocessSchema } from '../src/traits/UsesIntegration.js';
+import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 import type { OrbitalSchema } from '@almadar/core';
 
 // Minimal fixture: one orbital, three traits, each emitting render-ui on INIT.

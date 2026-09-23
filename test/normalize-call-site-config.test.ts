@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeCallSiteConfigToValues } from '../src/config-defaults.js';
+import { normalizeCallSiteConfigToValues } from '../src/traits/config-defaults.js';
 
 describe('normalizeCallSiteConfigToValues', () => {
     it('returns undefined for undefined input', () => {

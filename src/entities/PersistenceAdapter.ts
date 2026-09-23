@@ -9,7 +9,7 @@
  *
  * @packageDocumentation
  */
-import type { EntityRow } from "./types.js";
+import type { EntityRow } from "../types.js";
 
 /**
  * Storage contract for CRUD operations on runtime entity rows.

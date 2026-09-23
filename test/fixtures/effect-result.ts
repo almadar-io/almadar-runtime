@@ -1,4 +1,4 @@
-import type { ServerEffectResult } from '../../src/ServerEffectHandlers.js';
+import type { ServerEffectResult } from '../../src/effects/ServerEffectHandlers.js';
 import type { EntityRow } from '@almadar/core';
 
 /** `ServerEffectResult.data` is `EntityRow | batch summary | raw service

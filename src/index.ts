@@ -42,10 +42,10 @@ export { HANDLER_MANIFEST } from "./types.js";
 export type { EntityRow } from "./types.js";
 
 // EventBus
-export { EventBus } from "./EventBus.js";
+export { EventBus } from "./events/EventBus.js";
 
 // TickScheduler — coalesced tick clock, client-safe (falls back off rAF in Node/SSR)
-export { TickScheduler, createTickScheduler, type TickHandle } from "./TickScheduler.js";
+export { TickScheduler, createTickScheduler, type TickHandle } from "./time/TickScheduler.js";
 
 // Cron — the one canonical cron parser/matcher every tick-scheduling engine delegates to
 export {
@@ -55,10 +55,10 @@ export {
   cronMatches,
   cronMinuteKey,
   type CronFields,
-} from "./cron.js";
+} from "./time/cron.js";
 
 // Duration strings ('5s'/'1m'/'1h') — the other tick-interval shape, alongside cron
-export { parseDurationString, isValidDurationString } from "./duration.js";
+export { parseDurationString, isValidDurationString } from "./time/duration.js";
 
 // BindingResolver
 export {
@@ -71,7 +71,7 @@ export {
   deferEntityBindings,
   type DeferredPatternValue,
   type EvaluationContext,
-} from "./BindingResolver.js";
+} from "./evaluation/BindingResolver.js";
 
 // StateMachineCore
 export {
@@ -84,7 +84,7 @@ export {
   StateMachineManager,
   LIFECYCLE_EVENTS,
   type ProcessEventOptions,
-} from "./StateMachineCore.js";
+} from "./traits/StateMachineCore.js";
 
 // TraitCascade — same-trait fetch->emit->self-apply cascade completion,
 // shared by OrbitalServerRuntime and any stateless-server caller.
@@ -94,7 +94,7 @@ export {
   type TraitCascadeResult,
   type CascadeEmittedEvent,
   type CascadeStepEffectsResult,
-} from "./TraitCascade.js";
+} from "./traits/TraitCascade.js";
 
 // identity/routing — `listens {}` source-matching (`parseListenSource`),
 // shared by OrbitalServerRuntime's cross-trait fan-out and any
@@ -105,7 +105,7 @@ export {
   parseListenSource,
   type ListenSourceDescriptor,
   type RouteSourceMeta,
-} from "./identity/routing.js";
+} from "./events/identity/routing.js";
 
 // trait-index — the ONE per-trait evaluation index builder (resolved
 // linkedEntity, merged config, frame keys, V4 ids) shared by the unified
@@ -115,14 +115,14 @@ export {
   buildTraitIndexForOrbital,
   type IndexedTrait,
   type TraitIndex,
-} from "./trait-index.js";
+} from "./traits/trait-index.js";
 
 // emit-stamp — the ONE emit-source stamper (V4 identity triple +
 // originClientId); G-RUNTIME-030's hole stays closed by having one owner.
 export {
   stampEmitSource,
   type StampEmitIdentity,
-} from "./emit-stamp.js";
+} from "./events/emit-stamp.js";
 
 // evaluateOrbitalEvent — THE event-evaluation composition, one owner for
 // every server-side execution path (stateful sessions vs stateless
@@ -131,14 +131,14 @@ export {
   evaluateOrbitalEvent,
   type EvaluateOrbitalEventDeps,
   type EvaluateEffectRunner,
-} from "./evaluateOrbitalEvent.js";
+} from "./evaluation/evaluateOrbitalEvent.js";
 
 // stage-runner — the TraitIndex → effect-stage bridge for index-based
 // hosts (stateless per-request, embedded/headless).
 export {
   createIndexStageRunner,
   type IndexStageRunnerOptions,
-} from "./stage-runner.js";
+} from "./evaluation/stage-runner.js";
 
 // effect-stage — the server effect-execution stage extracted from
 // OrbitalServerRuntime.executeEffects (behavior-identical move); the
@@ -147,7 +147,7 @@ export {
   runServerEffectStage,
   type ServerEffectStageDeps,
   type ServerEffectStageArgs,
-} from "./effect-stage.js";
+} from "./effects/effect-stage.js";
 
 // EffectExecutor
 export {
@@ -155,7 +155,7 @@ export {
   clientResolvesRenderBindings,
   createTestExecutor,
   type EffectExecutorOptions,
-} from "./EffectExecutor.js";
+} from "./effects/EffectExecutor.js";
 
 // Client Effect Handlers Factory
 export {
@@ -174,31 +174,31 @@ export type {
   OrbitalEventRequest,
   OrbitalEventResponse,
   OrbitalServerRuntimeConfig,
-} from "./OrbitalServerRuntime.js";
+} from "./server/OrbitalServerRuntime.js";
 
 // Trait config-defaults extractor — used by client-side state machines
 // (`@almadar/ui` useTraitStateMachine) to merge declared `config { }`
 // defaults into the @config.X binding context, mirroring the server-side
 // merge in OrbitalServerRuntime.executeEffects. Lives in the browser-safe
-// `./config-defaults.js` (NOT OrbitalServerRuntime.js, which top-level-imports
+// `./traits/config-defaults.js` (NOT OrbitalServerRuntime.js, which top-level-imports
 // node `module`) precisely so this browser consumer doesn't pull node code.
-export { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults, normalizeCallSiteConfigToValues } from "./config-defaults.js";
+export { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults, normalizeCallSiteConfigToValues } from "./traits/config-defaults.js";
 
 // Row-level entity access — the one evaluator for every declared
 // `@read`/`@create`/`@update`/`@delete` directive. Generated app servers should
 // prefer the `@almadar/runtime/entityAccess` subpath so a Node process does not
 // pull this whole barrel; re-exported here for consumers already on the root.
-export { applyRowAccess, checkMutationAccess } from "./entityAccess.js";
-export type { AccessBindings } from "./entityAccess.js";
+export { applyRowAccess, checkMutationAccess } from "./entities/entityAccess.js";
+export type { AccessBindings } from "./entities/entityAccess.js";
 
 // Storage contract + in-memory default — extracted from OrbitalServerRuntime
 // so browser-side mock runtimes can use the same adapter interface.
-export type { PersistenceAdapter } from "./PersistenceAdapter.js";
-export { InMemoryPersistence } from "./PersistenceAdapter.js";
+export type { PersistenceAdapter } from "./entities/PersistenceAdapter.js";
+export { InMemoryPersistence } from "./entities/PersistenceAdapter.js";
 
 // Mock-data persistence adapter (faker-seeded) — browser-safe, for use in
 // offline previews (`OrbPreview autoMock`) or dev harnesses.
-export { MockPersistenceAdapter, createMockPersistence } from "./MockPersistenceAdapter.js";
+export { MockPersistenceAdapter, createMockPersistence } from "./entities/MockPersistenceAdapter.js";
 
 // Server-side effect handlers factory — the `fetch`/`persist`/`set`/`ref`/
 // `deref`/`swap!`/`atomic`/`callService` layer. Mirrors the handlers built
@@ -208,7 +208,7 @@ export {
   createServerEffectHandlers,
   type CreateServerEffectHandlersOptions,
   type ServerEffectResult,
-} from "./ServerEffectHandlers.js";
+} from "./effects/ServerEffectHandlers.js";
 
 // Resolved-schema → TraitDefinition[] parsing — extracted from
 // OrbitalServerRuntime.registerOrbitalAsync so a stateless per-request
@@ -217,17 +217,17 @@ export {
   parseOrbitalTraits,
   findEntityAmongOrbitals,
   type ParsedOrbitalTraits,
-} from "./OrbitalTraitParsing.js";
+} from "./traits/OrbitalTraitParsing.js";
 
-export type { ServerBridgeConfig, ServerBridgeState } from "./ServerBridge.js";
+export type { ServerBridgeConfig, ServerBridgeState } from "./server/ServerBridge.js";
 
-export type { OsHandlerContext, OsHandlerResult } from "./createOsHandlers.js";
+export type { OsHandlerContext, OsHandlerResult } from "./effects/createOsHandlers.js";
 
 export type {
   EntityField,
   EntitySchema,
   MockPersistenceConfig,
-} from "./MockPersistenceAdapter.js";
+} from "./entities/MockPersistenceAdapter.js";
 
 // Payload Validation (RCG-10)
 export {
@@ -237,7 +237,7 @@ export {
   formatPayloadValidationError,
   type PayloadMismatch,
   type PayloadValidationFailure,
-} from "./PayloadValidator.js";
+} from "./traits/PayloadValidator.js";
 
 // Uses Integration (for `uses` system)
 export {
@@ -251,7 +251,7 @@ export {
   type EventNamespaceMap,
   type PreprocessOptions,
   type PreprocessResult,
-} from "./UsesIntegration.js";
+} from "./traits/UsesIntegration.js";
 
 // Loader (for registerWithPreprocess consumers who need to construct a
 // custom SchemaLoader — e.g. to map std imports onto a non-standard
@@ -267,23 +267,23 @@ export {
   type LoadResult,
   type ImportChainLike,
   type UnifiedLoaderOptions,
-} from "./loader/index.js";
+} from "./entities/loader/index.js";
 
 // Composition (runtime-side TS implementation of behavior/* operators)
-export * as composition from "./composition/index.js";
+export * as composition from "./effects/composition/index.js";
 export {
   composeBehaviors,
   applyEventWiring,
   detectLayoutStrategy,
   pipeBehaviors,
-} from "./composition/index.js";
+} from "./effects/composition/index.js";
 export type {
   ComposeBehaviorsInput,
   ComposeBehaviorsResult,
   EventWiringEntry,
   LayoutStrategy,
   PipeStep,
-} from "./composition/index.js";
+} from "./effects/composition/index.js";
 
 // Renderer-agnostic UI contract. React/Web Components/Vue renderers depend on
 // this surface and implement the framework-specific pieces on top.

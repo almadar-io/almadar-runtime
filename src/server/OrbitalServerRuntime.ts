@@ -45,11 +45,11 @@ import type {
   Response,
   NextFunction,
 } from "express";
-import { EventBus } from "./EventBus.js";
-import { eventRouteKey, parseListenSource } from "./identity/routing.js";
-import { createTickScheduler, type TickHandle, type TickScheduler } from "./TickScheduler.js";
-import { isValidCronExpression } from "./cron.js";
-import { parseDurationString } from "./duration.js";
+import { EventBus } from "../events/EventBus.js";
+import { eventRouteKey, parseListenSource } from "../events/identity/routing.js";
+import { createTickScheduler, type TickHandle, type TickScheduler } from "../time/TickScheduler.js";
+import { isValidCronExpression } from "../time/cron.js";
+import { parseDurationString } from "../time/duration.js";
 import {
   StateMachineManager,
   processEvent,
@@ -57,11 +57,11 @@ import {
   LIFECYCLE_EVENTS,
   findMatchingTransitions,
   normalizeEventKey,
-} from "./StateMachineCore.js";
-import { runTraitCascade } from "./TraitCascade.js";
-import { EffectExecutor } from "./EffectExecutor.js";
-import { parseOrbitalTraits } from "./OrbitalTraitParsing.js";
-import type { ServerEffectResult } from "./ServerEffectHandlers.js";
+} from "../traits/StateMachineCore.js";
+import { runTraitCascade } from "../traits/TraitCascade.js";
+import { EffectExecutor } from "../effects/EffectExecutor.js";
+import { parseOrbitalTraits } from "../traits/OrbitalTraitParsing.js";
+import type { ServerEffectResult } from "../effects/ServerEffectHandlers.js";
 import { createLogger } from '@almadar/logger';
 // Same treatment for `createOsHandlers` (uses `fs`, `net`, `child_process`).
 // The runtime auto-wires it in the constructor's Node-only branch — guarded
@@ -70,17 +70,17 @@ import { createLogger } from '@almadar/logger';
 import type {
   createOsHandlers as CreateOsHandlersFn,
   OsHandlerResult,
-} from "./createOsHandlers.js";
+} from "../effects/createOsHandlers.js";
 import type {
   createAgentSubstrateHandlers as CreateAgentSubstrateHandlersFn,
   AgentSubstrateHandlerResult,
   SubstrateServices,
-} from "./createAgentSubstrateHandlers.js";
+} from "../effects/createAgentSubstrateHandlers.js";
 import {
   validateEventPayload,
   formatPayloadValidationError,
   type PayloadValidationFailure,
-} from "./PayloadValidator.js";
+} from "../traits/PayloadValidator.js";
 
 /**
  * Synchronous Node-only require, hidden from bundler static analysis.
@@ -145,7 +145,7 @@ import type { SSEEvent } from '@almadar/server';
 import {
   interpolateProps,
   createContextFromBindings,
-} from "./BindingResolver.js";
+} from "../evaluation/BindingResolver.js";
 import { evaluateGuard, evaluateListenPayloadExpr, createMinimalContext } from "@almadar/evaluator";
 import type {
   TraitDefinition,
@@ -155,10 +155,10 @@ import type {
   EntityRow,
   EventPayload,
   EvaluationContextExtensions,
-} from "./types.js";
-import { collectDeclaredConfigDefaults } from "./config-defaults.js";
+} from "../types.js";
+import { collectDeclaredConfigDefaults } from "../traits/config-defaults.js";
 // Backward-compat: `collectDeclaredConfigDefaults` used to live here. The package
-// index now re-exports it from the browser-safe `./config-defaults.js` (so it
+// index now re-exports it from the browser-safe `../traits/config-defaults.js` (so it
 // doesn't drag this node-only module into a browser bundle), but keep the
 // original export site for existing importers (tests, server consumers).
 export { collectDeclaredConfigDefaults };
@@ -202,23 +202,23 @@ import type {
 import { isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isPageReference, type NavItem, type ThemeRef, type Page, type PageRef,
 } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, entityAccessPoliciesByStoreKey } from "@almadar/core/mock";
-import { checkMutationAccess } from "./entityAccess.js";
-import { runServerEffectStage } from "./effect-stage.js";
-import { MockPersistenceAdapter } from "./MockPersistenceAdapter.js";
+import { checkMutationAccess } from "../entities/entityAccess.js";
+import { runServerEffectStage } from "../effects/effect-stage.js";
+import { MockPersistenceAdapter } from "../entities/MockPersistenceAdapter.js";
 import {
   preprocessSchema,
   type PreprocessedSchema,
   type EntitySharingMap,
   type EventNamespaceMap,
-} from "./UsesIntegration.js";
+} from "../traits/UsesIntegration.js";
 import {
   type SchemaLoader,
   createUnifiedLoader,
-} from "./loader/index.js";
+} from "../entities/loader/index.js";
 // `createOsHandlers` is type-imported at the top of this file and value-
 // loaded via `nodeRequire` inside the constructor's Node-only branch.
 // Removed the value-import here so the dist bundle has no static
-// reference to `./createOsHandlers.js` and its fs/net/child_process
+// reference to `../effects/createOsHandlers.js` and its fs/net/child_process
 // imports vanish from the browser-side dependency graph.
 
 // Node-detection helper. Used to guard call sites of express, fs/path/net,
@@ -402,10 +402,10 @@ export interface OrbitalServerRuntimeConfig {
 // without pulling in this server-only module's express dependency. Re-exported
 // here so existing `import { PersistenceAdapter } from './OrbitalServerRuntime'`
 // call sites keep working.
-export type { PersistenceAdapter } from "./PersistenceAdapter.js";
-export { InMemoryPersistence } from "./PersistenceAdapter.js";
-import type { PersistenceAdapter } from "./PersistenceAdapter.js";
-import { InMemoryPersistence } from "./PersistenceAdapter.js";
+export type { PersistenceAdapter } from "../entities/PersistenceAdapter.js";
+export { InMemoryPersistence } from "../entities/PersistenceAdapter.js";
+import type { PersistenceAdapter } from "../entities/PersistenceAdapter.js";
+import { InMemoryPersistence } from "../entities/PersistenceAdapter.js";
 
 // ============================================================================
 // OrbitalServerRuntime
@@ -641,7 +641,7 @@ export class OrbitalServerRuntime {
 
     // OS handlers (fs/net/child_process effects) are wired lazily on the first
     // event via ensureOsHandlers(). They live in the ESM-only
-    // `./createOsHandlers.js`; the package is `type: module`, so a synchronous
+    // `../effects/createOsHandlers.js`; the package is `type: module`, so a synchronous
     // require() of it throws ERR_REQUIRE_ESM in a Node consumer. A dynamic
     // import() loads it cleanly AND keeps it out of the browser graph
     // (isNodeEnv-guarded, lazy chunk) — same goal as the old eval-require, but
@@ -652,7 +652,7 @@ export class OrbitalServerRuntime {
   /**
    * Lazily wire the OS-level effect handlers (fs/net/child_process), merging
    * them UNDER any user-provided handlers. Deferred out of the constructor
-   * because `./createOsHandlers.js` is ESM and `require()`-ing it from a
+   * because `../effects/createOsHandlers.js` is ESM and `require()`-ing it from a
    * `type: module` package throws ERR_REQUIRE_ESM — so it is dynamic-import()ed
    * here on the first event. Node-only, idempotent (single shared load), and a
    * no-op in the browser (the import never runs behind the isNodeEnv guard).
@@ -666,7 +666,7 @@ export class OrbitalServerRuntime {
         // runtime (ext resolves to `.js`) and throws "Module not found in
         // bundle". A literal `import()` resolves the real dist `.js` in Node
         // and Vite/vitest maps `.js`→`.ts` source automatically.
-        const { createOsHandlers } = (await import('./createOsHandlers.js')) as {
+        const { createOsHandlers } = (await import('../effects/createOsHandlers.js')) as {
           createOsHandlers: typeof CreateOsHandlersFn;
         };
         this.osHandlers = createOsHandlers({
@@ -690,7 +690,7 @@ export class OrbitalServerRuntime {
     if (!isNodeEnv()) return;
     if (!this.substrateHandlersPromise) {
       this.substrateHandlersPromise = (async () => {
-        const { createAgentSubstrateHandlers } = (await import('./createAgentSubstrateHandlers.js')) as {
+        const { createAgentSubstrateHandlers } = (await import('../effects/createAgentSubstrateHandlers.js')) as {
           createAgentSubstrateHandlers: typeof CreateAgentSubstrateHandlersFn;
         };
         this.substrateHandlers = createAgentSubstrateHandlers({
@@ -3177,7 +3177,7 @@ export function createOrbitalServerRuntime(
 // Source-scoped listen support
 // ============================================================================
 //
-// `parseListenSource` moved to `./identity/routing.js` (2026-09-18) so the
+// `parseListenSource` moved to `../events/identity/routing.js` (2026-09-18) so the
 // stateless `@almadar-io/playground-runtime` path can reuse the exact same
 // `listens {}` matching predicate for its own cross-orbital cascade instead
 // of a second, divergent copy — see that module's doc comment.

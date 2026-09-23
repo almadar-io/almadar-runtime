@@ -31,7 +31,7 @@ import {
 import { createLogger } from '@almadar/logger';
 import { collectDeclaredConfigDefaults } from './config-defaults.js';
 import { findEntityAmongOrbitals, parseOrbitalTraits } from './OrbitalTraitParsing.js';
-import type { TraitDefinition } from './types.js';
+import type { TraitDefinition } from '../types.js';
 
 const traitIndexLog = createLogger('almadar:runtime:trait-index');
 

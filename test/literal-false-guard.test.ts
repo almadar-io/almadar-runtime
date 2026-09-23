@@ -5,7 +5,7 @@
  * kept racing the hydrated fetch they were configured to suppress.
  */
 import { describe, it, expect } from 'vitest';
-import { processEvent } from '../src/StateMachineCore.js';
+import { processEvent } from '../src/traits/StateMachineCore.js';
 
 const trait = {
   name: 'GuardedTrait',

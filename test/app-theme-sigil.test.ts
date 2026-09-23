@@ -4,7 +4,7 @@
  * `theme` (the `.lolo` app-header `theme "<key>"` line) > DEFAULT_THEME_KEY.
  */
 import { describe, it, expect } from 'vitest';
-import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import type { OrbitalSchema, PatternConfig } from '@almadar/core';
 
 function themedSchema(appTheme?: string, orbitalTheme?: string): OrbitalSchema {

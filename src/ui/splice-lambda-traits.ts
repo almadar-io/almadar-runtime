@@ -36,7 +36,7 @@ import type {
   TraitEventContract,
   TraitId,
 } from '@almadar/core';
-import { collectDeclaredConfigDefaults } from '../config-defaults.js';
+import { collectDeclaredConfigDefaults } from '../traits/config-defaults.js';
 import { collectTraitRefsFromEffects, collectTraitRefsFromValue } from './embedded-traits.js';
 
 const TRAIT_BINDING_PREFIX = '@trait.';

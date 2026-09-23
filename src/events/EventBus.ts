@@ -8,7 +8,7 @@
  */
 
 import { createLogger } from '@almadar/logger';
-import type { IEventBus, RuntimeEvent, EventListener, Unsubscribe, EventPayload } from './types.js';
+import type { IEventBus, RuntimeEvent, EventListener, Unsubscribe, EventPayload } from '../types.js';
 
 const log = createLogger('almadar:runtime:eventbus');
 

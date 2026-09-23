@@ -95,7 +95,7 @@
  * peer-level collision.
  *
  * C1-J8 (2026-09-06) ported the missing piece: {@link ReferenceResolver.
- * preResolveImportFile} (`src/resolver/reference-resolver.ts`) resolves
+ * preResolveImportFile} (`src/entities/resolver/reference-resolver.ts`) resolves
  * every `uses` alias's OWN file to completion — recursively, on a fresh
  * child resolver, cached per absolute source path — BEFORE `resolveImports`
  * hands the alias to any consumer, mirroring `inline_orbital`'s per-`uses`
@@ -134,7 +134,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
-import { resolveSchema } from '../src/resolver/reference-resolver.js';
+import { resolveSchema } from '../src/entities/resolver/reference-resolver.js';
 import type { OrbitalSchema, Orbital, Trait } from '@almadar/core';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');

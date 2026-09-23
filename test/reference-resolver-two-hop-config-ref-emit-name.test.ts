@@ -22,8 +22,8 @@
  * name stuck.
  */
 import { describe, it, expect } from 'vitest';
-import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
-import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
+import { ReferenceResolver } from '../src/entities/resolver/reference-resolver.js';
+import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 import type { Orbital, OrbitalDefinition } from '@almadar/core';
 
 /** The base atom: one trait whose emit name is DEFINED by a config knob

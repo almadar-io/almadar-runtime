@@ -8,9 +8,9 @@
  * same-instance `persist update` by that id, against the real store.
  */
 import { describe, it, expect } from 'vitest';
-import { MockPersistenceAdapter } from '../src/MockPersistenceAdapter.js';
-import { createServerEffectHandlers, type ServerEffectResult } from '../src/ServerEffectHandlers.js';
-import { EffectExecutor } from '../src/EffectExecutor.js';
+import { MockPersistenceAdapter } from '../src/entities/MockPersistenceAdapter.js';
+import { createServerEffectHandlers, type ServerEffectResult } from '../src/effects/ServerEffectHandlers.js';
+import { EffectExecutor } from '../src/effects/EffectExecutor.js';
 import type { BindingContext, EffectContext } from '../src/types.js';
 
 function makeExecutor(persistence: MockPersistenceAdapter, effectResults: ServerEffectResult[]) {

@@ -32,8 +32,8 @@
  */
 
 import { createLogger } from '@almadar/logger';
-import type { IEventBus, RuntimeEvent, EventPayload } from "./types.js";
-import { createHttpTransport, type EventTransport } from "./EventTransport.js";
+import type { IEventBus, RuntimeEvent, EventPayload } from "../types.js";
+import { createHttpTransport, type EventTransport } from "../EventTransport.js";
 import type { EmittedEvent, OrbitalEventRequest } from "@almadar/core";
 
 const log = createLogger('almadar:runtime:server-bridge');

@@ -7,7 +7,7 @@
  * deterministically single-steppable instead of racing real timers.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import type { OrbitalSchema } from '@almadar/core';
 
 function tickSchema(): OrbitalSchema {

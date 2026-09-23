@@ -54,18 +54,18 @@ import {
   runTraitCascade,
   selectDispatchCandidates,
   StateMachineManager,
-} from './index.js';
-import { parseListenSource } from './identity/routing.js';
-import { collectDeclaredEntityDefaults } from './config-defaults.js';
-import type { ServerEffectStageArgs } from './effect-stage.js';
+} from '../index.js';
+import { parseListenSource } from '../events/identity/routing.js';
+import { collectDeclaredEntityDefaults } from '../traits/config-defaults.js';
+import type { ServerEffectStageArgs } from '../effects/effect-stage.js';
 import {
   formatPayloadValidationError,
   validateEventPayload,
   type PayloadValidationFailure,
-} from './PayloadValidator.js';
-import type { TraitIndex } from './trait-index.js';
-import type { Effect, EvaluationContextExtensions } from './types.js';
-import type { PersistenceAdapter } from './PersistenceAdapter.js';
+} from '../traits/PayloadValidator.js';
+import type { TraitIndex } from '../traits/trait-index.js';
+import type { Effect, EvaluationContextExtensions } from '../types.js';
+import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
 import type { SExpr } from '@almadar/core';
 
 const evaluateLog = createLogger('almadar:runtime:evaluate');

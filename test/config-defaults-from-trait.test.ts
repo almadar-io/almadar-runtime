@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { collectDeclaredConfigDefaults } from '../src/OrbitalServerRuntime.js';
+import { collectDeclaredConfigDefaults } from '../src/server/OrbitalServerRuntime.js';
 import type { DeclaredTraitConfig } from '@almadar/core';
 
 // `collectDeclaredConfigDefaults` only ever reads `trait.config` — its real

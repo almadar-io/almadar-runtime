@@ -7,8 +7,8 @@
  * @packageDocumentation
  */
 
-import type { PersistenceAdapter } from './OrbitalServerRuntime.js';
-import type { EntityRow } from './types.js';
+import type { PersistenceAdapter } from '../server/OrbitalServerRuntime.js';
+import type { EntityRow } from '../types.js';
 import type { EntityField, EntityId, EntityPersistence, FieldValue } from '@almadar/core';
 import { linkSelfRelationField, RESERVED_FIELD_NAMES, sampleRow, sampleRowCount } from '@almadar/core/mock';
 import { createLogger } from '@almadar/logger';

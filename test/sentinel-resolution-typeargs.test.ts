@@ -19,8 +19,8 @@
  * off each entry — is exercised end-to-end, one `ParamSub` kind per case.
  */
 import { describe, it, expect } from 'vitest';
-import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
-import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
+import { ReferenceResolver } from '../src/entities/resolver/reference-resolver.js';
+import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 import type { Event, EventPayloadField, Orbital, OrbitalDefinition, TraitReference } from '@almadar/core';
 
 function payloadOf(events: readonly Event[] | undefined, key: string): Event['payloadSchema'] {

@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { preprocessSchema } from '../src/UsesIntegration.js';
+import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { Entity, EntityId, OrbitalSchema } from '@almadar/core';
 import { asOrbitalId } from '@almadar/core';
 

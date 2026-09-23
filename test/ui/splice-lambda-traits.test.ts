@@ -19,7 +19,7 @@ import {
   type SpliceResolvedTrait,
   type SpliceResolvedPage,
 } from '../../src/ui/splice-lambda-traits.js';
-import { interpolateValue, createContextFromBindings } from '../../src/BindingResolver.js';
+import { interpolateValue, createContextFromBindings } from '../../src/evaluation/BindingResolver.js';
 
 // ---------------------------------------------------------------------------
 // Builders

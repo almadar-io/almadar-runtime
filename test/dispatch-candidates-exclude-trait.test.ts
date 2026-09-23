@@ -11,7 +11,7 @@
  * compiled path's `t.name != source_trait` filter.
  */
 import { describe, it, expect } from 'vitest';
-import { StateMachineManager, type TraitDefinition } from '../src/StateMachineCore.js';
+import { StateMachineManager, type TraitDefinition } from '../src/traits/StateMachineCore.js';
 
 describe('G-RUNTIME-020 — excludeTrait drops one trait from an untargeted broadcast', () => {
   it('excludes the named trait from the broadcast; only the other trait fires and advances', () => {

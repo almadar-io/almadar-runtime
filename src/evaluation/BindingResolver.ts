@@ -20,7 +20,7 @@ import {
 // node-only registry LOADER (createRequire/fs/path), which has no place in the
 // runtime interpreter that ships to the renderer.
 import { isKnownStdOperator as isKnownOperator } from '@almadar/std/registry';
-import type { BindingContext, EntityRow, PatternProps, EvaluationContextExtensions, RuntimePatternValue } from './types.js';
+import type { BindingContext, EntityRow, PatternProps, EvaluationContextExtensions, RuntimePatternValue } from '../types.js';
 import type { RenderChildrenMap, RenderBindingMarker } from '@almadar/core';
 import { containsEntityBinding, containsPayloadBinding, RENDER_BINDING_MARKER } from '@almadar/core';
 import type { SExpr, RuntimeValue } from '@almadar/core';

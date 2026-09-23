@@ -21,18 +21,18 @@ import { isPersistBatchOperation } from "@almadar/core";
 // Re-exported here so every existing importer keeps working unchanged.
 import type { ServerBatchSummary, ServerEffectResult } from "@almadar/core";
 export type { ServerBatchSummary, ServerEffectResult } from "@almadar/core";
-import type { PersistenceAdapter } from "./PersistenceAdapter.js";
+import type { PersistenceAdapter } from "../entities/PersistenceAdapter.js";
 // Type-only — erased before runtime (isolatedModules), so this does not pull
 // OrbitalServerRuntime's Express/Node code into this browser-safe module.
 // Mirrors the identical reverse edge OrbitalServerRuntime.ts already has
 // (`import type { ServerEffectResult } from "./ServerEffectHandlers.js"`).
-import type { ClientEffectTuple } from "./OrbitalServerRuntime.js";
+import type { ClientEffectTuple } from "../server/OrbitalServerRuntime.js";
 import {
   applyRowAccess,
   checkMutationAccess,
   accessDeniedMessage,
   type AccessBindings,
-} from "./entityAccess.js";
+} from "../entities/entityAccess.js";
 import type {
   EffectHandlers,
   BindingContext,
@@ -40,9 +40,9 @@ import type {
   EntityRow,
   PersistBatchSummary,
   ServiceCallContext,
-} from "./types.js";
+} from "../types.js";
 import { EffectExecutor } from "./EffectExecutor.js";
-import { createContextFromBindings } from "./BindingResolver.js";
+import { createContextFromBindings } from "../evaluation/BindingResolver.js";
 import { evaluate } from "@almadar/evaluator";
 import { createLogger } from '@almadar/logger';
 

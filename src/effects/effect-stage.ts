@@ -9,10 +9,10 @@
 import { createLogger } from '@almadar/logger';
 import { EffectExecutor, clientResolvesRenderBindings } from './EffectExecutor.js';
 import type { ServerEffectResult } from './ServerEffectHandlers.js';
-import type { PersistenceAdapter } from './PersistenceAdapter.js';
-import { stampEmitSource } from './emit-stamp.js';
-import { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults } from './config-defaults.js';
-import { createContextFromBindings } from './BindingResolver.js';
+import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
+import { stampEmitSource } from '../events/emit-stamp.js';
+import { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults } from '../traits/config-defaults.js';
+import { createContextFromBindings } from '../evaluation/BindingResolver.js';
 import { evaluate } from '@almadar/evaluator';
 import type {
   BindingContext,
@@ -25,7 +25,7 @@ import type {
   RuntimeRenderPattern,
   RuntimePatternValue,
   TraitState,
-} from './types.js';
+} from '../types.js';
 import type {
   BusEventSource,
   ClientEffectTuple,
@@ -52,8 +52,8 @@ import {
   orbitalInlineEntities,
 } from '@almadar/core';
 import { entityAccessPolicies } from '@almadar/core/mock';
-import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from './entityAccess.js';
-import { findEntityAmongOrbitals } from './OrbitalTraitParsing.js';
+import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from '../entities/entityAccess.js';
+import { findEntityAmongOrbitals } from '../traits/OrbitalTraitParsing.js';
 import { getPatternFieldsContract } from '@almadar/core/patterns';
 
 const effectLog = createLogger("almadar:runtime:effects");

@@ -13,7 +13,7 @@ import {
     interpolateProps,
     createContextFromBindings,
     type BindingContext,
-} from '../src/BindingResolver.js';
+} from '../src/evaluation/BindingResolver.js';
 import type { RenderUINode, EntityRow, ResolvedPatternProps, RenderChildrenMap } from '@almadar/core';
 
 function makeCtx(entity: EntityRow) {

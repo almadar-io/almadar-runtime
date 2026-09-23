@@ -7,7 +7,7 @@
  * concern and is covered by their own integration tests.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { runTraitCascade } from '../src/TraitCascade.js';
+import { runTraitCascade } from '../src/traits/TraitCascade.js';
 import type { TraitDefinition } from '../src/types.js';
 
 /** A trait shaped exactly like the real-world bug: INIT fetches, and a

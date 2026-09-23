@@ -11,8 +11,8 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Trait, TraitEventContract, Event, OrbitalDefinition, Orbital } from '@almadar/core';
-import { ReferenceResolver, resolveConfigRefEmitNames } from '../src/resolver/reference-resolver.js';
-import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
+import { ReferenceResolver, resolveConfigRefEmitNames } from '../src/entities/resolver/reference-resolver.js';
+import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 
 function makeTrait(overrides: Partial<Trait>): Trait {
     return {

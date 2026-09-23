@@ -6,7 +6,7 @@
  * trace `sendEvent` would have emitted.
  */
 import { describe, it, expect } from 'vitest';
-import { StateMachineManager, type TraitDefinition } from '../src/StateMachineCore.js';
+import { StateMachineManager, type TraitDefinition } from '../src/traits/StateMachineCore.js';
 import type { TransitionObserver } from '../src/types.js';
 
 const trait = (name: string): TraitDefinition => ({

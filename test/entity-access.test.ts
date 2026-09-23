@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyRowAccess, checkMutationAccess } from '../src/entityAccess.js';
+import { applyRowAccess, checkMutationAccess } from '../src/entities/entityAccess.js';
 import type { EntityRow, SExpr, UserContext } from '@almadar/core';
 
 /** `["=", "@entity.memberId", "@user.id"]` — the ownership-scoping shape. */

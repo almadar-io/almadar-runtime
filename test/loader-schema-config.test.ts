@@ -2,9 +2,9 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ExternalOrbitalLoader } from '../src/loader/external-loader.js';
-import { HttpLoader } from '../src/loader/http-loader.js';
-import { UnifiedLoader } from '../src/loader/unified-loader.js';
+import { ExternalOrbitalLoader } from '../src/entities/loader/external-loader.js';
+import { HttpLoader } from '../src/entities/loader/http-loader.js';
+import { UnifiedLoader } from '../src/entities/loader/unified-loader.js';
 import type { DeclaredTraitConfig } from '@almadar/core';
 
 // R-ORBITAL-IMPORT-SCHEMA-CONFIG-RUNG-USES-CONSUMER: `loadOrbital` must carry

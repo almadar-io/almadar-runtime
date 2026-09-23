@@ -9,11 +9,11 @@
  * will be stuck in loading / empty / non-persistent respectively.
  */
 import { describe, it, expect } from 'vitest';
-import { InMemoryPersistence } from '../src/PersistenceAdapter.js';
-import { createServerEffectHandlers } from '../src/ServerEffectHandlers.js';
-import { EffectExecutor } from '../src/EffectExecutor.js';
+import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { createServerEffectHandlers } from '../src/effects/ServerEffectHandlers.js';
+import { EffectExecutor } from '../src/effects/EffectExecutor.js';
 import type { Effect, BindingContext, EffectContext } from '../src/types.js';
-import type { ClientEffectTuple } from '../src/OrbitalServerRuntime.js';
+import type { ClientEffectTuple } from '../src/server/OrbitalServerRuntime.js';
 
 function makeBus() {
     const events: Array<{ event: string; payload?: unknown }> = [];

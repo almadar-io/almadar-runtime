@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import type { OrbitalSchema } from '@almadar/core';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

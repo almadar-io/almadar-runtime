@@ -11,7 +11,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
-import { preprocessSchema } from '../src/UsesIntegration.js';
+import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { OrbitalSchema, Orbital, Trait, TraitConfigValue } from '@almadar/core';
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..');

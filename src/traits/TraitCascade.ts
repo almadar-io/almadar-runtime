@@ -33,7 +33,7 @@ import {
     findMatchingTransitions,
     type ProcessEventOptions,
 } from './StateMachineCore.js';
-import type { TransitionResult } from './types.js';
+import type { TransitionResult } from '../types.js';
 import { createLogger } from '@almadar/logger';
 import type { BusEventSource, EntityRow, EventPayload } from '@almadar/core';
 

@@ -20,7 +20,7 @@
  */
 
 import { createLogger } from '@almadar/logger';
-import type { EventPayload, EffectHandlers } from './types.js';
+import type { EventPayload, EffectHandlers } from '../types.js';
 import type { ServiceCallResult, Orbital, TraitConfig } from '@almadar/core';
 
 const log = createLogger('almadar:runtime:substrate-handlers');

@@ -10,7 +10,7 @@
  *    name fallback — old, id-free schemas are unaffected.
  */
 import { describe, it, expect } from 'vitest';
-import { StateMachineManager, type TraitDefinition } from '../src/StateMachineCore.js';
+import { StateMachineManager, type TraitDefinition } from '../src/traits/StateMachineCore.js';
 import { asEventId } from '@almadar/core';
 
 const EID_GO = asEventId('evt_01HGOGOGOGOGOGOGOGOGOGOGOG');

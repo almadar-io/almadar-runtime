@@ -7,7 +7,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import express from 'express';
 import http from 'node:http';
-import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import type { OrbitalSchema } from '@almadar/core';
 
 const schema: OrbitalSchema = {

@@ -25,8 +25,8 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/OrbitalServerRuntime.js';
-import { preprocessSchema } from '../src/UsesIntegration.js';
+import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/server/OrbitalServerRuntime.js';
+import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { OrbitalSchema, Trait } from '@almadar/core';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');

@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ReferenceResolver } from '../src/resolver/reference-resolver.js';
+import { ReferenceResolver } from '../src/entities/resolver/reference-resolver.js';
 import type { OrbitalSchema, OrbitalDefinition, Orbital, EventPayloadField, Trait } from '@almadar/core';
-import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/loader/schema-loader.js';
+import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 
 // Cross-path parity: for every named Stage B materialization case, B2-R
 // (compiler) and B2-J (this resolver) must produce byte-identical

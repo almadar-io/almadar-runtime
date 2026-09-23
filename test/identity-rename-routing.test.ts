@@ -13,11 +13,11 @@
  * what preserves the binding, not luck.
  */
 import { describe, it, expect } from 'vitest';
-import { OrbitalServerRuntime } from '../src/OrbitalServerRuntime.js';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import {
   StateMachineManager,
   type TraitDefinition,
-} from '../src/StateMachineCore.js';
+} from '../src/traits/StateMachineCore.js';
 import type { OrbitalSchema, Trait } from '@almadar/core';
 import { asOrbitalId, asEntityId, asTraitId, asEventId } from '@almadar/core';
 

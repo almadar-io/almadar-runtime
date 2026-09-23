@@ -21,7 +21,7 @@ import {
     interpolateValue,
     createContextFromBindings,
     type BindingContext,
-} from '../src/BindingResolver.js';
+} from '../src/evaluation/BindingResolver.js';
 import type { TraitConfigObject, TraitConfigValue, EventPayload } from '@almadar/core';
 
 // ============================================================================

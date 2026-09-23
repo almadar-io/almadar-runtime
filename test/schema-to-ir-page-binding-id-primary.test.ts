@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { schemaToIR } from '../src/resolver/schema-to-ir.js';
+import { schemaToIR } from '../src/entities/resolver/schema-to-ir.js';
 import { asTraitId } from '@almadar/core';
 import type { OrbitalSchema, PageTraitRef } from '@almadar/core';
 

@@ -25,12 +25,12 @@ import {
   resolveSchema,
   type ResolvedOrbital,
   type ResolveOptions,
-} from "./resolver/reference-resolver.js";
+} from "../entities/resolver/reference-resolver.js";
 import {
   type SchemaLoader,
   createUnifiedLoader,
   isBrowser,
-} from "./loader/index.js";
+} from "../entities/loader/index.js";
 
 // ============================================================================
 // Types

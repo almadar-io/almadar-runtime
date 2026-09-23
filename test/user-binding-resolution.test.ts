@@ -21,9 +21,9 @@ import {
     interpolateValue,
     createContextFromBindings,
     type BindingContext,
-} from '../src/BindingResolver.js';
-import { processEvent } from '../src/StateMachineCore.js';
-import type { TraitDefinition, TraitState } from '../src/StateMachineCore.js';
+} from '../src/evaluation/BindingResolver.js';
+import { processEvent } from '../src/traits/StateMachineCore.js';
+import type { TraitDefinition, TraitState } from '../src/traits/StateMachineCore.js';
 
 function ctxFor(user: UserContext | undefined) {
     const bindings: BindingContext = {
