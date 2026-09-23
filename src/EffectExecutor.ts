@@ -659,12 +659,24 @@ export class EffectExecutor {
     }
 
     /** Build the source metadata stamp for an emit fired from this trait. */
-    private sourceStamp(): import('./types.js').RuntimeEvent['source'] {
-        return {
+    private sourceStamp(event?: string): import('./types.js').RuntimeEvent['source'] {
+        const stamp: import('./types.js').RuntimeEvent['source'] = {
             orbital: this.context.orbitalName,
             trait: this.context.traitName,
             transition: this.context.transition,
         };
+        // V4 dual-carry ids (parity with `OrbitalServerRuntime`'s emit
+        // stamp): an id-scoped `listens` matcher (`buildSourceMatcher`)
+        // compares ids ONLY, so a name-only stamp never matches a
+        // `traitId`/`orbitalId`-carrying listen — the client's whole relay
+        // chain died on the stateful path this way (2026-09-22).
+        if (this.context.orbitalId !== undefined) stamp.orbitalId = this.context.orbitalId;
+        if (this.context.traitId !== undefined) stamp.traitId = this.context.traitId;
+        if (event !== undefined && this.context.emits !== undefined) {
+            const contract = this.context.emits.find((e) => e.event === event);
+            if (contract?.eventId !== undefined) stamp.eventId = contract.eventId;
+        }
+        return stamp;
     }
 
     private emitSuccess(
@@ -676,7 +688,7 @@ export class EffectExecutor {
     ): void {
         const eventName = emit?.[key];
         if (eventName) {
-            this.handlers.emit(eventName, payload as EventPayload | undefined, this.sourceStamp(), fromPersistSuccess);
+            this.handlers.emit(eventName, payload as EventPayload | undefined, this.sourceStamp(eventName), fromPersistSuccess);
         }
     }
 
@@ -688,7 +700,7 @@ export class EffectExecutor {
         extra?: EventPayload,
     ): void {
         if (!emit?.failure) return;
-        this.handlers.emit(emit.failure, { ...extra, error: failureMessage(err) }, this.sourceStamp());
+        this.handlers.emit(emit.failure, { ...extra, error: failureMessage(err) }, this.sourceStamp(emit.failure));
     }
 
     /**
@@ -764,7 +776,7 @@ export class EffectExecutor {
             case 'emit': {
                 const event = args[0] as string;
                 const payload = args[1] as EventPayload | undefined;
-                this.handlers.emit(event, payload, this.sourceStamp());
+                this.handlers.emit(event, payload, this.sourceStamp(event));
                 break;
             }
 

@@ -28,8 +28,9 @@ import type {
     IntegrationContext,
     Orbital,
     ServiceCallResult,
-    TraitId,
     EventId,
+    TraitId,
+    OrbitalId,
     TraitEventListener,
     UserContext,
     NavItem,
@@ -633,6 +634,26 @@ export interface EffectContext {
      * intra-orbital, `Orbital.TraitName EVENT` for cross-orbital) can
      * filter by emitter identity. */
     orbitalName?: string;
+    /**
+     * V4 dual-carry id sibling of `traitName` — stamped onto emit sources
+     * so id-scoped `listens` (`buildSourceMatcher`) match by id,
+     * rename-proof. The matcher compares ids ONLY when the listen source
+     * carries one, so a name-only stamp never matches a `traitId`-carrying
+     * listen (the chat SAVE → DO_CREATE relay died on the stateful path,
+     * 2026-09-22). Parity with `OrbitalServerRuntime`'s emit stamp.
+     */
+    traitId?: TraitId;
+    /**
+     * V4 dual-carry id sibling of `orbitalName` — same contract as
+     * `traitId`, for `kind: 'orbital'` listen sources.
+     */
+    orbitalId?: OrbitalId;
+    /**
+     * The trait's emit contracts — the emit-source stamp reads `eventId`
+     * from the matching contract (parity with `OrbitalServerRuntime`'s
+     * `emitContract?.eventId`).
+     */
+    emits?: ReadonlyArray<{ event: string; eventId?: EventId }>;
     /** Current state */
     state: string;
     /** Transition description */

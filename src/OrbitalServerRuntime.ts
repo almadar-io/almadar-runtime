@@ -55,6 +55,8 @@ import {
   processEvent,
   createInitialTraitState,
   LIFECYCLE_EVENTS,
+  findMatchingTransitions,
+  normalizeEventKey,
 } from "./StateMachineCore.js";
 import { runTraitCascade } from "./TraitCascade.js";
 import { EffectExecutor } from "./EffectExecutor.js";
@@ -198,11 +200,13 @@ export type {
   ClientRenderUITuple,
   ClientNavigateTuple,
   ClientNavigateBackTuple,
+  TransitionRejection,
 } from "@almadar/core";
 import type {
   OrbitalEventRequest,
   OrbitalEventResponse,
   ClientEffectTuple,
+  TransitionRejection,
 } from "@almadar/core";
 import { isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isRuntimeEntity, isPageReference, omitFrameFields, orbitalInlineEntities, type FetchOptions, type NavItem, type ThemeRef, type Page, type PageRef,
   getNestedValue,
@@ -2454,6 +2458,59 @@ export class OrbitalServerRuntime {
     // the `guardRejectedTrait` computation above.
     if (guardRejectedTrait) {
       response.guardFailed = `${guardRejectedTrait.name}.${event}`;
+    }
+
+    // G-RUNTIME-023 structured rejections (stateful-path parity with the
+    // stateless transition handler) — reported only when nothing transitioned.
+    if (!response.transitioned) {
+      const rejections: TransitionRejection[] = [];
+      const eventKey = normalizeEventKey(event);
+      if (guardRejectedTrait) {
+        const from = registered.manager.getState(guardRejectedTrait.name)?.currentState;
+        const traitDef = registered.manager.getTraitDefinition(guardRejectedTrait.name);
+        const candidates = traitDef && from !== undefined
+          ? findMatchingTransitions(traitDef, from, eventKey)
+          : [];
+        const guarded = candidates.find((t) => t.guard !== undefined) ?? candidates[0];
+        rejections.push({
+          code: 'guard-rejected',
+          trait: guardRejectedTrait.name,
+          ...(from !== undefined ? { from } : {}),
+          event,
+          ...(guarded ? { transition: `${from ?? '?'}--${eventKey}-->${guarded.to}`, guard: guarded.guard } : {}),
+        });
+      } else {
+        // No trait could handle the event from its CURRENT state — report the
+        // ones that declare it elsewhere in their table (a stale-state signal
+        // for the client), scoped to `_activeTraits` exactly like dispatch was.
+        for (const trait of registered.traits) {
+          if (activeTraits && activeTraits.length > 0 && !activeTraits.includes(trait.name)) continue;
+          if (dispatchTargetTraits.some((t) => t.name === trait.name)) continue;
+          const traitDef = registered.manager.getTraitDefinition(trait.name);
+          if (!traitDef) continue;
+          const declaring = new Set<string>();
+          for (const t of traitDef.transitions) {
+            if (t.event !== eventKey) continue;
+            if (Array.isArray(t.from)) {
+              for (const f of t.from) declaring.add(f);
+            } else {
+              declaring.add(t.from);
+            }
+          }
+          if (declaring.size === 0) continue;
+          const from = registered.manager.getState(trait.name)?.currentState;
+          rejections.push({
+            code: 'no-matching-transition',
+            trait: trait.name,
+            ...(from !== undefined ? { from } : {}),
+            event,
+            statesDeclaringEvent: Array.from(declaring),
+          });
+        }
+      }
+      if (rejections.length > 0) {
+        response.rejections = rejections;
+      }
     }
 
     // Response-side twin of the request's `entityByTrait`: the `@entity`

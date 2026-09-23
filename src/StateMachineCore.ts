@@ -428,14 +428,38 @@ function compositeKey(traitName: string, scope: string): string {
  * happen to agree — `targetTrait` (scoped-listen delivery) wins outright
  * and skips every other check; otherwise `activeTraits`, when given,
  * narrows to the page's own trait set (off-page traits neither transition
- * nor mutate state); `canHandle` is consulted last, only when neither of
- * the above already decided the answer. Pure — no I/O, no instance state.
+ * nor mutate state); `excludeTrait` drops one specific trait from an
+ * untargeted broadcast (see `excludeTrait` doc below); `canHandle` is
+ * consulted last, only when none of the above already decided the answer.
+ * Pure — no I/O, no instance state.
  */
 export function selectDispatchCandidates(
     traitNames: Iterable<string>,
     options: {
         targetTrait?: string;
         activeTraits?: ReadonlySet<string>;
+        /**
+         * Drop this one trait from an UNTARGETED broadcast (`targetTrait`
+         * unset) — the client's intra-orbital bare-cascade routing
+         * (`useTraitStateMachine.ts`'s `bareCascadeKeys` subscription)
+         * re-delivers a trait's own `(emit X)` back to every trait bound to
+         * an `X` transition, itself included; a transition whose own effects
+         * re-emit the same event then re-triggers forever
+         * (R-RUNTIME-020: `SnakePlay.RESTART -> playing` re-emitting
+         * `RESTART` wedged the whole game). The compiled path never has
+         * this problem — `orbital-shell-typescript`'s codegen statically
+         * resolves cascade targets and filters `t.name != source_trait`
+         * (`codegen/effect/client.rs:1339`) — this mirrors that filter so
+         * the runtime path matches. Ignored when `targetTrait` is set
+         * (scoped delivery already addresses exactly one trait).
+         * Intentional, working self-delivery (a trait catching its OWN
+         * emit, e.g. `ui-state-architect-board.lolo`'s
+         * `(emit GAME_END) -> own GAME_END -> won`) is unaffected — that
+         * runs through a SEPARATE qualified-key subscription
+         * (`useTraitStateMachine.ts`'s per-trait "self:fire" handler), not
+         * this bare-cascade broadcast path.
+         */
+        excludeTrait?: string;
         canHandle?: (traitName: string) => boolean;
     },
 ): string[] {
@@ -445,6 +469,7 @@ export function selectDispatchCandidates(
             if (traitName === options.targetTrait) candidates.push(traitName);
             continue;
         }
+        if (options.excludeTrait !== undefined && traitName === options.excludeTrait) continue;
         if (options.activeTraits && !options.activeTraits.has(traitName)) continue;
         if (options.canHandle && !options.canHandle(traitName)) continue;
         candidates.push(traitName);
@@ -770,12 +795,19 @@ export class StateMachineManager {
         // alone left off-page FSMs silently advancing on name-shared events
         // (R-TABLEVIEW-LOADED-UNSCOPED cross-page half). `targetTrait` is
         // more specific and bypasses this set.
-        allowedTraits?: ReadonlySet<string>
+        allowedTraits?: ReadonlySet<string>,
+        // See `selectDispatchCandidates`'s `excludeTrait` doc
+        // (R-RUNTIME-020) — drops this one trait from an UNTARGETED
+        // broadcast so a trait's own re-emitted event doesn't re-trigger
+        // its own emitting transition forever. Ignored when `targetTrait`
+        // is set. New trailing parameter, positional call sites elsewhere
+        // are unaffected.
+        excludeTrait?: string
     ): Array<{ traitName: string; result: TransitionResult }> {
         const results: Array<{ traitName: string; result: TransitionResult }> = [];
         const scope = scopeOf(entityData);
         const candidates = new Set(
-            selectDispatchCandidates(this.traits.keys(), { targetTrait, activeTraits: allowedTraits }),
+            selectDispatchCandidates(this.traits.keys(), { targetTrait, activeTraits: allowedTraits, excludeTrait }),
         );
 
         for (const [traitName, trait] of this.traits) {
