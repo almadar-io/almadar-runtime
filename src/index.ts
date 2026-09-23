@@ -179,6 +179,27 @@ export {
   type OrbitalEvaluator,
 } from "./server/EventTransport.js";
 
+// CircuitStore (P2) — the manager+frames port `evaluateOrbitalEvent`
+// already consumes, made explicit; `snapshot`/`restore` back the client
+// role's `runtimeOptimistic` rollback.
+export {
+  createMemoryCircuitStore,
+  type CircuitStore,
+  type TraitSnapshot,
+} from "./evaluation/circuit-store.js";
+
+// Client role (P4) — the JS twin of orbital-client's `ClientKernel` +
+// orbital-core's `dispatch_with_server_leg`/`apply_server_response`/
+// `already_delivered_from`.
+export {
+  alreadyDeliveredFrom,
+  applyOrbitalEventResponse,
+  dispatchWithServerLeg,
+  postServerLeg,
+  type ClientDispatch,
+  type ClientRoleOpts,
+} from "./evaluation/client-role.js";
+
 // Re-export types for server modules (for type-only imports in client code)
 export type {
   RuntimeOrbitalSchema,

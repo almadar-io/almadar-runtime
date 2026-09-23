@@ -297,16 +297,20 @@ describe('parity — stateless vs stateful produce the same circuit outcome', ()
     expect(normalize(slRes)).toEqual(normalize(sfRes));
     // The circuit actually ran end-to-end (not two vacuous no-ops agreeing).
     expect(slRes.transitioned).toBe(true);
-    expect(slRes.emittedEvents.map((e) => e.event)).toEqual(['SAVE', 'MESSAGE_SAVED']);
+    expect(slRes.emittedEvents.map((e) => e.event)).toEqual(['SAVE', 'MESSAGE_SAVED', 'THREAD_LOADED']);
     expect(slRes.emittedEvents[0]?.source).toMatchObject({
       orbitalId: 'orb_chat', traitId: 'trt_composer', eventId: 'evt_save',
     });
     // The off-page listener ran server-side on BOTH paths (G-RUNTIME-031)…
     expect(await rows(stateless.persistence, 'ChatMessage')).toEqual([{ content: 'hello', channel: undefined }]);
     expect(await rows(stateful.persistence, 'ChatMessage')).toEqual([{ content: 'hello', channel: undefined }]);
-    // …the mounted Thread was skipped on both (the client relays it).
-    expect(slRes.effectResults?.some((r) => r.effect === 'fetch')).toBe(false);
-    expect(sfRes.effectResults?.some((r) => r.effect === 'fetch')).toBe(false);
+    // …and the MOUNTED Thread ran server-side on BOTH paths too — the
+    // client never relays a listen trigger (its local run could not
+    // fetch, G-RUNTIME-029); the consumed emit's `dispatched: true` stamp
+    // is what keeps the client from re-applying the hop. (Proof: the
+    // fetch's success auto- emit — the stage records no fetch effectResult.)
+    expect(slRes.states['Thread']).toBe('displaying');
+    expect(sfRes.states['Thread']).toBe('displaying');
   });
 
   it('two sequential requests converge (SELECT then SEND, channel filter carried)', async () => {

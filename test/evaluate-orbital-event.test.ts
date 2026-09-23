@@ -149,9 +149,12 @@ describe('evaluateOrbitalEvent — client-declared dispatch (stateless shape)', 
     expect(response.states['Composer']).toBe('ready');
     // The off-page listener ran server-side (G-RUNTIME-031)…
     expect(response.states['Persistor']).toBe('idle');
-    // …and the mounted Thread did NOT (the client relays it) — no fetch ran.
-    expect(response.states['Thread']).toBeUndefined();
-    expect(response.effectResults?.some((r) => r.effect === 'fetch')).toBe(false);
+    // …and the MOUNTED listen-armed Thread ran here too: the client never
+    // relays a listen trigger itself (its local run could not fetch —
+    // G-RUNTIME-029), so the server completes every listener and stamps
+    // the consumed emit `dispatched: true` for the client to honor.
+    expect(response.states['Thread']).toBe('displaying');
+    expect(response.emittedEvents.some((e) => e.event === 'THREAD_LOADED')).toBe(true);
     expect(response.effectResults?.some(
       (r) => r.effect === 'persist' && r.action === 'create' && r.success,
     )).toBe(true);
@@ -299,5 +302,113 @@ describe('evaluateOrbitalEvent — V4 id-carrying listens (rename-proof)', () =>
     const rows = await deps.persistence.list('ChatMessage');
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ content: 'by-id' });
+  });
+});
+
+describe('evaluateOrbitalEvent — [runtime] row round-trip fold (the stateless singleton contract)', () => {
+  function gameSchema(): OrbitalSchema {
+    return {
+      name: 'runtime-fold',
+      version: '1.0.0',
+      orbitals: [
+        {
+          name: 'GameOrbital',
+          pages: [],
+          entity: {
+            name: 'GameState',
+            persistence: 'runtime',
+            fields: [
+              { name: 'id', type: 'string' },
+              { name: 'score', type: 'number', default: 0 },
+            ],
+          },
+          traits: [
+            {
+              name: 'Player',
+              stateMachine: {
+                states: [{ name: 'idle', isInitial: true }],
+                events: [],
+                transitions: [
+                  {
+                    from: 'idle', to: 'idle', event: 'BUMP',
+                    effects: [['set', '@entity.score', 42]],
+                  },
+                  {
+                    from: 'idle', to: 'idle', event: 'READ',
+                    effects: [['emit', 'SCORE', { score: '@entity.score' }]],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it('an id-carrying [runtime] row is folded into the frame — its CONTENT survives the round-trip, not just its addressing', async () => {
+    const deps = depsFor(gameSchema());
+    const response = await evaluateOrbitalEvent(
+      { ...deps, runtimeRowSentinel: true },
+      {
+        event: 'READ',
+        traits: [{ trait: 'Player', from: 'idle' }],
+        // The client-held singleton row: the id is addressing, the fields
+        // are the state (a [runtime] entity has no authoritative store).
+        entityByTrait: { Player: { id: 'runtime', score: 41 } },
+      },
+    );
+    const score = response.emittedEvents.find((e) => e.event === 'SCORE');
+    expect((score?.payload as { score?: number } | undefined)?.score).toBe(41);
+  });
+
+  it('a `set` on the folded row is echoed back for the NEXT request\'s round-trip', async () => {
+    const deps = depsFor(gameSchema());
+    const response = await evaluateOrbitalEvent(
+      { ...deps, runtimeRowSentinel: true },
+      {
+        event: 'BUMP',
+        traits: [{ trait: 'Player', from: 'idle' }],
+        entityByTrait: { Player: { id: 'runtime', score: 41 } },
+      },
+    );
+    expect(response.entityByTrait?.['Player']?.['score']).toBe(42);
+  });
+});
+
+describe('evaluateOrbitalEvent — discovery seeds the whole active set into states', () => {
+  it('a trait inside _activeTraits with no matching arm is still echoed (the stateful "every registered trait" contract)', async () => {
+    const deps = depsFor(chatSchema());
+    const response = await evaluateOrbitalEvent(deps, {
+      event: 'INIT',
+      payload: { _activeTraits: ['Composer', 'Thread'] },
+    });
+    // Composer has the INIT arm and ran; Thread does not — but a fresh
+    // mount's states map echoes every ACTIVE trait's held (initial) state.
+    expect(response.states['Composer']).toBe('ready');
+    expect(response.states['Thread']).toBe('idle');
+    expect(response.transitioned).toBe(true);
+  });
+});
+
+describe('evaluateOrbitalEvent — payload _targetTrait sidecar guards (the client page-scope contract)', () => {
+  it('a sidecar _targetTrait OUTSIDE the page\'s _activeTraits never dispatches (no off-page bypass)', async () => {
+    const deps = depsFor(chatSchema());
+    const response = await evaluateOrbitalEvent(deps, {
+      event: 'INIT',
+      payload: { _targetTrait: 'Composer', _activeTraits: ['Thread'] },
+    });
+    expect(response.transitioned).toBe(false);
+    expect(response.rejections).toEqual([{ code: 'no-dispatchable-traits', event: 'INIT' }]);
+  });
+
+  it('a sidecar _targetTrait naming an UNHELD multi-state trait never dispatches (its current state is not a fact)', async () => {
+    const deps = depsFor(chatSchema());
+    const response = await evaluateOrbitalEvent(deps, {
+      event: 'REFETCH',
+      payload: { _targetTrait: 'Thread', _activeTraits: ['Thread'] },
+    });
+    expect(response.transitioned).toBe(false);
+    expect(response.rejections).toEqual([{ code: 'no-dispatchable-traits', event: 'REFETCH' }]);
   });
 });

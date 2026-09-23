@@ -34,7 +34,7 @@ export interface ClientEventBus {
  */
 export interface SlotSetter {
     /** Accumulate a pattern into the pending slot map */
-    addPattern: (slot: string, pattern: PatternConfig | null, props?: PatternProps) => void;
+    addPattern: (slot: string, pattern: PatternConfig | null, props?: PatternProps, priority?: number) => void;
     /** Mark a slot for clearing */
     clearSlot: (slot: string) => void;
 }
@@ -268,12 +268,12 @@ export function createClientEffectHandlers(
             };
         },
 
-        renderUI: (slot: string, pattern: PatternConfig | null, props?: PatternProps) => {
+        renderUI: (slot: string, pattern: PatternConfig | null, props?: PatternProps, priority?: number) => {
             if (pattern === null) {
                 slotSetter.clearSlot(slot);
                 return;
             }
-            slotSetter.addPattern(slot, pattern, props);
+            slotSetter.addPattern(slot, pattern, props, priority);
         },
 
         navigate: navigate ?? ((path: string) => {

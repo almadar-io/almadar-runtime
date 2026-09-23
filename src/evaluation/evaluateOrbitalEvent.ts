@@ -100,10 +100,14 @@ export interface EvaluateOrbitalEventDeps {
   runEffects: EvaluateEffectRunner;
   /**
    * Traits the CLIENT completes itself — the fan-out skips these (its own
-   * relay/mount completes them). Defaults to the request's
-   * `_activeTraits` sidecar, which is exactly the origin tab's mounted
-   * set on both paths. Off-page listeners (never mounted on the origin
-   * page) run server-side — G-RUNTIME-031.
+   * relay/mount/dispatch completes them). When omitted, the composition
+   * derives the mask from the request's shape: a delegated server leg masks
+   * nothing (the client folds, never relays); a client-declared dispatch
+   * masks the declared set (those traits already ran on the client); a
+   * discovery dispatch masks the resolved targets (the server just ran
+   * them, and the mount-time client did no local dispatch at all).
+   * Off-page listeners (never mounted on the origin page) always run
+   * server-side — G-RUNTIME-031.
    */
   relayMask?: ReadonlySet<string>;
   /** Normalized viewer (hosts normalize `request.user` claims). */
@@ -179,32 +183,41 @@ export async function evaluateOrbitalEvent(
     delete cleanPayload['_activeTraits'];
     delete cleanPayload['_targetTrait'];
   }
-  const relayMask = deps.relayMask ?? activeTraits;
+  const delegatedServerLeg = request.targetTrait !== undefined &&
+    (request.traits !== undefined || request.entityByTrait !== undefined);
 
   // ------------------------------------------------------------------
   // 1. Seed per-request state (a no-op for the stateful host, which
-  //    strips `traits`/`entityByTrait` from the request).
+  //    strips `traits`/`entityByTrait` from the request). `traits`
+  //    seeding happens in the explicit-dispatch branch BELOW, after the
+  //    active-set filter — a filtered-out off-page declaration is
+  //    deliberately never seeded (it neither transitions nor appears in
+  //    the response's `states` map).
   // ------------------------------------------------------------------
   const entityId = request.entityId ?? deps.entityId;
-  if (request.traits) {
-    for (const { trait, from } of request.traits) {
-      manager.seedState(trait, from, entityId);
-    }
-  }
   // Per-trait directly-addressed row ids (a round-tripped row carrying an
   // id — including the `'runtime'` sentinel — keeps its own addressing).
   const traitEntityIds = new Map<string, string>();
   if (request.entityByTrait) {
     for (const [traitName, row] of Object.entries(request.entityByTrait)) {
       const rowId = row['id'];
+      const entry = traitIndex.byName.get(traitName);
       if (typeof rowId === 'string' && rowId !== '') {
         traitEntityIds.set(traitName, rowId);
+        // A `[runtime]` entity has no authoritative store — the client's
+        // round-trip IS the source of truth (the id is only addressing, the
+        // `'runtime'` sentinel included). Fold the row into the frame like
+        // an id-less one so `set`-written fields survive the round-trip; a
+        // persisted read (the host's mock seed) merges underneath it.
+        if (entry && isRuntimeEntity(entry.entity)) {
+          const existing = frames.get(entry.frameKey);
+          frames.set(entry.frameKey, existing === undefined ? { ...row } : { ...existing, ...row });
+        }
         continue;
       }
       // An id-less row is the entity's shared scratch frame: fold every
       // bound trait's round-trip into the ONE row (later rows overwrite
       // on conflict — they arrive identical from the response echo).
-      const entry = traitIndex.byName.get(traitName);
       if (!entry) continue;
       const existing = frames.get(entry.frameKey);
       frames.set(entry.frameKey, existing === undefined ? { ...row } : { ...existing, ...row });
@@ -217,12 +230,34 @@ export async function evaluateOrbitalEvent(
   //    server is authoritative and asks its held states).
   // ------------------------------------------------------------------
   let targets: Array<{ trait: string; from: string }>;
+  const targetEntry = targetTrait !== undefined ? traitIndex.byName.get(targetTrait) : undefined;
+  // The payload `_targetTrait` sidecar is the CLIENT's page-scoped fallback
+  // (its own local dispatch could not reach the trait) — it never bypasses
+  // the page's active set. The canonical `request.targetTrait` field is the
+  // server-authoritative scoped-listen delivery, which does (G-RUNTIME-031:
+  // an off-page listener must still run).
+  const sidecarOutOfScope = request.targetTrait === undefined &&
+    activeTraits !== undefined && targetTrait !== undefined && !activeTraits.has(targetTrait);
   if (targetTrait !== undefined) {
-    // Scoped-listen delivery: addressed to exactly one trait, bypassing
-    // the active set (same contract as `sendEvent`'s `targetTrait`).
-    targets = traitIndex.byName.has(targetTrait)
-      ? [{ trait: targetTrait, from: manager.getState(targetTrait, entityId)?.currentState ?? findInitialState(traitIndex.byName.get(targetTrait)!.traitDef) }]
-      : [];
+    if (sidecarOutOfScope || targetEntry === undefined) {
+      targets = [];
+    } else {
+      const declared = request.traits?.find((t) => t.trait === targetTrait);
+      const from = declared?.from ?? manager.getState(targetTrait, entityId)?.currentState ??
+        findInitialState(targetEntry.traitDef);
+      // Whose truth is `from`? The canonical `request.targetTrait` (the
+      // server-authoritative scoped delivery) and a client-DECLARED trait
+      // both dispatch from a known state in every case. The client-fallback
+      // SIDECAR, though, may only guess an initial state for a SINGLE-state
+      // trait (its one state is a fact) — a stateless server can never know
+      // a multi-state trait's current state, and guessing could fire an arm
+      // the client already left. (The stateful host's manager lazy-inits
+      // never-used traits to their declared initial state — server-held
+      // truth — so this gate only ever fires on the stateless path.)
+      const stateIsFact = request.targetTrait !== undefined || declared !== undefined ||
+        (targetEntry.traitDef.states?.length ?? 0) === 1;
+      targets = stateIsFact ? [{ trait: targetTrait, from }] : [];
+    }
   } else if (request.traits !== undefined) {
     if (request.traits.length === 0) {
       // An explicit empty list is an inert no-op — the client's own
@@ -243,11 +278,23 @@ export async function evaluateOrbitalEvent(
       selectDispatchCandidates(request.traits.map(({ trait }) => trait), { activeTraits }),
     );
     targets = request.traits.filter(({ trait }) => dispatchable.has(trait));
+    // Seed the surviving declarations (the client's own current states).
+    for (const { trait, from } of targets) {
+      manager.seedState(trait, from, entityId);
+    }
   } else {
-    // Discovery: every ACTIVE trait whose held (or initial, for a fresh
-    // per-request manager) state declares a matching arm — identical to
-    // the stateful path's `canHandleEvent` discovery.
-    const dispatchable = selectDispatchCandidates(traitIndex.byName.keys(), {
+    // Discovery (a fresh mount — the stateful host's registration-time
+    // contract): materialize EVERY active trait's declared initial state
+    // first (`getState`'s lazy init IS the seed — it materializes only
+    // when absent, so a long-lived stateful manager's live states are never
+    // clobbered), so the response's `states` map echoes the whole active
+    // set, then dispatch only the traits whose held state declares a
+    // matching arm.
+    const activeSet = selectDispatchCandidates(traitIndex.byName.keys(), { activeTraits });
+    for (const trait of activeSet) {
+      if (traitIndex.byName.has(trait)) manager.getState(trait, entityId);
+    }
+    const dispatchable = selectDispatchCandidates(activeSet, {
       activeTraits,
       canHandle: (trait) => manager.canHandleEvent(trait, event, entityId, request.eventId),
     });
@@ -258,14 +305,47 @@ export async function evaluateOrbitalEvent(
   }
 
   if (targets.length === 0) {
+    // Discovery echoes the manager's held states even when NOTHING could
+    // handle the event — a fresh mount's INIT asks "what is everything on
+    // this page's state?", and the materialized active set IS the answer
+    // (the client-declared/targetTrait no-op shapes stay bare `{}`).
+    const discoveryEcho = request.traits === undefined && targetTrait === undefined;
+    const heldStates: Record<string, string> = {};
+    if (discoveryEcho) {
+      for (const [name, state] of manager.getAllStates()) {
+        heldStates[name] = state.currentState;
+      }
+    }
     return {
       success: true,
       transitioned: false,
-      states: {},
+      states: heldStates,
       emittedEvents: [],
       rejections: [{ code: 'no-dispatchable-traits', event }],
     };
   }
+
+  // The relay mask — traits the CLIENT completes itself, which the fan-out
+  // therefore skips — is topology-derived (an explicit `deps.relayMask`
+  // always wins):
+  // - A DELEGATED server leg (canonical `targetTrait` + carried circuit
+  //   state): the client folds the response instead of relaying anything —
+  //   nothing is client-completed, the mask is empty, and the server runs
+  //   the whole circuit (incl. a delegated fetch's listeners,
+  //   G-RUNTIME-029).
+  // - Client-declared dispatch: the mask is the DECLARED set — those traits
+  //   already ran on the client (a re-dispatch would double-apply their
+  //   effects); a listen-armed trait NOT in the dispatch set (the chat
+  //   thread) ran nowhere client-side and MUST run here.
+  // - Discovery (mount-time INIT, no local dispatch): the mask is the
+  //   resolved target set — the server just ran those; everything else
+  //   (a listener that didn't match the original event) runs here too,
+  //   the pre-unification stateless contract.
+  const relayMask = deps.relayMask ?? (delegatedServerLeg
+    ? undefined
+    : request.traits !== undefined
+      ? new Set(request.traits.map((t) => t.trait))
+      : new Set(targets.map((t) => t.trait)));
 
   // ------------------------------------------------------------------
   // 3. Payload validation (both paths converge on the stateful rule:
@@ -427,7 +507,11 @@ export async function evaluateOrbitalEvent(
     );
     states[item.trait] = cascade.finalState;
     transitioned = transitioned || cascade.executed;
-    for (const step of cascade.effectResults) effectResults.push(...step.results);
+    // NOTE: the step runner already appended each step's results to the
+    // SHARED `effectResults` array (it receives the array in its args) —
+    // `cascade.effectResults`' slices are the cascade's own bookkeeping
+    // (commitState's hop trace), re-pushing them here double-counted every
+    // effect (seen as a duplicated persist entry in the client-role fold).
 
     // Structured rejection per non-fired dispatch (reported only when
     // NOTHING transitioned, below).

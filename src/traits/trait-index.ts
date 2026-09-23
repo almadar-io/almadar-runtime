@@ -29,6 +29,7 @@ import {
   type OrbitalDefinition,
   type Trait,
   type TraitConfig,
+  type TraitConfigValue,
 } from '@almadar/core';
 import { createLogger } from '@almadar/logger';
 import { collectDeclaredConfigDefaults } from './config-defaults.js';
@@ -75,13 +76,39 @@ export interface TraitIndex {
 }
 
 /**
+ * True when a call-site config value still carries an un-chained
+ * `@config.X` forward anywhere in its tree — mirrors `useTraitStateMachine`'s
+ * `containsConfigForward` (`buildTraitRenderConfig`), the merge this
+ * reproduces: a forward surviving into the call-site layer would clobber the
+ * concrete value `configOverridesByTrait` already resolved it to.
+ */
+function containsConfigForward(value: TraitConfigValue): boolean {
+  if (typeof value === 'string') return value.startsWith('@config.');
+  if (Array.isArray(value)) return value.some(containsConfigForward);
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value).some(containsConfigForward);
+  }
+  return false;
+}
+
+/**
  * Build the trait index from a RESOLVED schema's orbitals (no `uses`
  * left to expand — the compiler's inline phase already ran). Pure derived
  * data: safe to cache per schema (the stateless deployment caches one
  * index per catalog behavior; the stateful server builds one per
  * registered orbital set).
+ *
+ * `configOverridesByTrait` is the caller's resolved per-trait config
+ * (`useTraitStateMachine`'s `traitConfigsByName` — page-level composed
+ * values, already forward-chained to concrete data) merged as the MIDDLE
+ * layer of `buildTraitRenderConfig`'s three: declared defaults <
+ * `configOverridesByTrait` < call-site `uses` override (forward-stripped) —
+ * reproduced here so no ui-side merge remains.
  */
-export function buildTraitIndex(orbitals: readonly OrbitalDefinition[]): TraitIndex {
+export function buildTraitIndex(
+  orbitals: readonly OrbitalDefinition[],
+  configOverridesByTrait?: Readonly<Record<string, TraitConfig>>,
+): TraitIndex {
   const parsed = orbitals.map((orbital) => ({ orbital, parsed: parseOrbitalTraits(orbital) }));
   const allEntities = parsed.flatMap(({ orbital }) => orbitalInlineEntities(orbital));
   const orbitalsView = parsed.map(({ orbital, parsed: p }) => ({ schema: orbital, entity: p.entity }));
@@ -114,9 +141,15 @@ export function buildTraitIndex(orbitals: readonly OrbitalDefinition[]): TraitIn
         }
       }
       const declaredDefaults = collectDeclaredConfigDefaults(irTrait);
-      const callSiteOverride = configByTrait.get(traitDef.name);
-      const config = declaredDefaults || callSiteOverride
-        ? { ...declaredDefaults, ...callSiteOverride }
+      const resolvedOverride = configOverridesByTrait?.[traitDef.name];
+      const rawCallSiteOverride = configByTrait.get(traitDef.name);
+      const callSiteOverride = rawCallSiteOverride
+        ? (Object.fromEntries(
+            Object.entries(rawCallSiteOverride).filter(([, v]) => !containsConfigForward(v)),
+          ) as TraitConfig)
+        : undefined;
+      const config = declaredDefaults || resolvedOverride || callSiteOverride
+        ? { ...declaredDefaults, ...resolvedOverride, ...callSiteOverride }
         : undefined;
       const isShared = traitEntity.shared === true;
       byName.set(traitDef.name, {
