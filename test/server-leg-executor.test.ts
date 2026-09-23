@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 import { EffectExecutor, type BindingContext, type EffectContext } from '../src/index.js';
-import { ServerLegCollector } from '../src/server-leg.js';
+import { ServerLegCollector } from '../src/effects/server-leg.js';
 
 // P3 (docs/Almadar_Runtime_Stateless_Stateful_PLAN.md §4.2) — the JS twin of
 // orbital-core's `RuntimeEnvironment::Client` + `KernelConfig.delegate`

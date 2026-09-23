@@ -16,11 +16,13 @@
  */
 
 import { createLogger } from '@almadar/logger';
-import type {
-  EmittedEvent,
-  OrbitalEventRequest,
-  OrbitalEventResponse,
-  OrbitalSchema,
+import {
+  OrbitalRegisterResponseSchema,
+  type EmittedEvent,
+  type OrbitalEventRequest,
+  type OrbitalEventResponse,
+  type OrbitalSchema,
+  type ServerTopology,
 } from '@almadar/core';
 
 const log = createLogger('almadar:runtime:event-transport');
@@ -29,16 +31,6 @@ const log = createLogger('almadar:runtime:event-transport');
 // Topology → carriesCircuitState
 // ============================================================================
 
-/**
- * The server's own topology declaration, read at register time — the one
- * deterministic signal (no heuristics, no string-matching on transport
- * class). Mirrors the register response field `@almadar-io/playground-runtime`
- * (`src/server/routes.ts`) already sends; `@almadar/core` has no dedicated
- * register-response type today (register is a lighter, separate endpoint
- * from the `OrbitalEventRequest`/`Response` wire), so this two-value union
- * is declared here at the port that consumes it.
- */
-export type ServerTopology = 'stateless' | 'stateful';
 
 /**
  * `true` = stateless topology: the server holds no circuit state between
@@ -199,10 +191,14 @@ export function createHttpTransport(options: HttpTransportOptions): EventTranspo
           headers: await authHeaders(getAccessToken),
           body: JSON.stringify({ schema }),
         });
-        const result = (await res.json()) as { success?: boolean; topology?: ServerTopology };
+        const parsed = OrbitalRegisterResponseSchema.safeParse(await res.json());
+        if (!parsed.success) {
+          log.error('register:malformed-response', { issues: JSON.stringify(parsed.error.issues) });
+          return { success: false, carriesCircuitState: deriveCarriesCircuitState(undefined) };
+        }
         return {
-          success: !!result.success,
-          carriesCircuitState: deriveCarriesCircuitState(result.topology),
+          success: parsed.data.success,
+          carriesCircuitState: deriveCarriesCircuitState(parsed.data.topology),
         };
       } catch (err) {
         // Network-level failure (TypeError from fetch) is expected in

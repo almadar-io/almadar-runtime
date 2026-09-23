@@ -11,7 +11,7 @@ import {
   createHttpTransport,
   createInProcessTransport,
   deriveCarriesCircuitState,
-} from '../src/EventTransport.js';
+} from '../src/server/EventTransport.js';
 
 const schema: OrbitalSchema = { name: 'Probe', orbitals: [] };
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createClientEffectHandlers } from '../src/ClientEffectHandlers.js';
+import { createClientEffectHandlers } from '../src/effects/ClientEffectHandlers.js';
 import type { EntityRow } from '../src/types.js';
 import type { BusEventSource } from '@almadar/core';
 

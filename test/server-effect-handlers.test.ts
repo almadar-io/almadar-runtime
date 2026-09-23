@@ -39,7 +39,7 @@ function seeded(rows = 3) {
 
 describe('createClientEffectHandlers.emit — payload is NOT re-wrapped', () => {
     it('emits payload directly so subscribers can read @payload.X bindings', async () => {
-        const { createClientEffectHandlers } = await import('../src/ClientEffectHandlers.js');
+        const { createClientEffectHandlers } = await import('../src/effects/ClientEffectHandlers.js');
         const bus = makeBus();
         const h = createClientEffectHandlers({
             eventBus: bus,

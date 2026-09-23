@@ -64,7 +64,7 @@ import {
   type PayloadValidationFailure,
 } from '../traits/PayloadValidator.js';
 import type { TraitIndex } from '../traits/trait-index.js';
-import type { Effect, EvaluationContextExtensions } from '../types.js';
+import type { EvaluationContextExtensions } from '../types.js';
 import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
 import type { SExpr } from '@almadar/core';
 
@@ -373,7 +373,7 @@ export async function evaluateOrbitalEvent(
           ? ((await persistence.getById(entry.entity.name, currentEntityId)) ?? {})
           : {};
         await deps.runEffects(item.trait, {
-          effects: stepEffects as Effect[],
+          effects: stepEffects,
           payload: step.payload,
           entityData: persistedEntity,
           entityId: currentEntityId,

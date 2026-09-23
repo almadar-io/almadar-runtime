@@ -23,9 +23,9 @@ export type PipeStep<I, O> = (input: I) => O;
  */
 export function pipeBehaviors<T>(
     seed: T,
-    ...steps: Array<PipeStep<unknown, unknown>>
-): unknown {
-    let current: unknown = seed;
+    ...steps: Array<PipeStep<T, T>>
+): T {
+    let current: T = seed;
     for (const step of steps) {
         current = step(current);
     }

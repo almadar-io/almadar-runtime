@@ -9,7 +9,7 @@
 
 import { createLogger } from '@almadar/logger';
 import type { PatternConfig, BusEventSource, FieldValue } from '@almadar/core';
-import type { EffectHandlers, EventPayload, EntityRow, ServiceParams, PatternProps, BrowserFilePickerOptions, BrowserGeolocationOptions } from './types.js';
+import type { EffectHandlers, EventPayload, EntityRow, ServiceParams, PatternProps, BrowserFilePickerOptions, BrowserGeolocationOptions } from '../types.js';
 
 const log = createLogger('almadar:runtime:effects:client');
 

@@ -151,7 +151,6 @@ import type {
   TraitDefinition,
   TraitState,
   EffectHandlers,
-  Effect,
   EntityRow,
   EventPayload,
   EvaluationContextExtensions,
@@ -174,6 +173,7 @@ import type {
   BusEventSource,
   ListenSource,
   SExpr,
+  RuntimeValue,
   EventId,
   UserContext,
   RawUserClaims,
@@ -2233,7 +2233,7 @@ export class OrbitalServerRuntime {
               await this.executeEffects(
                 registered,
                 traitName,
-                effects as Effect[],
+                effects,
                 step.payload,
                 stepEntity,
                 entityId,
@@ -2444,7 +2444,7 @@ export class OrbitalServerRuntime {
   private async executeEffects(
     registered: RegisteredOrbital,
     traitName: string,
-    effects: Effect[],
+    effects: RuntimeValue[],
     payload: EventPayload | undefined,
     entityData: EntityRow,
     entityId: string | undefined,
@@ -2577,7 +2577,7 @@ export class OrbitalServerRuntime {
       await this.executeEffects(
         registered,
         childName,
-        entry.result.effects as Effect[],
+        entry.result.effects,
         {},
         entityData,
         entityId,

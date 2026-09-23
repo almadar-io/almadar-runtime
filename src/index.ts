@@ -38,7 +38,7 @@ export type {
 } from "./types.js";
 
 // Constants
-export { HANDLER_MANIFEST } from "./types.js";
+export { HANDLER_MANIFEST, isEffectTuple } from "./types.js";
 export type { EntityRow } from "./types.js";
 
 // EventBus
@@ -163,7 +163,21 @@ export {
   type CreateClientEffectHandlersOptions,
   type ClientEventBus,
   type SlotSetter,
-} from "./ClientEffectHandlers.js";
+} from "./effects/ClientEffectHandlers.js";
+
+// Client-role server leg (P3) and the one event transport (P5)
+export { ServerLegCollector, type EffectDelegate, type DelegateTarget } from "./effects/server-leg.js";
+export {
+  createHttpTransport,
+  createInProcessTransport,
+  deriveCarriesCircuitState,
+  type EventTransport,
+  type EventTransportRegisterResult,
+  type AccessTokenProvider,
+  type HttpTransportOptions,
+  type InProcessTransportOptions,
+  type OrbitalEvaluator,
+} from "./server/EventTransport.js";
 
 // Re-export types for server modules (for type-only imports in client code)
 export type {

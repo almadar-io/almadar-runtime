@@ -21,8 +21,10 @@
  * @packageDocumentation
  */
 import {
+  computeTraitDispatchMode,
   orbitalInlineEntities,
   type BusEventSource,
+  type DispatchMode,
   type Entity,
   type OrbitalDefinition,
   type Trait,
@@ -58,6 +60,8 @@ export interface IndexedTrait {
   frameKey: string;
   /** The linked entity's declared `shared` flag (render-binding deferral). */
   isSharedEntity: boolean;
+  /** Declared dispatch (`local` flag + `[runtime]` entity) — never inferred from effects. */
+  dispatchMode: DispatchMode;
 }
 
 export interface TraitIndex {
@@ -124,6 +128,7 @@ export function buildTraitIndex(orbitals: readonly OrbitalDefinition[]): TraitIn
         ...(orbital.id !== undefined ? { orbitalId: orbital.id as BusEventSource['orbitalId'] } : {}),
         frameKey: isShared ? `$shared::${traitEntity.name}` : traitDef.name,
         isSharedEntity: isShared,
+        dispatchMode: computeTraitDispatchMode(irTrait, traitEntity),
       });
     }
   }

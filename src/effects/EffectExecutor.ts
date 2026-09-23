@@ -10,7 +10,6 @@
 import type { EmitConfig, FetchOptions, PatternConfig } from '@almadar/core';
 import type {
     EffectHandlers,
-    Effect,
     EffectContext,
     EffectResult,
     ExecutionEnvironment,
@@ -18,7 +17,7 @@ import type {
     BrowserGeolocationOptions,
 } from '../types.js';
 import { HANDLER_MANIFEST } from '../types.js';
-import type { EffectDelegate } from '../server-leg.js';
+import type { EffectDelegate } from './server-leg.js';
 import { interpolateValue, createContextFromBindings, deferEntityBindings } from '../evaluation/BindingResolver.js';
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from '../types.js';
 import { omitFrameFields,
@@ -26,7 +25,8 @@ import { omitFrameFields,
     isRuntimeEntity,
 } from '@almadar/core';
 import { RESERVED_FIELD_NAMES } from '@almadar/core/mock';
-import type { FieldValue, SExpr, Orbital, TraitConfig, RuntimeValue, EntityField, Entity } from '@almadar/core';
+import type { FieldValue, SExpr, Orbital, OrbitalDefinition, TraitConfig, RuntimeValue, EntityField, Entity } from '@almadar/core';
+import type { ComposeBehaviorsInput, EventWiringEntry } from './composition/index.js';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
 import type { SExpressionEvaluator } from '@almadar/evaluator';
 import { SExpressionEvaluator as EvaluatorInstance } from '@almadar/evaluator';
@@ -1179,7 +1179,7 @@ export class EffectExecutor {
                         ? { id: rawOpt }
                         : rawOpt as {
                             id?: string;
-                            filter?: unknown;
+                            filter?: SExpr | Record<string, RuntimeValue>;
                             limit?: number;
                             offset?: number;
                             include?: string[];
@@ -1229,7 +1229,7 @@ export class EffectExecutor {
                     const streamEntityType = args[0] as string;
                     const rawStreamOpt = args[1];
                     const streamOptions = typeof rawStreamOpt === 'object' && rawStreamOpt !== null
-                        ? rawStreamOpt as { id?: string; filter?: unknown }
+                        ? rawStreamOpt as { id?: string; filter?: SExpr | Record<string, RuntimeValue> }
                         : undefined;
                     const streamEmitCfg = this.extractEmitConfig(rawStreamOpt);
                     try {
@@ -1260,7 +1260,7 @@ export class EffectExecutor {
                     ? { id: rawRefOpt }
                     : rawRefOpt as {
                         id?: string;
-                        filter?: unknown;
+                        filter?: SExpr | Record<string, RuntimeValue>;
                         limit?: number;
                         offset?: number;
                         include?: string[];
@@ -1296,7 +1296,7 @@ export class EffectExecutor {
                     ? { id: rawDerefOpt }
                     : rawDerefOpt as {
                         id?: string;
-                        filter?: unknown;
+                        filter?: SExpr | Record<string, RuntimeValue>;
                     } | undefined;
                 if (this.handlers.deref) {
                     await this.handlers.deref(derefEntityType, derefOptions);
@@ -1312,7 +1312,7 @@ export class EffectExecutor {
                 if (this.handlers.swap) {
                     const swapEntityType = args[0] as string;
                     const swapEntityId = args[1] as string;
-                    const swapTransform = args[2];
+                    const swapTransform = args[2] as SExpr;
                     await this.handlers.swap(swapEntityType, swapEntityId, swapTransform);
                 } else {
                     this.logUnsupported('swap!');
@@ -1323,7 +1323,7 @@ export class EffectExecutor {
             case 'watch': {
                 if (this.handlers.watch) {
                     const watchEntityType = args[0] as string;
-                    const watchOptions = args[1] as { id?: string; filter?: unknown; limit?: number } | undefined;
+                    const watchOptions = args[1] as { id?: string; filter?: SExpr | Record<string, RuntimeValue>; limit?: number } | undefined;
                     this.handlers.watch(watchEntityType, watchOptions);
                 } else {
                     // Watch is a no-op on server - just log in debug mode
@@ -1653,7 +1653,7 @@ export class EffectExecutor {
 
             case 'behavior/compose': {
                 if (this.handlers.composeBehaviors) {
-                    const config = args[0] as { appName: string; orbitals: unknown[]; layoutStrategy?: string; eventWiring?: unknown[]; entityMappings?: Record<string, string> };
+                    const config = args[0] as ComposeBehaviorsInput;
                     await this.handlers.composeBehaviors(config);
                 } else {
                     this.logUnsupported('behavior/compose');
@@ -1663,8 +1663,8 @@ export class EffectExecutor {
 
             case 'behavior/wire': {
                 if (this.handlers.applyEventWiring) {
-                    const wireOrbitals = args[0] as unknown[];
-                    const wireEntries = args[1] as unknown[];
+                    const wireOrbitals = args[0] as OrbitalDefinition[];
+                    const wireEntries = args[1] as EventWiringEntry[];
                     await this.handlers.applyEventWiring(wireOrbitals, wireEntries);
                 } else {
                     this.logUnsupported('behavior/wire');
@@ -1674,8 +1674,8 @@ export class EffectExecutor {
 
             case 'behavior/detect-layout': {
                 if (this.handlers.detectLayoutStrategy) {
-                    const layoutOrbitals = args[0] as unknown[];
-                    const layoutWiring = args[1] as unknown[] | undefined;
+                    const layoutOrbitals = args[0] as OrbitalDefinition[];
+                    const layoutWiring = args[1] as EventWiringEntry[] | undefined;
                     await this.handlers.detectLayoutStrategy(layoutOrbitals, layoutWiring);
                 } else {
                     this.logUnsupported('behavior/detect-layout');
@@ -1688,7 +1688,7 @@ export class EffectExecutor {
                     const [pipeSeed, ...pipeSteps] = args;
                     await this.handlers.pipeBehaviors(
                         pipeSeed,
-                        ...(pipeSteps as Array<(prev: unknown) => unknown>),
+                        ...(pipeSteps as Array<(prev: RuntimeValue) => RuntimeValue>),
                     );
                 } else {
                     this.logUnsupported('behavior/pipe');

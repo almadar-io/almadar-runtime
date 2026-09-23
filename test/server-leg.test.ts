@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ServerLegCollector } from '../src/server-leg.js';
+import { ServerLegCollector } from '../src/effects/server-leg.js';
 import type { Effect } from '../src/types.js';
 
 // The JS twin of orbital-core's `runtime::server_leg` unit tests

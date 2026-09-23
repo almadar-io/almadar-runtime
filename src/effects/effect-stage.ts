@@ -17,7 +17,6 @@ import { evaluate } from '@almadar/evaluator';
 import type {
   BindingContext,
   EffectContext,
-  Effect,
   EffectHandlers,
   EntityRow,
   EventPayload,
@@ -26,6 +25,7 @@ import type {
   RuntimePatternValue,
   TraitState,
 } from '../types.js';
+import { isEffectTuple } from '../types.js';
 import type {
   BusEventSource,
   ClientEffectTuple,
@@ -128,7 +128,11 @@ export interface ServerEffectStageDeps {
 /** What was `executeEffects`' per-call parameter list. */
 export interface ServerEffectStageArgs {
   traitName: string;
-  effects: Effect[];
+  /** Wire-level effects from the transition. `RuntimeValue[]` (not `SExpr[]`)
+   *  because tick sources carry core's `TypedEffect[]`, whose interface option
+   *  objects are not `SExprObject`-assignable; the stage narrows to executable
+   *  tuples internally via `isEffectTuple` where tuple shape is required. */
+  effects: RuntimeValue[];
   payload: EventPayload | undefined;
   entityData: EntityRow;
   entityId: string | undefined;
@@ -310,7 +314,7 @@ export async function runServerEffectStage(
   // that shows when a SIBLING trait's unfiltered fetch of the same entity
   // bypasses a scoped call site (R-FETCH-SCOPE-SIBLING-BYPASS).
   for (const eff of effects) {
-    if (Array.isArray(eff) && eff[0] === 'fetch') {
+    if (isEffectTuple(eff) && eff[0] === 'fetch') {
       xOrbitalLog.debug('fetch:pre-exec-keys', () => ({
         trait: traitName,
         entity: String(eff[1]),

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createClientEffectHandlers } from '../src/ClientEffectHandlers.js';
+import { createClientEffectHandlers } from '../src/effects/ClientEffectHandlers.js';
 
 // Bridge mode (no live client entity): the server executes every persist,
 // so the client handlers must declare the placeholder as DELEGATED — the

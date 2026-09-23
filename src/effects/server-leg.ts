@@ -15,7 +15,7 @@
  * @packageDocumentation
  */
 
-import type { Effect } from './types.js';
+import type { Effect } from '../types.js';
 
 /**
  * Mirrors Rust's `RuntimeEnvironment` enum. JS never runs a server-role

@@ -35,7 +35,15 @@ import type {
     UserContext,
     NavItem,
     RuntimeValue,
+    OrbitalDefinition,
 } from '@almadar/core';
+import type {
+    ComposeBehaviorsInput,
+    ComposeBehaviorsResult,
+    EventWiringEntry,
+    LayoutStrategy,
+    PipeStep,
+} from './effects/composition/index.js';
 
 // ============================================================================
 // Runtime Data Types (re-exported from @almadar/core)
@@ -176,7 +184,7 @@ export interface TraitDefinition {
         event: string;
         /** V4 dual-carry id sibling of `event` — optional until the Phase-7 flip. */
         eventId?: EventId;
-        guard?: unknown;
+        guard?: SExpr;
         effects?: SExpr[];
         /** Compensating transition when effects fail (RCG-04) */
         onEffectError?: {
@@ -310,7 +318,7 @@ export interface EffectHandlers {
         entityType: string,
         options?: {
             id?: string;
-            filter?: unknown;
+            filter?: SExpr | Record<string, RuntimeValue>;
             limit?: number;
             offset?: number;
             /** Relation fields to include (populate) in the response */
@@ -328,10 +336,10 @@ export interface EffectHandlers {
         entityType: string,
         options: {
             id?: string;
-            filter?: unknown;
+            filter?: SExpr | Record<string, RuntimeValue>;
         } | undefined,
-        onChunk: (chunk: unknown) => void,
-    ) => Promise<unknown>;
+        onChunk: (chunk: RuntimeValue) => void,
+    ) => Promise<RuntimeValue>;
 
     /** Spawn a new entity instance */
     spawn?: (entityType: string, props?: EntityRow) => void;
@@ -371,7 +379,7 @@ export interface EffectHandlers {
     navigateBack?: () => void;
 
     /** Log a message */
-    log?: (message: string, level?: 'log' | 'warn' | 'error', data?: unknown) => void;
+    log?: (message: string, level?: 'log' | 'warn' | 'error', data?: RuntimeValue) => void;
 
     // Resource operators (ref/deref/swap!/watch/atomic)
 
@@ -380,7 +388,7 @@ export interface EffectHandlers {
         entityType: string,
         options?: {
             id?: string;
-            filter?: unknown;
+            filter?: SExpr | Record<string, RuntimeValue>;
             limit?: number;
             offset?: number;
             include?: string[];
@@ -392,7 +400,7 @@ export interface EffectHandlers {
         entityType: string,
         options?: {
             id?: string;
-            filter?: unknown;
+            filter?: SExpr | Record<string, RuntimeValue>;
         }
     ) => Promise<FetchResult | null>;
 
@@ -400,13 +408,13 @@ export interface EffectHandlers {
     swap?: (
         entityType: string,
         entityId: string,
-        transform: unknown,
+        transform: SExpr,
     ) => Promise<EntityRow | null>;
 
     /** Watch: client-side reactive subscription (no-op on server) */
     watch?: (
         entityType: string,
-        options?: { id?: string; filter?: unknown; limit?: number },
+        options?: { id?: string; filter?: SExpr | Record<string, RuntimeValue>; limit?: number },
     ) => void;
 
     /** Atomic: execute inner effects as a transaction */
@@ -416,13 +424,13 @@ export interface EffectHandlers {
 
     // === Composition handlers (compile-time, optional) ===
     /** Compose multiple orbitals into one schema. Compile-time only. */
-    composeBehaviors?: (config: { appName: string; orbitals: unknown[]; layoutStrategy?: string; eventWiring?: unknown[]; entityMappings?: Record<string, string> }) => Promise<unknown> | unknown;
+    composeBehaviors?: (input: ComposeBehaviorsInput) => ComposeBehaviorsResult;
     /** Apply cross-orbital event wiring. Compile-time only. */
-    applyEventWiring?: (orbitals: unknown[], wiring: unknown[]) => Promise<unknown[]> | unknown[];
+    applyEventWiring?: (orbitals: OrbitalDefinition[], wiring: EventWiringEntry[]) => OrbitalDefinition[];
     /** Auto-detect layout strategy. Compile-time only. */
-    detectLayoutStrategy?: (orbitals: unknown[], wiring?: unknown[]) => Promise<string> | string;
+    detectLayoutStrategy?: (orbitals: OrbitalDefinition[], wiring?: EventWiringEntry[]) => LayoutStrategy;
     /** Left-to-right behavior pipeline. Compile-time only. */
-    pipeBehaviors?: (seed: unknown, ...steps: Array<(prev: unknown) => unknown>) => Promise<unknown> | unknown;
+    pipeBehaviors?: <T>(seed: T, ...steps: Array<PipeStep<T, T>>) => T;
 
     // OS trigger handlers (server-side only)
     //
@@ -610,7 +618,7 @@ export interface BindingContext {
      */
     callsitePayload?: EventPayload;
     /** Additional custom bindings */
-    [key: string]: unknown;
+    [key: string]: RuntimeValue | undefined;
 }
 
 // ============================================================================
@@ -618,10 +626,28 @@ export interface BindingContext {
 // ============================================================================
 
 /**
- * S-expression effect array
- * First element is the operator, rest are arguments
+ * Executable effect tuple: operator name plus already-resolved arguments.
+ *
+ * Runtime-local on purpose — NOT `@almadar/core`'s `Effect` (`TypedEffect`),
+ * which is a CLOSED union of authoring-time tuples. The runtime's operator
+ * set is extensible (custom handlers, `os/*`, substrate ops), so the executor
+ * input is this open tuple. The wire-level type for effect lists stays
+ * `SExpr[]` (`TransitionResult.effects`, `TraitDefinition.transitions[].effects`);
+ * narrow it to `Effect[]` at the executor boundary with {@link isEffectTuple}.
  */
-export type Effect = [string, ...unknown[]];
+export type Effect = [string, ...RuntimeValue[]];
+
+/**
+ * Type guard: is this value an executable effect tuple (operator + args)?
+ * Narrows wire-level `SExpr` effect lists to the executor-input `Effect`
+ * without a cast. (Parameter is `RuntimeValue`, not `SExpr`, because a type
+ * predicate's type must be assignable to its parameter's type — `Effect`'s
+ * `RuntimeValue` tail is wider than `SExpr`. Every `SExpr` is a `RuntimeValue`,
+ * so call sites pass either.)
+ */
+export function isEffectTuple(value: RuntimeValue): value is Effect {
+    return Array.isArray(value) && typeof value[0] === 'string';
+}
 
 /**
  * Effect execution context
@@ -675,7 +701,7 @@ export interface EffectResult {
     /** Effect operator (e.g., "persist", "render-ui") */
     type: string;
     /** Effect arguments */
-    args: unknown[];
+    args: RuntimeValue[];
     /** Whether the effect executed successfully */
     status: "executed" | "failed" | "skipped";
     /** Error message if failed */
