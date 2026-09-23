@@ -58,6 +58,7 @@ function schema(): OrbitalSchema {
           {
             name: 'LocalToggle',
             linkedEntity: 'Cursor',
+            scope: 'instance',
             local: true,
             stateMachine: {
               states: [{ name: 'idle', isInitial: true }, { name: 'created' }],
@@ -73,6 +74,7 @@ function schema(): OrbitalSchema {
           {
             name: 'Move',
             linkedEntity: 'Cursor',
+            scope: 'instance',
             stateMachine: {
               states: [{ name: 'idle', isInitial: true }, { name: 'moved' }],
               events: [],
@@ -90,6 +92,7 @@ function schema(): OrbitalSchema {
           {
             name: 'Persistor',
             linkedEntity: 'Note',
+            scope: 'instance',
             stateMachine: {
               states: [{ name: 'idle', isInitial: true }],
               events: [],
@@ -106,6 +109,7 @@ function schema(): OrbitalSchema {
           {
             name: 'Thread',
             linkedEntity: 'Note',
+            scope: 'instance',
             stateMachine: {
               states: [{ name: 'idle', isInitial: true }, { name: 'displaying' }],
               events: [],
@@ -116,7 +120,7 @@ function schema(): OrbitalSchema {
                 },
                 {
                   from: 'displaying', to: 'displaying', event: 'LOADED',
-                  effects: [['render-ui', 'list', { type: 'data-list' }, { data: '@payload.data' }]],
+                  effects: [['render-ui', 'main', { type: 'data-list', data: '@payload.data' }]],
                 },
               ],
             },
@@ -244,9 +248,14 @@ describe('dispatchWithServerLeg — persistedAwaited', () => {
 
     const response = await postServerLeg(transport, 'ClientRoleOrbital', dispatch, o.store, o);
 
-    // The PRESENTED response is the local one — the fold lands data for
-    // the next render, it doesn't replace what THIS call returns.
-    expect(response).toBe(dispatch.response);
+    // The presented response is the local one plus the fold's effects, local first,
+    // plus the server's emits the local run did not already deliver.
+    expect(response).toMatchObject({
+      ...dispatch.response,
+      emittedEvents: serverResponse.emittedEvents,
+      clientEffects: [],
+      clientEffectsByTrait: [],
+    });
     expect(o.store.frames.get('Persistor')).toMatchObject({ id: 'n-1', title: 'From server' });
   });
 });
@@ -278,6 +287,7 @@ describe('alreadyDeliveredFrom — suppresses re-running an echo', () => {
       mode: 'persistedAwaited',
       trait: 'Persistor',
       frameKey: 'Persistor',
+      writtenTraits: new Set(['Persistor']),
     };
     const already = alreadyDeliveredFrom(dispatch);
 
@@ -356,9 +366,9 @@ describe('G-RUNTIME-029 — the fold carries the server rows, not the skeleton',
     // The REAL row, fetched and rendered entirely server-side within ONE
     // evaluateOrbitalEvent call (Persistor.CREATED fan-out → Thread.REFETCH
     // → same-trait LOADED continuation → render-ui bound to @payload.data).
-    const render = folded.clientEffects.find((e) => e[0] === 'render-ui' && e[1] === 'list');
+    const render = folded.clientEffects.find((e) => e[0] === 'render-ui' && e[1] === 'main');
     expect(render).toBeDefined();
-    const props = render?.[3] as { data?: Array<{ title?: string }> } | undefined;
+    const props = render?.[2] as { data?: Array<{ title?: string }> } | undefined;
     expect(props?.data?.[0]?.title).toBe('real title');
 
     const rows = await persistence.list('Note');

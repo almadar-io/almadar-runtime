@@ -11,6 +11,15 @@
  *   requests server-side); the host strips `traits`/`entityByTrait` and
  *   discovery runs off server-held states.
  *
+ * Topology note (W4): the REAL stateful host (`OrbitalServerRuntime`)
+ * additionally passes an explicit `relayMask` — the requesting client's
+ * mounted set (`_activeTraits`) — for every non-delegated request, because
+ * the real client relays its own mounted traits (or delegates the whole
+ * circuit via a server leg, which masks nothing). This suite's stateful
+ * host models a NO-RELAY client (a headless/topology-free peer), so the
+ * composition's derived mask applies instead — the parity asserted here
+ * is composition semantics, not host relay topology.
+ *
  * The contract asserted is "what ran and what it produced" — identical
  * `transitioned`, identical emitted events (name + V4 source stamp),
  * identical effect results, identical persisted rows. Transport-only
@@ -18,6 +27,7 @@
  * deliberately.
  */
 import { describe, it, expect } from 'vitest';
+import { asEventId } from '@almadar/core';
 import type {
   BusEventSource,
   EntityRow,
@@ -66,10 +76,11 @@ function paritySchema(): OrbitalSchema {
           {
             name: 'Composer',
             id: 'trt_composer' as TraitId,
+            scope: 'instance',
             stateMachine: {
               states: [{ name: 'ready', isInitial: true }],
               events: [
-                { key: 'SEND', payloadSchema: [{ name: 'content', type: 'string', required: true }] },
+                { key: 'SEND', name: 'Send', payloadSchema: [{ name: 'content', type: 'string', required: true }] },
               ],
               transitions: [
                 {
@@ -86,11 +97,12 @@ function paritySchema(): OrbitalSchema {
                 },
               ],
             },
-            emits: [{ event: 'SAVE', eventId: 'evt_save' }],
+            emits: [{ event: 'SAVE', eventId: asEventId('evt_save') }],
           },
           {
             name: 'Persistor',
             id: 'trt_persistor' as TraitId,
+            scope: 'instance',
             stateMachine: {
               states: [{ name: 'idle', isInitial: true }],
               events: [],
@@ -108,6 +120,7 @@ function paritySchema(): OrbitalSchema {
           {
             name: 'Thread',
             id: 'trt_thread' as TraitId,
+            scope: 'instance',
             stateMachine: {
               states: [{ name: 'idle', isInitial: true }, { name: 'displaying' }],
               events: [],
@@ -122,6 +135,7 @@ function paritySchema(): OrbitalSchema {
           },
           {
             name: 'Guarded',
+            scope: 'instance',
             stateMachine: {
               states: [{ name: 'idle', isInitial: true }, { name: 'done' }],
               events: [],
@@ -299,7 +313,7 @@ describe('parity — stateless vs stateful produce the same circuit outcome', ()
     expect(slRes.transitioned).toBe(true);
     expect(slRes.emittedEvents.map((e) => e.event)).toEqual(['SAVE', 'MESSAGE_SAVED', 'THREAD_LOADED']);
     expect(slRes.emittedEvents[0]?.source).toMatchObject({
-      orbitalId: 'orb_chat', traitId: 'trt_composer', eventId: 'evt_save',
+      orbitalId: 'orb_chat', traitId: 'trt_composer', eventId: asEventId('evt_save'),
     });
     // The off-page listener ran server-side on BOTH paths (G-RUNTIME-031)…
     expect(await rows(stateless.persistence, 'ChatMessage')).toEqual([{ content: 'hello', channel: undefined }]);

@@ -8,7 +8,7 @@
  * `InMemoryPersistence` — these are composition tests, not stage tests.
  */
 import { describe, it, expect } from 'vitest';
-import type { OrbitalId, OrbitalSchema, Trait, TraitId, TraitEventListener } from '@almadar/core';
+import { asEventId, type EntityRow, type OrbitalId, type OrbitalSchema, type Trait, type TraitId, type TraitEventListener } from '@almadar/core';
 import {
   buildTraitIndex,
   createIndexStageRunner,
@@ -40,10 +40,11 @@ function chatSchema(listenerSource?: TraitEventListener[]): OrbitalSchema {
           {
             name: 'Composer',
             id: 'trt_composer' as TraitId,
+            scope: 'instance',
             stateMachine: {
               states: [{ name: 'ready', isInitial: true }],
               events: [
-                { key: 'SEND', payloadSchema: [{ name: 'content', type: 'string', required: true }] },
+                { key: 'SEND', name: 'Send', payloadSchema: [{ name: 'content', type: 'string', required: true }] },
               ],
               transitions: [
                 {
@@ -60,11 +61,12 @@ function chatSchema(listenerSource?: TraitEventListener[]): OrbitalSchema {
                 },
               ],
             },
-            emits: [{ event: 'SAVE', eventId: 'evt_save' }],
+            emits: [{ event: 'SAVE', eventId: asEventId('evt_save') }],
           },
           {
             name: 'Persistor',
             id: 'trt_persistor' as TraitId,
+            scope: 'instance',
             stateMachine: {
               states: [{ name: 'idle', isInitial: true }],
               events: [],
@@ -82,6 +84,7 @@ function chatSchema(listenerSource?: TraitEventListener[]): OrbitalSchema {
           {
             name: 'Thread',
             id: 'trt_thread' as TraitId,
+            scope: 'instance',
             stateMachine: {
               states: [{ name: 'idle', isInitial: true }, { name: 'displaying' }],
               events: [],
@@ -96,6 +99,7 @@ function chatSchema(listenerSource?: TraitEventListener[]): OrbitalSchema {
           },
           {
             name: 'Guarded',
+            scope: 'instance',
             stateMachine: {
               states: [{ name: 'idle', isInitial: true }, { name: 'done' }],
               events: [],
@@ -116,14 +120,14 @@ function chatSchema(listenerSource?: TraitEventListener[]): OrbitalSchema {
 
 function depsFor(
   schema: OrbitalSchema,
-  overrides: Partial<EvaluateOrbitalEventDeps> = {},
+  overrides: Partial<Omit<EvaluateOrbitalEventDeps, 'persistence'>> = {},
 ): EvaluateOrbitalEventDeps & { persistence: InMemoryPersistence } {
   const traitIndex = buildTraitIndex(schema.orbitals);
   const manager = new StateMachineManager(
     [...traitIndex.byName.values()].map((entry) => entry.traitDef),
   );
   const persistence = new InMemoryPersistence();
-  const frames = new Map<string, Record<string, unknown>>();
+  const frames = new Map<string, EntityRow>();
   return {
     traitIndex,
     manager,
@@ -166,7 +170,7 @@ describe('evaluateOrbitalEvent — client-declared dispatch (stateless shape)', 
       orbitalId: 'orb_chat',
       trait: 'Composer',
       traitId: 'trt_composer',
-      eventId: 'evt_save',
+      eventId: asEventId('evt_save'),
     });
     // …and the persist-success auto-emit fired for the listener's own cascade.
     expect(response.emittedEvents.some((e) => e.event === 'MESSAGE_SAVED')).toBe(true);
@@ -325,6 +329,7 @@ describe('evaluateOrbitalEvent — [runtime] row round-trip fold (the stateless 
           traits: [
             {
               name: 'Player',
+              scope: 'instance',
               stateMachine: {
                 states: [{ name: 'idle', isInitial: true }],
                 events: [],
@@ -410,5 +415,49 @@ describe('evaluateOrbitalEvent — payload _targetTrait sidecar guards (the clie
     });
     expect(response.transitioned).toBe(false);
     expect(response.rejections).toEqual([{ code: 'no-dispatchable-traits', event: 'REFETCH' }]);
+  });
+});
+
+describe('evaluateOrbitalEvent — seedVisited (the client role\'s alreadyDelivered contract)', () => {
+  it('a seeded (trait, event) pair is never re-run, even when the fan-out reaches it', async () => {
+    const deps = depsFor(chatSchema(), {
+      seedVisited: new Set(['Persistor\u0000DO_CREATE']),
+    });
+    const response = await evaluateOrbitalEvent(deps, {
+      event: 'SEND',
+      payload: { content: 'hello', _activeTraits: ['Composer', 'Thread'] },
+      traits: [{ trait: 'Composer', from: 'ready' }],
+    });
+
+    // Composer ran, but the already-delivered Persistor leg was skipped
+    // (its state echoes from the manager — it never LEFT idle)…
+    expect(response.transitioned).toBe(true);
+    expect(response.states['Composer']).toBe('ready');
+    expect(response.states['Persistor']).toBe('idle');
+    expect(response.emittedEvents.some((e) => e.event === 'MESSAGE_SAVED')).toBe(false);
+    expect(await deps.persistence.list('ChatMessage')).toHaveLength(0);
+    // …so the Thread (listening on MESSAGE_SAVED) was never even enqueued —
+    // the enqueue-time getState materializes a trait into the states echo,
+    // and Thread was never reached.
+    expect(response.states['Thread']).toBeUndefined();
+  });
+
+  it('an UNSEEDED pair still runs (the seed only suppresses exact pairs)', async () => {
+    const deps = depsFor(chatSchema(), {
+      seedVisited: new Set(['Thread\u0000REFETCH']),
+    });
+    const response = await evaluateOrbitalEvent(deps, {
+      event: 'SEND',
+      payload: { content: 'hello', _activeTraits: ['Composer', 'Thread'] },
+      traits: [{ trait: 'Composer', from: 'ready' }],
+    });
+
+    // Persistor ran (not seeded) and persisted…
+    expect(response.states['Persistor']).toBe('idle');
+    expect(await deps.persistence.list('ChatMessage')).toHaveLength(1);
+    expect(response.emittedEvents.some((e) => e.event === 'MESSAGE_SAVED')).toBe(true);
+    // …but the seeded Thread leg was skipped — no REFETCH, no fetch, no display.
+    expect(response.states['Thread']).toBe('idle');
+    expect(response.emittedEvents.some((e) => e.event === 'THREAD_LOADED')).toBe(false);
   });
 });

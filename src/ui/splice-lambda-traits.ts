@@ -31,6 +31,7 @@ import type {
   DeclaredTraitConfig,
   Page,
   PageTraitRef,
+  RuntimeValue,
   SExpr,
   Trait,
   TraitEventContract,
@@ -123,11 +124,11 @@ function renderOnlyTemplate(trait: Trait): SExpr | null {
 // Config substitution — mirror of rewrite.rs `rewrite_config_bindings`
 // ---------------------------------------------------------------------------
 
-function resolveObjectPath(value: { [k: string]: unknown }, path: string): unknown {
-  let cur: unknown = value;
+function resolveObjectPath(value: Record<string, SExpr>, path: string): SExpr | undefined {
+  let cur: SExpr | undefined = value;
   for (const seg of path.split('.')) {
     if (cur === null || typeof cur !== 'object') return undefined;
-    cur = (cur as { [k: string]: unknown })[seg];
+    cur = (cur as Record<string, SExpr>)[seg];
     if (cur === undefined) return undefined;
   }
   return cur;
@@ -152,8 +153,8 @@ function substituteConfig(expr: SExpr, subs: Record<string, SExpr>): SExpr {
       return substituteConfig(value, subs);
     }
     if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-      const leaf = resolveObjectPath(value as { [k: string]: unknown }, trailing);
-      if (leaf !== undefined) return substituteConfig(leaf as SExpr, subs);
+      const leaf = resolveObjectPath(value, trailing);
+      if (leaf !== undefined) return substituteConfig(leaf, subs);
     }
     return expr;
   }
@@ -161,11 +162,11 @@ function substituteConfig(expr: SExpr, subs: Record<string, SExpr>): SExpr {
     return expr.map((item) => substituteConfig(item, subs));
   }
   if (expr !== null && typeof expr === 'object') {
-    const out: { [k: string]: unknown } = {};
+    const out: Record<string, SExpr> = {};
     for (const [k, v] of Object.entries(expr)) {
-      out[k] = substituteConfig(v as SExpr, subs);
+      out[k] = substituteConfig(v, subs);
     }
-    return out as SExpr;
+    return out;
   }
   return expr;
 }
@@ -202,7 +203,7 @@ interface SpliceState {
   changed: boolean;
 }
 
-function isLambdaForm(expr: readonly unknown[]): boolean {
+function isLambdaForm(expr: readonly SExpr[]): boolean {
   return expr.length === 3 && (expr[0] === 'fn' || expr[0] === 'lambda');
 }
 
@@ -253,11 +254,11 @@ function spliceExpr(expr: SExpr, inLambda: boolean, st: SpliceState): SExpr {
     return expr.map((item) => spliceExpr(item, inLambda, st));
   }
   if (expr !== null && typeof expr === 'object') {
-    const out: { [k: string]: unknown } = {};
+    const out: Record<string, SExpr> = {};
     for (const [k, v] of Object.entries(expr)) {
-      out[k] = spliceExpr(v as SExpr, inLambda, st);
+      out[k] = spliceExpr(v, inLambda, st);
     }
-    return out as SExpr;
+    return out;
   }
   return expr;
 }
@@ -266,12 +267,12 @@ function spliceExpr(expr: SExpr, inLambda: boolean, st: SpliceState): SExpr {
 // Emit merge — mirror of splice.rs `merge_wrapper_emits`
 // ---------------------------------------------------------------------------
 
-function canonical(value: unknown): unknown {
+function canonical(value: RuntimeValue): RuntimeValue {
   if (Array.isArray(value)) return value.map(canonical);
   if (value !== null && typeof value === 'object') {
-    const out: { [k: string]: unknown } = {};
-    for (const key of Object.keys(value as { [k: string]: unknown }).sort()) {
-      out[key] = canonical((value as { [k: string]: unknown })[key]);
+    const out: Record<string, RuntimeValue> = {};
+    for (const key of Object.keys(value as Record<string, RuntimeValue>).sort()) {
+      out[key] = canonical((value as Record<string, RuntimeValue>)[key]);
     }
     return out;
   }

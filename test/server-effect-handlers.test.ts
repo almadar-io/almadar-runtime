@@ -14,12 +14,13 @@ import { createServerEffectHandlers } from '../src/effects/ServerEffectHandlers.
 import { EffectExecutor } from '../src/effects/EffectExecutor.js';
 import type { Effect, BindingContext, EffectContext } from '../src/types.js';
 import type { ClientEffectTuple } from '../src/server/OrbitalServerRuntime.js';
+import type { EntityRow, EventPayload } from '@almadar/core';
 
 function makeBus() {
-    const events: Array<{ event: string; payload?: unknown }> = [];
+    const events: Array<{ event: string; payload?: EventPayload }> = [];
     return {
         events,
-        emit(event: string, payload?: unknown) {
+        emit(event: string, payload?: EventPayload) {
             events.push({ event, payload });
         },
     };
@@ -49,7 +50,7 @@ describe('createClientEffectHandlers.emit — payload is NOT re-wrapped', () => 
         const out = bus.events.find((e) => e.event === 'UI:ListItemLoaded');
         expect(out).toBeDefined();
         // Must be the raw { data: [...] } — NOT { payload: { data: [...] } }.
-        const p = out!.payload as { data?: unknown[]; payload?: unknown };
+        const p = out!.payload as { data?: EntityRow[]; payload?: EventPayload };
         expect(Array.isArray(p.data)).toBe(true);
         expect(p.payload).toBeUndefined();
     });
@@ -135,7 +136,7 @@ describe('EffectExecutor + createServerEffectHandlers — emit success with {dat
         await exec.executeAll([fetchEffect]);
         const loaded = bus.events.find((e) => e.event === 'ListItemLoaded');
         expect(loaded).toBeDefined();
-        const payload = loaded!.payload as { data: unknown[] };
+        const payload = loaded!.payload as { data: EntityRow[] };
         expect(Array.isArray(payload.data)).toBe(true);
         expect(payload.data).toHaveLength(3);
     });

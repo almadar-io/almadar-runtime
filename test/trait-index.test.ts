@@ -71,7 +71,7 @@ describe('buildTraitIndex', () => {
       ref: 'x',
       config: { mode: 'compact' },
       _resolved: trait('Composer', {
-        config: { mode: { default: 'full' }, size: { default: 10 } },
+        config: { mode: { type: 'string', default: 'full' }, size: { type: 'number', default: 10 } },
       } as Partial<Trait>),
     };
     const idx = buildTraitIndex([

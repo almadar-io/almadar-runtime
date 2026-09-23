@@ -11,6 +11,7 @@
  */
 
 import type {
+  RuntimeValue,
   Orbital,
   OrbitalDefinition,
   OrbitalRefObject,
@@ -29,6 +30,7 @@ import type {
   OrbitalSchema,
   UseDeclaration,
   PatternConfig,
+  Effect,
   OrbitalId,
   TraitId,
   EntityId,
@@ -38,6 +40,7 @@ import type {
   ConfigFieldItemsDeclaration,
   DeclaredTraitConfig,
   TraitConfigValue,
+  TraitConfigObject,
   CallSiteConfig,
   IdKind,
   IdentityLedger,
@@ -292,6 +295,17 @@ export interface ResolvedOrbital {
    */
   auxiliaryEntities?: Entity[];
 
+  /**
+   * Explicit-rebind field merges ({@link mergeImportedEntityFieldsIntoOrbital})
+   * whose target named neither this orbital's own primary nor a declared
+   * aux — left for {@link applyDeferredEntityFieldMerges}'s schema-wide
+   * retry (the target is commonly a SIBLING orbital's own primary in the
+   * same schema, e.g. `std-wiki`'s `WikiHistory -> WikiRevision` rebinding
+   * to `RevisionOrbital`'s primary from within `DocumentOrbital`). Absent
+   * (not `[]`) when nothing was deferred.
+   */
+  pendingEntityFieldMerges?: DeferredEntityFieldMerge[];
+
   /** Resolved pages (references expanded with path overrides applied) */
   pages: ResolvedPage[];
 
@@ -433,13 +447,13 @@ export type ResolveResult<T> =
  * slot / child field names — traits using `children`, `content`,
  * `leading`, `trailing`, etc. all get covered automatically.
  */
-function renameEventsInRenderUiConfig(
-  node: PatternConfig | readonly unknown[] | unknown,
+function renameEventsInRenderUiConfig<T extends RuntimeValue>(
+  node: T,
   rename: (k: string | undefined) => string | undefined,
-): PatternConfig | unknown[] | unknown {
+): T {
   if (node === null || node === undefined) return node;
   if (Array.isArray(node)) {
-    return node.map((item) => renameEventsInRenderUiConfig(item, rename));
+    return node.map((item: RuntimeValue) => renameEventsInRenderUiConfig(item, rename)) as T;
   }
   if (typeof node !== "object") return node;
 
@@ -449,26 +463,23 @@ function renameEventsInRenderUiConfig(
   // Mapped output preserves every key by re-spreading the node via a
   // shallow iteration, so we never lose the discriminator or untouched
   // props.
-  const obj = node as PatternConfig;
-  const next: PatternConfig = { ...obj };
+  const obj = node as Record<string, RuntimeValue>;
+  const next: Record<string, RuntimeValue> = { ...obj };
   // The node's own `type:` selects which pattern's prop metadata applies —
   // the same discriminator the compiled path reads (`inline/rewrite.rs`).
-  const rawType = (obj as { type?: unknown }).type;
+  const rawType = obj.type;
   const patternType = typeof rawType === "string" ? rawType : undefined;
   for (const [key, value] of Object.entries(obj)) {
     if (key === "action" && typeof value === "string" && !value.startsWith("@")) {
-      (next as { [k: string]: PatternConfig[keyof PatternConfig] })[key] =
-        (rename(value) ?? value) as PatternConfig[keyof PatternConfig];
+      next[key] = rename(value) ?? value;
       continue;
     }
     if (/^on[A-Z]/.test(key) && typeof value === "string" && !value.startsWith("@")) {
-      (next as { [k: string]: PatternConfig[keyof PatternConfig] })[key] =
-        (rename(value) ?? value) as PatternConfig[keyof PatternConfig];
+      next[key] = rename(value) ?? value;
       continue;
     }
     if (key.endsWith("Event") && typeof value === "string" && !value.startsWith("@")) {
-      (next as { [k: string]: PatternConfig[keyof PatternConfig] })[key] =
-        (rename(value) ?? value) as PatternConfig[keyof PatternConfig];
+      next[key] = rename(value) ?? value;
       continue;
     }
     // Descriptor arrays (`actions`, `itemActions`, `topBarActions`, …). Which
@@ -481,21 +492,21 @@ function renameEventsInRenderUiConfig(
     // as any prop whose carrier is not literally named `event`.
     const eventField = patternType !== undefined ? eventListPropsOf(patternType).get(key) : undefined;
     if (eventField !== undefined && Array.isArray(value)) {
-      const rewrittenArray = value.map((entry): unknown => {
+      const rewrittenArray = value.map((entry: RuntimeValue): RuntimeValue => {
         if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
-        const action = entry as { [k: string]: unknown };
+        const action = entry as Record<string, RuntimeValue>;
         const current = action[eventField];
         if (typeof current === "string" && !current.startsWith("@")) {
           return { ...action, [eventField]: rename(current) ?? current };
         }
         return action;
       });
-      (next as { [k: string]: unknown })[key] = rewrittenArray;
+      next[key] = rewrittenArray;
       continue;
     }
-    (next as { [k: string]: unknown })[key] = renameEventsInRenderUiConfig(value, rename);
+    next[key] = renameEventsInRenderUiConfig(value, rename);
   }
-  return next;
+  return next as T;
 }
 
 /**
@@ -509,19 +520,19 @@ function renameEventsInRenderUiConfig(
  * enforces the same invariant for scalar `event`-typed knobs.
  */
 function renameEventTypedMembers(
-  value: unknown,
+  value: TraitConfigValue | undefined,
   items: ConfigFieldItemsDeclaration | undefined,
   rename: (k: string | undefined) => string | undefined,
-): unknown {
+): TraitConfigValue | undefined {
   if (items === undefined || value === null || value === undefined) return value;
   if (Array.isArray(value)) {
-    return value.map((entry) => renameEventTypedMembers(entry, items, rename));
+    return value.map((entry) => renameEventTypedMembers(entry, items, rename) as TraitConfigValue);
   }
   if (typeof value !== "object") return value;
   const properties = items.properties;
   if (properties === undefined) return value;
-  const entry = value as { [k: string]: unknown };
-  const next: { [k: string]: unknown } = { ...entry };
+  const entry = value as TraitConfigObject;
+  const next: { [k: string]: TraitConfigValue } = { ...entry };
   let touched = false;
   for (const [member, decl] of Object.entries(properties)) {
     const current = entry[member];
@@ -540,7 +551,7 @@ function renameEventTypedMembers(
     if (decl.items !== undefined && current !== undefined) {
       const nested = renameEventTypedMembers(current, decl.items, rename);
       if (nested !== current) {
-        next[member] = nested;
+        next[member] = nested as TraitConfigValue;
         touched = true;
       }
     }
@@ -590,9 +601,9 @@ function renameEventsInDeclaredConfig(
  * event arms of the compiled path's `rewrite_identifiers`.
  */
 function renameEventsInEffects(
-  effects: readonly unknown[],
+  effects: readonly Effect[],
   rename: (k: string | undefined) => string | undefined,
-): unknown[] {
+): Effect[] {
   return effects.map((effect) => renameEventRefsInNode(effect, rename));
 }
 
@@ -618,30 +629,31 @@ function renameEventsInEffects(
  */
 const EMIT_OPTION_SLOTS = new Set(["success", "failure", "on_message", "on_change"]);
 
-function renameEventRefsInNode(
-  node: unknown,
+function renameEventRefsInNode<T extends RuntimeValue>(
+  node: T,
   rename: (k: string | undefined) => string | undefined,
-): unknown {
+): T {
   if (node === null || node === undefined) return node;
   if (Array.isArray(node)) {
-    if (node[0] === "render-ui" && node.length >= 3) {
-      const nextConfig = renameEventsInRenderUiConfig(node[2], rename);
+    const arr = node as ReadonlyArray<RuntimeValue>;
+    if (arr[0] === "render-ui" && arr.length >= 3) {
+      const nextConfig = renameEventsInRenderUiConfig(arr[2] as PatternConfig, rename);
       return [
-        node[0],
-        node[1],
+        arr[0],
+        arr[1],
         nextConfig,
-        ...node.slice(3).map((x) => renameEventRefsInNode(x, rename)),
-      ];
+        ...arr.slice(3).map((x) => renameEventRefsInNode(x, rename)),
+      ] as T;
     }
-    const out = node.map((x) => renameEventRefsInNode(x, rename));
-    if (node[0] === "emit" && typeof node[1] === "string") {
-      out[1] = rename(node[1]) ?? node[1];
+    const out = arr.map((x) => renameEventRefsInNode(x, rename));
+    if (arr[0] === "emit" && typeof arr[1] === "string") {
+      out[1] = rename(arr[1]) ?? arr[1];
     }
-    return out;
+    return out as T;
   }
   if (typeof node === "object") {
-    const obj = node as { [k: string]: unknown };
-    const next: { [k: string]: unknown } = {};
+    const obj = node as Record<string, RuntimeValue>;
+    const next: Record<string, RuntimeValue> = {};
     for (const [k, v] of Object.entries(obj)) {
       if (k === "emit") {
         if (typeof v === "string") {
@@ -651,8 +663,8 @@ function renameEventRefsInNode(
           // slot-key universe as the compiled path's emit-map arm) — other
           // values recurse normally so a rename key can never clobber an
           // arbitrary string that merely sits inside an emit map.
-          const slots: { [k: string]: unknown } = {};
-          for (const [slot, slotV] of Object.entries(v as { [k: string]: unknown })) {
+          const slots: Record<string, RuntimeValue> = {};
+          for (const [slot, slotV] of Object.entries(v as Record<string, RuntimeValue>)) {
             slots[slot] =
               EMIT_OPTION_SLOTS.has(slot) && typeof slotV === "string"
                 ? (rename(slotV) ?? slotV)
@@ -666,7 +678,7 @@ function renameEventRefsInNode(
       }
       next[k] = renameEventRefsInNode(v, rename);
     }
-    return next;
+    return next as T;
   }
   return node;
 }
@@ -729,29 +741,29 @@ const ID_ENTITY_PROPS: ReadonlySet<string> = new Set(["entity", "entityType", "s
  */
 type EntityRename = (name: string) => string | undefined;
 
-function renameEntityInRenderUiConfig(
-  node: PatternConfig | readonly unknown[] | unknown,
+function renameEntityInRenderUiConfig<T extends RuntimeValue>(
+  node: T,
   rename: EntityRename,
   props: ReadonlySet<string>,
-): PatternConfig | unknown[] | unknown {
+): T {
   if (node === null || node === undefined) return node;
   if (Array.isArray(node)) {
-    return node.map((item) => renameEntityInRenderUiConfig(item, rename, props));
+    return node.map((item: RuntimeValue) => renameEntityInRenderUiConfig(item, rename, props)) as T;
   }
   if (typeof node !== "object") return node;
-  const obj = node as PatternConfig;
-  const next: PatternConfig = { ...obj };
+  const obj = node as Record<string, RuntimeValue>;
+  const next: Record<string, RuntimeValue> = { ...obj };
   for (const [key, value] of Object.entries(obj)) {
     if (props.has(key) && typeof value === "string") {
       const replaced = rename(value);
       if (replaced !== undefined) {
-        (next as { [k: string]: unknown })[key] = replaced;
+        next[key] = replaced;
         continue;
       }
     }
-    (next as { [k: string]: unknown })[key] = renameEntityInRenderUiConfig(value, rename, props);
+    next[key] = renameEntityInRenderUiConfig(value, rename, props);
   }
-  return next;
+  return next as T;
 }
 
 /**
@@ -783,10 +795,10 @@ function renameEntityInRenderUiConfig(
  * rewritten end-to-end.
  */
 function renameEntityInEffects(
-  effects: readonly unknown[],
+  effects: readonly Effect[],
   rename: EntityRename,
   props: ReadonlySet<string>,
-): unknown[] {
+): Effect[] {
   return effects.map((effect) => renameEntityInEffect(effect, rename, props));
 }
 
@@ -835,35 +847,36 @@ const ARGS_FROM_POS_2_ARE_EFFECTS = new Set([
   "async/interval",
 ]);
 
-function renameEntityInEffect(
-  effect: unknown,
+function renameEntityInEffect<T extends RuntimeValue>(
+  effect: T,
   rename: EntityRename,
   props: ReadonlySet<string>,
-): unknown {
+): T {
   if (!Array.isArray(effect) || effect.length === 0) return effect;
-  const op = effect[0];
+  const arr = effect as ReadonlyArray<RuntimeValue>;
+  const op = arr[0];
   if (typeof op !== "string") return effect;
 
   // `(render-ui slot config)` — recurse into the pattern tree config.
   // Bare `entity: "<OldName>"` string-literal props inside the
   // pattern tree get rewritten too.
-  if (op === "render-ui" && effect.length >= 3) {
-    const [, slot, config, ...rest] = effect;
-    const nextConfig = renameEntityInRenderUiConfig(config, rename, props);
-    return [op, slot, nextConfig, ...rest];
+  if (op === "render-ui" && arr.length >= 3) {
+    const [, slot, config, ...rest] = arr;
+    const nextConfig = renameEntityInRenderUiConfig(config as PatternConfig, rename, props);
+    return [op, slot, nextConfig, ...rest] as T;
   }
 
   // `(persist <op> <Entity> ...)`. Entity at position 2 (after the
   // create/update/delete/clear keyword). Per PersistEffect tuple shape.
-  if (op === "persist" && effect.length >= 3 && typeof effect[2] === "string") {
-    const replaced = rename(effect[2]);
-    if (replaced !== undefined) return [op, effect[1], replaced, ...effect.slice(3)];
+  if (op === "persist" && arr.length >= 3 && typeof arr[2] === "string") {
+    const replaced = rename(arr[2]);
+    if (replaced !== undefined) return [op, arr[1], replaced, ...arr.slice(3)] as T;
   }
 
   // Operators with the entity name at position 1.
-  if (ENTITY_AT_POS_1.has(op) && typeof effect[1] === "string") {
-    const replaced = rename(effect[1]);
-    if (replaced !== undefined) return [op, replaced, ...effect.slice(2)];
+  if (ENTITY_AT_POS_1.has(op) && typeof arr[1] === "string") {
+    const replaced = rename(arr[1]);
+    if (replaced !== undefined) return [op, replaced, ...arr.slice(2)] as T;
   }
 
   // Wrappers — recurse into nested effects. Whether to skip position 1
@@ -872,13 +885,13 @@ function renameEntityInEffect(
   const recurseAll = ALL_ARGS_ARE_EFFECTS.has(op);
   if (recurseAll || skipFirstNonEffectArg) {
     const startIndex = skipFirstNonEffectArg ? 2 : 1;
-    return effect.map((arg, i) => {
+    return arr.map((arg, i) => {
       if (i < startIndex) return arg;
       if (Array.isArray(arg)) {
         return renameEntityInEffect(arg, rename, props);
       }
       return arg;
-    });
+    }) as T;
   }
 
   return effect;
@@ -892,7 +905,7 @@ const TRAIT_EMBED_PREFIX = "@trait.";
  * `Foo` substitution. JS twin of the compiler's
  * `rewrite_trait_embed_in_sexpr` (`inline/identity_normalize.rs:330`).
  */
-function renameTraitEmbedsInValue(node: unknown, subs: ReadonlyMap<string, string>): unknown {
+function renameTraitEmbedsInValue<T extends RuntimeValue>(node: T, subs: ReadonlyMap<string, string>): T {
   if (node === null || node === undefined) return node;
   if (typeof node === "string") {
     if (!node.startsWith(TRAIT_EMBED_PREFIX)) return node;
@@ -901,15 +914,15 @@ function renameTraitEmbedsInValue(node: unknown, subs: ReadonlyMap<string, strin
     const name = dot === -1 ? rest : rest.slice(0, dot);
     const suffix = dot === -1 ? "" : rest.slice(dot);
     const to = subs.get(name);
-    return to === undefined ? node : `${TRAIT_EMBED_PREFIX}${to}${suffix}`;
+    return (to === undefined ? node : `${TRAIT_EMBED_PREFIX}${to}${suffix}`) as T;
   }
-  if (Array.isArray(node)) return node.map((item) => renameTraitEmbedsInValue(item, subs));
+  if (Array.isArray(node)) return node.map((item: RuntimeValue) => renameTraitEmbedsInValue(item, subs)) as T;
   if (typeof node !== "object") return node;
-  const next: { [k: string]: unknown } = {};
-  for (const [key, value] of Object.entries(node as { [k: string]: unknown })) {
+  const next: Record<string, RuntimeValue> = {};
+  for (const [key, value] of Object.entries(node as Record<string, RuntimeValue>)) {
     next[key] = renameTraitEmbedsInValue(value, subs);
   }
-  return next;
+  return next as T;
 }
 
 /**
@@ -925,7 +938,7 @@ function renameTraitEmbedsInValue(node: unknown, subs: ReadonlyMap<string, strin
  * (`phases/inline/rewrite.rs`), which the position-only
  * `renameEntityInEffect` walker does not reach.
  */
-function renameEntityNameTokensInValue(node: unknown, entitySubs: ReadonlyMap<string, string>): unknown {
+function renameEntityNameTokensInValue<T extends RuntimeValue>(node: T, entitySubs: ReadonlyMap<string, string>): T {
   if (node === null || node === undefined) return node;
   if (typeof node === "string") {
     if (!node.startsWith("@")) return node;
@@ -934,15 +947,15 @@ function renameEntityNameTokensInValue(node: unknown, entitySubs: ReadonlyMap<st
     const name = dot === -1 ? rest : rest.slice(0, dot);
     const suffix = dot === -1 ? "" : rest.slice(dot);
     const to = entitySubs.get(name);
-    return to === undefined ? node : `@${to}${suffix}`;
+    return (to === undefined ? node : `@${to}${suffix}`) as T;
   }
-  if (Array.isArray(node)) return node.map((item) => renameEntityNameTokensInValue(item, entitySubs));
+  if (Array.isArray(node)) return node.map((item: RuntimeValue) => renameEntityNameTokensInValue(item, entitySubs)) as T;
   if (typeof node !== "object") return node;
-  const next: { [k: string]: unknown } = {};
-  for (const [key, value] of Object.entries(node as { [k: string]: unknown })) {
+  const next: Record<string, RuntimeValue> = {};
+  for (const [key, value] of Object.entries(node as Record<string, RuntimeValue>)) {
     next[key] = renameEntityNameTokensInValue(value, entitySubs);
   }
-  return next;
+  return next as T;
 }
 
 /**
@@ -960,7 +973,7 @@ function renameTraitEmbeds(trait: Trait, subs: ReadonlyMap<string, string>): Tra
       ...sm,
       transitions: (sm.transitions ?? []).map((t) =>
         t.effects
-          ? { ...t, effects: renameTraitEmbedsInValue(t.effects, subs) as typeof t.effects }
+          ? { ...t, effects: renameTraitEmbedsInValue(t.effects, subs) }
           : t,
       ),
     };
@@ -968,7 +981,7 @@ function renameTraitEmbeds(trait: Trait, subs: ReadonlyMap<string, string>): Tra
   if (trait.ticks) {
     next.ticks = trait.ticks.map((tick) =>
       tick.effects
-        ? { ...tick, effects: renameTraitEmbedsInValue(tick.effects, subs) as typeof tick.effects }
+        ? { ...tick, effects: renameTraitEmbedsInValue(tick.effects, subs) }
         : tick,
     );
   }
@@ -1088,7 +1101,7 @@ function toPageTraitRef(traitRef: TraitRef): PageTraitRef {
 /** Every `@trait.X` root name a trait references (effects, ticks, config defaults). */
 function traitEmbedNamesOf(trait: Trait): string[] {
   const found = new Set<string>();
-  const walk = (node: unknown): void => {
+  const walk = (node: RuntimeValue): void => {
     if (node === null || node === undefined) return;
     if (typeof node === "string") {
       if (!node.startsWith(TRAIT_EMBED_PREFIX)) return;
@@ -1099,11 +1112,11 @@ function traitEmbedNamesOf(trait: Trait): string[] {
       return;
     }
     if (Array.isArray(node)) {
-      for (const item of node) walk(item);
+      for (const item of node as ReadonlyArray<RuntimeValue>) walk(item);
       return;
     }
     if (typeof node !== "object") return;
-    for (const value of Object.values(node as { [k: string]: unknown })) walk(value);
+    for (const value of Object.values(node as Record<string, RuntimeValue>)) walk(value);
   };
   // Guard AND effects — Rust `sibling_trait_refs_of` (trait.rs) walks both;
   // an embed can live in a guard's own SExpr tree just as much as an
@@ -1593,11 +1606,7 @@ function applyLinkedEntityRename(
   }
   const nextTransitions = (sm.transitions ?? []).map((t) => {
     const nextEffects = t.effects
-      ? (renameEntityInEffects(
-          t.effects as readonly unknown[],
-          rename,
-          REBIND_ENTITY_PROPS,
-        ) as typeof t.effects)
+      ? renameEntityInEffects(t.effects, rename, REBIND_ENTITY_PROPS)
       : t.effects;
     return { ...t, effects: nextEffects };
   });
@@ -1666,30 +1675,18 @@ function resolveEntityTokensById(
     ? sm.transitions.map((t) => ({
         ...t,
         effects: t.effects
-          ? (renameEntityInEffects(
-              t.effects as readonly unknown[],
-              rename,
-              ID_ENTITY_PROPS,
-            ) as typeof t.effects)
+          ? renameEntityInEffects(t.effects, rename, ID_ENTITY_PROPS)
           : t.effects,
       }))
     : sm?.transitions;
   const nextTicks = trait.ticks
     ? trait.ticks.map((tick) => ({
         ...tick,
-        effects: (renameEntityInEffects(
-          tick.effects as readonly unknown[],
-          rename,
-          ID_ENTITY_PROPS,
-        ) as typeof tick.effects),
+        effects: renameEntityInEffects(tick.effects, rename, ID_ENTITY_PROPS),
       }))
     : trait.ticks;
   const nextInitial = trait.initialEffects
-    ? (renameEntityInEffects(
-        trait.initialEffects as readonly unknown[],
-        rename,
-        ID_ENTITY_PROPS,
-      ) as typeof trait.initialEffects)
+    ? renameEntityInEffects(trait.initialEffects, rename, ID_ENTITY_PROPS)
     : trait.initialEffects;
   const nextLinked =
     trait.linkedEntity !== undefined
@@ -1811,7 +1808,7 @@ function applyEventRenames(
   const nextTransitions = (sm?.transitions ?? []).map((t) => {
     const nextEvent = rename(t.event) ?? t.event;
     const nextEffects = t.effects
-      ? (renameEventsInEffects(t.effects as readonly unknown[], rename) as typeof t.effects)
+      ? renameEventsInEffects(t.effects, rename)
       : t.effects;
     return { ...t, event: nextEvent, effects: nextEffects };
   });
@@ -1833,10 +1830,7 @@ function applyEventRenames(
     tk.effects
       ? {
           ...tk,
-          effects: renameEventsInEffects(
-            tk.effects as readonly unknown[],
-            rename,
-          ) as typeof tk.effects,
+          effects: renameEventsInEffects(tk.effects, rename),
         }
       : tk,
   );
@@ -1898,8 +1892,8 @@ function applyEventRenamesToCallSiteConfig(
   const rename = (k: string | undefined): string | undefined =>
     k !== undefined && k in renames ? renames[k] : k;
   let touched = false;
-  const next: { [k: string]: unknown } = { ...(config as { [k: string]: unknown }) };
-  for (const [knob, value] of Object.entries(config as { [k: string]: unknown })) {
+  const next: { [k: string]: TraitConfigValue } = { ...config };
+  for (const [knob, value] of Object.entries(config)) {
     const field = declared[knob];
     if (field === undefined) continue;
     const renamed =
@@ -1909,7 +1903,10 @@ function applyEventRenamesToCallSiteConfig(
             : value)
         : renameEventTypedMembers(value, field.items, rename);
     if (renamed !== value) {
-      next[knob] = renamed;
+      // `value` is a TraitConfig entry (never undefined), so
+      // `renameEventTypedMembers` cannot actually return undefined here —
+      // its `| undefined` covers only its own optional-input case.
+      next[knob] = renamed as TraitConfigValue;
       touched = true;
     }
   }
@@ -2173,7 +2170,7 @@ const FIELD_NAME_MEMBER_KEYS: readonly string[] = ["key", "name", "field"];
  * Almadar_Compiler_Gaps.md` §82), and a struct descriptor's `key`/`name`/
  * `field` member. Rust twin: `rewrite_entity_field_paths`.
  */
-function rewriteEntityFieldTokensInValue(node: unknown, subs: ReadonlyMap<string, string>): unknown {
+function rewriteEntityFieldTokensInValue<T extends RuntimeValue>(node: T, subs: ReadonlyMap<string, string>): T {
   if (node === null || node === undefined) return node;
   if (typeof node === "string") {
     for (const prefix of ROW_ALIAS_TOKEN_PREFIXES) {
@@ -2183,30 +2180,31 @@ function rewriteEntityFieldTokensInValue(node: unknown, subs: ReadonlyMap<string
       const name = dot === -1 ? rest : rest.slice(0, dot);
       const suffix = dot === -1 ? "" : rest.slice(dot);
       const to = subs.get(name);
-      return to === undefined ? node : `${prefix}${to}${suffix}`;
+      return (to === undefined ? node : `${prefix}${to}${suffix}`) as T;
     }
     return node;
   }
   if (Array.isArray(node)) {
+    const arr = node as ReadonlyArray<RuntimeValue>;
     if (
-      node.length >= 3 &&
-      node[0] === "object/get" &&
-      typeof node[1] === "string" &&
-      ROW_ALIAS_ROOTS.has(node[1]) &&
-      typeof node[2] === "string"
+      arr.length >= 3 &&
+      arr[0] === "object/get" &&
+      typeof arr[1] === "string" &&
+      ROW_ALIAS_ROOTS.has(arr[1]) &&
+      typeof arr[2] === "string"
     ) {
-      const to = subs.get(node[2]);
+      const to = subs.get(arr[2]);
       if (to !== undefined) {
-        const rewritten = node.map((item) => rewriteEntityFieldTokensInValue(item, subs));
+        const rewritten = arr.map((item) => rewriteEntityFieldTokensInValue(item, subs));
         rewritten[2] = to;
-        return rewritten;
+        return rewritten as T;
       }
     }
-    return node.map((item) => rewriteEntityFieldTokensInValue(item, subs));
+    return arr.map((item) => rewriteEntityFieldTokensInValue(item, subs)) as T;
   }
   if (typeof node !== "object") return node;
-  const next: { [k: string]: unknown } = {};
-  for (const [key, value] of Object.entries(node as { [k: string]: unknown })) {
+  const next: Record<string, RuntimeValue> = {};
+  for (const [key, value] of Object.entries(node as Record<string, RuntimeValue>)) {
     if (FIELD_NAME_MEMBER_KEYS.includes(key) && typeof value === "string") {
       const to = subs.get(value);
       next[key] = to === undefined ? value : to;
@@ -2214,7 +2212,7 @@ function rewriteEntityFieldTokensInValue(node: unknown, subs: ReadonlyMap<string
     }
     next[key] = rewriteEntityFieldTokensInValue(value, subs);
   }
-  return next;
+  return next as T;
 }
 
 /**
@@ -2232,13 +2230,16 @@ function rewriteEntityFieldTokensInValue(node: unknown, subs: ReadonlyMap<string
  * config default whose value happens to literally equal one of those few
  * old names. Rust twin: `rewrite_bare_field_name_config_default`.
  */
-function rewriteBareFieldNameConfigDefault(value: unknown, fieldSubs: ReadonlyMap<string, string>): unknown {
+function rewriteBareFieldNameConfigDefault(
+  value: TraitConfigValue,
+  fieldSubs: ReadonlyMap<string, string>,
+): TraitConfigValue {
   if (typeof value === "string") {
     if (value === "" || value.startsWith("@")) return value;
     return fieldSubs.get(value) ?? value;
   }
-  if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
-    return value.map((v) => (v === "" || (v as string).startsWith("@") ? v : (fieldSubs.get(v as string) ?? v)));
+  if (Array.isArray(value) && value.every((v): v is string => typeof v === "string")) {
+    return value.map((v) => (v === "" || v.startsWith("@") ? v : (fieldSubs.get(v) ?? v)));
   }
   return value;
 }
@@ -2269,17 +2270,16 @@ function rewriteEntityFieldsInConfig(
   fieldSubs: ReadonlyMap<string, string>,
 ): Trait["config"] {
   if (fieldSubs.size === 0 || !config) return config;
-  const rewrite = (v: unknown): unknown => rewriteEntityFieldTokensInValue(v, fieldSubs);
   const nextConfig: { [k: string]: ConfigFieldDeclaration } = {};
   for (const [key, field] of Object.entries(config)) {
     if (field.default === undefined) {
       nextConfig[key] = field;
       continue;
     }
-    const afterSigils = rewrite(field.default) as ConfigFieldDeclaration["default"];
+    const afterSigils = rewriteEntityFieldTokensInValue(field.default, fieldSubs);
     nextConfig[key] = {
       ...field,
-      default: rewriteBareFieldNameConfigDefault(afterSigils, fieldSubs) as ConfigFieldDeclaration["default"],
+      default: rewriteBareFieldNameConfigDefault(afterSigils, fieldSubs),
     };
   }
   return nextConfig;
@@ -2294,7 +2294,7 @@ function rewriteEntityFieldsInConfig(
  */
 function rewriteEntityFieldsInTrait(trait: Trait, fieldSubs: ReadonlyMap<string, string>): Trait {
   if (fieldSubs.size === 0) return trait;
-  const rewrite = (v: unknown): unknown => rewriteEntityFieldTokensInValue(v, fieldSubs);
+  const rewrite = <T extends RuntimeValue>(v: T): T => rewriteEntityFieldTokensInValue(v, fieldSubs);
   const next: Trait = { ...trait };
   const sm = trait.stateMachine;
   if (sm) {
@@ -2302,27 +2302,27 @@ function rewriteEntityFieldsInTrait(trait: Trait, fieldSubs: ReadonlyMap<string,
       ...sm,
       transitions: (sm.transitions ?? []).map((t) => ({
         ...t,
-        ...(t.guard !== undefined ? { guard: rewrite(t.guard) as typeof t.guard } : {}),
-        ...(t.effects ? { effects: rewrite(t.effects) as typeof t.effects } : {}),
+        ...(t.guard !== undefined ? { guard: rewrite(t.guard) } : {}),
+        ...(t.effects ? { effects: rewrite(t.effects) } : {}),
       })),
     };
   }
   if (trait.ticks) {
     next.ticks = trait.ticks.map((tick) => ({
       ...tick,
-      ...(tick.guard !== undefined ? { guard: rewrite(tick.guard) as typeof tick.guard } : {}),
-      effects: rewrite(tick.effects) as typeof tick.effects,
+      ...(tick.guard !== undefined ? { guard: rewrite(tick.guard) } : {}),
+      effects: rewrite(tick.effects),
     }));
   }
   if (trait.listens) {
     next.listens = trait.listens.map((l) => ({
       ...l,
-      ...(l.guard !== undefined ? { guard: rewrite(l.guard) as typeof l.guard } : {}),
-      ...(l.payloadMapping ? { payloadMapping: rewrite(l.payloadMapping) as typeof l.payloadMapping } : {}),
+      ...(l.guard !== undefined ? { guard: rewrite(l.guard) } : {}),
+      ...(l.payloadMapping ? { payloadMapping: rewrite(l.payloadMapping) } : {}),
     }));
   }
   if (trait.initialEffects) {
-    next.initialEffects = rewrite(trait.initialEffects) as typeof trait.initialEffects;
+    next.initialEffects = rewrite(trait.initialEffects);
   }
   if (trait.config) {
     next.config = rewriteEntityFieldsInConfig(trait.config, fieldSubs);
@@ -2337,21 +2337,21 @@ function rewriteEntityFieldsInTrait(trait: Trait, fieldSubs: ReadonlyMap<string,
  */
 function rewriteEntityFieldsInEntity(entity: Entity, fieldSubs: ReadonlyMap<string, string>): Entity {
   if (fieldSubs.size === 0) return entity;
-  const rewrite = (v: unknown): unknown => rewriteEntityFieldTokensInValue(v, fieldSubs);
+  const rewrite = <T extends RuntimeValue>(v: T): T => rewriteEntityFieldTokensInValue(v, fieldSubs);
   return {
     ...entity,
     fields: entity.fields.map((f) => (f.name && fieldSubs.has(f.name) ? { ...f, name: fieldSubs.get(f.name)! } : f)),
     ...(entity.read_policy !== undefined
-      ? { read_policy: rewrite(entity.read_policy) as typeof entity.read_policy }
+      ? { read_policy: rewrite(entity.read_policy) }
       : {}),
     ...(entity.create_policy !== undefined
-      ? { create_policy: rewrite(entity.create_policy) as typeof entity.create_policy }
+      ? { create_policy: rewrite(entity.create_policy) }
       : {}),
     ...(entity.update_policy !== undefined
-      ? { update_policy: rewrite(entity.update_policy) as typeof entity.update_policy }
+      ? { update_policy: rewrite(entity.update_policy) }
       : {}),
     ...(entity.delete_policy !== undefined
-      ? { delete_policy: rewrite(entity.delete_policy) as typeof entity.delete_policy }
+      ? { delete_policy: rewrite(entity.delete_policy) }
       : {}),
   };
 }
@@ -2364,7 +2364,7 @@ const USER_FIELD_PREFIX = "@user.";
  * is never a role-literal comparand. JS twin of Rust's `user_field_of`
  * (`orbital-compiler/src/phases/validation/user_identity.rs` L149).
  */
-function directUserField(node: unknown): string | undefined {
+function directUserField(node: RuntimeValue): string | undefined {
   if (typeof node !== "string" || !node.startsWith(USER_FIELD_PREFIX)) return undefined;
   const rest = node.slice(USER_FIELD_PREFIX.length);
   return rest.length > 0 && !/[.[]/.test(rest) ? rest : undefined;
@@ -2395,7 +2395,7 @@ const NEGATED_EQUALITY_OPS: ReadonlySet<string> = new Set(["!=", "!==", "neq"]);
  * guard — is not a literal haystack: `undefined` tells the caller to leave
  * the node untouched.
  */
-function literalHaystackMembers(items: readonly unknown[]): string[] | undefined {
+function literalHaystackMembers(items: readonly RuntimeValue[]): string[] | undefined {
   const isListCall = items[0] === "list";
   const members = isListCall ? items.slice(1) : items;
   return members.every((v): v is string => typeof v === "string") ? [...members] : undefined;
@@ -2424,16 +2424,17 @@ function literalHaystackMembers(items: readonly unknown[]): string[] | undefined
  * literal reaches a materialized entity) is the backstop for "left
  * unmapped, and the consumer roster doesn't happen to already have it".
  */
-function rewriteRoleLiteralsInValue(
-  node: unknown,
+function rewriteRoleLiteralsInValue<T extends RuntimeValue>(
+  node: T,
   roleFields: ReadonlyMap<string, readonly string[]>,
   roles: Readonly<Record<string, readonly string[]>>,
-): unknown {
+): T {
   if (node === null || node === undefined) return node;
   if (Array.isArray(node)) {
-    const head = node[0];
-    if (typeof head === "string" && EQUALITY_OPS.has(head) && node.length === 3) {
-      const [, left, right] = node;
+    const arr = node as ReadonlyArray<RuntimeValue>;
+    const head = arr[0];
+    if (typeof head === "string" && EQUALITY_OPS.has(head) && arr.length === 3) {
+      const [, left, right] = arr;
       const leftField = directUserField(left);
       const rightField = directUserField(right);
       const userField =
@@ -2447,17 +2448,17 @@ function rewriteRoleLiteralsInValue(
         if (typeof literalSide === "string" && literalSide in roles) {
           const targets = roles[literalSide];
           if (targets.length === 1) {
-            return leftField !== undefined ? [head, left, targets[0]] : [head, targets[0], right];
+            return (leftField !== undefined ? [head, left, targets[0]] : [head, targets[0], right]) as T;
           }
           const includesExpr = ["array/includes", [...targets], leftField !== undefined ? left : right];
-          return NEGATED_EQUALITY_OPS.has(head) ? ["not", includesExpr] : includesExpr;
+          return (NEGATED_EQUALITY_OPS.has(head) ? ["not", includesExpr] : includesExpr) as T;
         }
       }
     }
-    if (head === "array/includes" && node.length === 3 && Array.isArray(node[1])) {
-      const needleField = directUserField(node[2]);
+    if (head === "array/includes" && arr.length === 3 && Array.isArray(arr[1])) {
+      const needleField = directUserField(arr[2]);
       if (needleField !== undefined && roleFields.has(needleField)) {
-        const members = literalHaystackMembers(node[1]);
+        const members = literalHaystackMembers(arr[1] as readonly RuntimeValue[]);
         if (members !== undefined) {
           const expanded: string[] = [];
           for (const literal of members) {
@@ -2468,19 +2469,19 @@ function rewriteRoleLiteralsInValue(
               expanded.push(literal);
             }
           }
-          const isListCall = node[1][0] === "list";
-          return ["array/includes", isListCall ? ["list", ...expanded] : expanded, node[2]];
+          const isListCall = (arr[1] as readonly RuntimeValue[])[0] === "list";
+          return ["array/includes", isListCall ? ["list", ...expanded] : expanded, arr[2]] as T;
         }
       }
     }
-    return node.map((item) => rewriteRoleLiteralsInValue(item, roleFields, roles));
+    return arr.map((item) => rewriteRoleLiteralsInValue(item, roleFields, roles)) as T;
   }
   if (typeof node !== "object") return node;
-  const next: { [k: string]: unknown } = {};
-  for (const [key, value] of Object.entries(node as { [k: string]: unknown })) {
+  const next: Record<string, RuntimeValue> = {};
+  for (const [key, value] of Object.entries(node as Record<string, RuntimeValue>)) {
     next[key] = rewriteRoleLiteralsInValue(value, roleFields, roles);
   }
-  return next;
+  return next as T;
 }
 
 /**
@@ -2499,7 +2500,7 @@ function rewriteRoleLiteralsInTrait(
   roles: Readonly<Record<string, readonly string[]>>,
 ): Trait {
   if (roleFields.size === 0 || Object.keys(roles).length === 0) return trait;
-  const rewrite = (v: unknown): unknown => rewriteRoleLiteralsInValue(v, roleFields, roles);
+  const rewrite = <T extends RuntimeValue>(v: T): T => rewriteRoleLiteralsInValue(v, roleFields, roles);
   const next: Trait = { ...trait };
   const sm = trait.stateMachine;
   if (sm) {
@@ -2507,27 +2508,27 @@ function rewriteRoleLiteralsInTrait(
       ...sm,
       transitions: (sm.transitions ?? []).map((t) => ({
         ...t,
-        ...(t.guard !== undefined ? { guard: rewrite(t.guard) as typeof t.guard } : {}),
-        ...(t.effects ? { effects: rewrite(t.effects) as typeof t.effects } : {}),
+        ...(t.guard !== undefined ? { guard: rewrite(t.guard) } : {}),
+        ...(t.effects ? { effects: rewrite(t.effects) } : {}),
       })),
     };
   }
   if (trait.ticks) {
     next.ticks = trait.ticks.map((tick) => ({
       ...tick,
-      ...(tick.guard !== undefined ? { guard: rewrite(tick.guard) as typeof tick.guard } : {}),
-      effects: rewrite(tick.effects) as typeof tick.effects,
+      ...(tick.guard !== undefined ? { guard: rewrite(tick.guard) } : {}),
+      effects: rewrite(tick.effects),
     }));
   }
   if (trait.listens) {
     next.listens = trait.listens.map((l) => ({
       ...l,
-      ...(l.guard !== undefined ? { guard: rewrite(l.guard) as typeof l.guard } : {}),
-      ...(l.payloadMapping ? { payloadMapping: rewrite(l.payloadMapping) as typeof l.payloadMapping } : {}),
+      ...(l.guard !== undefined ? { guard: rewrite(l.guard) } : {}),
+      ...(l.payloadMapping ? { payloadMapping: rewrite(l.payloadMapping) } : {}),
     }));
   }
   if (trait.initialEffects) {
-    next.initialEffects = rewrite(trait.initialEffects) as typeof trait.initialEffects;
+    next.initialEffects = rewrite(trait.initialEffects);
   }
   if (trait.config) {
     const nextConfig: { [k: string]: ConfigFieldDeclaration } = {};
@@ -2535,7 +2536,7 @@ function rewriteRoleLiteralsInTrait(
       nextConfig[key] =
         field.default === undefined
           ? field
-          : { ...field, default: rewrite(field.default) as ConfigFieldDeclaration["default"] };
+          : { ...field, default: rewrite(field.default) };
     }
     next.config = nextConfig;
   }
@@ -2555,20 +2556,20 @@ function rewriteRoleLiteralsInEntity(
   roles: Readonly<Record<string, readonly string[]>>,
 ): Entity {
   if (roleFields.size === 0 || Object.keys(roles).length === 0) return entity;
-  const rewrite = (v: unknown): unknown => rewriteRoleLiteralsInValue(v, roleFields, roles);
+  const rewrite = <T extends RuntimeValue>(v: T): T => rewriteRoleLiteralsInValue(v, roleFields, roles);
   return {
     ...entity,
     ...(entity.read_policy !== undefined
-      ? { read_policy: rewrite(entity.read_policy) as typeof entity.read_policy }
+      ? { read_policy: rewrite(entity.read_policy) }
       : {}),
     ...(entity.create_policy !== undefined
-      ? { create_policy: rewrite(entity.create_policy) as typeof entity.create_policy }
+      ? { create_policy: rewrite(entity.create_policy) }
       : {}),
     ...(entity.update_policy !== undefined
-      ? { update_policy: rewrite(entity.update_policy) as typeof entity.update_policy }
+      ? { update_policy: rewrite(entity.update_policy) }
       : {}),
     ...(entity.delete_policy !== undefined
-      ? { delete_policy: rewrite(entity.delete_policy) as typeof entity.delete_policy }
+      ? { delete_policy: rewrite(entity.delete_policy) }
       : {}),
   };
 }
@@ -2754,11 +2755,11 @@ function walkEntityInPayloadMapping(
   rename: EntityRename,
   props: ReadonlySet<string>,
 ): NonNullable<TraitEventListener["payloadMapping"]> {
-  const next: { [k: string]: unknown } = {};
+  const next: NonNullable<TraitEventListener["payloadMapping"]> = {};
   for (const [key, value] of Object.entries(payloadMapping)) {
     next[key] = renameEntityInEffect(value, rename, props);
   }
-  return next as NonNullable<TraitEventListener["payloadMapping"]>;
+  return next;
 }
 
 /**
@@ -2795,16 +2796,16 @@ function renameEntitiesInTrait(
   // `orbital_import_stage_b` fixture parity). Run as a second, order-
   // independent pass over the SAME surfaces (`@trait.X`'s embed-token
   // rewrite is the sibling of this, `renameTraitEmbedsInValue`).
-  const withTokens = <T>(value: T): T => renameEntityNameTokensInValue(value, entitySubs) as T;
+  const withTokens = <T extends RuntimeValue>(value: T): T => renameEntityNameTokensInValue(value, entitySubs);
   const nextLinked =
     trait.linkedEntity !== undefined ? (entitySubs.get(trait.linkedEntity) ?? trait.linkedEntity) : trait.linkedEntity;
   const sm = trait.stateMachine;
   const nextTransitions = sm?.transitions
     ? sm.transitions.map((t) => ({
         ...t,
-        ...(t.guard !== undefined ? { guard: withTokens(renameEntityInEffect(t.guard, rename, REBIND_ENTITY_PROPS)) as typeof t.guard } : {}),
+        ...(t.guard !== undefined ? { guard: withTokens(renameEntityInEffect(t.guard, rename, REBIND_ENTITY_PROPS)) } : {}),
         effects: t.effects
-          ? withTokens(renameEntityInEffects(t.effects as readonly unknown[], rename, REBIND_ENTITY_PROPS)) as typeof t.effects
+          ? withTokens(renameEntityInEffects(t.effects, rename, REBIND_ENTITY_PROPS))
           : t.effects,
       }))
     : sm?.transitions;
@@ -2812,30 +2813,30 @@ function renameEntitiesInTrait(
     ? trait.ticks.map((tick) => ({
         ...tick,
         ...(tick.guard !== undefined
-          ? { guard: withTokens(renameEntityInEffect(tick.guard, rename, REBIND_ENTITY_PROPS)) as typeof tick.guard }
+          ? { guard: withTokens(renameEntityInEffect(tick.guard, rename, REBIND_ENTITY_PROPS)) }
           : {}),
         effects: withTokens(renameEntityInEffects(
-          tick.effects as readonly unknown[],
+          tick.effects,
           rename,
           REBIND_ENTITY_PROPS,
-        )) as typeof tick.effects,
+        )),
       }))
     : trait.ticks;
   const nextListens = trait.listens
     ? trait.listens.map((l) => ({
         ...l,
-        ...(l.guard !== undefined ? { guard: withTokens(renameEntityInEffect(l.guard, rename, REBIND_ENTITY_PROPS)) as typeof l.guard } : {}),
+        ...(l.guard !== undefined ? { guard: withTokens(renameEntityInEffect(l.guard, rename, REBIND_ENTITY_PROPS)) } : {}),
         ...(l.payloadMapping
-          ? { payloadMapping: withTokens(walkEntityInPayloadMapping(l.payloadMapping, rename, REBIND_ENTITY_PROPS)) as typeof l.payloadMapping }
+          ? { payloadMapping: withTokens(walkEntityInPayloadMapping(l.payloadMapping, rename, REBIND_ENTITY_PROPS)) }
           : {}),
       }))
     : trait.listens;
   const nextInitial = trait.initialEffects
     ? withTokens(renameEntityInEffects(
-        trait.initialEffects as readonly unknown[],
+        trait.initialEffects,
         rename,
         REBIND_ENTITY_PROPS,
-      )) as typeof trait.initialEffects
+      ))
     : trait.initialEffects;
   return rewriteEntityTypedConfigValues(
     renamePayloadEntityMarkers(
@@ -2952,16 +2953,16 @@ function applyAliasEntityRenames(
 ): Trait {
   if (subs.size === 0) return trait;
   const rename: EntityRename = (name) => subs.get(name);
-  const withTokens = <T>(value: T): T => renameEntityNameTokensInValue(value, subs) as T;
+  const withTokens = <T extends RuntimeValue>(value: T): T => renameEntityNameTokensInValue(value, subs);
   const sm = trait.stateMachine;
   const nextTransitions = sm?.transitions
     ? sm.transitions.map((t) => ({
         ...t,
         ...(t.guard !== undefined
-          ? { guard: withTokens(renameEntityInEffect(t.guard, rename, REBIND_ENTITY_PROPS)) as typeof t.guard }
+          ? { guard: withTokens(renameEntityInEffect(t.guard, rename, REBIND_ENTITY_PROPS)) }
           : {}),
         effects: t.effects
-          ? (withTokens(renameEntityInEffects(t.effects as readonly unknown[], rename, REBIND_ENTITY_PROPS)) as typeof t.effects)
+          ? withTokens(renameEntityInEffects(t.effects, rename, REBIND_ENTITY_PROPS))
           : t.effects,
       }))
     : sm?.transitions;
@@ -2969,11 +2970,11 @@ function applyAliasEntityRenames(
     ? trait.ticks.map((tick) => ({
         ...tick,
         ...(tick.guard !== undefined
-          ? { guard: withTokens(renameEntityInEffect(tick.guard, rename, REBIND_ENTITY_PROPS)) as typeof tick.guard }
+          ? { guard: withTokens(renameEntityInEffect(tick.guard, rename, REBIND_ENTITY_PROPS)) }
           : {}),
         effects: withTokens(
-          renameEntityInEffects(tick.effects as readonly unknown[], rename, REBIND_ENTITY_PROPS),
-        ) as typeof tick.effects,
+          renameEntityInEffects(tick.effects, rename, REBIND_ENTITY_PROPS),
+        ),
       }))
     : trait.ticks;
   const next: Trait = {
@@ -3003,18 +3004,18 @@ function collectEntityNamesInTrait(trait: Trait, candidates: ReadonlySet<string>
   const sm = trait.stateMachine;
   for (const t of sm?.transitions ?? []) {
     if (t.guard !== undefined) renameEntityInEffect(t.guard, collect, REBIND_ENTITY_PROPS);
-    if (t.effects) renameEntityInEffects(t.effects as readonly unknown[], collect, REBIND_ENTITY_PROPS);
+    if (t.effects) renameEntityInEffects(t.effects, collect, REBIND_ENTITY_PROPS);
   }
   for (const tick of trait.ticks ?? []) {
     if (tick.guard !== undefined) renameEntityInEffect(tick.guard, collect, REBIND_ENTITY_PROPS);
-    renameEntityInEffects(tick.effects as readonly unknown[], collect, REBIND_ENTITY_PROPS);
+    renameEntityInEffects(tick.effects, collect, REBIND_ENTITY_PROPS);
   }
   for (const l of trait.listens ?? []) {
     if (l.guard !== undefined) renameEntityInEffect(l.guard, collect, REBIND_ENTITY_PROPS);
     if (l.payloadMapping) walkEntityInPayloadMapping(l.payloadMapping, collect, REBIND_ENTITY_PROPS);
   }
   if (trait.initialEffects) {
-    renameEntityInEffects(trait.initialEffects as readonly unknown[], collect, REBIND_ENTITY_PROPS);
+    renameEntityInEffects(trait.initialEffects, collect, REBIND_ENTITY_PROPS);
   }
   return collected;
 }
@@ -3225,6 +3226,15 @@ function boundTraitOrbitalBinding(
       readonly ownerEntity: Entity;
       readonly entity: Entity;
       readonly requiredData: ReadonlySet<string>;
+      /**
+       * The resolved (or, best-effort, raw inline) trait definition itself —
+       * `undefined` only when neither lookup path below can produce one
+       * (should not happen in practice). Read by
+       * {@link mergeImportedEntityFieldsIntoOrbital} via
+       * {@link collectTraitReferencedEntityFields} to compute an explicit
+       * rebind's `referencedFields` filter.
+       */
+      readonly trait: Trait | undefined;
     }
   | undefined {
   // Prefer the alias's OWN fully-resolved orbitals ({@link
@@ -3248,10 +3258,15 @@ function boundTraitOrbitalBinding(
       const bound = entry.linkedEntity;
       const resolvedEntities = [ro.entity, ...(ro.auxiliaryEntities ?? [])];
       const boundEntity = bound !== undefined ? resolvedEntities.find((e) => e.name === bound) : undefined;
-      const requiredData = new Set<string>(
-        ro.traits.find((rt) => rt.trait.name === traitName)?.trait.entityContract?.requires ?? [],
-      );
-      return { owner: ro.original, ownerEntity: ro.entity, entity: boundEntity ?? ro.entity, requiredData };
+      const resolvedTrait = ro.traits.find((rt) => rt.trait.name === traitName)?.trait;
+      const requiredData = new Set<string>(resolvedTrait?.entityContract?.requires ?? []);
+      return {
+        owner: ro.original,
+        ownerEntity: ro.entity,
+        entity: boundEntity ?? ro.entity,
+        requiredData,
+        trait: resolvedTrait,
+      };
     }
   }
 
@@ -3260,12 +3275,17 @@ function boundTraitOrbitalBinding(
   const ownerEntities = inlineEntityRefsOf(owned.owner);
   const bound = owned.entry?.linkedEntity;
   const boundEntity = bound !== undefined ? ownerEntities.find((e) => e.name === bound) : undefined;
-  const requiredData = new Set<string>(
-    owned.entry && "stateMachine" in owned.entry ? (owned.entry as Trait).entityContract?.requires ?? [] : [],
-  );
+  const rawTrait = owned.entry && "stateMachine" in owned.entry ? (owned.entry as Trait) : undefined;
+  const requiredData = new Set<string>(rawTrait?.entityContract?.requires ?? []);
   // No bound name resolves within the owner's own entity set → fall back to
   // the owner's OWN primary (mirrors the compiled path's unconditional tail).
-  return { owner: owned.owner, ownerEntity: owned.ownerEntity, entity: boundEntity ?? owned.ownerEntity, requiredData };
+  return {
+    owner: owned.owner,
+    ownerEntity: owned.ownerEntity,
+    entity: boundEntity ?? owned.ownerEntity,
+    requiredData,
+    trait: rawTrait,
+  };
 }
 
 /**
@@ -3358,6 +3378,208 @@ function rewriteSelfRelationTarget(
 }
 
 /**
+ * JS twin of `SExpression::collect_entity_field_refs` (`orbital-core/src/
+ * schema/sexpr.rs`) — walks a guard/effect/config-default tree collecting
+ * every `@entity.<field>` READ into `referencedFields` (field name -> the
+ * first site that referenced it) and every `["set", "@entity.<field>",
+ * ...]` WRITE into `setFields`. `id`/`createdAt`/`updatedAt` are excluded
+ * from `referencedFields` (runtime-managed) but NOT from `setFields` — the
+ * setter scan keeps them, matching Rust. Recurses through arrays and object
+ * values over `RuntimeValue`, which every guard/effect/config-default union
+ * (`Expression`, `TypedEffect`, `TraitConfigValue`) is assignable to.
+ */
+function collectEntityFieldRefs(
+  node: RuntimeValue,
+  referencedFields: Map<string, string>,
+  setFields: Set<string>,
+  site: string,
+): void {
+  if (typeof node === "string" && node.startsWith("@entity.")) {
+    const path = node.slice("@entity.".length);
+    const field = (path.split(".")[0] ?? "").split("[")[0] ?? "";
+    if (field !== "" && field !== "id" && field !== "createdAt" && field !== "updatedAt") {
+      if (!referencedFields.has(field)) referencedFields.set(field, site);
+    }
+    return;
+  }
+  if (Array.isArray(node)) {
+    if (node.length >= 2 && node[0] === "set" && typeof node[1] === "string" && node[1].startsWith("@entity.")) {
+      const setterPath = node[1].slice("@entity.".length);
+      const setterField = (setterPath.split(".")[0] ?? "").split("[")[0] ?? "";
+      if (setterField !== "") setFields.add(setterField);
+    }
+    for (const item of node) collectEntityFieldRefs(item, referencedFields, setFields, site);
+    return;
+  }
+  if (node !== null && typeof node === "object") {
+    for (const value of Object.values(node as Record<string, RuntimeValue>)) {
+      collectEntityFieldRefs(value, referencedFields, setFields, site);
+    }
+  }
+}
+
+/**
+ * JS twin of `TraitDefinition::referenced_entity_field_names`
+ * (`orbital-core/src/schema/types.rs`) — every entity field NAME this
+ * trait's own body reads or writes: the union of `@entity.<field>` refs and
+ * `set @entity.<field>` writers across every guard, transition effect, tick
+ * guard/effect, and config-field default. Entity-agnostic (says which field
+ * NAMES the trait touches, not which entity they belong to) — a caller
+ * matches the result against a specific {@link Entity}.
+ */
+function referencedEntityFieldNames(trait: Trait): Set<string> {
+  const referenced = new Map<string, string>();
+  const setFields = new Set<string>();
+  for (const transition of trait.stateMachine?.transitions ?? []) {
+    if (transition.guard) collectEntityFieldRefs(transition.guard, referenced, setFields, "GUARD");
+    for (const effect of transition.effects ?? []) {
+      collectEntityFieldRefs(effect, referenced, setFields, "EFFECT");
+    }
+  }
+  for (const tick of trait.ticks ?? []) {
+    if (tick.guard) collectEntityFieldRefs(tick.guard, referenced, setFields, "TICK_GUARD");
+    for (const effect of tick.effects ?? []) {
+      collectEntityFieldRefs(effect, referenced, setFields, "TICK");
+    }
+  }
+  for (const field of Object.values(trait.config ?? {})) {
+    if (field.default !== undefined) {
+      collectEntityFieldRefs(field.default, referenced, setFields, "CONFIG_DEFAULT");
+    }
+  }
+  const out = new Set(referenced.keys());
+  for (const f of setFields) out.add(f);
+  return out;
+}
+
+/**
+ * JS twin of `parse_fetch_include_literals` (`orbital-compiler/src/phases/
+ * validation/effect/fetch.rs`) — the literal string field names named by a
+ * fetch `include` option, stripping the `["list", ...]` literal-list marker
+ * (`strip_literal_list_marker`) when present. `undefined`/non-array input
+ * yields no literals (the shape error itself is a validation concern, not
+ * this collector's).
+ */
+function fetchIncludeLiterals(includeExpr: RuntimeValue): string[] {
+  if (!Array.isArray(includeExpr)) return [];
+  const arr = includeExpr[0] === "list" ? includeExpr.slice(1) : includeExpr;
+  return arr.filter((item): item is string => typeof item === "string");
+}
+
+/**
+ * JS twin of `resolve_fetch_include_field` (`orbital-compiler/src/phases/
+ * validation/effect/fetch.rs`) — resolves a fetch `include` literal to the
+ * entity FIELD name it designates: either a relation field's own name, or
+ * that field's base name with the `Id` suffix stripped (`"company"` ->
+ * `"companyId"`). `undefined` when it matches no relation field on
+ * `entityDef`.
+ */
+function resolveFetchIncludeField(entityDef: Entity, includeField: string): string | undefined {
+  const exact = entityDef.fields.find((f) => f.type === "relation" && f.name === includeField);
+  if (exact?.name !== undefined) return exact.name;
+  for (const f of entityDef.fields) {
+    if (f.type !== "relation" || f.name === undefined) continue;
+    const baseName = f.name.endsWith("Id") ? f.name.slice(0, -2) : f.name;
+    if (baseName === includeField) return f.name;
+  }
+  return undefined;
+}
+
+/**
+ * JS twin of `collect_fetch_persist_entity_fields_matched` / leaf matcher
+ * `collect_fetch_persist_fields` (`orbital-compiler/src/phases/inline/
+ * entity.rs`) — walks a guard/effect tree for `fetch`/`persist` calls naming
+ * `entityDef` by name, collecting the fetch `include` fields (resolved via
+ * {@link resolveFetchIncludeField}) and persist data-literal keys into
+ * `out`. Part 4 of the Rust collector (render-ui pattern-contract
+ * `requiredFields`, `required_entity_fields_for_node`) has NO JS twin yet —
+ * no pattern-contract required-fields walker exists in `@almadar/core` or
+ * `@almadar/runtime` to reuse, and none of the corpus mismatches this fix
+ * targets needed it (see the gap noted where this is called).
+ */
+function collectFetchPersistEntityFields(node: RuntimeValue, entityDef: Entity, out: Set<string>): void {
+  if (Array.isArray(node)) {
+    if (node[0] === "fetch" && node.length >= 2 && node[1] === entityDef.name) {
+      const opts = node[2];
+      if (opts !== null && typeof opts === "object" && !Array.isArray(opts)) {
+        const include = (opts as Record<string, RuntimeValue>)["include"];
+        for (const literal of fetchIncludeLiterals(include)) {
+          const resolved = resolveFetchIncludeField(entityDef, literal);
+          if (resolved !== undefined) out.add(resolved);
+        }
+      }
+    } else if (node[0] === "persist") {
+      const entityIndex =
+        typeof node[1] === "string" && (node[1] === "create" || node[1] === "update" || node[1] === "delete")
+          ? 2
+          : 1;
+      if (node[entityIndex] === entityDef.name) {
+        const data = node[entityIndex + 1];
+        if (data !== null && typeof data === "object" && !Array.isArray(data)) {
+          for (const key of Object.keys(data as object)) out.add(key);
+        }
+      }
+    }
+    for (const item of node) collectFetchPersistEntityFields(item, entityDef, out);
+    return;
+  }
+  if (node !== null && typeof node === "object") {
+    for (const value of Object.values(node as Record<string, RuntimeValue>)) {
+      collectFetchPersistEntityFields(value, entityDef, out);
+    }
+  }
+}
+
+/**
+ * JS twin of `trait_references_entity_fields` (`orbital-compiler/src/
+ * phases/inline/entity.rs`) — parts 1+2+3 of the field-usage definition for
+ * a SINGLE trait (no recursion into hoisted `@trait.<Sibling>` children —
+ * `sibling_trait_refs_of`'s recursive union, part 4's cross-trait half, has
+ * no JS twin yet; not needed by any corpus case this fix targets, so this
+ * mirrors only what {@link collectTraitReferencedEntityFields} below
+ * actually calls): {@link referencedEntityFieldNames} unioned with
+ * {@link collectFetchPersistEntityFields} against `entityDef`.
+ */
+function traitReferencesEntityFields(trait: Trait, entityDef: Entity): Set<string> {
+  const fields = referencedEntityFieldNames(trait);
+  for (const transition of trait.stateMachine?.transitions ?? []) {
+    if (transition.guard) collectFetchPersistEntityFields(transition.guard, entityDef, fields);
+    for (const effect of transition.effects ?? []) {
+      collectFetchPersistEntityFields(effect, entityDef, fields);
+    }
+  }
+  for (const tick of trait.ticks ?? []) {
+    if (tick.guard) collectFetchPersistEntityFields(tick.guard, entityDef, fields);
+    for (const effect of tick.effects ?? []) {
+      collectFetchPersistEntityFields(effect, entityDef, fields);
+    }
+  }
+  for (const field of Object.values(trait.config ?? {})) {
+    if (field.default !== undefined) collectFetchPersistEntityFields(field.default, entityDef, fields);
+  }
+  return fields;
+}
+
+/**
+ * JS twin of `collect_trait_referenced_entity_fields`
+ * (`orbital-compiler/src/phases/inline/entity.rs`) — every field of
+ * `importedEntity` that `trait`'s own body actually reads, writes,
+ * fetch-includes, or persists ({@link traitReferencesEntityFields}) unioned
+ * with `trait.entityContract.requires` (a required read counts as
+ * referenced by definition, even though {@link mergeImportedEntityFields}
+ * separately excludes required-DATA fields from ever being auto-merged).
+ * NOT recursed into hoisted synthetic render children — see
+ * {@link traitReferencesEntityFields}'s own doc for why that part of the
+ * Rust collector has no JS twin yet
+ * (R-ENTITY-FIELD-UNION-ACROSS-SAME-NAMED-ENTITY, `docs/Almadar_Gaps.md`).
+ */
+function collectTraitReferencedEntityFields(trait: Trait, importedEntity: Entity): Set<string> {
+  const fields = traitReferencesEntityFields(trait, importedEntity);
+  for (const r of trait.entityContract?.requires ?? []) fields.add(r);
+  return fields;
+}
+
+/**
  * JS twin of `merge_imported_entity_fields` (`orbital-compiler/src/phases/
  * inline/entity.rs`) — auto-merges the imported behavior's canonical entity
  * fields INTO the caller's entity. For each field in `importedEntity`, if
@@ -3367,15 +3589,23 @@ function rewriteSelfRelationTarget(
  * depth-propagation case); `requiredData` (the trait's own
  * `entityContract.requires`) is NEVER auto-merged unless the field is itself
  * intrinsic — a required DATA read must be satisfied by the target, not
- * silently masked by a merge. Each added field is stamped `mergedFrom:
- * <importedEntity.name>` — its `required` is the atom's own write contract,
- * never the host writer's. Mutates `callerEntity.fields` in place.
+ * silently masked by a merge. On an explicit rebind (`intrinsicOnly ==
+ * false`) a field only carries when it's also in `referencedFields` —
+ * R-ENTITY-FIELD-UNION-ACROSS-SAME-NAMED-ENTITY: the composed trait's own
+ * field usage decides what merges onto a differently-named host entity,
+ * never the imported entity's whole field list. The no-rebind
+ * `intrinsicOnly` path is unaffected — `referencedFields` is ignored there,
+ * matching its existing "all intrinsic fields carry" contract. Each added
+ * field is stamped `mergedFrom: <importedEntity.name>` — its `required` is
+ * the atom's own write contract, never the host writer's. Mutates
+ * `callerEntity.fields` in place.
  */
 function mergeImportedEntityFields(
   callerEntity: Entity,
   importedEntity: Entity,
   intrinsicOnly: boolean,
   requiredData: ReadonlySet<string>,
+  referencedFields: ReadonlySet<string>,
 ): void {
   const existingNames = new Set(
     callerEntity.fields.map((f) => f.name).filter((n): n is string => n !== undefined),
@@ -3387,6 +3617,7 @@ function mergeImportedEntityFields(
     if (intrinsicOnly && field.intrinsic !== true) continue;
     if (field.name === undefined) continue;
     if (requiredData.has(field.name) && field.intrinsic !== true) continue;
+    if (!intrinsicOnly && !referencedFields.has(field.name)) continue;
     if (existingNames.has(field.name)) continue;
     const cloned = structuredClone(field);
     rewriteSelfRelationTarget(cloned, oldName, newName, newId);
@@ -3400,32 +3631,38 @@ function mergeImportedEntityFields(
  * (GAP-AGB-MOLECULE-ENTITY-CONTRACT)" pass (`orbital-compiler/src/phases/
  * inline/mod.rs`, ~line 1044) — runs BEFORE entity/trait resolution, exactly
  * like Rust, so a composed atom's field contract (an explicit `-> Entity`
- * rebind's FULL field set, or a no-rebind same-name atom's `@intrinsic`-only
- * fields) is present on the entity object every later phase — including
- * {@link resolveOrbitalTypeParamSentinels} — reads. Two cases carry the
- * imported entity's fields onto the caller entity: (a) an explicit
- * `linkedEntity` rebind (any target), and (b) NO rebind, but the imported
- * trait's own bound entity NAME equals the caller entity name (the depth-
- * propagation fix: an organism importing a self-contained widget atom
+ * rebind's referenced-field-filtered set, or a no-rebind same-name atom's
+ * `@intrinsic`-only fields) is present on the entity object every later
+ * phase — including {@link resolveOrbitalTypeParamSentinels} — reads. Two
+ * cases carry the imported entity's fields onto the caller entity: (a) an
+ * explicit `linkedEntity` rebind (any target), and (b) NO rebind, but the
+ * imported trait's own bound entity NAME equals the caller entity name (the
+ * depth-propagation fix: an organism importing a self-contained widget atom
  * WITHOUT rebinding still reads the trait's intrinsic `@entity.X` fields
  * against its own same-named entity). The rebind target is honored — primary
- * or a matching AUTHOR-DECLARED auxiliary — falling back to the primary when
- * the name matches neither; a rebind target that is an IMPORTED aux entity
- * (surfaced by {@link auxEntitiesFromUnrebindTraitRefs} below, not yet
- * computed at this point) is a known Rust limitation too, mirrored here
- * unchanged. Mutates `entity`/`declaredAuxEntities` members in place.
+ * or a matching AUTHOR-DECLARED auxiliary; a target that is NEITHER is not
+ * merged here (the retired behavior silently fell back to the primary,
+ * R-ENTITY-REBIND-TARGET-FALLBACK) but returned as a
+ * {@link DeferredEntityFieldMerge} for the caller to retry schema-wide via
+ * {@link applyDeferredEntityFieldMerges} — JS twin of
+ * `merge_into_named_entity`'s own local-then-schema-wide two-attempt shape.
+ * A rebind target that is an IMPORTED aux entity (surfaced by
+ * {@link auxEntitiesFromUnrebindTraitRefs} below, not yet computed at this
+ * point) is a known Rust limitation too, mirrored here unchanged. Mutates
+ * `entity`/`declaredAuxEntities` members in place.
  */
 function mergeImportedEntityFieldsIntoOrbital(
   orbitalTraits: readonly TraitRef[],
   entity: Entity,
   declaredAuxEntities: readonly Entity[],
   imports: ResolvedImports,
-): void {
+): DeferredEntityFieldMerge[] {
   interface PendingMerge {
     readonly target: string | undefined;
     readonly imported: Entity;
     readonly intrinsicOnly: boolean;
     readonly requiredData: ReadonlySet<string>;
+    readonly trait: Trait | undefined;
   }
   const mergedAliases = new Set<string>();
   const pending: PendingMerge[] = [];
@@ -3458,15 +3695,122 @@ function mergeImportedEntityFieldsIntoOrbital(
       imported: binding.entity,
       intrinsicOnly: linkedEntity === undefined,
       requiredData: binding.requiredData,
+      trait: binding.trait,
     });
   }
 
+  const deferred: DeferredEntityFieldMerge[] = [];
   for (const pm of pending) {
-    const auxTarget =
-      pm.target !== undefined && pm.target !== entity.name
-        ? declaredAuxEntities.find((e) => e.name === pm.target)
-        : undefined;
-    mergeImportedEntityFields(auxTarget ?? entity, pm.imported, pm.intrinsicOnly, pm.requiredData);
+    // Ignored on the no-rebind `intrinsicOnly` path (matches
+    // `merge_imported_entity_fields`'s own contract); an explicit rebind
+    // with no resolvable trait definition merges nothing rather than
+    // falling back to "everything" -- deterministic, not a heuristic guess.
+    const referencedFields =
+      pm.intrinsicOnly || pm.trait === undefined
+        ? new Set<string>()
+        : collectTraitReferencedEntityFields(pm.trait, pm.imported);
+
+    if (pm.target === undefined || pm.target === entity.name) {
+      refResolverLog.debug("entity-merge", {
+        into: entity.name,
+        from: pm.imported.name,
+        target: pm.target,
+        intrinsicOnly: pm.intrinsicOnly,
+        fields: pm.imported.fields.map((f) => f.name),
+      });
+      mergeImportedEntityFields(entity, pm.imported, pm.intrinsicOnly, pm.requiredData, referencedFields);
+      continue;
+    }
+
+    const auxTarget = declaredAuxEntities.find((e) => e.name === pm.target);
+    if (auxTarget) {
+      refResolverLog.debug("entity-merge", {
+        into: auxTarget.name,
+        from: pm.imported.name,
+        target: pm.target,
+        intrinsicOnly: pm.intrinsicOnly,
+        fields: pm.imported.fields.map((f) => f.name),
+      });
+      mergeImportedEntityFields(auxTarget, pm.imported, pm.intrinsicOnly, pm.requiredData, referencedFields);
+      continue;
+    }
+
+    // Neither this orbital's primary nor a declared aux -- defer to the
+    // schema-wide retry rather than silently landing on the primary
+    // (the retired R-ENTITY-REBIND-TARGET-FALLBACK behavior).
+    refResolverLog.debug("entity-merge:deferred", {
+      from: pm.imported.name,
+      target: pm.target,
+      intrinsicOnly: pm.intrinsicOnly,
+    });
+    deferred.push({
+      target: pm.target,
+      imported: pm.imported,
+      intrinsicOnly: pm.intrinsicOnly,
+      requiredData: pm.requiredData,
+      referencedFields,
+    });
+  }
+  return deferred;
+}
+
+/**
+ * A `mergeImportedEntityFieldsIntoOrbital` merge whose explicit rebind
+ * target named neither this orbital's own primary nor one of its declared
+ * auxiliaries -- JS twin of the pending state `merge_into_named_entity`'s
+ * FIRST (single-orbital) call leaves behind when it returns `false`
+ * (`orbital-compiler/src/phases/inline/mod.rs`). Carried up to
+ * {@link ResolvedOrbital.pendingEntityFieldMerges} for
+ * {@link applyDeferredEntityFieldMerges}'s schema-wide retry.
+ */
+interface DeferredEntityFieldMerge {
+  /** The rebind target name this orbital could not resolve locally. */
+  readonly target: string;
+  readonly imported: Entity;
+  readonly intrinsicOnly: boolean;
+  readonly requiredData: ReadonlySet<string>;
+  /** Pre-computed by {@link collectTraitReferencedEntityFields} -- the composing trait/binding no longer exists by retry time. */
+  readonly referencedFields: ReadonlySet<string>;
+}
+
+/**
+ * JS twin of the compiled path's schema-wide REBIND-MERGE RETRY --
+ * `merge_into_named_entity`'s SECOND call, made once every orbital in a
+ * schema (or self-contained imported file -- see the two call sites) has
+ * finished its own local `mergeImportedEntityFieldsIntoOrbital` pass
+ * (`orbital-compiler/src/phases/inline/mod.rs`). Each
+ * {@link DeferredEntityFieldMerge} target is looked up again against EVERY
+ * orbital in `resolved` -- primary checked before aux, in schema order,
+ * first match wins -- rather than landing on the deferring orbital's own
+ * primary (the retired R-ENTITY-REBIND-TARGET-FALLBACK behavior). Mutates
+ * the matched orbital's entity fields in place; a target that resolves
+ * nowhere in `resolved` is not merged anywhere -- mirrors
+ * `merge_into_named_entity` returning `false` with no further fallback (a
+ * compiled-path validator reports `ORB_T_REBIND_TARGET_UNRESOLVED` there;
+ * this interpreter path has no such gate, so it only logs).
+ */
+function applyDeferredEntityFieldMerges(resolved: readonly ResolvedOrbital[]): void {
+  for (const orbital of resolved) {
+    for (const pm of orbital.pendingEntityFieldMerges ?? []) {
+      let landed = false;
+      for (const candidate of resolved) {
+        if (candidate.entity.name === pm.target) {
+          mergeImportedEntityFields(candidate.entity, pm.imported, pm.intrinsicOnly, pm.requiredData, pm.referencedFields);
+          landed = true;
+          break;
+        }
+        const auxMatch = (candidate.auxiliaryEntities ?? []).find((e) => e.name === pm.target);
+        if (auxMatch) {
+          mergeImportedEntityFields(auxMatch, pm.imported, pm.intrinsicOnly, pm.requiredData, pm.referencedFields);
+          landed = true;
+          break;
+        }
+      }
+      refResolverLog.debug(landed ? "entity-merge:deferred-landed" : "entity-merge:unresolved", {
+        from: pm.imported.name,
+        target: pm.target,
+      });
+    }
   }
 }
 
@@ -3686,13 +4030,14 @@ function rewriteConcatPrefix(literalPrefix: string, pathMap: ReadonlyMap<string,
  * navigate targets (the compiled path's `rewrite_navigate_targets` has not
  * landed yet either — W3-R is a sibling, not-yet-shipped work item).
  */
-function rewriteNavigateTargets(node: unknown, pathMap: ReadonlyMap<string, string>): unknown {
+function rewriteNavigateTargets<T extends RuntimeValue>(node: T, pathMap: ReadonlyMap<string, string>): T {
   if (node === null || node === undefined) return node;
   if (Array.isArray(node)) {
-    if (node[0] === "navigate" && node.length >= 2) {
-      const target = node[1];
+    const arr = node as ReadonlyArray<RuntimeValue>;
+    if (arr[0] === "navigate" && arr.length >= 2) {
+      const target = arr[1];
       if (typeof target === "string" && pathMap.has(target)) {
-        return [node[0], pathMap.get(target)!, ...node.slice(2).map((v) => rewriteNavigateTargets(v, pathMap))];
+        return [arr[0], pathMap.get(target)!, ...arr.slice(2).map((v) => rewriteNavigateTargets(v, pathMap))] as T;
       }
       if (
         Array.isArray(target) &&
@@ -3702,38 +4047,38 @@ function rewriteNavigateTargets(node: unknown, pathMap: ReadonlyMap<string, stri
       ) {
         const rewrittenPrefix = rewriteConcatPrefix(target[1], pathMap);
         const nextTarget = rewrittenPrefix !== undefined ? [target[0], rewrittenPrefix, ...target.slice(2)] : target;
-        return [node[0], nextTarget, ...node.slice(2).map((v) => rewriteNavigateTargets(v, pathMap))];
+        return [arr[0], nextTarget, ...arr.slice(2).map((v) => rewriteNavigateTargets(v, pathMap))] as T;
       }
     }
-    return node.map((item) => rewriteNavigateTargets(item, pathMap));
+    return arr.map((item) => rewriteNavigateTargets(item, pathMap)) as T;
   }
   if (typeof node !== "object") return node;
-  const next: { [k: string]: unknown } = {};
-  for (const [key, value] of Object.entries(node as { [k: string]: unknown })) {
+  const next: Record<string, RuntimeValue> = {};
+  for (const [key, value] of Object.entries(node as Record<string, RuntimeValue>)) {
     next[key] = rewriteNavigateTargets(value, pathMap);
   }
-  return next;
+  return next as T;
 }
 
 /** Apply {@link rewriteNavigateTargets} across a trait's whole effect surface. */
 function rewriteTraitNavigateTargets(trait: Trait, pathMap: ReadonlyMap<string, string>): Trait {
   if (pathMap.size === 0) return trait;
-  const rewrite = (v: unknown): unknown => rewriteNavigateTargets(v, pathMap);
+  const rewrite = <T extends RuntimeValue>(v: T): T => rewriteNavigateTargets(v, pathMap);
   const next: Trait = { ...trait };
   const sm = trait.stateMachine;
   if (sm) {
     next.stateMachine = {
       ...sm,
       transitions: (sm.transitions ?? []).map((t) =>
-        t.effects ? { ...t, effects: rewrite(t.effects) as typeof t.effects } : t,
+        t.effects ? { ...t, effects: rewrite(t.effects) } : t,
       ),
     };
   }
   if (trait.ticks) {
-    next.ticks = trait.ticks.map((tick) => ({ ...tick, effects: rewrite(tick.effects) as typeof tick.effects }));
+    next.ticks = trait.ticks.map((tick) => ({ ...tick, effects: rewrite(tick.effects) }));
   }
   if (trait.initialEffects) {
-    next.initialEffects = rewrite(trait.initialEffects) as typeof trait.initialEffects;
+    next.initialEffects = rewrite(trait.initialEffects);
   }
   return next;
 }
@@ -3749,15 +4094,17 @@ function rewriteTraitNavigateTargets(trait: Trait, pathMap: ReadonlyMap<string, 
  * never appears anywhere else in a config-default tree. JS twin of Rust's
  * `rewrite_config_page_paths`.
  */
-function rewriteConfigPagePaths(node: unknown, pathMap: ReadonlyMap<string, string>): unknown {
-  if (typeof node === "string") return pathMap.get(node) ?? node;
-  if (Array.isArray(node)) return node.map((item) => rewriteConfigPagePaths(item, pathMap));
+function rewriteConfigPagePaths<T extends RuntimeValue>(node: T, pathMap: ReadonlyMap<string, string>): T {
+  if (typeof node === "string") return (pathMap.get(node) ?? node) as T;
+  if (Array.isArray(node)) {
+    return (node as ReadonlyArray<RuntimeValue>).map((item) => rewriteConfigPagePaths(item, pathMap)) as T;
+  }
   if (node !== null && typeof node === "object") {
-    const next: { [k: string]: unknown } = {};
-    for (const [key, value] of Object.entries(node as { [k: string]: unknown })) {
+    const next: Record<string, RuntimeValue> = {};
+    for (const [key, value] of Object.entries(node as Record<string, RuntimeValue>)) {
       next[key] = rewriteConfigPagePaths(value, pathMap);
     }
-    return next;
+    return next as T;
   }
   return node;
 }
@@ -3790,7 +4137,7 @@ function rewriteTraitConfigPagePaths(
     nextConfig[key] =
       field.default === undefined || schemaOnlyKeys.has(key)
         ? field
-        : { ...field, default: rewriteConfigPagePaths(field.default, pathMap) as ConfigFieldDeclaration["default"] };
+        : { ...field, default: rewriteConfigPagePaths(field.default, pathMap) };
   }
   return { ...trait, config: nextConfig };
 }
@@ -4166,14 +4513,18 @@ export class ReferenceResolver {
     // own entity fields onto this orbital's primary/declared-aux BEFORE
     // entity resolution, mirroring Rust's exact ordering (`orbital-compiler/
     // src/phases/inline/mod.rs`, ~line 1044) so a composed atom's field
-    // contract (an explicit rebind's full field set, or a no-rebind
-    // same-name atom's `@intrinsic`-only fields) is present on the entity
-    // object every later phase — including {@link
+    // contract (an explicit rebind's referenced-field-filtered set, or a
+    // no-rebind same-name atom's `@intrinsic`-only fields) is present on the
+    // entity object every later phase — including {@link
     // resolveOrbitalTypeParamSentinels} below — reads. `orbital.entity` is
     // mutated in place; `resolveEntity`'s inline branch returns the SAME
-    // object, so `entityResult.data.entity` carries the merge through.
+    // object, so `entityResult.data.entity` carries the merge through. A
+    // rebind target this orbital can't resolve locally (not this orbital's
+    // primary, not a declared aux) comes back as `pendingEntityFieldMerges`
+    // for the schema-wide retry ({@link applyDeferredEntityFieldMerges}).
+    let pendingEntityFieldMerges: DeferredEntityFieldMerge[] | undefined;
     if (isInlineEntity(orbital.entity)) {
-      mergeImportedEntityFieldsIntoOrbital(
+      pendingEntityFieldMerges = mergeImportedEntityFieldsIntoOrbital(
         orbital.traits ?? [],
         orbital.entity,
         (orbital.auxiliaryEntities ?? []).filter(isInlineEntity),
@@ -4302,6 +4653,9 @@ export class ReferenceResolver {
         entitySource: entityResult.data.source,
         traits: traitsResult.data,
         ...(resolvedAuxEntities ? { auxiliaryEntities: resolvedAuxEntities } : {}),
+        ...(pendingEntityFieldMerges && pendingEntityFieldMerges.length > 0
+          ? { pendingEntityFieldMerges }
+          : {}),
         pages: pagesResult.data,
         imports,
         original: orbital,
@@ -4426,6 +4780,11 @@ export class ReferenceResolver {
       resolved.push(result.data);
       child.noteResolvedEntityIds(result.data);
     }
+    // This file's own orbitals are a closed schema for rebind-target
+    // visibility purposes (e.g. a multi-orbital behavior file where one
+    // orbital's composed atom rebinds to a SIBLING orbital's primary) — see
+    // {@link applyDeferredEntityFieldMerges}'s own doc.
+    applyDeferredEntityFieldMerges(resolved);
     return resolved;
   }
 
@@ -7311,6 +7670,16 @@ export async function resolveSchema(
   if (errors.length > 0) {
     return { success: false, errors };
   }
+
+  // §52 schema-wide retry (mirrors Rust's post-per-orbital-loop
+  // `merge_into_named_entity` sweep over `deferred_merges`, `inline/mod.rs`)
+  // — every orbital has now inlined, so a rebind target unresolved LOCALLY
+  // (commonly a SIBLING orbital's own primary/aux) may resolve here. Must
+  // run before {@link ReferenceResolver.uniquifyCrossOrbitalPulledSiblings}
+  // only in the sense that both are schema-wide post-loop passes; they touch
+  // disjoint state (entity fields vs. trait names) so their relative order
+  // doesn't matter.
+  applyDeferredEntityFieldMerges(resolved);
 
   // C1-J6: cross-orbital pulled-sibling naming, once every orbital's own
   // resolve is final — see {@link ReferenceResolver.

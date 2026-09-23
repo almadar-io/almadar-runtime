@@ -13,7 +13,11 @@
  * (an explicit `-> Entity` rebind), but the composed atom's added field is
  * an ordinary REQUIRED field (not `@intrinsic`) — the shape that broke the
  * chat composer's `persist create` (std-browse's `BrowseItem { name! }`
- * rebound onto `ChatMessage`).
+ * rebound onto `ChatMessage`). The composed trait's body WRITES `name`
+ * (`set @entity.name`) so the R-ENTITY-FIELD-UNION-ACROSS-SAME-NAMED-ENTITY
+ * filter (`mergeImportedEntityFields`'s `referencedFields` argument) counts
+ * it as referenced — an unreferenced required field does NOT merge on an
+ * explicit rebind (verified against `~/bin/orbital resolve` 2026-09-23).
  */
 import { describe, it, expect } from 'vitest';
 import { ReferenceResolver } from '../src/entities/resolver/reference-resolver.js';
@@ -21,7 +25,8 @@ import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loa
 import type { Orbital, OrbitalDefinition } from '@almadar/core';
 
 /** The composed atom: bound to its OWN entity `BrowseItem`, which declares a
- *  REQUIRED field the consumer does not (`name`). */
+ *  REQUIRED field the consumer does not (`name`), and whose INIT transition
+ *  writes it (`set @entity.name`) — a genuine reference. */
 function browseAtomOrbital(): Orbital {
   return {
     name: 'BrowseOrbital',
@@ -41,7 +46,9 @@ function browseAtomOrbital(): Orbital {
         stateMachine: {
           states: [{ name: 'idle', isInitial: true }],
           events: [{ key: 'INIT', name: 'Initialize' }],
-          transitions: [{ from: 'idle', to: 'idle', event: 'INIT', effects: [] }],
+          transitions: [
+            { from: 'idle', to: 'idle', event: 'INIT', effects: [['set', '@entity.name', 'untitled']] },
+          ],
         },
       },
     ],

@@ -97,7 +97,7 @@ export function buildSourceMatcher(
  * module.
  */
 export function parseListenSource(
-  listener: { event: string; source?: unknown },
+  listener: { event: string; source?: ListenSourceDescriptor },
   listenerOrbital: string,
 ): {
   bareEvent: string;
@@ -106,7 +106,7 @@ export function parseListenSource(
   // 1. Explicit source field from the new core schema (preferred). Carries
   //    V4 dual-carry `traitId`/`orbitalId` when the schema has ids, so the
   //    matcher can compare ids (rename-proof) instead of names.
-  const explicit = (listener as { source?: ListenSourceDescriptor }).source;
+  const explicit = listener.source;
   if (explicit && typeof explicit === 'object') {
     return {
       bareEvent: listener.event,

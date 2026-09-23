@@ -12,7 +12,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { collectDeclaredEntityDefaults } from '../src/traits/config-defaults.js';
-import type { Entity } from '@almadar/core';
+import { isEntityReference, isEntityCall, type Entity, type OrbitalSchema } from '@almadar/core';
 
 function resolveStdRegistry(): string {
     try {
@@ -26,20 +26,13 @@ function resolveStdRegistry(): string {
 }
 const STD_REGISTRY = resolveStdRegistry();
 
-interface OrbOrb {
-    entity?: Entity | string;
-    [k: string]: unknown;
-}
-interface OrbSchema {
-    orbitals: OrbOrb[];
-}
-
 function loadOrbEntity(orbRelative: string): Entity {
     const orbPath = path.join(STD_REGISTRY, orbRelative);
-    const data: OrbSchema = JSON.parse(fs.readFileSync(orbPath, 'utf-8'));
+    const data = JSON.parse(fs.readFileSync(orbPath, 'utf-8')) as OrbitalSchema;
     for (const orbital of data.orbitals) {
-        if (orbital.entity && typeof orbital.entity === 'object') {
-            return orbital.entity as Entity;
+        const entity = orbital.entity;
+        if (entity && !isEntityReference(entity) && !isEntityCall(entity)) {
+            return entity;
         }
     }
     throw new Error(`No object entity found in ${orbRelative}`);

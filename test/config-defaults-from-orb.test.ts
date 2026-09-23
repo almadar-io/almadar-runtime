@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { collectDeclaredConfigDefaults } from '../src/server/OrbitalServerRuntime.js';
-import type { DeclaredTraitConfig } from '@almadar/core';
+import type { OrbitalSchema, Trait } from '@almadar/core';
 
 function resolveStdRegistry(): string {
     try {
@@ -30,21 +30,12 @@ function resolveStdRegistry(): string {
 }
 const STD_REGISTRY = resolveStdRegistry();
 
-interface OrbTrait {
-    name: string;
-    config?: DeclaredTraitConfig;
-    [k: string]: unknown;
-}
-interface OrbSchema {
-    orbitals: Array<{ traits: OrbTrait[] }>;
-}
-
-function loadAtomTrait(orbRelative: string, traitName: string): OrbTrait {
+function loadAtomTrait(orbRelative: string, traitName: string): Trait {
     const orbPath = path.join(STD_REGISTRY, orbRelative);
-    const data: OrbSchema = JSON.parse(fs.readFileSync(orbPath, 'utf-8'));
+    const data = JSON.parse(fs.readFileSync(orbPath, 'utf-8')) as OrbitalSchema;
     for (const orbital of data.orbitals) {
         for (const t of orbital.traits) {
-            if (t.name === traitName) return t;
+            if (typeof t !== 'string' && 'stateMachine' in t && t.name === traitName) return t;
         }
     }
     throw new Error(`Trait ${traitName} not found in ${orbRelative}`);

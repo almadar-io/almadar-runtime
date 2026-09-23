@@ -26,6 +26,7 @@ import {
     type BindingContext,
     type EffectContext,
 } from '../src/index.js';
+import type { EventPayload, PatternConfig, RuntimeValue } from '@almadar/core';
 
 // ============================================================================
 // Phase 1: interpolateProps — Binding Resolution
@@ -217,11 +218,20 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
      * This mirrors how useTraitStateMachine and useTickExecutor
      * now construct handlers after consolidation.
      */
+    type MockCalls = {
+        emit: Array<Parameters<EffectHandlers['emit']>>;
+        persist: Array<Parameters<EffectHandlers['persist']>>;
+        set: Array<Parameters<EffectHandlers['set']>>;
+        callService: Array<Parameters<EffectHandlers['callService']>>;
+        renderUI: Array<Parameters<NonNullable<EffectHandlers['renderUI']>>>;
+        navigate: Array<Parameters<NonNullable<EffectHandlers['navigate']>>>;
+    };
+
     function createMockHandlers(): {
         handlers: EffectHandlers;
-        calls: Record<string, unknown[][]>;
+        calls: MockCalls;
     } {
-        const calls: Record<string, unknown[][]> = {
+        const calls: MockCalls = {
             emit: [],
             persist: [],
             set: [],
@@ -306,7 +316,7 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
 
         expect(calls.renderUI).toHaveLength(1);
         expect(calls.renderUI[0][0]).toBe('main');
-        expect((calls.renderUI[0][1] as Record<string, unknown>).type).toBe('entity-table');
+        expect((calls.renderUI[0][1] as Record<string, RuntimeValue>).type).toBe('entity-table');
     });
 
     it('dispatches navigate effects', async () => {
@@ -339,7 +349,7 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
 
         expect(calls.renderUI).toHaveLength(1);
         expect(calls.renderUI[0][0]).toBe('toast');
-        const pattern = calls.renderUI[0][1] as Record<string, unknown>;
+        const pattern = calls.renderUI[0][1] as Record<string, RuntimeValue>;
         expect(pattern.message).toBe('Task saved!');
         expect(pattern.variant).toBe('success');
     });
@@ -386,7 +396,7 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         expect(calls.emit).toHaveLength(1);
         expect(calls.emit[0][0]).toBe('STATUS_CHANGED');
         // The payload should have resolved bindings
-        const emittedPayload = calls.emit[0][1] as Record<string, unknown>;
+        const emittedPayload = calls.emit[0][1] as Record<string, RuntimeValue>;
         expect(emittedPayload.name).toBe('My Task');
         expect(emittedPayload.newStatus).toBe('completed');
     });
@@ -451,7 +461,7 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         ]);
 
         expect(calls.renderUI).toHaveLength(1);
-        expect((calls.renderUI[0][1] as Record<string, unknown>).message).toBe('Admin access granted');
+        expect((calls.renderUI[0][1] as Record<string, RuntimeValue>).message).toBe('Admin access granted');
     });
 
     it('handles conditional when effects (falsy)', async () => {
@@ -473,7 +483,7 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         ]);
 
         expect(calls.renderUI).toHaveLength(1);
-        expect((calls.renderUI[0][1] as Record<string, unknown>).message).toBe('Access denied');
+        expect((calls.renderUI[0][1] as Record<string, RuntimeValue>).message).toBe('Access denied');
     });
 
     it('silently skips invalid effects', async () => {
@@ -501,8 +511,8 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
          *   slot carries what used to be the separate notify effect)
          * - persist, set, callService → stub with console.warn
          */
-        const emitted: Array<{ event: string; payload?: Record<string, unknown> }> = [];
-        const rendered: Array<{ slot: string; pattern: unknown }> = [];
+        const emitted: Array<{ event: string; payload?: EventPayload }> = [];
+        const rendered: Array<{ slot: string; pattern: PatternConfig | null }> = [];
         const navigated: string[] = [];
 
         const handlers: EffectHandlers = {
@@ -561,7 +571,7 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         expect(emitted[0].payload?.total).toBe(99.99);       // binding resolved
 
         expect(rendered[1].slot).toBe('toast');
-        expect((rendered[1].pattern as Record<string, unknown>).message).toBe('Order confirmed!');
+        expect((rendered[1].pattern as Record<string, RuntimeValue>).message).toBe('Order confirmed!');
 
         // Navigate wasn't in the sequence
         expect(navigated).toHaveLength(0);
@@ -594,7 +604,7 @@ describe('End-to-End: Builder Runtime Consolidation Scenario', () => {
         expect(resolvedName).toBe('Implement Feature X');
 
         // 3. Execute effects via EffectExecutor (Phase 4)
-        const rendered: Array<{ slot: string; pattern: unknown }> = [];
+        const rendered: Array<{ slot: string; pattern: PatternConfig | null }> = [];
 
         const handlers: EffectHandlers = {
             emit: (event, eventPayload) => {
@@ -629,7 +639,7 @@ describe('End-to-End: Builder Runtime Consolidation Scenario', () => {
 
         // Verify render-ui executed
         expect(rendered).toHaveLength(1);
-        const renderedPattern = rendered[0].pattern as Record<string, unknown>;
+        const renderedPattern = rendered[0].pattern as Record<string, RuntimeValue>;
         expect(renderedPattern.type).toBe('entity-detail');
         expect(renderedPattern.title).toBe('Implement Feature X'); // binding resolved
 

@@ -11,7 +11,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import type { Orbital, OrbitalSchema, DeclaredTraitConfig } from "@almadar/core";
+import type { Orbital, OrbitalSchema, DeclaredTraitConfig, JsonValue } from "@almadar/core";
 import { OrbitalSchemaSchema } from "@almadar/core";
 
 // ============================================================================
@@ -679,7 +679,7 @@ export class ExternalOrbitalLoader {
       const content = await fs.promises.readFile(absolutePath, "utf-8");
 
       // Parse JSON
-      let data: unknown;
+      let data: JsonValue;
       try {
         data = JSON.parse(content);
       } catch (e) {

@@ -124,7 +124,7 @@ export interface EffectExecutorOptions {
  */
 /** The text a failure route carries: an Error's message, a thrown result object's
  *  string `message` (integration errors are plain `{code, message}` objects), else String(). */
-function failureMessage(err: unknown): string {
+function failureMessage(err: RuntimeValue): string {
     if (err instanceof Error) return err.message;
     if (typeof err === 'object' && err !== null && 'message' in err && typeof err.message === 'string') return err.message;
     return String(err);
@@ -383,7 +383,7 @@ export class EffectExecutor {
      */
     getRegisteredHandlers(): string[] {
         const registered: string[] = [];
-        const handlerMap: { [op: string]: ((...args: never[]) => unknown) | undefined } = {
+        const handlerMap: { [op: string]: RuntimeValue } = {
             'emit': this.handlers.emit,
             'persist': this.handlers.persist,
             'set': this.handlers.set,
@@ -668,11 +668,11 @@ export class EffectExecutor {
     // semantics. The compiled-path shell does the same work in generated JS.
     // ==========================================================================
 
-    private extractEmitConfig(rawOpt: unknown): EmitConfig | undefined {
+    private extractEmitConfig(rawOpt: RuntimeValue): EmitConfig | undefined {
         if (!rawOpt || typeof rawOpt !== 'object' || Array.isArray(rawOpt)) {
             return undefined;
         }
-        const obj = rawOpt as { emit?: unknown };
+        const obj = rawOpt as { emit?: RuntimeValue };
         const emitBlock = obj.emit;
         if (!emitBlock || typeof emitBlock !== 'object' || Array.isArray(emitBlock)) {
             return undefined;
@@ -680,14 +680,14 @@ export class EffectExecutor {
         // Narrow to the known-keys shape so we don't need a Record index.
         // Resolver accepts both snake_case and camelCase; mirror that here.
         const block = emitBlock as {
-            success?: unknown;
-            failure?: unknown;
-            on_change?: unknown;
-            onChange?: unknown;
-            on_message?: unknown;
-            onMessage?: unknown;
+            success?: RuntimeValue;
+            failure?: RuntimeValue;
+            on_change?: RuntimeValue;
+            onChange?: RuntimeValue;
+            on_message?: RuntimeValue;
+            onMessage?: RuntimeValue;
         };
-        const asStr = (v: unknown): string | undefined =>
+        const asStr = (v: RuntimeValue): string | undefined =>
             typeof v === 'string' ? v : undefined;
         return {
             success: asStr(block.success),
@@ -721,7 +721,7 @@ export class EffectExecutor {
     private emitSuccess(
         emit: EmitConfig | undefined,
         key: 'success' | 'on_change' | 'on_message',
-        payload: unknown,
+        payload: RuntimeValue,
         /** True only for a persist effect's `emit:{success}` envelope — see `EffectHandlers.emit`. */
         fromPersistSuccess?: boolean,
     ): void {
@@ -733,7 +733,7 @@ export class EffectExecutor {
 
     private emitFailure(
         emit: EmitConfig | undefined,
-        err: unknown,
+        err: RuntimeValue,
         /** Extra fields merged alongside `error` — e.g. persist's `entityType`/`id`,
          *  so a listener can act on WHICH row/entity the failure was about. */
         extra?: EventPayload,
@@ -768,7 +768,7 @@ export class EffectExecutor {
      * but no event is dispatched and errors propagate (legacy behavior).
      */
     private async runSubstrate(
-        invoke: () => Promise<unknown>,
+        invoke: () => Promise<RuntimeValue>,
         emitCfg: EmitConfig | undefined,
     ): Promise<void> {
         if (!emitCfg) {
@@ -779,7 +779,7 @@ export class EffectExecutor {
             const result = await invoke();
             this.emitSuccess(emitCfg, 'success', { result: result ?? null });
         } catch (err) {
-            this.emitFailure(emitCfg, err);
+            this.emitFailure(emitCfg, err as RuntimeValue);
         }
     }
 
@@ -1073,7 +1073,7 @@ export class EffectExecutor {
                         if (persisted === undefined) {
                             const attemptedId = typeof data === 'string'
                                 ? data
-                                : (data && typeof data === 'object' ? ((data as { id?: unknown }).id as string | undefined) : undefined);
+                                : (data && typeof data === 'object' ? data.id : undefined);
                             persistLog.error('persist:denied', { action, entityType, attemptedId });
                             const deniedError = `persist ${action} ${entityType} was denied or failed`;
                             this.emitFailure(
@@ -1085,7 +1085,7 @@ export class EffectExecutor {
                         } else {
                             const dataId = typeof persisted === 'string'
                                 ? persisted
-                                : (persisted as { id?: unknown }).id as string | undefined;
+                                : persisted.id;
                             persistLog.debug('persist:success', {
                                 action,
                                 entityType,
@@ -1101,7 +1101,7 @@ export class EffectExecutor {
                             if (action === 'create' && this.bindings.entity && typeof dataId === 'string') {
                                 const boundId = this.bindings.entity.id;
                                 const submittedId = data && typeof data === 'object'
-                                    ? (data as { id?: unknown }).id
+                                    ? data.id
                                     : undefined;
                                 if (boundId === undefined || boundId === submittedId) {
                                     this.bindings.entity.id = dataId;
@@ -1121,7 +1121,7 @@ export class EffectExecutor {
                         entityType: action === 'batch' ? 'batch' : (args[1] as string),
                         error: err instanceof Error ? err.message : String(err),
                     });
-                    this.emitFailure(emitCfg, err);
+                    this.emitFailure(emitCfg, err as RuntimeValue);
                     throw err;
                 }
                 break;
@@ -1154,8 +1154,8 @@ export class EffectExecutor {
                     // transition complete, as `persist` does. Rethrowing aborted the
                     // whole transition, so the failure arm never reached the client.
                     if (!emitCfg?.failure) throw err;
-                    this.emitFailure(emitCfg, err);
-                    return { failed: true, error: failureMessage(err) };
+                    this.emitFailure(emitCfg, err as RuntimeValue);
+                    return { failed: true, error: failureMessage(err as RuntimeValue) };
                 }
                 break;
             }
@@ -1215,7 +1215,7 @@ export class EffectExecutor {
                             this.emitSuccess(emitCfg, 'success', payload);
                         }
                     } catch (err) {
-                        this.emitFailure(emitCfg, err);
+                        this.emitFailure(emitCfg, err as RuntimeValue);
                         throw err;
                     }
                 } else {
@@ -1242,7 +1242,7 @@ export class EffectExecutor {
                         );
                         this.emitSuccess(streamEmitCfg, 'success', { data: result });
                     } catch (err) {
-                        this.emitFailure(streamEmitCfg, err);
+                        this.emitFailure(streamEmitCfg, err as RuntimeValue);
                         throw err;
                     }
                 } else {
@@ -1283,7 +1283,7 @@ export class EffectExecutor {
                         : { data: null, totalCount: 0 };
                     this.emitSuccess(refEmitCfg, 'on_change', refPayload);
                 } catch (err) {
-                    this.emitFailure(refEmitCfg, err);
+                    this.emitFailure(refEmitCfg, err as RuntimeValue);
                     throw err;
                 }
                 break;
@@ -1432,7 +1432,7 @@ export class EffectExecutor {
                         break;
                     }
                     const params = args[1] as { [key: string]: string } | undefined;
-                    const options = args[2] as { crumb?: unknown } | undefined;
+                    const options = args[2] as { crumb?: RuntimeValue } | undefined;
                     const crumb =
                         options && typeof options.crumb === 'string' && options.crumb !== ''
                             ? options.crumb
@@ -1562,7 +1562,7 @@ export class EffectExecutor {
                     const glob = args[0] as string;
                     // options may carry emit: — strip it before passing to the handler.
                     const rawOptions = args[1] as
-                        | { recursive?: boolean; debounce?: number; emit?: unknown }
+                        | { recursive?: boolean; debounce?: number; emit?: RuntimeValue }
                         | undefined;
                     const emitCfg = this.extractEmitConfig(rawOptions);
                     const options = rawOptions

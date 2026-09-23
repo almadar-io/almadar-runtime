@@ -10,7 +10,7 @@ import type { EventPayload } from '@almadar/core';
 import type { EventListener, IEventBus, Unsubscribe } from '../src/types.js';
 import { createServerBridge } from '../src/server/ServerBridge.js';
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse<T>(body: T): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
@@ -61,7 +61,7 @@ describe('ServerBridge (class) via EventTransport', () => {
       jsonResponse({ success: true, emittedEvents: [{ event: 'ORDER_ACCEPTED', payload: { id: 42 } }] }),
     );
     const eventBus = stubEventBus();
-    const received: Array<{ type: string; payload: unknown }> = [];
+    const received: Array<{ type: string; payload?: EventPayload }> = [];
     eventBus.on('SERVER:ORDER_ACCEPTED', (e) => received.push({ type: e.type, payload: e.payload }));
 
     const bridge = createServerBridge({

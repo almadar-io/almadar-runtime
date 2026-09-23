@@ -188,7 +188,7 @@ export function validatePayloadShapes(
 function extractPayloadReferences(mapping: Record<string, SExpr>): string[] {
     const refs: string[] = [];
 
-    function collect(value: unknown): void {
+    function collect(value: SExpr): void {
         if (typeof value === 'string') {
             const match = value.match(/^@payload\.(\w+)$/);
             if (match) {

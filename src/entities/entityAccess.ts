@@ -39,7 +39,7 @@ export interface AccessBindings {
    * outside, which is exactly how R-ENTITY-ACCESS-CONFIG-DROPPED-IN-ROW-CTX
    * hid for as long as it did.
    */
-  onPredicateError?: (error: unknown) => void;
+  onPredicateError?: (error: Error) => void;
 }
 
 /** The three directives checked against a row before it is written. */
@@ -89,7 +89,7 @@ export function applyRowAccess<T extends EntityRow>(
       try {
         return Boolean(evaluate(predicate, ctx));
       } catch (err) {
-        bindings.onPredicateError?.(err);
+        bindings.onPredicateError?.(err instanceof Error ? err : new Error(String(err)));
         return false;
       }
     });
@@ -120,7 +120,7 @@ export function checkMutationAccess(
   try {
     return Boolean(evaluate(policy, ctx));
   } catch (err) {
-    bindings.onPredicateError?.(err);
+    bindings.onPredicateError?.(err instanceof Error ? err : new Error(String(err)));
     return false;
   }
 }

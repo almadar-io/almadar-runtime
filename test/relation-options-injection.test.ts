@@ -114,8 +114,8 @@ function isOptionShape(value: RuntimeValue): value is OptionShape {
   return (
     value !== null &&
     typeof value === 'object' &&
-    typeof (value as { value?: unknown }).value === 'string' &&
-    typeof (value as { label?: unknown }).label === 'string'
+    typeof (value as { value?: RuntimeValue }).value === 'string' &&
+    typeof (value as { label?: RuntimeValue }).label === 'string'
   );
 }
 

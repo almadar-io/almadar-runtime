@@ -24,7 +24,7 @@ import * as path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
-import type { Entity, EntityId, OrbitalSchema } from '@almadar/core';
+import type { Entity, EntityId, EntityRef, OrbitalSchema } from '@almadar/core';
 import { asOrbitalId } from '@almadar/core';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -97,10 +97,9 @@ describe.skipIf(!hasCorpus)('orbital_import_disjoint.lolo — entityRefIds cover
     const problems: string[] = [];
     for (const orbital of result.data.schema.orbitals) {
       const declared = new Map<string, EntityId>();
-      const addEntity = (e: unknown) => {
+      const addEntity = (e: EntityRef | undefined) => {
         if (e && typeof e === 'object' && 'name' in e && 'id' in e) {
-          const rec = e as Entity;
-          if (rec.name && rec.id) declared.set(rec.name, rec.id);
+          if (e.name && e.id) declared.set(e.name, e.id);
         }
       };
       addEntity(orbital.entity);

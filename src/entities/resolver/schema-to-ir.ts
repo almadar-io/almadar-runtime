@@ -28,7 +28,14 @@ import type {
   EntityField,
   Page,
   Orbital,
+  JsonValue,
+  PageTraitRef,
+  StateMachine,
+  Trait,
+  TraitConfigValue,
+  TraitEntityField,
 } from '@almadar/core';
+
 import {
   isEntityReference,
   isEntityCall,
@@ -62,27 +69,49 @@ export function clearSchemaCache(): void {
 // ============================================================================
 
 function resolveField(field: EntityField): ResolvedField {
-  // Use a local extra variable for accessing non-EntityField properties
-  interface FieldExtra { enumValues?: string[]; values?: string[]; options?: string[]; validation?: { enum?: string[] }; description?: string }
-  const extra = field as EntityField & FieldExtra;
-  // Collect enum values from all possible locations
-  const enumValues = extra.enumValues || extra.values || extra.options || extra.validation?.enum;
-
+  const values = 'values' in field ? field.values : undefined;
   return {
     // EntityField.name is optional in @almadar/core 7+ (matches Rust IR
     // FieldDefinition.name: Option<String>). Top-level entity fields
     // always carry a name; nameless nested item descriptors don't reach
     // this resolver path.
     name: field.name ?? '',
-    type: field.type || 'string',
-    tsType: inferTsType(field.type || 'string'),
-    description: extra.description as string | undefined,
-    default: field.default as string | undefined,
+    type: field.type,
+    tsType: inferTsType(field.type),
+    description: field.description,
+    default: field.default,
     required: field.required ?? false,
-    validation: extra.validation || (enumValues ? { enum: enumValues } : undefined),
-    values: enumValues,
-    enumValues: enumValues, // Also provide enumValues for compatibility
+    validation: values ? { enum: values } : undefined,
+    values,
+    enumValues: values,
     relation: field.type === 'relation' ? field.relation : undefined,
+  };
+}
+
+function traitConfigToJson(value: TraitConfigValue): JsonValue {
+  if (value === null || typeof value !== 'object') return value;
+  if (isTraitConfigArray(value)) return value.map(traitConfigToJson);
+  const out: { [key: string]: JsonValue } = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry !== undefined) out[key] = traitConfigToJson(entry);
+  }
+  return out;
+}
+
+function isTraitConfigArray(value: TraitConfigValue): value is ReadonlyArray<TraitConfigValue> {
+  return Array.isArray(value);
+}
+
+/** A trait's own `dataEntities` field (`TraitEntityField`) as a `ResolvedField`. */
+function resolveTraitEntityField(field: TraitEntityField): ResolvedField {
+  return {
+    name: field.name,
+    type: field.type,
+    tsType: inferTsType(field.type),
+    default: field.default === undefined ? undefined : traitConfigToJson(field.default),
+    required: field.required ?? false,
+    values: field.values,
+    enumValues: field.values,
   };
 }
 
@@ -164,22 +193,22 @@ function resolveEntities(schema: OrbitalSchema): Map<string, ResolvedEntity> {
 // Trait Resolution
 // ============================================================================
 
-function resolveStateMachine(sm: any): {
+function resolveStateMachine(sm: StateMachine | undefined): {
   states: ResolvedTraitState[];
   events: ResolvedTraitEvent[];
   transitions: ResolvedTraitTransition[];
 } {
   return {
-    states: (sm?.states || []).map((s: any) => ({
+    states: (sm?.states || []).map((s) => ({
       name: s.name,
       isInitial: s.isInitial ?? false,
       isFinal: s.isFinal ?? false,
     })),
-    events: (sm?.events || []).map((e: any) => ({
+    events: (sm?.events || []).map((e) => ({
       key: e.key,
       name: e.name || e.key,
     })),
-    transitions: (sm?.transitions || []).map((t: any) => ({
+    transitions: (sm?.transitions || []).map((t) => ({
       from: t.from as TransitionFrom,
       to: t.to,
       event: t.event,
@@ -189,7 +218,7 @@ function resolveStateMachine(sm: any): {
   };
 }
 
-function resolveTrait(trait: any, source: 'schema' | 'library' | 'inline'): ResolvedTrait {
+function resolveTrait(trait: Trait, source: 'schema' | 'library' | 'inline'): ResolvedTrait {
   const sm = trait.stateMachine;
   const { states, events, transitions } = resolveStateMachine(sm);
 
@@ -201,11 +230,11 @@ function resolveTrait(trait: any, source: 'schema' | 'library' | 'inline'): Reso
     states,
     events,
     transitions,
-    guards: (sm?.guards || []).map((g: any) => ({
+    guards: (sm?.guards || []).map((g) => ({
       name: g.name,
-      condition: g.condition as SExpr,
+      condition: g.expression,
     })),
-    ticks: (trait.ticks || []).map((tick: any): ResolvedTraitTick => ({
+    ticks: (trait.ticks || []).map((tick): ResolvedTraitTick => ({
       name: tick.name || 'tick',
       interval: tick.interval || 0,
       guard: tick.guard as SExpr | undefined,
@@ -213,14 +242,14 @@ function resolveTrait(trait: any, source: 'schema' | 'library' | 'inline'): Reso
       priority: tick.priority ?? 0,
       appliesTo: tick.appliesTo || [],
     })),
-    listens: (trait.listens || []).map((listen: any): ResolvedTraitListener => ({
+    listens: (trait.listens || []).map((listen): ResolvedTraitListener => ({
       event: listen.event || '',
-      triggers: listen.action || listen.triggers || '',
+      triggers: listen.triggers,
       guard: listen.guard as SExpr | undefined,
     })),
-    dataEntities: (trait.dataEntities || []).map((de: any) => ({
+    dataEntities: (trait.dataEntities || []).map((de) => ({
       name: de.name,
-      fields: (de.fields || []).map((f: unknown) => resolveField(f as EntityField)),
+      fields: (de.fields || []).map(resolveTraitEntityField),
       runtime: de.runtime ?? false,
       singleton: de.singleton ?? false,
     })),
@@ -278,11 +307,9 @@ function resolveTraits(schema: OrbitalSchema): ResolvedTraitMaps {
       // Preprocessed ref-trait wrapper: { ref, config, linkedEntity, _resolved }
       // Register _resolved under the ref's local name so page bindings can find it.
       if ('ref' in trait) {
-        // eslint-disable-next-line almadar/no-record-string-unknown -- dynamic shape from preprocessor
-        const wrap = trait as Record<string, unknown>;
-        const resolved = wrap['_resolved'] as { name?: string; id?: string; stateMachine?: unknown } | undefined;
+        const resolved = trait._resolved;
         if (resolved && resolved.stateMachine) {
-          const name = resolved.name ?? (trait as { ref?: string }).ref;
+          const name = resolved.name ?? trait.ref;
           if (name && traitMap.has(name)) {
             reportTraitNameCollision(name, (orbital as Orbital).name);
           } else if (name) {
@@ -292,7 +319,7 @@ function resolveTraits(schema: OrbitalSchema): ResolvedTraitMaps {
             // V4 composed-surface backbone: page-ref refIds point at the
             // wrapper's own LOCAL declaration id (distinct from the resolved
             // atom's id) — register it so a renamed declaration still binds.
-            const declId = wrap['id'];
+            const declId = (trait as { id?: string }).id;
             if (typeof declId === 'string' && declId.length > 0) {
               traitById.set(declId, resolvedTrait);
             }
@@ -322,75 +349,17 @@ function resolveTraits(schema: OrbitalSchema): ResolvedTraitMaps {
 // ============================================================================
 
 function resolveTraitBinding(
-  t: any,
+  t: PageTraitRef,
   traitMap: Map<string, ResolvedTrait>,
   traitById: Map<string, ResolvedTrait>,
   orbitalEntity?: string
 ): ResolvedTraitBinding {
-  // Case 1: String reference
-  if (typeof t === 'string') {
-    const trait = traitMap.get(t);
-    return {
-      ref: t,
-      trait: trait || createEmptyTrait(t, 'library'),
-      linkedEntity: orbitalEntity,
-    };
-  }
-
-  // Case 2: Reference object { ref: "TraitName", ... }
-  // Preprocessed ref traits from @almadar/runtime's preprocessSchema carry
-  // `_resolved: FullTrait` alongside the ref — the state machine (with events
-  // rename already applied at preprocess time) lives there. If we skip the
-  // `_resolved` path, traitMap.get(t.ref) returns undefined for renamed refs
-  // like "CartItemAddItem" (which aren't top-level library traits), we fall
-  // back to createEmptyTrait, and useTraitStateMachine subscribes to zero
-  // events. Result: UI:ADD_ITEM button clicks have no listener and the state
-  // machine is silent.
-  if (t.ref && !t.stateMachine) {
-    if (t._resolved && t._resolved.stateMachine) {
-      // Wrapper-level rebind wins; otherwise inherit the inlined atom's
-      // own linkedEntity (e.g. PagedItem for std-pagination), and fall
-      // back to the orbital's primary entity only if neither names a
-      // target. Without this, atoms imported via `uses` without an
-      // explicit `-> Entity` rebind silently rebind to the orbital's
-      // primary entity (the gap #22 design intent of "atoms keep their
-      // own auxiliary entity" was being overridden here).
-      return {
-        ref: t._resolved.name ?? t.ref,
-        trait: resolveTrait(t._resolved, 'inline'),
-        config: t.config,
-        linkedEntity: t.linkedEntity || t._resolved.linkedEntity || orbitalEntity,
-      };
-    }
-    // Id-primary: a `refId` that survives a declaration rename resolves the
-    // (possibly renamed) trait by stable id; fall back to the name index.
-    const trait = (t.refId && traitById.get(t.refId)) ?? traitMap.get(t.ref);
-    return {
-      ref: t.ref,
-      trait: trait || createEmptyTrait(t.ref, 'library'),
-      config: t.config,
-      linkedEntity: t.linkedEntity || trait?.linkedEntity || orbitalEntity,
-    };
-  }
-
-  // Case 3: Inline trait definition (has stateMachine or name with states)
-  if (t.stateMachine || (t.name && !t.ref)) {
-    const inlineTrait = resolveTrait(t, 'inline');
-
-    return {
-      ref: t.name,
-      trait: inlineTrait,
-      config: t.config,
-      linkedEntity: t.linkedEntity || inlineTrait.linkedEntity || orbitalEntity,
-    };
-  }
-
-  // Fallback: try to look up by id (stable under rename) then by name
-  const ref = t.name || t.ref || 'unknown';
-  const trait = (t.refId && traitById.get(t.refId)) ?? traitMap.get(ref);
+  // Id-primary: a `refId` that survives a declaration rename resolves the
+  // (possibly renamed) trait by stable id; fall back to the name index.
+  const trait = (t.refId && traitById.get(t.refId)) ?? traitMap.get(t.ref);
   return {
-    ref,
-    trait: trait || createEmptyTrait(ref, 'library'),
+    ref: t.ref,
+    trait: trait || createEmptyTrait(t.ref, 'library'),
     config: t.config,
     linkedEntity: t.linkedEntity || trait?.linkedEntity || orbitalEntity,
   };
@@ -425,7 +394,7 @@ function getEntityNameFromRef(entityRef: EntityRef | undefined): string | undefi
 /**
  * Extract page info from PageRef (handles inline, string ref, and object ref)
  */
-function getPageInfoFromRef(pageRef: PageRef): { name: string; path: string; traits: any[] } | null {
+function getPageInfoFromRef(pageRef: PageRef): { name: string; path: string; traits: PageTraitRef[] } | null {
   if (isPageReferenceString(pageRef)) {
     // String reference like "Alias.pages.PageName"
     const parts = pageRef.split('.');
@@ -466,21 +435,9 @@ function resolvePages(
       const pageName = pageInfo.name;
       const pagePath = pageInfo.path;
 
-      // Page traits can be:
-      // 1. References to traits (string or { ref: "TraitName" })
-      // 2. Inline trait definitions (object with stateMachine)
-      const pageTraitRefs = pageInfo.traits || [];
-
-      const traitBindings: ResolvedTraitBinding[] = pageTraitRefs.map((t: any) => {
-        const binding = resolveTraitBinding(t, traitMap, traitById, orbitalEntity);
-
-        // Also add inline traits to traitMap for consistency
-        if (binding.trait.source === 'inline' && !traitMap.has(binding.trait.name)) {
-          traitMap.set(binding.trait.name, binding.trait);
-        }
-
-        return binding;
-      });
+      const traitBindings: ResolvedTraitBinding[] = (pageInfo.traits || []).map((t) =>
+        resolveTraitBinding(t, traitMap, traitById, orbitalEntity),
+      );
 
       pageMap.set(pageName, {
         name: pageName,

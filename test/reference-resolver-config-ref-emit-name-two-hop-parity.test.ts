@@ -51,7 +51,7 @@ import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
-import type { Orbital, OrbitalSchema, Trait } from '@almadar/core';
+import type { Orbital, OrbitalSchema, Trait, TraitRef } from '@almadar/core';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 const ORBITAL_BIN = join(homedir(), 'bin', 'orbital');
@@ -103,10 +103,10 @@ const canRun = existsSync(ORBITAL_BIN) && GATE_CASES.every((c) => existsSync(c.f
 /** `preprocessSchema` (UsesIntegration.ts) wraps a resolved trait carrying
  * `config`/`linkedEntity` into `{ref, config, linkedEntity, _resolved:
  * Trait}` rather than the bare inline shape — unwrap it. */
-function asTrait(t: unknown): Trait | undefined {
-  if (typeof t !== 'object' || t === null) return undefined;
+function asTrait(t: TraitRef): Trait | undefined {
+  if (typeof t === 'string') return undefined;
   if ('stateMachine' in t) return t as Trait;
-  if ('_resolved' in t && (t as { _resolved?: unknown })._resolved) return (t as { _resolved: Trait })._resolved;
+  if ('_resolved' in t) return t._resolved;
   return undefined;
 }
 

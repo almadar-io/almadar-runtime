@@ -135,7 +135,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { resolveSchema } from '../src/entities/resolver/reference-resolver.js';
-import type { OrbitalSchema, Orbital, Trait } from '@almadar/core';
+import type { OrbitalSchema, Orbital, Trait, TraitRef } from '@almadar/core';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 const BEHAVIORS_ROOT = join(REPO_ROOT, 'packages/almadar-behaviors');
@@ -156,8 +156,8 @@ const canRun = existsSync(ORB_BIN) && existsSync(ORBITAL_BIN) && registryPaths.e
 
 const CLI_ENV = { ...process.env, ALMADAR_DEV: '1', ALMADAR_ROOT: REPO_ROOT };
 
-function isTrait(t: unknown): t is Trait {
-  return typeof t === 'object' && t !== null && 'stateMachine' in t;
+function isTrait(t: TraitRef): t is Trait {
+  return typeof t === 'object' && 'stateMachine' in t;
 }
 
 // Regenerate the Rust reference + read the registry input for all five

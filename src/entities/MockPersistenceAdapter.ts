@@ -744,8 +744,8 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
 
   private assertFileValuesWithinCeiling(entityType: string, data: EntityRow): void {
     for (const [fieldName, value] of Object.entries(data)) {
-      if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
-      const candidate = value as { url?: unknown; sizeBytes?: unknown };
+      if (value === null || typeof value !== 'object' || Array.isArray(value) || value instanceof Date) continue;
+      const candidate = value;
       if (typeof candidate.url !== 'string' || !candidate.url.startsWith('data:')) continue;
       const bytes =
         typeof candidate.sizeBytes === 'number' ? candidate.sizeBytes : candidate.url.length;

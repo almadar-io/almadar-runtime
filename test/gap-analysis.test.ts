@@ -11,10 +11,11 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { asEntityRow } from './fixtures/effect-result.js';
+import type { ClientEffectTuple, EventPayload, OrbitalSchema, RuntimeValue, Trait } from '@almadar/core';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const schemaPath = join(__dirname, 'fixtures/trait-wars.orb');
-const traitWarsSchema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
+const traitWarsSchema = JSON.parse(readFileSync(schemaPath, 'utf-8')) as OrbitalSchema;
 
 describe('Runtime Gap Analysis: trait-wars.orb', () => {
 
@@ -40,9 +41,9 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
       expect(result.clientEffects).toBeDefined();
 
       const effects = result.clientEffects!;
-      const gamePatterns = effects.filter((e: unknown) => {
-        const arr = e as unknown[];
-        return Array.isArray(arr) && arr[0] === 'render-ui' && (arr[2] as Record<string, string>)?.type?.startsWith('game-');
+      const gamePatterns = effects.filter((e: ClientEffectTuple) => {
+        const patternConfig = e[2] as Record<string, RuntimeValue> | null;
+        return e[0] === 'render-ui' && typeof patternConfig?.type === 'string' && patternConfig.type.startsWith('game-');
       });
 
       expect(gamePatterns.length).toBeGreaterThan(0);
@@ -55,11 +56,13 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
       await runtime.register(traitWarsSchema);
 
       try {
-        const battleOrbital = traitWarsSchema.orbitals.find((o: Record<string, unknown>) => o.name === 'TacticalBattle');
-        const controller = battleOrbital.traits.find((t: Record<string, unknown>) => t.name === 'BattlePhaseController');
+        const battleOrbital = traitWarsSchema.orbitals.find((o) => o.name === 'TacticalBattle')!;
+        const controller = battleOrbital.traits.find(
+          (t): t is Trait => typeof t === 'object' && 'stateMachine' in t && t.name === 'BattlePhaseController'
+        )!;
 
         expect(controller.listens).toBeDefined();
-        expect(controller.listens.length).toBe(2);
+        expect(controller.listens!.length).toBe(2);
       } finally {
         runtime.unregisterAll();
       }
@@ -78,7 +81,7 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
         expect(result.emittedEvents).toBeDefined();
         const heroEvent = result.emittedEvents.find((e) => e.event === 'HERO_SELECTED');
         expect(heroEvent).toBeDefined();
-        expect((heroEvent!.payload as Record<string, unknown>).heroId).toBe('hero-valor');
+        expect((heroEvent!.payload as EventPayload).heroId).toBe('hero-valor');
       } finally {
         runtime.unregisterAll();
       }
@@ -222,13 +225,10 @@ describe('Runtime Gap Analysis: trait-wars.orb', () => {
         payload: {},
       });
 
-      const navigateEffects = result.clientEffects?.filter((e: unknown) => {
-        const arr = e as unknown[];
-        return Array.isArray(arr) && arr[0] === 'navigate';
-      });
+      const navigateEffects = result.clientEffects?.filter((e: ClientEffectTuple) => e[0] === 'navigate');
 
       expect(navigateEffects && navigateEffects.length).toBeGreaterThan(0);
-      expect((navigateEffects![0] as unknown[])[1]).toBe('/world');
+      expect(navigateEffects![0][1]).toBe('/world');
     });
   });
 

@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { MockPersistenceAdapter } from '../src/entities/MockPersistenceAdapter.js';
 import type { EntitySchema } from '../src/entities/MockPersistenceAdapter.js';
+import type { FieldValue } from '@almadar/core';
 
 const contributorSchema: EntitySchema = {
   name: 'Contributor',
@@ -38,7 +39,7 @@ const wikiPageSchema: EntitySchema = {
 
 /** Only author|reviewer roles may create a WikiPage — mirrors an
  *  `@create: (or (= @user.role "author") (= @user.role "reviewer"))` policy. */
-function authorOrReviewer(role: unknown): boolean {
+function authorOrReviewer(role: FieldValue | undefined): boolean {
   return role === 'author' || role === 'reviewer';
 }
 

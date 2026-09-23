@@ -7,9 +7,15 @@
  * - **Stateful** (`OrbitalServerRuntime`): a long-lived `manager` holding
  *   every registered trait's state, a long-lived `frames` map
  *   (`traitFieldStates`), and a `runEffects` runner whose stage delivers
- *   emits to the live bus/broadcast. The host STRIPS `request.traits` /
- *   `request.entityByTrait` before calling — the server is authoritative
- *   and discovers targets via `canHandleEvent` over its own held states.
+ *   emits to the live broadcast. The host strips `request.traits` /
+ *   `request.entityByTrait` from NON-TARGETED requests — the server is
+ *   authoritative and discovers targets via `canHandleEvent` over its own
+ *   held states. A TARGETED request carrying circuit state is the client
+ *   role's delegated server leg and passes through: the seed's `from`
+ *   and `[runtime]` rows are the client's truth, and the relay mask
+ *   derived for it is empty (the server runs the whole circuit).
+ *   Cross-orbital listeners (a different registered orbital's trait) are
+ *   the host's relay, driven by the exported {@link collectListenerTargets}.
  * - **Stateless** (the playground's per-request handler): a FRESH manager
  *   + frames map per request, seeded from the client's round-tripped
  *   `traits[].from` and `entityByTrait` (the client is the source of
@@ -31,8 +37,10 @@
 import {
   applyListenPayloadMapping,
   isRuntimeEntity,
+  type BusEventSource,
   type ClientEffectTuple,
   type EntityRow,
+  type EventId,
   type EventPayload,
   type OrbitalEventRequest,
   type OrbitalEventResponse,
@@ -63,7 +71,7 @@ import {
   validateEventPayload,
   type PayloadValidationFailure,
 } from '../traits/PayloadValidator.js';
-import type { TraitIndex } from '../traits/trait-index.js';
+import type { IndexedTrait, TraitIndex } from '../traits/trait-index.js';
 import type { EvaluationContextExtensions } from '../types.js';
 import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
 import type { SExpr } from '@almadar/core';
@@ -128,6 +136,16 @@ export interface EvaluateOrbitalEventDeps {
    * the `frames` map only — so it leaves this unset.
    */
   runtimeRowSentinel?: boolean;
+  /**
+   * `(trait, event)` pairs the caller has ALREADY delivered elsewhere
+   * (`\u0000`-joined, the client role's `alreadyDeliveredKey` format) —
+   * pre-seeded into the worklist's visited set so a listener chain that
+   * cycles back onto an already-delivered pair is not re-run (the twin of
+   * Rust `apply_server_response` seeding its own cascade's visited set
+   * from the same `already_delivered`). Hosts that deliver every emit
+   * themselves (stateless, stateful) leave this unset.
+   */
+  seedVisited?: ReadonlySet<string>;
 }
 
 /** One dispatched trait's per-step effect output (see `runTraitCascade`). */
@@ -347,6 +365,16 @@ export async function evaluateOrbitalEvent(
       ? new Set(request.traits.map((t) => t.trait))
       : new Set(targets.map((t) => t.trait)));
 
+  evaluateLog.info('dispatch:targets', {
+    event,
+    mode: request.traits !== undefined
+      ? 'declared'
+      : targetTrait !== undefined ? 'targetTrait' : 'discovery',
+    targets: targets.map((t) => `${t.trait}@${t.from}`),
+    ...(relayMask !== undefined ? { relayMask: [...relayMask] } : {}),
+    ...(deps.logContext ?? {}),
+  });
+
   // ------------------------------------------------------------------
   // 3. Payload validation (both paths converge on the stateful rule:
   //    required fields are enforced at the API boundary).
@@ -403,6 +431,15 @@ export async function evaluateOrbitalEvent(
     if (!item) break;
     const visitKey = `${item.trait}:${item.event}:${item.from}`;
     if (visited.has(visitKey)) continue;
+    if (deps.seedVisited?.has(`${item.trait}\u0000${item.event}`) === true) {
+      evaluateLog.info('dispatch:already-delivered', {
+        trait: item.trait,
+        event: item.event,
+        from: item.from,
+        ...(deps.logContext ?? {}),
+      });
+      continue;
+    }
     visited.add(visitKey);
     steps += 1;
 
@@ -507,6 +544,16 @@ export async function evaluateOrbitalEvent(
     );
     states[item.trait] = cascade.finalState;
     transitioned = transitioned || cascade.executed;
+    evaluateLog.info('dispatch:step', {
+      trait: item.trait,
+      event: item.event,
+      from: item.from,
+      to: cascade.finalState,
+      executed: cascade.executed,
+      emitted: cascade.emitted.length,
+      onPage: item.onPage,
+      ...(deps.logContext ?? {}),
+    });
     // NOTE: the step runner already appended each step's results to the
     // SHARED `effectResults` array (it receives the array in its args) —
     // `cascade.effectResults`' slices are the cascade's own bookkeeping
@@ -536,6 +583,16 @@ export async function evaluateOrbitalEvent(
           statesDeclaringEvent: statesDeclaringEvent(entry.traitDef, normalizeEventKey(item.event)),
         });
       }
+      const rejection = rejections[rejections.length - 1];
+      evaluateLog.info('dispatch:rejected', {
+        code: rejection.code,
+        trait: item.trait,
+        from: item.from,
+        event: item.event,
+        ...(rejection.transition !== undefined ? { transition: rejection.transition } : {}),
+        ...(candidate?.guard !== undefined ? { guard: JSON.stringify(candidate.guard) } : {}),
+        ...(deps.logContext ?? {}),
+      });
     }
 
     // The response-side entity round-trip: the trait's final row (fresh
@@ -547,51 +604,28 @@ export async function evaluateOrbitalEvent(
     // transition run too. Skipped for relay-masked traits — the origin
     // client's own relay completes those (its mounted set is the mask).
     for (const emitted of cascade.emitted) {
-      for (const [listenerName, listenerEntry] of traitIndex.byName) {
-        if (relayMask?.has(listenerName) === true) continue;
-        const listeners = (listenerEntry.traitDef.listens ?? []) as TraitEventListener[];
-        for (const listener of listeners) {
-          const { bareEvent, matcher } = parseListenSource(listener, listenerEntry.orbitalName);
-          if (bareEvent !== emitted.event || !matcher(emitted.source)) continue;
+      for (const target of collectListenerTargets(traitIndex, emitted.source, emitted.event, emitted.payload, relayMask)) {
+        // Mark consumed so the client's own relay (if the source trait
+        // is also on-page) doesn't ALSO re-apply this hop.
+        emitted.source = { ...emitted.source, dispatched: true };
 
-          // Listen-level guard, kernel parity: evaluated against the RAW
-          // payload before payload mapping; false or an error skips.
-          if (listener.guard) {
-            let guardPassed: boolean;
-            try {
-              guardPassed = evaluateGuard(
-                listener.guard as SExpr,
-                createMinimalContext({}, emitted.payload),
-              );
-            } catch {
-              guardPassed = false;
-            }
-            if (!guardPassed) continue;
-          }
+        evaluateLog.info('fanout:enqueue', {
+          listener: target.listenerTrait,
+          triggers: target.triggers,
+          source: emitted.source.trait ?? emitted.source.orbital,
+          event: emitted.event,
+          ...(deps.logContext ?? {}),
+        });
 
-          const mappedPayload = applyListenPayloadMapping(
-            listener.payloadMapping,
-            emitted.payload,
-            evaluateListenPayloadExpr,
-          );
-          const pickId = (field: string): string | undefined =>
-            (mappedPayload?.[field] as string | undefined) ?? (emitted.payload?.[field] as string | undefined);
-          const forwardedEntityId = pickId('entityId') ?? pickId('orbitalName');
-
-          // Mark consumed so the client's own relay (if the source trait
-          // is also on-page) doesn't ALSO re-apply this hop.
-          emitted.source = { ...emitted.source, dispatched: true };
-
-          queue.push({
-            trait: listenerName,
-            from: manager.getState(listenerName, forwardedEntityId)?.currentState ??
-              findInitialState(listenerEntry.traitDef),
-            event: listener.triggers,
-            payload: mappedPayload,
-            ...(forwardedEntityId !== undefined ? { entityId: forwardedEntityId } : {}),
-            onPage: activeTraits?.has(listenerName) === true,
-          });
-        }
+        queue.push({
+          trait: target.listenerTrait,
+          from: manager.getState(target.listenerTrait, target.entityId)?.currentState ??
+            findInitialState(target.entry.traitDef),
+          event: target.triggers,
+          payload: target.payload,
+          ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
+          onPage: activeTraits?.has(target.listenerTrait) === true,
+        });
       }
     }
   }
@@ -644,6 +678,93 @@ export async function evaluateOrbitalEvent(
     ...(!transitioned && rejections.length > 0 ? { rejections } : {}),
     ...(truncatedTraits.length > 0 ? { cascadeTruncated: truncatedTraits } : {}),
   };
+}
+
+/**
+ * One matched `listens` subscriber: the listener trait plus everything a
+ * dispatch of its `triggers` event needs (mapped payload, forwarded row
+ * id, the trigger's V4 id for rename-proof matching).
+ */
+export interface CollectedListenerTarget {
+  listenerTrait: string;
+  /** The listener's index entry (initial-state fallback, emit stamping). */
+  entry: IndexedTrait;
+  /** The matched listener declaration (guard already applied). */
+  listener: TraitEventListener;
+  triggers: string;
+  triggersId?: EventId;
+  payload: EventPayload | undefined;
+  entityId: string | undefined;
+}
+
+/**
+ * Find every trait in `traitIndex` whose declared `listens` reacts to
+ * `event` from `sourceStamp` — the ONE listens-matching implementation,
+ * shared by the composition's in-band fan-out, the stateful host's
+ * cross-orbital relay, and the client role's response fold (the twin of
+ * `orbital-core::collect_listener_targets`).
+ *
+ * Semantics (kernel parity): the listen-level guard runs against the RAW
+ * payload before payload mapping; false or an evaluation error skips.
+ * `skip` is the relay mask — traits the requesting client completes
+ * itself, which the fan-out therefore never re-dispatches.
+ */
+export function collectListenerTargets(
+  traitIndex: TraitIndex,
+  sourceStamp: BusEventSource | undefined,
+  event: string,
+  payload: EventPayload | undefined,
+  skip?: ReadonlySet<string>,
+): CollectedListenerTarget[] {
+  const targets: CollectedListenerTarget[] = [];
+  for (const [listenerName, listenerEntry] of traitIndex.byName) {
+    const masked = skip?.has(listenerName) === true;
+    const listeners = (listenerEntry.traitDef.listens ?? []) as TraitEventListener[];
+    for (const listener of listeners) {
+      const { bareEvent, matcher } = parseListenSource(listener, listenerEntry.orbitalName);
+      if (bareEvent !== event || !matcher(sourceStamp)) continue;
+      if (masked) {
+        evaluateLog.info('fanout:masked', {
+          listener: listenerName,
+          event,
+          source: sourceStamp?.trait ?? sourceStamp?.orbital,
+        });
+        continue;
+      }
+
+      if (listener.guard) {
+        let guardPassed: boolean;
+        try {
+          guardPassed = evaluateGuard(
+            listener.guard as SExpr,
+            createMinimalContext({}, payload),
+          );
+        } catch {
+          guardPassed = false;
+        }
+        if (!guardPassed) continue;
+      }
+
+      const mappedPayload = applyListenPayloadMapping(
+        listener.payloadMapping,
+        payload,
+        evaluateListenPayloadExpr,
+      );
+      const pickId = (field: string): string | undefined =>
+        (mappedPayload?.[field] as string | undefined) ?? (payload?.[field] as string | undefined);
+
+      targets.push({
+        listenerTrait: listenerName,
+        entry: listenerEntry,
+        listener,
+        triggers: listener.triggers,
+        ...(listener.triggersId !== undefined ? { triggersId: listener.triggersId } : {}),
+        payload: mappedPayload,
+        entityId: pickId('entityId') ?? pickId('orbitalName'),
+      });
+    }
+  }
+  return targets;
 }
 
 /**

@@ -38,6 +38,25 @@ import type { TraitDefinition } from '../types.js';
 
 const traitIndexLog = createLogger('almadar:runtime:trait-index');
 
+/**
+ * Parse cache: `parseOrbitalTraits`/`orbitalInlineEntities` are pure
+ * functions of the schema object, and the stateful host builds a
+ * per-orbital view over EVERY registered orbital (catalog servers hold
+ * ~1.5k) — without memoization the first event per orbital re-parses the
+ * whole registry. Keyed by schema identity: a re-registered orbital is a
+ * fresh object and re-parses.
+ */
+const parseCache = new WeakMap<OrbitalDefinition, { traits: ReturnType<typeof parseOrbitalTraits>; entities: Entity[] }>();
+
+function parseOrbitalCached(orbital: OrbitalDefinition): { traits: ReturnType<typeof parseOrbitalTraits>; entities: Entity[] } {
+  let cached = parseCache.get(orbital);
+  if (cached === undefined) {
+    cached = { traits: parseOrbitalTraits(orbital), entities: orbitalInlineEntities(orbital) };
+    parseCache.set(orbital, cached);
+  }
+  return cached;
+}
+
 /** One trait's fully-resolved evaluation entry. */
 export interface IndexedTrait {
   /** Flat shape `processEvent`/`runTraitCascade` consume. */
@@ -109,8 +128,8 @@ export function buildTraitIndex(
   orbitals: readonly OrbitalDefinition[],
   configOverridesByTrait?: Readonly<Record<string, TraitConfig>>,
 ): TraitIndex {
-  const parsed = orbitals.map((orbital) => ({ orbital, parsed: parseOrbitalTraits(orbital) }));
-  const allEntities = parsed.flatMap(({ orbital }) => orbitalInlineEntities(orbital));
+  const parsed = orbitals.map((orbital) => ({ orbital, parsed: parseOrbitalCached(orbital).traits }));
+  const allEntities = orbitals.map((orbital) => parseOrbitalCached(orbital).entities).flat();
   const orbitalsView = parsed.map(({ orbital, parsed: p }) => ({ schema: orbital, entity: p.entity }));
   const byName = new Map<string, IndexedTrait>();
 
@@ -182,7 +201,7 @@ export function buildTraitIndexForOrbital(
 ): TraitIndex {
   const orbitals = [host, ...otherOrbitals];
   const full = buildTraitIndex(orbitals);
-  const hostNames = new Set(parseOrbitalTraits(host).traits.map((t) => t.name));
+  const hostNames = new Set(parseOrbitalCached(host).traits.traits.map((t) => t.name));
   const byName = new Map<string, IndexedTrait>();
   for (const [name, entry] of full.byName) {
     if (hostNames.has(name)) byName.set(name, entry);

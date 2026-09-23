@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ReferenceResolver } from '../src/entities/resolver/reference-resolver.js';
-import type { OrbitalSchema, OrbitalDefinition, Orbital, EventPayloadField, Trait } from '@almadar/core';
+import type { OrbitalSchema, OrbitalDefinition, Orbital, EventPayloadField, Trait, RuntimeValue } from '@almadar/core';
 import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 
 // Cross-path parity: for every named Stage B materialization case, B2-R
@@ -27,12 +27,12 @@ const FIXTURES_DIR = path.resolve(
   '../../../orbital-rust/crates/orbital-compiler/tests/fixtures/orbital_import_stage_b',
 );
 
-function sortKeysDeep(value: unknown): unknown {
+function sortKeysDeep(value: RuntimeValue): RuntimeValue {
   if (Array.isArray(value)) return value.map(sortKeysDeep);
   if (value !== null && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-      out[key] = sortKeysDeep((value as Record<string, unknown>)[key]);
+    const out: Record<string, RuntimeValue> = {};
+    for (const key of Object.keys(value as Record<string, RuntimeValue>).sort()) {
+      out[key] = sortKeysDeep((value as Record<string, RuntimeValue>)[key]);
     }
     return out;
   }
@@ -42,11 +42,11 @@ function sortKeysDeep(value: unknown): unknown {
 /** Rust's canonical JSON never serializes `None` — an `undefined`-valued
  *  key on either side (JS's optional-field convention) is a non-diff, not
  *  a mismatch. Strip before comparing. */
-function stripUndefinedDeep(value: unknown): unknown {
+function stripUndefinedDeep(value: RuntimeValue): RuntimeValue {
   if (Array.isArray(value)) return value.map(stripUndefinedDeep);
   if (value !== null && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    const out: Record<string, RuntimeValue> = {};
+    for (const [key, v] of Object.entries(value as Record<string, RuntimeValue>)) {
       if (v === undefined) continue;
       out[key] = stripUndefinedDeep(v);
     }

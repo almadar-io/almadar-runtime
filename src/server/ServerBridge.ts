@@ -224,7 +224,7 @@ export class ServerBridge {
       this.log("debug", `Forwarded event: ${event.type}`);
     } catch (error) {
       this.state.lastError = String(error);
-      this.log("error", `Failed to forward event: ${event.type}`, error);
+      this.log("error", `Failed to forward event: ${event.type}`, error instanceof Error ? error : String(error));
     }
   }
 
@@ -293,7 +293,7 @@ export class ServerBridge {
             this.log("debug", `Received server event: ${data.event}`);
           }
         } catch (error) {
-          this.log("error", "Failed to parse WebSocket message", error);
+          this.log("error", "Failed to parse WebSocket message", error instanceof Error ? error : String(error));
         }
       };
 
@@ -307,7 +307,7 @@ export class ServerBridge {
         // Could implement reconnection logic here
       };
     } catch (error) {
-      this.log("error", "Failed to create WebSocket", error);
+      this.log("error", "Failed to create WebSocket", error instanceof Error ? error : String(error));
     }
   }
 
@@ -381,7 +381,7 @@ export class ServerBridge {
   private log(
     level: "debug" | "info" | "warn" | "error",
     message: string,
-    data?: unknown,
+    data?: Error | Event | string,
   ): void {
     if (!this.config.debug && level === "debug") return;
 

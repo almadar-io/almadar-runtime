@@ -42,7 +42,7 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { asOrbitalId, asEntityId, asTraitId, asEventId, isInlineTrait } from '@almadar/core';
-import type { OrbitalSchema, Trait, Entity } from '@almadar/core';
+import type { OrbitalSchema, Trait, Entity, EventPayload } from '@almadar/core';
 
 const ORB = asOrbitalId('orb_01HCCAAAAAAAAAAAAAAAAAAAAA');
 const ENT = asEntityId('ent_01HCCAAAAAAAAAAAAAAAAAAAAA');
@@ -388,13 +388,13 @@ function resolveViaCli(schema: object): OrbitalSchema {
 
 describe.skipIf(!canRunRealPlugin)('vim-mode plugin: composed-trait cascade end-to-end (real schema)', () => {
   it('SHELL_PLUGIN_ENABLED -> Shell.PLUGIN_ENABLED -> VimStudioBridge registers commands + shows NORMAL status', async () => {
-    const raw = JSON.parse(readFileSync(ORB_PATH, 'utf-8'));
+    const raw = JSON.parse(readFileSync(ORB_PATH, 'utf-8')) as OrbitalSchema;
     const resolved = resolveViaCli(raw);
 
     const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
     await runtime.register(resolved);
 
-    const events: Array<{ type: string; payload?: unknown }> = [];
+    const events: Array<{ type: string; payload?: EventPayload }> = [];
     runtime.getEventBus().onAny((e) => events.push({ type: e.type, payload: e.payload }));
 
     await runtime.processOrbitalEvent('VimModeOrbital', {
@@ -411,13 +411,13 @@ describe.skipIf(!canRunRealPlugin)('vim-mode plugin: composed-trait cascade end-
   });
 
   it('SHELL_KEY i -> Modes NORMAL->INSERT -> VimStudioBridge shows INSERT status, Escape returns to NORMAL', async () => {
-    const raw = JSON.parse(readFileSync(ORB_PATH, 'utf-8'));
+    const raw = JSON.parse(readFileSync(ORB_PATH, 'utf-8')) as OrbitalSchema;
     const resolved = resolveViaCli(raw);
 
     const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
     await runtime.register(resolved);
 
-    const events: Array<{ type: string; payload?: unknown }> = [];
+    const events: Array<{ type: string; payload?: EventPayload }> = [];
     runtime.getEventBus().onAny((e) => events.push({ type: e.type, payload: e.payload }));
 
     const keyPayload = {

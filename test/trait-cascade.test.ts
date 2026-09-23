@@ -9,6 +9,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runTraitCascade } from '../src/traits/TraitCascade.js';
 import type { TraitDefinition } from '../src/types.js';
+import type { EventPayload } from '@almadar/core';
 
 /** A trait shaped exactly like the real-world bug: INIT fetches, and a
  *  SEPARATE arm (same state, "idle -> idle") applies the fetched data when
@@ -160,7 +161,7 @@ describe('runTraitCascade', () => {
     // event's payload (typically empty/undefined for INIT) instead of the
     // fetch's own `{data: [...]}` — caught live via a real fetch-then-apply
     // integration test where `total` came back 0 instead of the real sum.
-    const seenPayloads: unknown[] = [];
+    const seenPayloads: Array<EventPayload | undefined> = [];
     const runEffects = vi.fn(async (effects, step) => {
       seenPayloads.push(step.payload);
       if (step.event === 'INIT') {

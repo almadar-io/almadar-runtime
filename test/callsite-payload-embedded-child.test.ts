@@ -27,7 +27,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/server/OrbitalServerRuntime.js';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
-import type { OrbitalSchema, Trait } from '@almadar/core';
+import type { ClientEffectTuple, OrbitalSchema, RuntimeValue, Trait } from '@almadar/core';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 
@@ -37,14 +37,14 @@ const REPO_ROOT = join(__dirname, '..', '..', '..');
 // separate, usually-empty slot. Picks the LAST matching entry so a re-fired
 // capture child's REFRESHED frame (pushed after the mount-time one) wins.
 function renderPatternFor(
-  clientEffectsByTrait: Array<{ traitName: string; effect: unknown }> | undefined,
+  clientEffectsByTrait: Array<{ traitName: string; effect: ClientEffectTuple }> | undefined,
   traitName: string,
-): Record<string, unknown> | undefined {
+): Record<string, RuntimeValue> | undefined {
   const entries = clientEffectsByTrait?.filter((e) => e.traitName === traitName);
   const entry = entries && entries.length > 0 ? entries[entries.length - 1] : undefined;
   if (!entry) return undefined;
   const effect = entry.effect as ClientRenderUITuple;
-  return effect[2] as Record<string, unknown> | undefined;
+  return effect[2] as Record<string, RuntimeValue> | undefined;
 }
 
 // ============================================================================

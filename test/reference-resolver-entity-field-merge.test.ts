@@ -17,10 +17,17 @@
  * DECLARED fields composes an atom (via an explicit `-> Entity` rebind,
  * mirroring `std-wiki`'s `WikiDoc = RecordDetail.traits.RecordItemDetail ->
  * WikiPage`) whose OWN bound entity carries one `@intrinsic`-marked field
- * the consumer never declares. The merge must add that field to the
- * consumer's entity, and a `@entity` sentinel on a SEPARATE trait of the
- * SAME orbital must see it in its substituted `properties` — proving the
- * sentinel pass reads the entity AFTER the merge, not before it.
+ * the consumer never declares, and the composed trait's OWN body writes it
+ * (`set @entity.state`, mirroring `std-record-detail`'s real `set
+ * @entity.loadedRow`) — the R-ENTITY-FIELD-UNION-ACROSS-SAME-NAMED-ENTITY
+ * gate (`mergeImportedEntityFields`'s `referencedFields` filter, verified
+ * against `~/bin/orbital resolve` 2026-09-23) only carries a field on an
+ * EXPLICIT rebind when the composing trait actually reads/writes it — an
+ * `@intrinsic` marking alone does not exempt it there (only the no-rebind
+ * path exempts by `@intrinsic` unconditionally). The merge must add that
+ * field to the consumer's entity, and a `@entity` sentinel on a SEPARATE
+ * trait of the SAME orbital must see it in its substituted `properties` —
+ * proving the sentinel pass reads the entity AFTER the merge, not before it.
  *
  * RED without `mergeImportedEntityFieldsIntoOrbital`/`boundTraitOrbitalBinding`
  * (`reference-resolver.ts`): the intrinsic field is simply absent from both
@@ -35,7 +42,10 @@ import type { Orbital, OrbitalDefinition } from '@almadar/core';
 /** The composed atom: bound to its OWN placeholder entity `Widget`, which
  * carries a field the consumer already declares (`id`) and one
  * `@intrinsic`-marked field it does NOT (`state`) — mirrors
- * `std-record-detail`'s `RecordItem.loadedRow`. */
+ * `std-record-detail`'s `RecordItem.loadedRow`. The INIT transition WRITES
+ * `state` (`set @entity.state`) — a genuine reference, without which the
+ * R-ENTITY-FIELD-UNION-ACROSS-SAME-NAMED-ENTITY filter correctly excludes
+ * it on this explicit rebind (verified against `~/bin/orbital resolve`). */
 function widgetAtomOrbital(): Orbital {
   return {
     name: 'WidgetOrbital',
@@ -55,7 +65,9 @@ function widgetAtomOrbital(): Orbital {
         stateMachine: {
           states: [{ name: 'idle', isInitial: true }],
           events: [{ key: 'INIT', name: 'Initialize' }],
-          transitions: [{ from: 'idle', to: 'idle', event: 'INIT', effects: [] }],
+          transitions: [
+            { from: 'idle', to: 'idle', event: 'INIT', effects: [['set', '@entity.state', 'active']] },
+          ],
         },
       },
     ],

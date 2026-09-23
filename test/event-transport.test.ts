@@ -15,7 +15,7 @@ import {
 
 const schema: OrbitalSchema = { name: 'Probe', orbitals: [] };
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
@@ -34,7 +34,7 @@ class FakeEventSource {
   close(): void {
     this.closed = true;
   }
-  emit(data: unknown): void {
+  emit<T>(data: T): void {
     this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
   }
 }

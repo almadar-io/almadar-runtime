@@ -8,13 +8,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 import { EffectExecutor, type BindingContext, type EffectContext } from '../src/index.js';
+import type { EntityRow } from '@almadar/core';
 
 const CREATE = ['persist', 'create', 'Task', '@entity', { emit: { success: 'TASK_CREATED' } }];
 
 describe('EffectExecutor persist create — write-back onto @entity', () => {
     it('binds the store-minted id onto an id-less bound entity after a successful create', async () => {
-        const persist = vi.fn(async (_action: string, _entityType: string, data: unknown) => ({
-            ...(data as Record<string, unknown>),
+        const persist = vi.fn(async (_action: string, _entityType: string, data?: EntityRow) => ({
+            ...data,
             id: 'Task Id 1',
         }));
         const handlers = stubEffectHandlers({ persist, emit: vi.fn() });
@@ -29,8 +30,8 @@ describe('EffectExecutor persist create — write-back onto @entity', () => {
     });
 
     it('does not overwrite an already-bound entity id when the create is for unrelated literal data', async () => {
-        const persist = vi.fn(async (_action: string, _entityType: string, data: unknown) => ({
-            ...(data as Record<string, unknown>),
+        const persist = vi.fn(async (_action: string, _entityType: string, data?: EntityRow) => ({
+            ...data,
             id: 'Other Id 5',
         }));
         const handlers = stubEffectHandlers({ persist, emit: vi.fn() });

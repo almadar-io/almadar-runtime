@@ -11,11 +11,12 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { asEntityRow } from './fixtures/effect-result.js';
+import type { ClientEffectTuple, EventPayload, OrbitalSchema, RuntimeValue } from '@almadar/core';
 
 // Load trait-wars schema
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const schemaPath = join(__dirname, 'fixtures/trait-wars.orb');
-const traitWarsSchema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
+const traitWarsSchema = JSON.parse(readFileSync(schemaPath, 'utf-8')) as OrbitalSchema;
 
 describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
@@ -41,26 +42,22 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
       expect(result.clientEffects).toBeDefined();
 
       const effects = result.clientEffects!;
-      const renderUiEffects = effects.filter((e: unknown) => {
-        const arr = e as unknown[];
-        return Array.isArray(arr) && arr[0] === 'render-ui';
-      });
+      const renderUiEffects = effects.filter((e: ClientEffectTuple) => e[0] === 'render-ui');
 
       expect(renderUiEffects.length).toBeGreaterThan(0);
 
-      const gamePatterns = renderUiEffects.filter((e: unknown) => {
-        const patternConfig = (e as unknown[])[2] as Record<string, string> | undefined;
-        return patternConfig?.type?.startsWith('game-');
+      const gamePatterns = renderUiEffects.filter((e) => {
+        const patternConfig = e[2] as Record<string, RuntimeValue> | null;
+        return typeof patternConfig?.type === 'string' && patternConfig.type.startsWith('game-');
       });
 
       expect(gamePatterns.length).toBeGreaterThan(0);
 
-      const canvasPattern = gamePatterns.find((e: unknown) => {
-        const arr = e as unknown[];
-        return (arr[2] as Record<string, string>)?.type === 'game-isometric-canvas';
+      const canvasPattern = gamePatterns.find((e) => {
+        return (e[2] as Record<string, RuntimeValue> | null)?.type === 'game-isometric-canvas';
       });
       expect(canvasPattern).toBeDefined();
-      expect((canvasPattern as unknown[])[1]).toBe('main');
+      expect(canvasPattern![1]).toBe('main');
     });
 
     it('should preserve all pattern properties including onTileClick', async () => {
@@ -72,13 +69,12 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
         payload: {},
       });
 
-      const canvasEffect = result.clientEffects?.find((e: unknown) => {
-        const arr = e as unknown[];
-        return Array.isArray(arr) && (arr[2] as Record<string, string>)?.type === 'game-isometric-canvas';
+      const canvasEffect = result.clientEffects?.find((e: ClientEffectTuple) => {
+        return (e[2] as Record<string, RuntimeValue> | null)?.type === 'game-isometric-canvas';
       });
 
       expect(canvasEffect).toBeDefined();
-      const props = (canvasEffect as unknown[])[2] as Record<string, unknown>;
+      const props = canvasEffect![2] as Record<string, RuntimeValue>;
       expect(props.onTileClick).toBeDefined();
       expect(props.scale).toBe(0.6);
     });
@@ -109,7 +105,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
         e.event === 'HERO_SELECTED'
       );
       expect(heroSelectedEmit).toBeDefined();
-      expect((heroSelectedEmit!.payload as Record<string, unknown>).heroId).toBe('hero-valor');
+      expect((heroSelectedEmit!.payload as EventPayload).heroId).toBe('hero-valor');
     });
 
     it('should handle SHIELD_BREAK emission from GuardianBehavior', async () => {
@@ -168,7 +164,7 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
 
       const heroEvent = result.emittedEvents.find((e) => e.event === 'HERO_SELECTED');
       expect(heroEvent).toBeDefined();
-      expect((heroEvent!.payload as Record<string, unknown>).heroId).toBe('hero-valor');
+      expect((heroEvent!.payload as EventPayload).heroId).toBe('hero-valor');
     });
 
     it('should execute persist effects', async () => {
@@ -463,13 +459,10 @@ describe('OrbitalServerRuntime with trait-wars.orb', () => {
       expect(result.success).toBeTruthy();
       expect(result.clientEffects).toBeDefined();
 
-      const navigateEffects = result.clientEffects!.filter((e: unknown) => {
-        const arr = e as unknown[];
-        return Array.isArray(arr) && arr[0] === 'navigate';
-      });
+      const navigateEffects = result.clientEffects!.filter((e: ClientEffectTuple) => e[0] === 'navigate');
 
       expect(navigateEffects.length).toBeGreaterThan(0);
-      expect((navigateEffects[0] as unknown[])[1]).toBe('/world');
+      expect(navigateEffects[0][1]).toBe('/world');
     });
 
     it('should include params in navigate effects', async () => {

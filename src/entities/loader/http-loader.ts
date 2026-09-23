@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import type { OrbitalSchema, Orbital } from "@almadar/core";
+import type { OrbitalSchema, Orbital, JsonValue } from "@almadar/core";
 import { OrbitalSchemaSchema } from "@almadar/core";
 import type {
   SchemaLoader,
@@ -381,7 +381,7 @@ export class HttpLoader implements SchemaLoader {
         const text = await response.text();
 
         // Parse JSON
-        let data: unknown;
+        let data: JsonValue;
         try {
           data = JSON.parse(text);
         } catch (e) {

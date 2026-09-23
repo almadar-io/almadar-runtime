@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
-import type { OrbitalSchema, Orbital, Trait, TraitConfigValue } from '@almadar/core';
+import type { OrbitalSchema, Orbital, Trait, TraitConfigValue, TraitRef } from '@almadar/core';
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..');
 const PF_LOLO = join(
@@ -24,8 +24,8 @@ const ORBITAL_BIN = join(homedir(), 'bin', 'orbital');
 const canRun = existsSync(ORB_BIN) && existsSync(ORBITAL_BIN) && existsSync(PF_LOLO);
 const CLI_ENV = { ...process.env, ALMADAR_DEV: '1', ALMADAR_ROOT: REPO_ROOT };
 
-function isTrait(t: unknown): t is Trait {
-  return typeof t === 'object' && t !== null && 'stateMachine' in t;
+function isTrait(t: TraitRef): t is Trait {
+  return typeof t === 'object' && 'stateMachine' in t;
 }
 
 interface ShellNav {

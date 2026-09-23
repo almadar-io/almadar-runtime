@@ -35,6 +35,7 @@ export type {
   RuntimeConfig,
   ExecutionEnvironment,
   TransitionObserver,
+  EvaluationContextExtensions,
 } from "./types.js";
 
 // Constants
@@ -129,6 +130,8 @@ export {
 // per-request evaluations differ only in the deps supplied).
 export {
   evaluateOrbitalEvent,
+  collectListenerTargets,
+  type CollectedListenerTarget,
   type EvaluateOrbitalEventDeps,
   type EvaluateEffectRunner,
 } from "./evaluation/evaluateOrbitalEvent.js";
@@ -139,6 +142,7 @@ export {
   createIndexStageRunner,
   type IndexStageRunnerOptions,
 } from "./evaluation/stage-runner.js";
+export type { DeliverEmit } from "./effects/effect-stage.js";
 
 // effect-stage — the server effect-execution stage extracted from
 // OrbitalServerRuntime.executeEffects (behavior-identical move); the
@@ -194,9 +198,13 @@ export {
 export {
   alreadyDeliveredFrom,
   applyOrbitalEventResponse,
+  createClientKernel,
   dispatchWithServerLeg,
   postServerLeg,
   type ClientDispatch,
+  type ClientKernel,
+  type ClientKernelOpts,
+  type ClientKernelOutcome,
   type ClientRoleOpts,
 } from "./evaluation/client-role.js";
 

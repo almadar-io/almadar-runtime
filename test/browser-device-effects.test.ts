@@ -14,15 +14,16 @@ import {
     type EffectHandlers,
     type BrowserGeolocationPosition,
 } from '../src/index.js';
+import type { EventPayload } from '@almadar/core';
 
 interface Emitted {
     event: string;
-    payload: unknown;
+    payload?: EventPayload;
 }
 
 function makeExecutor(handlers: Partial<EffectHandlers>) {
     const emitted: Emitted[] = [];
-    const emit = vi.fn((event: string, payload?: unknown) => {
+    const emit = vi.fn((event: string, payload?: EventPayload) => {
         emitted.push({ event, payload });
     });
     const executor = new EffectExecutor({

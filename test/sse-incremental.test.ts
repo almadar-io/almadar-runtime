@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import express from 'express';
 import http from 'node:http';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import type { OrbitalSchema } from '@almadar/core';
+import type { JsonValue, OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
 
 /**
  * Schema with a trait that emits 2 events and renders a UI effect, so we
@@ -115,7 +115,7 @@ describe('SSE incremental streaming (Express runtime)', () => {
 
     const events = lines
       .filter((l) => l !== '[DONE]')
-      .map((l) => JSON.parse(l) as { type: string; data: unknown });
+      .map((l) => JSON.parse(l) as { type: string; data: JsonValue });
 
     const types = events.map((e) => e.type);
 
@@ -165,12 +165,7 @@ describe('SSE incremental streaming (Express runtime)', () => {
     });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('application/json');
-    const body = (await res.json()) as {
-      success: boolean;
-      transitioned: boolean;
-      emittedEvents: unknown[];
-      clientEffects: unknown[];
-    };
+    const body = (await res.json()) as OrbitalEventResponse;
     expect(body.success).toBe(true);
     expect(body.transitioned).toBe(true);
     // Both emitted events and client effects are still present in the JSON body

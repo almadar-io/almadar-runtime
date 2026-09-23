@@ -22,7 +22,7 @@ import {
     createContextFromBindings,
     type BindingContext,
 } from '../src/evaluation/BindingResolver.js';
-import type { TraitConfigObject, TraitConfigValue, EventPayload } from '@almadar/core';
+import type { TraitConfigObject, TraitConfigValue, EventPayload, RenderChildrenMap, ResolvedPatternProps, RuntimeValue } from '@almadar/core';
 
 // ============================================================================
 // Helpers
@@ -126,7 +126,7 @@ describe('@config.X — object arrays', () => {
         const ctx = makeCtx({ filters: [filterDef] });
         const result = interpolateProps({ filters: '@config.filters' }, ctx);
         expect(Array.isArray(result.filters)).toBe(true);
-        expect((result.filters as unknown[])[0]).toEqual(filterDef);
+        expect((result.filters as Array<ResolvedPatternProps | RenderChildrenMap>)[0]).toEqual(filterDef);
     });
 });
 
@@ -166,7 +166,7 @@ describe('@config.X — inside render-ui pattern shapes', () => {
         expect(result.type).toBe('filter-group');
         expect(result.entity).toBe('FilteredListItem');
         expect(Array.isArray(result.filters)).toBe(true);
-        expect((result.filters as unknown[]).length).toBe(1);
+        expect((result.filters as Array<ResolvedPatternProps | RenderChildrenMap>).length).toBe(1);
     });
 
     it('resolves data-grid `fields: [object]` and `pageSize: number` from config', () => {
@@ -317,7 +317,7 @@ describe('@config.<render-ui knob> — nested bindings inside the resolved tree'
             { data: [{ id: 'r1' }, { id: 'r2' }] },
         );
         const result = interpolateValue('@config.bodyContent', ctx) as {
-            children: [{ content: string }, { nodes: unknown[] }];
+            children: [{ content: string }, { nodes: RuntimeValue[] }];
         };
         expect(result.children[0].content).toBe('Replies');
         expect(result.children[1].nodes).toEqual([{ id: 'r1' }, { id: 'r2' }]);
@@ -339,7 +339,7 @@ describe('@config.<render-ui knob> — nested bindings inside the resolved tree'
         const cyclic: Record<string, TraitConfigValue> = { type: 'stack' };
         cyclic['children'] = ['@config.bodyContent'];
         const ctx = makeRichCtx({ bodyContent: cyclic }, {});
-        const result = interpolateValue('@config.bodyContent', ctx) as { children: unknown[] };
+        const result = interpolateValue('@config.bodyContent', ctx) as { children: RuntimeValue[] };
         expect(Array.isArray(result.children)).toBe(true);
     });
 });

@@ -20,7 +20,9 @@ import {
     EffectExecutor,
     type BindingContext,
     type EffectContext,
+    type EffectHandlers,
 } from '../src/index.js';
+import type { EntityRow } from '@almadar/core';
 
 const ROWS = [
     { id: 'a', name: 'Item A', status: 'active', category: 'foo', amount: 10, units: 2 },
@@ -32,10 +34,10 @@ const ROWS = [
 ] as const;
 
 function makeExecutor(): {
-    emit: ReturnType<typeof vi.fn>;
+    emit: ReturnType<typeof vi.fn<EffectHandlers['emit']>>;
     executor: EffectExecutor;
 } {
-    const emit = vi.fn();
+    const emit = vi.fn<EffectHandlers['emit']>();
     const handlers = stubEffectHandlers({
         emit,
         // Multi-row fetch — the dashboard fetches the full collection then
@@ -70,8 +72,8 @@ describe('Dashboard fetch → cross-trait emit', () => {
         expect(payload).toEqual({ data: ROWS, totalCount: ROWS.length });
         // Sanity: a downstream array/len would see 6, not 1, and a
         // downstream array/groupBy 'status' would see active=5/inactive=1.
-        expect(Array.isArray((payload as { data: unknown }).data)).toBe(true);
-        expect(((payload as { data: unknown[] }).data).length).toBe(ROWS.length);
+        expect(Array.isArray((payload as { data: EntityRow[] }).data)).toBe(true);
+        expect(((payload as { data: EntityRow[] }).data).length).toBe(ROWS.length);
     });
 
     it('payload data is the same array reference for all listeners (Stats + Graphs both groupBy/sum it)', async () => {
@@ -86,10 +88,10 @@ describe('Dashboard fetch → cross-trait emit', () => {
             'DashboardItem',
             { limit: 100, emit: { success: 'BrowseItemLoaded' } },
         ]);
-        const payload = emit.mock.calls.find(([e]) => e === 'BrowseItemLoaded')![1] as { data: unknown[] };
+        const payload = emit.mock.calls.find(([e]) => e === 'BrowseItemLoaded')![1] as { data: EntityRow[] };
         // Snapshot the data array — verifying the runtime doesn't strip
         // fields the lambdas need (status / category / amount / units).
-        const sampleKeys = Object.keys(payload.data[0] as Record<string, unknown>).sort();
+        const sampleKeys = Object.keys(payload.data[0]).sort();
         expect(sampleKeys).toEqual(['amount', 'category', 'id', 'name', 'status', 'units']);
     });
 

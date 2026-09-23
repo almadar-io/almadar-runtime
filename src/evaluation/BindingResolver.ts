@@ -516,7 +516,7 @@ function interpolateArray(value: RuntimeValue[], ctx: EvaluationContext): Runtim
  * canonical, verbatim IR for map-in-`children:`. Structural, no name/heuristic
  * match beyond the pinned operator + lambda head.
  */
-function isRenderChildrenMap(value: unknown[]): value is RenderChildrenMap {
+function isRenderChildrenMap(value: RuntimeValue[]): value is RenderChildrenMap {
     if (value.length !== 3 || value[0] !== 'array/map') return false;
     const lambda = value[2];
     return (
@@ -530,7 +530,7 @@ function isRenderChildrenMap(value: unknown[]): value is RenderChildrenMap {
 /**
  * Check if an array is an S-expression.
  */
-function isSExpression(value: unknown[]): boolean {
+function isSExpression(value: RuntimeValue[]): boolean {
     if (value.length === 0) return false;
 
     const first = value[0];
@@ -550,7 +550,7 @@ function isSExpression(value: unknown[]): boolean {
 /**
  * Check if a value contains any binding references.
  */
-export function containsBindings(value: unknown): boolean {
+export function containsBindings(value: RuntimeValue): boolean {
     if (typeof value === 'string') {
         return value.includes('@');
     }
@@ -560,7 +560,7 @@ export function containsBindings(value: unknown): boolean {
     }
 
     if (value !== null && typeof value === 'object') {
-        return Object.values(value as PatternProps).some(containsBindings);
+        return Object.values(value as Record<string, RuntimeValue>).some(containsBindings);
     }
 
     return false;
@@ -569,10 +569,10 @@ export function containsBindings(value: unknown): boolean {
 /**
  * Extract all binding references from a value.
  */
-export function extractBindings(value: unknown): string[] {
+export function extractBindings(value: RuntimeValue): string[] {
     const bindings: string[] = [];
 
-    function collect(v: unknown): void {
+    function collect(v: RuntimeValue): void {
         if (typeof v === 'string') {
             const matches = v.match(/@[\w]+(?:\.[\w]+)*/g);
             if (matches) {
@@ -581,7 +581,7 @@ export function extractBindings(value: unknown): string[] {
         } else if (Array.isArray(v)) {
             v.forEach(collect);
         } else if (v !== null && typeof v === 'object') {
-            Object.values(v as PatternProps).forEach(collect);
+            Object.values(v as Record<string, RuntimeValue>).forEach(collect);
         }
     }
 

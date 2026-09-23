@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ReferenceResolver } from '../src/entities/resolver/reference-resolver.js';
-import type { OrbitalDefinition, EntityId, Trait, Effect } from '@almadar/core';
+import type { OrbitalDefinition, EntityId, Trait, Effect, FetchEffect, PersistEffect, RenderUIEffect, RuntimeValue } from '@almadar/core';
 
 // W4-B2: a trait's entity-name tokens (linkedEntity + positional fetch/persist
 // args + render-ui `entity` prop) resolve by the `entityRefIds` side-map
@@ -50,20 +50,20 @@ function traitWithStaleTokens(entityRefIds?: Record<string, EntityId>): Trait {
   } as Trait;
 }
 
-function fetchArg(trait: Trait): unknown {
-  const effects = trait.stateMachine?.transitions[0].effects as unknown[][];
-  const fetchEffect = effects.find((e) => e[0] === 'fetch');
+function fetchArg(trait: Trait): string | undefined {
+  const effects = trait.stateMachine?.transitions[0].effects ?? [];
+  const fetchEffect = effects.find((e): e is FetchEffect => e[0] === 'fetch');
   return fetchEffect?.[1];
 }
-function persistEntity(trait: Trait): unknown {
-  const effects = trait.stateMachine?.transitions[0].effects as unknown[][];
-  const persistEffect = effects.find((e) => e[0] === 'persist');
+function persistEntity(trait: Trait): string | undefined {
+  const effects = trait.stateMachine?.transitions[0].effects ?? [];
+  const persistEffect = effects.find((e): e is PersistEffect => e[0] === 'persist');
   return persistEffect?.[2];
 }
-function renderUiEntity(trait: Trait): unknown {
-  const effects = trait.stateMachine?.transitions[0].effects as unknown[][];
-  const renderEffect = effects.find((e) => e[0] === 'render-ui');
-  return (renderEffect?.[2] as { entity?: unknown })?.entity;
+function renderUiEntity(trait: Trait): RuntimeValue {
+  const effects = trait.stateMachine?.transitions[0].effects ?? [];
+  const renderEffect = effects.find((e): e is RenderUIEffect => e[0] === 'render-ui');
+  return (renderEffect?.[2] as Record<string, RuntimeValue> | null)?.entity;
 }
 
 describe('ReferenceResolver — id-primary entity-token resolution', () => {

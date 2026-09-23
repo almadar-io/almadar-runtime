@@ -20,24 +20,25 @@
  */
 import type {
   DispatchMode,
-  EventPayload,
   OrbitalEventRequest,
   OrbitalEventResponse,
-  SExpr,
-  TraitEventListener,
   UserContext,
 } from '@almadar/core';
-import { applyListenPayloadMapping, type BusEventSource, type ClientEffectTuple } from '@almadar/core';
+import { type ClientEffectTuple } from '@almadar/core';
 import { createLogger } from '@almadar/logger';
-import { createMinimalContext, evaluateGuard, evaluateListenPayloadExpr } from '@almadar/evaluator';
-import { evaluateOrbitalEvent, type EvaluateEffectRunner, type EvaluateOrbitalEventDeps } from './evaluateOrbitalEvent.js';
+import {
+  collectListenerTargets,
+  evaluateOrbitalEvent,
+  type EvaluateEffectRunner,
+  type EvaluateOrbitalEventDeps,
+} from './evaluateOrbitalEvent.js';
 import { findInitialState } from '../traits/StateMachineCore.js';
 import type { TraitIndex } from '../traits/trait-index.js';
 import type { CircuitStore, TraitSnapshot } from './circuit-store.js';
+import type { EntityRow } from '@almadar/core';
 import { EffectExecutor, clientResolvesRenderBindings } from '../effects/EffectExecutor.js';
 import { createClientEffectHandlers } from '../effects/ClientEffectHandlers.js';
 import { ServerLegCollector } from '../effects/server-leg.js';
-import { parseListenSource } from '../events/identity/routing.js';
 import { InMemoryPersistence, type PersistenceAdapter } from '../entities/PersistenceAdapter.js';
 import type { EventTransport } from '../server/EventTransport.js';
 import type { EvaluationContextExtensions } from '../types.js';
@@ -86,6 +87,12 @@ export interface ClientDispatch {
   serverLeg?: OrbitalEventRequest;
   mode: DispatchMode;
   snapshot?: TraitSnapshot;
+  /** `runtimeOptimistic` only: the pre-dispatch rows of every sibling frame
+   *  the local dispatch may fan its row into (see `fanOutEntityRows`). */
+  siblingSnapshots?: Map<string, EntityRow | undefined>;
+  /** Traits whose effects ran locally in this dispatch — the rows the local
+   *  run and the response fold fan out to same-entity siblings. */
+  writtenTraits: ReadonlySet<string>;
   trait: string;
   entityId?: string;
   frameKey: string;
@@ -110,6 +117,66 @@ export function alreadyDeliveredFrom(dispatch: ClientDispatch): Set<string> {
     set.add(alreadyDeliveredKey(dispatch.serverLeg.targetTrait, dispatch.serverLeg.event));
   }
   return set;
+}
+
+/**
+ * Every frame bound to the same entity instance as `traitName`'s own frame:
+ * same entity name, and either no row yet or a row with the same `id` — the
+ * JS twin of Rust's entity source keyed by (linked-entity TYPE, id).
+ */
+function sameEntityFrameKeys(traitIndex: TraitIndex, store: CircuitStore, traitName: string, rowId: string | undefined): Set<string> {
+  const entry = traitIndex.byName.get(traitName);
+  const keys = new Set<string>([entry?.frameKey ?? traitName]);
+  if (entry === undefined) return keys;
+  for (const sibling of traitIndex.byName.values()) {
+    if (sibling.entity.name !== entry.entity.name) continue;
+    const siblingId = store.frames.get(sibling.frameKey)?.['id'];
+    if (rowId === undefined || siblingId === undefined || siblingId === rowId) keys.add(sibling.frameKey);
+  }
+  return keys;
+}
+
+function rowIdOf(row: EntityRow): string | undefined {
+  const id = row['id'];
+  return typeof id === 'string' && id !== '' ? id : undefined;
+}
+
+/**
+ * Merge each `entityByTrait` row into its own frame, then fan the rows of
+ * `writtenTraits` into every frame sharing their entity instance
+ * (G-RUNTIME-026/027). Only written traits fan out, and last: the other
+ * rows are echoes that may predate this write, and fanning one of those
+ * would clobber the fresh row.
+ */
+function fanOutEntityRows(
+  store: CircuitStore,
+  traitIndex: TraitIndex,
+  entityByTrait: Record<string, EntityRow>,
+  writtenTraits: ReadonlySet<string>,
+): void {
+  const merge = (frameKey: string, row: EntityRow): void => {
+    const existing = store.frames.get(frameKey);
+    if (existing === row) return;
+    store.frames.set(frameKey, existing !== undefined ? { ...existing, ...row } : { ...row });
+  };
+  for (const [traitName, row] of Object.entries(entityByTrait)) {
+    merge(traitIndex.byName.get(traitName)?.frameKey ?? traitName, row);
+  }
+  for (const traitName of writtenTraits) {
+    const row = entityByTrait[traitName];
+    if (row === undefined) continue;
+    for (const frameKey of sameEntityFrameKeys(traitIndex, store, traitName, rowIdOf(row))) merge(frameKey, row);
+  }
+}
+
+function restoreDispatch(store: CircuitStore, dispatch: ClientDispatch): void {
+  if (dispatch.snapshot === undefined) return;
+  for (const [frameKey, row] of dispatch.siblingSnapshots ?? []) {
+    if (row === undefined) store.frames.delete(frameKey);
+    else store.frames.set(frameKey, { ...row });
+  }
+  store.restore(dispatch.trait, dispatch.entityId, dispatch.snapshot, dispatch.frameKey);
+  store.notify();
 }
 
 /**
@@ -215,52 +282,6 @@ function createClientEffectRunner(
   };
 }
 
-/**
- * Find every LOCAL listener reacting to `event` from `sourceStamp` — the
- * twin of `orbital-core::collect_listener_targets` (`kernel.rs`) and the
- * inline listens-fan-out block inside `evaluateOrbitalEvent`'s own worklist
- * loop, over the exact same shared primitives (`parseListenSource`,
- * `evaluateGuard`, `applyListenPayloadMapping`) rather than a divergent
- * re-derivation — `evaluateOrbitalEvent` doesn't export this block as its
- * own unit today (see the wave report's interface-gap note).
- */
-function collectListenerTargets(
-  traitIndex: TraitIndex,
-  sourceStamp: BusEventSource | undefined,
-  event: string,
-  payload: EventPayload | undefined,
-): Array<{ listenerTrait: string; triggers: string; payload: EventPayload | undefined; entityId: string | undefined }> {
-  const targets: Array<{ listenerTrait: string; triggers: string; payload: EventPayload | undefined; entityId: string | undefined }> = [];
-  for (const [listenerName, listenerEntry] of traitIndex.byName) {
-    const listeners = (listenerEntry.traitDef.listens ?? []) as TraitEventListener[];
-    for (const listener of listeners) {
-      const { bareEvent, matcher } = parseListenSource(listener, listenerEntry.orbitalName);
-      if (bareEvent !== event || !matcher(sourceStamp)) continue;
-
-      if (listener.guard) {
-        let guardPassed: boolean;
-        try {
-          guardPassed = evaluateGuard(listener.guard as SExpr, createMinimalContext({}, payload));
-        } catch {
-          guardPassed = false;
-        }
-        if (!guardPassed) continue;
-      }
-
-      const mappedPayload = applyListenPayloadMapping(listener.payloadMapping, payload, evaluateListenPayloadExpr);
-      const pickId = (field: string): string | undefined =>
-        (mappedPayload?.[field] as string | undefined) ?? (payload?.[field] as string | undefined);
-      targets.push({
-        listenerTrait: listenerName,
-        triggers: listener.triggers,
-        payload: mappedPayload,
-        entityId: pickId('entityId') ?? pickId('orbitalName'),
-      });
-    }
-  }
-  return targets;
-}
-
 function resolvePersistence(opts: Pick<ClientRoleOpts, 'persistence'>): PersistenceAdapter {
   return opts.persistence ?? new InMemoryPersistence();
 }
@@ -321,6 +342,15 @@ export async function dispatchWithServerLeg(
   const snapshot = mode === 'runtimeOptimistic'
     ? opts.store.snapshot(traitName, entityId, entry.frameKey)
     : undefined;
+  let siblingSnapshots: Map<string, EntityRow | undefined> | undefined;
+  if (snapshot !== undefined) {
+    siblingSnapshots = new Map();
+    for (const frameKey of sameEntityFrameKeys(opts.traitIndex, opts.store, traitName, undefined)) {
+      if (frameKey === entry.frameKey) continue;
+      const row = opts.store.frames.get(frameKey);
+      siblingSnapshots.set(frameKey, row !== undefined ? { ...row } : undefined);
+    }
+  }
 
   const beforeStates = new Map<string, string>();
   for (const [name, traitState] of opts.store.manager.getAllStates()) {
@@ -340,6 +370,7 @@ export async function dispatchWithServerLeg(
     { event: request.event, payload: request.payload, entityId, targetTrait: traitName },
   );
 
+  if (response.entityByTrait) fanOutEntityRows(opts.store, opts.traitIndex, response.entityByTrait, executedTraitNames);
   opts.store.notify();
 
   const drained = collector.drain();
@@ -373,7 +404,17 @@ export async function dispatchWithServerLeg(
     }
   }
 
-  return { response, serverLeg, mode, snapshot, trait: traitName, entityId, frameKey: entry.frameKey };
+  return {
+    response,
+    serverLeg,
+    mode,
+    snapshot,
+    ...(siblingSnapshots !== undefined ? { siblingSnapshots } : {}),
+    writtenTraits: executedTraitNames,
+    trait: traitName,
+    entityId,
+    frameKey: entry.frameKey,
+  };
 }
 
 function stripCircuitState(request: OrbitalEventRequest): OrbitalEventRequest {
@@ -385,11 +426,10 @@ function stripCircuitState(request: OrbitalEventRequest): OrbitalEventRequest {
 
 /**
  * Fold a server `OrbitalEventResponse` into `store`: `entityByTrait` merges
- * into `frames` (server wins) — fanned out to EVERY trait sharing that row's
- * entity name, not only the trait the response keys it by (G5, mirrors
- * Rust's entity source keyed by linked-entity type) — `states` write through
- * as a RECONCILE (no
- * guard evaluation — the server already decided the transition fired), and
+ * into `frames` (server wins), and the rows of `writtenTraits` fan out to
+ * every frame bound to the same entity instance (G5, mirrors Rust's entity
+ * source keyed by linked-entity type + id; see `fanOutEntityRows`) —
+ * `states` write through as a RECONCILE (no guard evaluation — the server already decided the transition fired), and
  * every `emittedEvents` entry NOT in `alreadyDelivered` fans out through
  * the SAME `evaluateOrbitalEvent` path (scoped-listen delivery, one call
  * per matched local listener) — the twin of `RuntimeKernel::apply_server_response`.
@@ -423,6 +463,7 @@ export async function applyOrbitalEventResponse(
   response: OrbitalEventResponse,
   alreadyDelivered: ReadonlySet<string>,
   opts: ClientRoleOpts,
+  writtenTraits: ReadonlySet<string> = new Set(),
 ): Promise<{
   clientEffects: ClientEffectTuple[];
   clientEffectsByTrait: Array<{ traitName: string; effect: ClientEffectTuple }>;
@@ -431,26 +472,7 @@ export async function applyOrbitalEventResponse(
   const clientEffectsByTrait: Array<{ traitName: string; effect: ClientEffectTuple }> =
     [...(response.clientEffectsByTrait ?? [])];
 
-  if (response.entityByTrait) {
-    for (const [traitName, row] of Object.entries(response.entityByTrait)) {
-      const entry = opts.traitIndex.byName.get(traitName);
-      // Rust's `apply_server_response` writes into an entity source keyed
-      // by (linked-entity TYPE, id) — every trait bound to that entity type
-      // sees the row, not only the trait the response happened to name.
-      // Mirror that here: fan the row out to every IndexedTrait whose
-      // resolved entity shares this trait's entity name (G-RUNTIME-026/027).
-      const targetFrameKeys = new Set<string>([entry?.frameKey ?? traitName]);
-      if (entry !== undefined) {
-        for (const sibling of opts.traitIndex.byName.values()) {
-          if (sibling.entity.name === entry.entity.name) targetFrameKeys.add(sibling.frameKey);
-        }
-      }
-      for (const frameKey of targetFrameKeys) {
-        const existing = store.frames.get(frameKey);
-        store.frames.set(frameKey, existing !== undefined ? { ...existing, ...row } : { ...row });
-      }
-    }
-  }
+  if (response.entityByTrait) fanOutEntityRows(store, opts.traitIndex, response.entityByTrait, writtenTraits);
 
   const traitEntityIds = new Map<string, string>();
   if (response.entityByTrait) {
@@ -548,25 +570,177 @@ export async function postServerLeg(
   try {
     posted = await transport.send(orbitalName, legToSend);
   } catch (err) {
-    if (dispatch.snapshot !== undefined) {
-      store.restore(dispatch.trait, dispatch.entityId, dispatch.snapshot, dispatch.frameKey);
-      store.notify();
-    }
+    restoreDispatch(store, dispatch);
     throw err;
   }
 
-  if (dispatch.mode === 'runtimeOptimistic') {
-    if (posted.success) {
-      await applyOrbitalEventResponse(store, posted, alreadyDeliveredFrom(dispatch), opts);
-      return dispatch.response;
-    }
-    if (dispatch.snapshot !== undefined) {
-      store.restore(dispatch.trait, dispatch.entityId, dispatch.snapshot, dispatch.frameKey);
-      store.notify();
-    }
+  if (dispatch.mode === 'runtimeOptimistic' && !posted.success) {
+    restoreDispatch(store, dispatch);
     return posted;
   }
 
-  await applyOrbitalEventResponse(store, posted, alreadyDeliveredFrom(dispatch), opts);
-  return dispatch.response;
+  // G-RUNTIME-029: the fold's effects render AFTER the local arm's, so the
+  // server's real data wins last.
+  const delivered = alreadyDeliveredFrom(dispatch);
+  const folded = await applyOrbitalEventResponse(store, posted, delivered, opts, dispatch.writtenTraits);
+  const local = dispatch.response;
+  return {
+    ...local,
+    emittedEvents: [
+      ...local.emittedEvents,
+      ...posted.emittedEvents.filter((e) => !delivered.has(alreadyDeliveredKey(e.source?.trait ?? '', e.event))),
+    ],
+    clientEffects: [...(local.clientEffects ?? []), ...folded.clientEffects],
+    clientEffectsByTrait: [...(local.clientEffectsByTrait ?? []), ...folded.clientEffectsByTrait],
+  };
+}
+
+// ============================================================================
+// ClientKernel — G1, plan §5.1's first bullet
+// ============================================================================
+
+/**
+ * `createClientKernel`'s own opts: every `ClientRoleOpts` field plus the
+ * transport a dispatch's server leg posts through. `transport` is optional —
+ * omitted means offline/no-bridge (plan G7): every dispatch runs locally,
+ * nothing is ever posted, mirroring `ClientKernel::new(schema, bridge: None)`.
+ * A caller wanting an in-process local server supplies
+ * `createInProcessTransport(...)` here instead of leaving it unset.
+ */
+export interface ClientKernelOpts extends ClientRoleOpts {
+  transport?: EventTransport;
+}
+
+/** One `ClientKernel.dispatch()` call's settled outcome. */
+export interface ClientKernelOutcome {
+  response: OrbitalEventResponse;
+  mode: DispatchMode;
+}
+
+export interface ClientKernel {
+  /**
+   * Enqueue one event. FIFO per kernel: this entry's local dispatch → post
+   * (per the posting rule) → fold → `store.notify()` all complete before the
+   * next queued entry's local dispatch begins — the twin of orbital-client's
+   * `ClientKernel::dispatch` being called serially off one queue, ported to
+   * JS's single-threaded-but-concurrent-microtask model where two `dispatch`
+   * calls made back to back would otherwise interleave.
+   *
+   * A `request.tick`-stamped entry coalesces onto a pending entry with the
+   * SAME `(event, targetTrait)` that is itself tick-stamped — same contract
+   * as `@almadar/ui`'s `lib/event-queue-coalesce.ts` `enqueueEvent` (see
+   * that file's tests, mirrored in `client-kernel.test.ts`): only the
+   * pending entry's `payload` is replaced (its FIFO slot and every other
+   * field are kept), a sourceless/non-tick entry is never coalesced, and an
+   * entry already shifted off the queue (in flight) is never a coalesce
+   * target. Every caller coalesced onto the same pending entry resolves to
+   * that ONE entry's eventual outcome.
+   *
+   * A tick-stamped entry resolves after its LOCAL dispatch; its post goes
+   * out on a per-(event, trait) newest-wins lane outside the FIFO, with no
+   * rollback, so a tick round trip never delays a command.
+   */
+  dispatch(request: OrbitalEventRequest): Promise<ClientKernelOutcome>;
+  readonly store: CircuitStore;
+}
+
+interface QueuedKernelEntry {
+  request: OrbitalEventRequest;
+  resolvers: Array<(outcome: ClientKernelOutcome) => void>;
+  rejecters: Array<(err: Error) => void>;
+}
+
+/**
+ * Build one `ClientKernel` — one FIFO queue over `opts.store`, the twin of
+ * orbital-client's `ClientKernel` (`client_kernel.rs`): a per-dispatch
+ * `dispatchWithServerLeg` run, `postServerLeg` deciding whether/what to post
+ * per `opts.carriesCircuitState`, and one `applyOrbitalEventResponse` fold
+ * (done inside `postServerLeg`) before the next queued entry starts.
+ */
+export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
+  const { transport, ...roleOpts } = opts;
+  const queue: QueuedKernelEntry[] = [];
+  let pumping = false;
+
+  // Tick-stamped posts leave the FIFO: a tick is a latest-state broadcast,
+  // so its round trip must never delay a queued command (R-CLIENT-TICK-POST-
+  // BACKLOG). One lane per (event, trait): at most one post in flight,
+  // newer firings replace the pending one, the newest goes out on settle.
+  const tickLanes = new Map<string, { inFlight: boolean; pending?: { dispatch: ClientDispatch; request: OrbitalEventRequest } }>();
+  const flushTickLane = (key: string): void => {
+    const lane = tickLanes.get(key);
+    if (lane === undefined || transport === undefined) return;
+    const next = lane.pending;
+    lane.pending = undefined;
+    if (next === undefined) {
+      lane.inFlight = false;
+      return;
+    }
+    lane.inFlight = true;
+    void postServerLeg(transport, roleOpts.orbitalName, next.dispatch, roleOpts.store, roleOpts, next.request)
+      .catch((err: Error) => {
+        clientRoleLog.warn('tick-post-failed', { event: next.request.event, trait: next.request.targetTrait, error: String(err) });
+      })
+      .then(() => flushTickLane(key));
+  };
+  const postTick = (dispatch: ClientDispatch, request: OrbitalEventRequest): void => {
+    const key = `${request.targetTrait ?? ''}\u0000${request.event}`;
+    const lane = tickLanes.get(key) ?? { inFlight: false };
+    tickLanes.set(key, lane);
+    // No rollback point: the post settles after later commands have run, so
+    // restoring this snapshot would clobber them; the next tick supersedes.
+    const { snapshot: _snapshot, siblingSnapshots: _siblings, ...unrollable } = dispatch;
+    lane.pending = { dispatch: unrollable, request };
+    if (!lane.inFlight) flushTickLane(key);
+  };
+
+  function pump(): void {
+    if (pumping) return;
+    pumping = true;
+    void (async () => {
+      try {
+        while (queue.length > 0) {
+          const entry = queue.shift()!;
+          try {
+            const dispatch = await dispatchWithServerLeg(roleOpts, entry.request);
+            let response = dispatch.response;
+            if (transport !== undefined) {
+              if (entry.request.tick !== undefined) postTick(dispatch, entry.request);
+              else response = await postServerLeg(transport, roleOpts.orbitalName, dispatch, roleOpts.store, roleOpts, entry.request);
+            }
+            const outcome: ClientKernelOutcome = { response, mode: dispatch.mode };
+            for (const resolve of entry.resolvers) resolve(outcome);
+          } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            for (const reject of entry.rejecters) reject(error);
+          }
+        }
+      } finally {
+        pumping = false;
+      }
+    })();
+  }
+
+  return {
+    store: roleOpts.store,
+    dispatch(request: OrbitalEventRequest): Promise<ClientKernelOutcome> {
+      return new Promise<ClientKernelOutcome>((resolve, reject) => {
+        if (request.tick !== undefined) {
+          const pending = queue.find(
+            (e) => e.request.tick !== undefined
+              && e.request.event === request.event
+              && e.request.targetTrait === request.targetTrait,
+          );
+          if (pending !== undefined) {
+            pending.request = { ...pending.request, payload: request.payload };
+            pending.resolvers.push(resolve);
+            pending.rejecters.push(reject);
+            return;
+          }
+        }
+        queue.push({ request, resolvers: [resolve], rejecters: [reject] });
+        pump();
+      });
+    },
+  };
 }

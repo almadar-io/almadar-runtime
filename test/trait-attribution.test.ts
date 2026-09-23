@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
-import type { OrbitalSchema } from '@almadar/core';
+import type { OrbitalSchema, RuntimeValue } from '@almadar/core';
 
 // Minimal fixture: one orbital, three traits, each emitting render-ui on INIT.
 // Two "atoms" (AtomA, AtomB) share slot 'main' independently; a layout-owner
@@ -136,7 +136,7 @@ describe('OrbitalServerRuntime trait attribution', () => {
     // name, and vice versa — that's the attribution we're guarding.
     const layoutEntry = tagged.find((e) => e.traitName === 'LayoutOwner');
     expect(layoutEntry).toBeDefined();
-    const layoutPattern = layoutEntry!.effect[2] as { children: unknown[] };
+    const layoutPattern = layoutEntry!.effect[2] as { children: RuntimeValue[] };
     expect(layoutPattern.children).toEqual(['@trait.AtomA', '@trait.AtomB']);
 
     const atomAEntry = tagged.find((e) => e.traitName === 'AtomA');
@@ -157,9 +157,8 @@ describe('OrbitalServerRuntime trait attribution', () => {
     expect(result.clientEffects).toHaveLength(3);
 
     for (const eff of result.clientEffects!) {
-      const arr = eff as unknown[];
-      expect(Array.isArray(arr)).toBe(true);
-      expect(arr[0]).toBe('render-ui');
+      expect(Array.isArray(eff)).toBe(true);
+      expect(eff[0]).toBe('render-ui');
     }
 
     // Sidecar entries reference the SAME effect arrays (1:1 by index), not copies.
@@ -347,7 +346,7 @@ describe('OrbitalServerRuntime trait attribution', () => {
     // been dropped by the isInlineTrait filter.
     expect(result.clientEffects).toHaveLength(1);
     expect(result.clientEffectsByTrait?.[0]?.traitName).toBe('WrappedAtom');
-    const effect = result.clientEffects![0] as unknown[];
+    const effect = result.clientEffects![0];
     expect(effect[0]).toBe('render-ui');
     expect((effect[2] as { content: string }).content).toBe('from WrappedAtom');
   });

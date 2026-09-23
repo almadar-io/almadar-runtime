@@ -75,14 +75,14 @@ describe('deferEntityBindings', () => {
       'item',
       { type: 'typography', content: '@item.title', children: '@config.children' },
     ];
-    const out = deferEntityBindings(lambda, ctx) as [string, string, Record<string, unknown>];
+    const out = deferEntityBindings(lambda, ctx) as [string, string, Record<string, RuntimeValue>];
     expect(out[2].children).toBeUndefined();
     expect(out[2].content).toBe('@item.title');
   });
 
   it('substitutes a SUPPLIED knob inside a fn lambda body', () => {
     const lambda = ['fn', 'item', { type: 'typography', children: '@config.label' }];
-    const out = deferEntityBindings(lambda, ctx) as [string, string, Record<string, unknown>];
+    const out = deferEntityBindings(lambda, ctx) as [string, string, Record<string, RuntimeValue>];
     expect(out[2].children).toBe('static label');
   });
 

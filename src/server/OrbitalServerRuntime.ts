@@ -46,19 +46,21 @@ import type {
   NextFunction,
 } from "express";
 import { EventBus } from "../events/EventBus.js";
-import { eventRouteKey, parseListenSource } from "../events/identity/routing.js";
+import { eventRouteKey } from "../events/identity/routing.js";
+import {
+  evaluateOrbitalEvent,
+  collectListenerTargets,
+  type EvaluateEffectRunner,
+  type EvaluateOrbitalEventDeps,
+} from "../evaluation/evaluateOrbitalEvent.js";
+import { buildTraitIndexForOrbital, type TraitIndex } from "../traits/trait-index.js";
 import { createTickScheduler, type TickHandle, type TickScheduler } from "../time/TickScheduler.js";
 import { isValidCronExpression } from "../time/cron.js";
 import { parseDurationString } from "../time/duration.js";
 import {
   StateMachineManager,
-  processEvent,
-  createInitialTraitState,
   LIFECYCLE_EVENTS,
-  findMatchingTransitions,
-  normalizeEventKey,
 } from "../traits/StateMachineCore.js";
-import { runTraitCascade } from "../traits/TraitCascade.js";
 import { EffectExecutor } from "../effects/EffectExecutor.js";
 import { parseOrbitalTraits } from "../traits/OrbitalTraitParsing.js";
 import type { ServerEffectResult } from "../effects/ServerEffectHandlers.js";
@@ -76,11 +78,6 @@ import type {
   AgentSubstrateHandlerResult,
   SubstrateServices,
 } from "../effects/createAgentSubstrateHandlers.js";
-import {
-  validateEventPayload,
-  formatPayloadValidationError,
-  type PayloadValidationFailure,
-} from "../traits/PayloadValidator.js";
 
 /**
  * Synchronous Node-only require, hidden from bundler static analysis.
@@ -141,12 +138,22 @@ const renderLog = createLogger("almadar:runtime:render-ui");
 const xOrbitalLog = createLogger("almadar:runtime:cross-orbital");
 const persistLog = createLogger("almadar:runtime:persist");
 const registerLog = createLogger("almadar:runtime:register");
+
+/**
+ * Relay hop cap — a circuit breaker for pathological cross-orbital listen
+ * cycles (orbital A emits → orbital B relays → A re-emits …). The visited
+ * set already bounds work to distinct
+ * (orbital, trait, triggers, from-state) keys; this caps worst-case
+ * latency, the same rationale as the composition's cascade cap
+ * (G-RUNTIME-027).
+ */
+const CROSS_ORBITAL_RELAY_CAP = 500;
 import type { SSEEvent } from '@almadar/server';
 import {
   interpolateProps,
   createContextFromBindings,
 } from "../evaluation/BindingResolver.js";
-import { evaluateGuard, evaluateListenPayloadExpr, createMinimalContext } from "@almadar/evaluator";
+import { evaluateGuard } from "@almadar/evaluator";
 import type {
   TraitDefinition,
   TraitState,
@@ -171,10 +178,8 @@ import type {
   TraitTick,
   TraitConfig,
   BusEventSource,
-  ListenSource,
   SExpr,
   RuntimeValue,
-  EventId,
   UserContext,
   RawUserClaims,
 } from "@almadar/core";
@@ -197,9 +202,8 @@ import type {
   OrbitalEventRequest,
   OrbitalEventResponse,
   ClientEffectTuple,
-  TransitionRejection,
 } from "@almadar/core";
-import { isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, applyListenPayloadMapping, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isPageReference, type NavItem, type ThemeRef, type Page, type PageRef,
+import { isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isPageReference, type NavItem, type ThemeRef, type Page, type PageRef,
 } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, entityAccessPoliciesByStoreKey } from "@almadar/core/mock";
 import { checkMutationAccess } from "../entities/entityAccess.js";
@@ -247,6 +251,14 @@ export type RuntimeTrait = Trait;
 export type RuntimeTraitTick = TraitTick;
 
 /**
+ * Incremental-push item streamed to an SSE client mid-dispatch (an emitted
+ * event or a client effect), before the response resolves.
+ */
+export type PushItem =
+  | { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } }
+  | { type: 'effect'; data: ClientEffectTuple };
+
+/**
  * Registered orbital with runtime state
  */
 export interface RegisteredOrbital {
@@ -279,6 +291,13 @@ export interface RegisteredOrbital {
    * composer held the open channel).
    */
   traitFieldStates: Map<string, EntityRow>;
+  /**
+   * Lazily built evaluation index (`traitIndexFor`), cached on the
+   * registration. Invalidated whenever another orbital registers — a late
+   * registrant's entities must appear in already-built indexes'
+   * cross-orbital `linkedEntity` resolution.
+   */
+  traitIndex?: TraitIndex;
 }
 
 // `OrbitalEventRequest` — event sent from client to server — is owned by
@@ -538,7 +557,6 @@ export class OrbitalServerRuntime {
    *  .persistence` was the alternative, and that cast is what this field
    *  visibility replaces. */
   public readonly persistence: PersistenceAdapter;
-  private listenerCleanups: Array<() => void> = [];
   private tickBindings: TickBinding[] = [];
   // One coalesced clock for every tick this runtime registers — replaces
   // "one setInterval per tick" with a single accumulator loop so ticks due
@@ -670,7 +688,7 @@ export class OrbitalServerRuntime {
           createOsHandlers: typeof CreateOsHandlersFn;
         };
         this.osHandlers = createOsHandlers({
-          emitEvent: (type, payload) => this.eventBus.emit(type, payload),
+          emitEvent: (type, payload) => this.dispatchExternalEvent(type, payload),
         });
         this.config.effectHandlers = {
           ...this.osHandlers.handlers,
@@ -694,7 +712,7 @@ export class OrbitalServerRuntime {
           createAgentSubstrateHandlers: typeof CreateAgentSubstrateHandlersFn;
         };
         this.substrateHandlers = createAgentSubstrateHandlers({
-          emitEvent: (type, payload) => this.eventBus.emit(type, payload),
+          emitEvent: (type, payload) => this.dispatchExternalEvent(type, payload),
           services: this.config.substrateServices ?? {},
         });
         this.config.effectHandlers = {
@@ -833,9 +851,6 @@ export class OrbitalServerRuntime {
       await this.registerOrbitalAsync(orbital);
     }
 
-    // Set up cross-orbital event listeners
-    this.setupEventListeners();
-
     // Set up scheduled ticks
     this.setupTicks();
 
@@ -902,9 +917,6 @@ export class OrbitalServerRuntime {
     for (const orbital of schema.orbitals) {
       this.registerOrbital(orbital);
     }
-
-    // Set up cross-orbital event listeners
-    this.setupEventListeners();
 
     // Set up scheduled ticks
     this.setupTicks();
@@ -1122,6 +1134,13 @@ export class OrbitalServerRuntime {
       traitFieldStates: new Map(),
     });
 
+    // A newly registered orbital's entities must appear in every
+    // already-built evaluation index's cross-orbital `linkedEntity`
+    // resolution — drop the caches so the next use rebuilds.
+    for (const other of this.orbitals.values()) {
+      other.traitIndex = undefined;
+    }
+
     // Seed entity instances from schema if they exist
     if (entity?.name && entity.instances && Array.isArray(entity.instances)) {
       const instances = entity.instances;
@@ -1238,199 +1257,6 @@ export class OrbitalServerRuntime {
         error: err instanceof Error ? err : String(err),
       });
     });
-  }
-
-  /**
-   * The id of the SOURCE event a `listens {}` entry names, derived from the
-   * emitting trait's own declared `emits[]` contract rather than trusted
-   * from `listener.eventId` alone.
-   *
-   * `TraitEventListener.eventId` is "optional until the Phase-7 flip" (see
-   * `@almadar/core`'s `trait.ts`) — the compose/resolve pipeline stamps a
-   * V4 ledger id onto every `emits[]` entry (the emitter's own contract)
-   * well before it stamps the matching id onto every `listens[]` entry that
-   * names that event (source-qualified `Trait.EVENT -> X` listens compiled
-   * from `uses`-resolved atoms carry `triggersId` for their OWN triggered
-   * event but no `eventId` for the event they're listening to). The emit
-   * handler (`executeEffects`'s `emit` closure below) always looks up and
-   * stamps `emittingTrait.emits[].eventId` when present, so during that
-   * transitional window the emit side routes under an id-qualified bus key
-   * while the listen side — reading only its own possibly-absent
-   * `eventId` — subscribes under the bare name, and the two never meet.
-   *
-   * Fix: derive the SAME id the emitter will stamp by resolving the
-   * listener's declared `source` (trait/orbital, name or id) to the actual
-   * registered trait and reading ITS `emits[]` contract for `listener.event`
-   * — the single canonical place an event's id lives. `kind: "any"` sources
-   * are left alone (no single emitter to resolve against; bare-name routing
-   * is already the correct, safe default there).
-   */
-  private resolveSourceEmitEventId(
-    source: ListenSource | undefined,
-    event: string,
-    listenerOrbital: string,
-  ): EventId | undefined {
-    if (!source || source.kind === "any") return undefined;
-
-    const ownerOrbitalName = source.kind === "orbital" ? source.orbital : listenerOrbital;
-    const owner = this.orbitals.get(ownerOrbitalName);
-    if (!owner) return undefined;
-
-    const sourceTrait = source.traitId !== undefined
-      ? owner.traits.find((t) => t.id === source.traitId)
-      : owner.traits.find((t) => t.name === source.trait);
-    if (!sourceTrait) return undefined;
-
-    return sourceTrait.emits?.find((e) => e.event === event)?.eventId;
-  }
-
-  /**
-   * Set up event listeners for cross-orbital communication
-   */
-  private setupEventListeners(): void {
-    // Clean up existing listeners
-    for (const cleanup of this.listenerCleanups) {
-      cleanup();
-    }
-    this.listenerCleanups = [];
-
-    // For each orbital's traits with `listens`
-    for (const [orbitalName, registered] of this.orbitals) {
-      for (const trait of registered.traits) {
-        if (!trait.listens) continue;
-
-        for (const listener of trait.listens) {
-          // Split `listener.event` into { bareEvent, source }.
-          // The .lolo parser encodes `Source EVENT`, `Orbital.Source EVENT`,
-          // or `* EVENT` as `"Source.EVENT"`, `"Orbital.Source.EVENT"`,
-          // `"*.EVENT"` respectively. If the explicit `listener.source` field
-          // is present (new core schema), use it directly; otherwise parse the
-          // legacy concatenated form so migrated and unmigrated schemas both work.
-          const { bareEvent, matcher } = parseListenSource(listener, orbitalName);
-
-          // V4 identity routing: subscribe under the event-id key when the
-          // listen carries an `eventId` (rename-proof), else under the bare
-          // event name (legacy). Source filtering happens inside the handler
-          // closure so a single key can serve many listeners with different
-          // scopes.
-          //
-          // The listener's own `eventId` can be STALE: L1 mints it from the
-          // listener's declaration and nothing re-points orbital-kind sources
-          // into reference-form orbitals post-inline, so it may not match the
-          // id the emitter actually stamps. The source trait's `emits[]`
-          // contract is the single canonical place the emitter's id lives
-          // (the emit handler stamps exactly that), so resolve it FIRST and
-          // fall back to the listener's own id only when the source cannot be
-          // resolved (unregistered orbital, legacy source-free form, or
-          // `kind: "any"` — which carries no id and routes by bare name).
-          // Any-scope listeners (explicit `kind: "any"` or the legacy `*.EVENT`
-          // form) must route bare-name UNCONDITIONALLY: L1 mints a listener
-          // eventId for them too, and the `?? listener.eventId` fallback would
-          // re-subscribe them under that stale id, which no emitter stamps.
-          const isAnyScope =
-            listener.source?.kind === 'any' || listener.event.startsWith('*.');
-          const effectiveEventId = isAnyScope
-            ? undefined
-            : this.resolveSourceEmitEventId(listener.source, bareEvent, orbitalName) ?? listener.eventId;
-          const routeKey = eventRouteKey(bareEvent, effectiveEventId);
-          const cleanup = this.eventBus.on(routeKey, async (event) => {
-            // Source filter: skip if the emit doesn't match our declared scope.
-            if (!matcher(event.source)) return;
-            // Client-originated cascade: the originating tab relays every
-            // hop through the bridge itself (its own listens wiring), so
-            // dispatching the same trigger here ran each hop TWICE — one
-            // Send persisted two ChatMessage rows. Headless dispatches
-            // (ticks, circuit-router probes) carry no originClientId and
-            // keep this fan-out as their circuit.
-            if (event.source?.originClientId !== undefined) {
-              if (this.config.debug) {
-                xOrbitalLog.debug('listen:skip-client-origin', {
-                  receiverTrait: trait.name,
-                  event: listener.event,
-                  originClientId: event.source.originClientId,
-                });
-              }
-              return;
-            }
-            if (this.config.debug) {
-              xOrbitalLog.debug('listen:received', () => ({
-                receiverOrbital: orbitalName,
-                receiverTrait: trait.name,
-                event: listener.event,
-                sourceOrbital: event.source?.orbital ?? '?',
-                sourceTrait: event.source?.trait ?? '?',
-              }));
-            }
-
-            // Listen-level guard, kernel parity (orbital-core listener.rs):
-            // evaluated against the RAW payload in a payload-only context,
-            // before payload mapping; false OR evaluation error skips the
-            // dispatch. Without this every guarded listen over-fires (e.g.
-            // all five search responders answering every module request).
-            if (listener.guard) {
-              const guardPassed = (() => {
-                try {
-                  return evaluateGuard(
-                    listener.guard as SExpr,
-                    createMinimalContext({}, event.payload as EventPayload | undefined),
-                  );
-                } catch {
-                  return false;
-                }
-              })();
-              if (!guardPassed) {
-                if (this.config.debug) {
-                  xOrbitalLog.debug('listen:guard-blocked', {
-                    receiverTrait: trait.name,
-                    event: listener.event,
-                  });
-                }
-                return;
-              }
-            }
-
-            // Apply payload mapping (shared contract with the client wiring)
-            const mappedPayload = applyListenPayloadMapping(
-              listener.payloadMapping,
-              event.payload as EventPayload | undefined,
-              evaluateListenPayloadExpr,
-            );
-
-            // Forward entityId so the triggered trait can bind @entity.*
-            // against the right row. Without this, cross-trait listens
-            // auto-wiring would always dispatch with entityData={} and
-            // every @entity.id would resolve to undefined.
-            //
-            // Priority (checked against the MAPPED payload first so the
-            // schema's payloadMapping takes effect, then the raw emit
-            // payload for listens without a mapping):
-            //   1. mapped or raw payload.entityId
-            //   2. mapped or raw payload.orbitalName (convention: the
-            //      OrbitalProcess entity uses orbitalName as its id)
-            const raw = event.payload as EventPayload | undefined;
-            const mapped = mappedPayload as EventPayload | undefined;
-            const pickId = (field: string): string | undefined =>
-              (mapped?.[field] as string | undefined) ??
-              (raw?.[field] as string | undefined);
-            const forwardedEntityId = pickId("entityId") ?? pickId("orbitalName");
-
-            // Trigger the mapped event. `triggersId` is the V4 dual-carry id
-            // sibling of `triggers` — threading it lets the target
-            // transition match by id even if its `event` name has since
-            // diverged from `triggers` (mid-flight rename).
-            await this.processOrbitalEvent(orbitalName, {
-              event: listener.triggers,
-              eventId: listener.triggersId,
-              payload: mappedPayload as EventPayload,
-              entityId: forwardedEntityId,
-              targetTrait: trait.name,
-            });
-          });
-
-          this.listenerCleanups.push(cleanup);
-        }
-      }
-    }
   }
 
   /**
@@ -1616,6 +1442,24 @@ export class OrbitalServerRuntime {
           }
         }
       }
+
+      // The tick ran its effects directly (never entering the composition),
+      // so its emits saw no in-band fan-out — relay them to every orbital's
+      // matching listeners, this orbital's included (the deleted bus
+      // fan-out's role for tick emits).
+      if (emittedEvents.length > 0) {
+        this.enqueueEvent(async () => {
+          await this.relayEmittedEvents(orbitalName, emittedEvents, {
+            includeSourceOrbital: true,
+            visited: new Set<string>(),
+          });
+        }).catch((error: Error) => {
+          effectLog.error('tick:relay-error', {
+            tick: tick.name,
+            error: error.message,
+          });
+        });
+      }
     } catch (error) {
       effectLog.error('tick:execute-error', {
         tick: tick.name,
@@ -1640,12 +1484,6 @@ export class OrbitalServerRuntime {
   unregisterAll(): void {
     // Clean up ticks
     this.cleanupTicks();
-
-    // Clean up event listeners
-    for (const cleanup of this.listenerCleanups) {
-      cleanup();
-    }
-    this.listenerCleanups = [];
 
     this.orbitals.clear();
     this.eventBus.clear();
@@ -1944,7 +1782,26 @@ export class OrbitalServerRuntime {
   }
 
   /**
-   * Process an event for an orbital
+   * Process an event for an orbital — the stateful host's thin shell over
+   * the unified `evaluateOrbitalEvent` composition (design:
+   * docs/Almadar_Runtime_Stateless_Stateful_PLAN.md §4.1). This method owns
+   * ONLY session concerns: orbital lookup, viewer normalization, the lazy
+   * OS/substrate handler wiring, the per-request relay mask
+   * (G-RUNTIME-031 — the client's mounted set as DATA, replacing the
+   * deleted blanket `originClientId` skip), the tick snapshot relay, and
+   * the cross-orbital listens relay (a listener registered under a
+   * DIFFERENT orbital than the emitter — the per-orbital composition's
+   * in-band fan-out covers the rest). Target resolution, payload
+   * validation, the cascade, the fan-out, structured rejections, and
+   * response assembly are the composition's, identical to the stateless
+   * path.
+   *
+   * Serialization: the whole evaluation runs on ONE runtime-wide async
+   * queue. The composition commits manager state directly (no per-trait
+   * actor queue), so concurrent requests against the long-lived session
+   * manager would otherwise both evaluate from the same held state and
+   * lose a transition. Coarser than the old per-(trait, entityId) actor
+   * queues — a deliberate W4 tradeoff, recorded in the plan doc.
    *
    * @param onPush - Optional incremental-push callback. Called immediately
    * when an event is emitted or a client effect fires, before the promise
@@ -1954,7 +1811,7 @@ export class OrbitalServerRuntime {
   async processOrbitalEvent(
     orbitalName: string,
     request: OrbitalEventRequest,
-    onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void,
+    onPush?: (item: PushItem) => void,
   ): Promise<OrbitalEventResponse> {
     // Gap 4 (Almadar_Rabit_V3_Deepseek_Gaps.md #4): this whole body used to
     // have no top-level error boundary, so a throw deep in an effect
@@ -1978,6 +1835,48 @@ export class OrbitalServerRuntime {
       };
     }
 
+    const response = await this.enqueueEvent(() =>
+      this.evaluateForOrbital(registered, request, onPush),
+    );
+
+    // T6: a tick-stamped dispatch is a latest-state broadcast — queue it for
+    // coalesced snapshot relay to other tabs. Local processing above is
+    // unchanged (guards/persists still run); only the cross-tab fan-out is
+    // lossy.
+    if (request.tick !== undefined && this.liveBroadcastSink !== null) {
+      this.queueTickRelay(orbitalName, request);
+    }
+
+    return response;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      xOrbitalLog.error('processOrbitalEvent:error', {
+        orbital: orbitalName,
+        event: request.event,
+        entityId: request.entityId,
+        error: message,
+      });
+      return {
+        success: false,
+        transitioned: false,
+        states: {},
+        emittedEvents: [],
+        error: message,
+      };
+    }
+  }
+
+  /**
+   * The enqueued critical section behind `processOrbitalEvent`: evaluate
+   * one request through the composition, then relay its emits to
+   * cross-orbital listeners. MUST only run holding the event queue.
+   */
+  private async evaluateForOrbital(
+    registered: RegisteredOrbital,
+    request: OrbitalEventRequest,
+    onPush?: (item: PushItem) => void,
+  ): Promise<OrbitalEventResponse> {
+    const orbitalName = registered.schema.name;
     // Trace every server-side event entry. If the runtime path is
     // re-firing render-ui during a typing session, the smoking gun
     // appears here: a `processOrbitalEvent:enter` line per keystroke
@@ -2020,423 +1919,261 @@ export class OrbitalServerRuntime {
       ),
     }));
 
-    const { event, eventId, payload, entityId, user: requestUser, clientId } = request;
-    // The viewer this event is executed as. A request's own authenticated user
-    // always wins; `defaultUser` only fills the gap for a dev host that has no
-    // auth (see the config field's doc).
-    const viewer = normalizeUserContext(requestUser) ?? this.config.defaultUser;
-    // Scoped-listen delivery: first-class request field, or the client
-    // relay's `_targetTrait` payload sidecar (the `_activeTraits` pattern).
-    const targetTrait =
-      request.targetTrait ??
-      ((payload as EventPayload | undefined)?.['_targetTrait'] as string | undefined);
-    // Hoisted above the validation block below (its other use is the
-    // `sendEvent` call further down) so both share one selection.
-    const activeTraits = (payload as EventPayload | undefined)?._activeTraits as string[] | undefined;
+    // The viewer this event is executed as. A request's own authenticated
+    // user always wins; `defaultUser` only fills the gap for a dev host
+    // that has no auth (see the config field's doc).
+    const viewer = normalizeUserContext(request.user) ?? this.config.defaultUser;
+    const activeTraits = (request.payload as EventPayload | undefined)?._activeTraits as string[] | undefined;
 
-    // API-boundary payload validation. Each trait declares a
-    // `payloadSchema` per event in its `stateMachine.events` block
-    // (lowered from the `.lolo` listens block). A field marked with
-    // `!` (e.g. `data : ListItem!`) becomes `required: true`; this
-    // check rejects the request when a required field is missing or
-    // null. Without this, the persist effect happily writes empty
-    // rows for `payload: {}` requests — exactly what produced the
-    // junk-card artifact in the verifier's bus-replay coverage walk.
-    // The compiled-path generated handler emits the equivalent
-    // inline check (per-event required-field list inlined from
-    // `OirEvent.payload_required_fields`) so guards behave
-    // identically across paths.
-    //
-    // Scoped to the trait(s) `sendEvent` below will actually dispatch to:
-    // `targetTrait` when the request names one, else whichever traits'
-    // CURRENT state has a transition for `event` — the identical predicate
-    // `sendEvent` uses via `StateMachineManager.canHandleEvent`, further
-    // narrowed by `_activeTraits` exactly as `sendEvent`'s `allowedTraits`
-    // narrows it. Validating every trait that merely shares the event KEY
-    // let an inline render trait's own listener (e.g. an InputGroup's
-    // required-field `SEND`) reject a sibling Button's `SEND {}` dispatch
-    // that trait would never handle (R-PAYLOAD-VALIDATION-SCOPE-UNION).
-    //
-    // Use `registered.traits` (already-unwrapped `Trait[]`) instead
-    // of `registered.schema.traits` (which holds the unprocessed
-    // `TraitRef` wrappers with `_resolved` attached by
-    // preprocessSchema). The unwrap was already done in
-    // registerOrbitalAsync.
-    const dispatchTargetTraits = registered.traits.filter((trait) => {
-      if (targetTrait !== undefined) return trait.name === targetTrait;
-      if (activeTraits && activeTraits.length > 0 && !activeTraits.includes(trait.name)) return false;
-      return registered.manager.canHandleEvent(trait.name, event, entityId, eventId);
-    });
-    const validationFailures: PayloadValidationFailure[] = [];
-    for (const trait of dispatchTargetTraits) {
-      const eventSchema = trait.stateMachine?.events?.find((e) => e.key === event);
-      if (eventSchema?.payloadSchema && eventSchema.payloadSchema.length > 0) {
-        validationFailures.push(
-          ...validateEventPayload(event, payload, eventSchema.payloadSchema),
-        );
-      }
-    }
-    if (validationFailures.length > 0) {
-      return {
-        success: false,
-        transitioned: false,
-        states: {},
-        emittedEvents: [],
-        error: formatPayloadValidationError(validationFailures),
-      };
-    }
-
-    const emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }> = [];
-    // Collect data fetched by `fetch` effects
-    const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
-    // Collect client-side effects (render-ui, navigate)
-    const clientEffects: ClientEffectTuple[] = [];
-    // Same effects, paired with their producing trait — populated in lockstep
-    // by the helper inside executeEffects so consumers can attribute each
-    // effect to the trait that emitted it (used by `<TraitFrame>`).
-    const clientEffectsByTrait: Array<{ traitName: string; effect: ClientEffectTuple }> = [];
-    // Collect server-side effect results (persist, call-service, set)
-    const effectResults: ServerEffectResult[] = [];
-
-    // activeTraits is hoisted above the payload-validation block; reused here.
-    // Remove _activeTraits from payload before processing (internal use only)
-    const cleanPayload = payload ? { ...payload } : undefined;
-    if (cleanPayload) {
-      delete cleanPayload['_activeTraits'];
-      delete cleanPayload['_targetTrait'];
-    }
-
-    // Get entity data if entityId provided
-    let entityData: EntityRow = {};
-    if (entityId) {
-      const stored = await this.persistence.getById(
-        registered.entity.name,
-        entityId,
-      );
-      if (stored) {
-        entityData = stored;
+    // A TARGETED request carrying circuit state is the client role's
+    // delegated server leg — the composition's own delegated-leg semantics
+    // apply (empty relay mask: the server runs the whole circuit,
+    // G-RUNTIME-029). Anything else is server-authoritative: strip
+    // client-carried circuit state so a non-targeted request can't inject
+    // client-held states into the session manager. The legacy client's
+    // `_targetTrait` payload sidecar is PROMOTED to the canonical
+    // first-class field here: the composition's sidecar fallback only
+    // guesses an initial state for single-state traits (a stateless-server
+    // protection), which would silently drop the multi-state scoped
+    // deliveries the old stateful path served from its held states.
+    const isDelegatedLeg = request.targetTrait !== undefined &&
+      (request.traits !== undefined || request.entityByTrait !== undefined);
+    let serverRequest = request;
+    if (!isDelegatedLeg && request.targetTrait === undefined) {
+      const sidecarTarget = (request.payload as EventPayload | undefined)?.['_targetTrait'] as string | undefined;
+      if (sidecarTarget !== undefined || request.traits !== undefined || request.entityByTrait !== undefined) {
+        serverRequest = { ...request, ...(sidecarTarget !== undefined ? { targetTrait: sidecarTarget } : {}) };
+        delete serverRequest.traits;
+        delete serverRequest.entityByTrait;
       }
     }
 
-    // Build per-trait entity overrides from `traitFieldStates` (mutated by
-    // `(set @entity.X Y)` effects). For [runtime] entities with no persistence
-    // row, this is the only way `@entity.X` references in guards get resolved
-    // to the values prior transitions committed — matches the runtime UI hook
-    // behavior so guard outcomes are identical across both paths. Resolved
-    // per trait THROUGH the shared key so a `[shared]` group's frame reaches
-    // every bound trait's guards, not just the writer's.
-    const entityByTrait: Record<string, EntityRow> = {};
-    for (const trait of registered.traits) {
-      const fields = registered.traitFieldStates.get(this.sharedFieldKey(registered, trait.name));
-      if (fields && Object.keys(fields).length > 0) {
-        entityByTrait[trait.name] = fields;
-      }
-    }
+    // G-RUNTIME-031: the relay mask is DATA — the traits the requesting
+    // client completes itself (its mounted set). The fan-out skips exactly
+    // these; off-page listeners run server-side (the deleted blanket
+    // `originClientId` skip suppressed them). A delegated leg masks
+    // nothing — the client folds the response instead of relaying.
+    const relayMask = isDelegatedLeg
+      ? undefined
+      : activeTraits !== undefined && activeTraits.length > 0
+        ? new Set(activeTraits)
+        : undefined;
 
-    // Process event through state machine. `_activeTraits` scopes the
-    // transition loop itself — off-page traits neither transition nor
-    // mutate state (previously only their effects were filtered below,
-    // leaving FSMs silently advancing on name-shared events).
-    const results = registered.manager.sendEvent(
-      event,
-      cleanPayload,
-      entityData,
-      entityByTrait,
-      eventId,
-      targetTrait,
-      viewer,
-      activeTraits && activeTraits.length > 0 ? new Set(activeTraits) : undefined,
+    const response = await evaluateOrbitalEvent(
+      this.makeEvaluateDeps(registered, { viewer, onPush, originClientId: request.clientId, relayMask }),
+      serverRequest,
     );
 
-    // Filter results to only active traits (if specified)
-    const filteredResults = activeTraits && activeTraits.length > 0
-      ? results.filter(({ traitName }) => activeTraits.includes(traitName))
-      : results;
-
-    if (this.config.debug && activeTraits) {
-      busLog.debug('dispatch:filter-traits', () => ({
-        total: results.length,
-        active: filteredResults.length,
-        activeTraits: activeTraits.join(','),
-      }));
-    }
-
-    // Guard-rejection diagnostic (`OrbitalEventResponse.guardFailed`).
-    // `dispatchTargetTraits` is computed by `canHandleEvent` /
-    // `findTransition`, which is GUARD-UNAWARE — it reports a trait as a
-    // candidate whenever some transition matches `from`/`event`, guard or
-    // no guard. `sendEvent` above only pushes a trait into `results` when
-    // `processEvent` actually executed a transition. So a trait present in
-    // `dispatchTargetTraits` but absent from the executed set had a
-    // candidate whose guard(s) all rejected (or, in strict `guardMode`, a
-    // guard evaluation error blocked it) — the only other way `processEvent`
-    // returns `executed: false` for a trait `canHandleEvent` said yes to.
-    const executedTraitNames = new Set(filteredResults.map(({ traitName }) => traitName));
-    const guardRejectedTrait = dispatchTargetTraits.find((trait) => !executedTraitNames.has(trait.name));
-
-    // Execute effects only for active traits. Wrapped in `runTraitCascade`
-    // (Fix A, Almadar_Rabit_V3_Deepseek_Gaps.md-style universal gap): a
-    // trait's own `INIT -> (fetch Entity {emit: {success: Loaded}})` and a
-    // SEPARATE `Loaded -> (set @entity.X ...)` arm never used to complete on
-    // this path — `sendEvent` above computed exactly one hop, effects ran
-    // once, and the second arm was only ever reached via a browser's own
-    // client-side self-subscribe (`useTraitStateMachine.ts`). A headless
-    // caller (`orbital_play`, a webhook) had nothing to complete it.
-    // `runTraitCascade` re-invokes `processEvent` for the SAME trait's own
-    // emitted events until no further arm matches or the step cap is hit —
-    // it does not touch the EXISTING cross-trait `listens` fan-out
-    // (`setupEventListeners`/`originClientId`) at all.
-    for (const { traitName, result } of filteredResults) {
-      if (result.effects.length > 0) {
-        // `registered.traits` is `Trait[]` (nested `stateMachine.*`, from
-        // `@almadar/core`) — NOT the same shape `sendEvent`/`processEvent`
-        // use internally. `getTraitDefinition` returns the manager's own
-        // flat `TraitDefinition`, the shape `runTraitCascade` needs.
-        const trait = registered.manager.getTraitDefinition(traitName);
-        // Freshly-persisted row only, re-read per cascade step — the SAME
-        // value `executeEffects` always received as its `entityData` param
-        // (that call already 3-layer-merges it with `traitFieldStates` +
-        // declared defaults internally, see `sharedFieldKey`'s doc). Do NOT
-        // let `traitFieldStates` override wholesale here (that's the SEPARATE
-        // precedence `entityByTrait` uses below for guard evaluation) — doing
-        // so fed `executeEffects` a partial row missing every field besides
-        // the trait's own `(set)`-written ones, and the persist's 3-layer
-        // merge then fell through to declared defaults for the rest.
-        const readPersistedEntity = async (): Promise<EntityRow> => {
-          if (entityId) {
-            const stored = await this.persistence.getById(registered.entity.name, entityId);
-            if (stored) return stored;
-          }
-          return entityData;
-        };
-        // Guard/transition evaluation precedence — mirrors `entityByTrait`
-        // above exactly (traitFieldStates wholesale override when non-empty,
-        // else a fresh persisted read) so a `(set @entity.X Y)` from an
-        // earlier cascade step is visible to the next step's guard exactly
-        // like a fresh request's `sendEvent` call would see it.
-        const readGuardEntity = async (): Promise<EntityRow> => {
-          const fields = registered.traitFieldStates.get(this.sharedFieldKey(registered, traitName));
-          if (fields && Object.keys(fields).length > 0) return fields;
-          return readPersistedEntity();
-        };
-        if (trait) {
-          const cascade = await runTraitCascade<void>({
-            trait,
-            fromState: result.previousState,
-            eventKey: event,
-            payload: cleanPayload,
-            getEntityData: readGuardEntity,
-            user: viewer,
-            runEffects: async (effects, step) => {
-              const emittedStart = emittedEvents.length;
-              const stepEntity = await readPersistedEntity();
-              await this.executeEffects(
-                registered,
-                traitName,
-                effects,
-                step.payload,
-                stepEntity,
-                entityId,
-                emittedEvents,
-                fetchedData,
-                clientEffects,
-                effectResults,
-                viewer,
-                clientEffectsByTrait,
-                onPush,
-                clientId,
-              );
-              // A JSX-hoisted inline child embedded via `@trait.X`
-              // (`@callsitePayload.<field>` capture) renders once at its own
-              // mount-time INIT and never again — re-run its lifecycle
-              // transition now, under THIS step's payload, so its frame
-              // reflects the composing event instead of staying frozen at
-              // whatever it captured at mount.
-              await this.rerenderCallsiteCaptureChildren(
-                registered,
-                traitName,
-                step.payload ?? {},
-                stepEntity,
-                entityId,
-                emittedEvents,
-                fetchedData,
-                clientEffects,
-                effectResults,
-                viewer,
-                clientEffectsByTrait,
-                onPush,
-                clientId,
-              );
-              return { effectResults: [], emitted: emittedEvents.slice(emittedStart) };
-            },
-            logContext: { orbitalName: registered.schema.name },
-          });
-          // `sendEvent` already committed hop 1's state; a cascade that
-          // advanced further needs the manager's own tracking updated too,
-          // or `getAllStates()`/the next request's `canHandleEvent()` would
-          // see a stale, one-hop-behind state.
-          registered.manager.setCascadeFinalState(traitName, entityId, cascade.finalState, event);
-        }
-      }
-    }
-
-    // V2 Phase 6: auto-refetch on ref-subscribed entities is gone. The
-    // `ref` operator is deprecated; entities flow through explicit fetch+emit
-    // listeners now. Downstream re-reads are triggered by the listener wiring
-    // in the state machine (listen on the LOADED emit), not by the server
-    // re-fetching after every mutation.
-
-    // NOTE (VG31-duplicate, 4.10.0): the server-side re-emit that used to
-    // live here fanned SAVE/CONFIRM_REMOVE onto the server bus so
-    // `setupListeners()` could dispatch cascade triggers (DO_CREATE,
-    // DO_DELETE). That was RIGHT when the runtime was server-only, but the
-    // runtime playground now has matching cross-trait listens wiring on
-    // the CLIENT (@almadar/ui 3.7.0+ useTraitStateMachine). With both
-    // sides listening, every SAVE fired DO_CREATE twice — once from the
-    // client's re-broadcast → onEventProcessed → server persist, and once
-    // from the server's own bus listener → server persist. Two "Mock
-    // name" rows appeared per click instead of one. Leaving the re-emit
-    // out here is safe: the client posts DO_CREATE/DO_DELETE to the
-    // server directly via bridge.sendEvent, and the server processes
-    // those directly — the server-side listens fan-out is redundant in
-    // the playground topology.
-
-    // Build current states
-    const states: Record<string, string> = {};
-    for (const [name, state] of registered.manager.getAllStates()) {
-      states[name] = state.currentState;
-    }
-
-    const response: OrbitalEventResponse = {
-      success: true,
-      transitioned: results.length > 0,
-      states,
-      emittedEvents,
-    };
-
-    // Guard that rejected the event, addressed as `"<Trait>.<event>"` — see
-    // the `guardRejectedTrait` computation above.
-    if (guardRejectedTrait) {
-      response.guardFailed = `${guardRejectedTrait.name}.${event}`;
-    }
-
-    // G-RUNTIME-023 structured rejections (stateful-path parity with the
-    // stateless transition handler) — reported only when nothing transitioned.
-    if (!response.transitioned) {
-      const rejections: TransitionRejection[] = [];
-      const eventKey = normalizeEventKey(event);
-      if (guardRejectedTrait) {
-        const from = registered.manager.getState(guardRejectedTrait.name)?.currentState;
-        const traitDef = registered.manager.getTraitDefinition(guardRejectedTrait.name);
-        const candidates = traitDef && from !== undefined
-          ? findMatchingTransitions(traitDef, from, eventKey)
-          : [];
-        const guarded = candidates.find((t) => t.guard !== undefined) ?? candidates[0];
-        rejections.push({
-          code: 'guard-rejected',
-          trait: guardRejectedTrait.name,
-          ...(from !== undefined ? { from } : {}),
-          event,
-          ...(guarded ? { transition: `${from ?? '?'}--${eventKey}-->${guarded.to}`, guard: guarded.guard } : {}),
-        });
-      } else {
-        // No trait could handle the event from its CURRENT state — report the
-        // ones that declare it elsewhere in their table (a stale-state signal
-        // for the client), scoped to `_activeTraits` exactly like dispatch was.
-        for (const trait of registered.traits) {
-          if (activeTraits && activeTraits.length > 0 && !activeTraits.includes(trait.name)) continue;
-          if (dispatchTargetTraits.some((t) => t.name === trait.name)) continue;
-          const traitDef = registered.manager.getTraitDefinition(trait.name);
-          if (!traitDef) continue;
-          const declaring = new Set<string>();
-          for (const t of traitDef.transitions) {
-            if (t.event !== eventKey) continue;
-            if (Array.isArray(t.from)) {
-              for (const f of t.from) declaring.add(f);
-            } else {
-              declaring.add(t.from);
-            }
-          }
-          if (declaring.size === 0) continue;
-          const from = registered.manager.getState(trait.name)?.currentState;
-          rejections.push({
-            code: 'no-matching-transition',
-            trait: trait.name,
-            ...(from !== undefined ? { from } : {}),
-            event,
-            statesDeclaringEvent: Array.from(declaring),
-          });
-        }
-      }
-      if (rejections.length > 0) {
-        response.rejections = rejections;
-      }
-    }
-
-    // Response-side twin of the request's `entityByTrait`: the `@entity`
-    // fields this transition's server-side `set` effects wrote, POST-effect,
-    // keyed by trait name (`OrbitalEventResponse.entityByTrait`'s contract).
-    // Re-read `traitFieldStates` now (same per-trait resolution as the
-    // pre-dispatch `entityByTrait` built above for guard evaluation) so this
-    // reflects writes the cascade loop just made, not the pre-dispatch
-    // snapshot.
-    const responseEntityByTrait: Record<string, EntityRow> = {};
-    for (const trait of registered.traits) {
-      const fields = registered.traitFieldStates.get(this.sharedFieldKey(registered, trait.name));
-      if (fields && Object.keys(fields).length > 0) {
-        responseEntityByTrait[trait.name] = fields;
-      }
-    }
-    if (Object.keys(responseEntityByTrait).length > 0) {
-      response.entityByTrait = responseEntityByTrait;
-    }
-
-    // V2 Phase 6: `response.data` is gone. Fetched entities are surfaced via
-    // typed emit payloads on `emittedEvents` and through the rendered effect
-    // tree instead of a sidecar record bag.
-
-    // Include client effects if any
-    if (clientEffects.length > 0) {
-      response.clientEffects = clientEffects;
-    }
-
-    // Per-trait attribution sidecar — same effects as `clientEffects`, paired
-    // 1:1 with the trait that produced each one.
-    if (clientEffectsByTrait.length > 0) {
-      response.clientEffectsByTrait = clientEffectsByTrait;
-    }
-
-    // Include server effect results if any
-    if (effectResults.length > 0) {
-      response.effectResults = effectResults;
-    }
-
-    // T6: a tick-stamped dispatch is a latest-state broadcast — queue it for
-    // coalesced snapshot relay to other tabs. Local processing above is
-    // unchanged (guards/persists still run); only the cross-tab fan-out is
-    // lossy.
-    if (request.tick !== undefined && this.liveBroadcastSink !== null) {
-      this.queueTickRelay(orbitalName, request);
-    }
+    // Cross-orbital listens relay: the composition's in-band fan-out
+    // covered THIS orbital's listeners; a listener registered under a
+    // different orbital gets the emit here (the deleted bus fan-out's
+    // only load-bearing role). Awaited — the old bus handlers were
+    // fire-and-forget, which let a relayed persist land after the
+    // response.
+    await this.relayEmittedEvents(orbitalName, response.emittedEvents, {
+      includeSourceOrbital: false,
+      visited: new Set<string>(),
+    });
 
     return response;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      xOrbitalLog.error('processOrbitalEvent:error', {
-        orbital: orbitalName,
-        event: request.event,
-        entityId: request.entityId,
-        error: message,
-      });
-      return {
-        success: false,
-        transitioned: false,
-        states: {},
-        emittedEvents: [],
-        error: message,
-      };
+  }
+
+  /**
+   * Build the composition deps for one registered orbital — the stateful
+   * session shape: long-lived manager + frames, the server effect stage
+   * (relation trio + live broadcast), and the per-request viewer/push/
+   * origin context. The stage runner also re-runs JSX-hoisted
+   * callsite-capture children under each step's payload (see
+   * `rerenderCallsiteCaptureChildren`).
+   */
+  private makeEvaluateDeps(
+    registered: RegisteredOrbital,
+    context: {
+      viewer?: UserContext;
+      onPush?: (item: PushItem) => void;
+      originClientId?: string;
+      relayMask?: ReadonlySet<string>;
+    },
+  ): EvaluateOrbitalEventDeps {
+    const runEffects: EvaluateEffectRunner = async (traitName, args) => {
+      const originClientId = args.originClientId ?? context.originClientId;
+      await this.executeEffects(
+        registered,
+        traitName,
+        args.effects,
+        args.payload,
+        args.entityData,
+        args.entityId,
+        args.emittedEvents,
+        args.fetchedData,
+        args.clientEffects,
+        args.effectResults,
+        context.viewer,
+        args.clientEffectsByTrait,
+        context.onPush,
+        originClientId,
+      );
+      await this.rerenderCallsiteCaptureChildren(
+        registered,
+        traitName,
+        args.payload ?? {},
+        args.entityData,
+        args.entityId,
+        args.emittedEvents,
+        args.fetchedData,
+        args.clientEffects,
+        args.effectResults,
+        context.viewer,
+        args.clientEffectsByTrait,
+        context.onPush,
+        originClientId,
+      );
+    };
+    return {
+      traitIndex: this.traitIndexFor(registered),
+      manager: registered.manager,
+      persistence: this.persistence,
+      frames: registered.traitFieldStates,
+      runEffects,
+      ...(context.relayMask !== undefined ? { relayMask: context.relayMask } : {}),
+      ...(context.viewer !== undefined ? { user: context.viewer } : {}),
+      ...(context.originClientId !== undefined ? { originClientId: context.originClientId } : {}),
+      ...(this.config.contextExtensions !== undefined ? { contextExtensions: this.config.contextExtensions } : {}),
+      ...(this.config.debug !== undefined ? { debug: this.config.debug } : {}),
+      logContext: { orbitalName: registered.schema.name },
+    };
+  }
+
+  /**
+   * The orbital's evaluation index, built lazily on first use (by then
+   * every orbital is registered, so cross-orbital `linkedEntity`
+   * resolution sees the full registry) and cached on the registration.
+   */
+  private traitIndexFor(registered: RegisteredOrbital): TraitIndex {
+    if (registered.traitIndex === undefined) {
+      registered.traitIndex = buildTraitIndexForOrbital(
+        registered.schema,
+        [...this.orbitals.values()].filter((other) => other !== registered).map((other) => other.schema),
+      );
+    }
+    return registered.traitIndex;
+  }
+
+  /**
+   * The runtime-wide event queue — ONE async serialization point for every
+   * composition run (requests, cross-orbital relays, external emits, tick
+   * relays). The composition commits manager state directly rather than
+   * through the manager's per-(trait, entityId) actor queues, so without
+   * this, two concurrent requests against the session manager could both
+   * evaluate from the same held state and lose a transition. `run` sees
+   * the caller's result (or throw); the queue itself never wedges on a
+   * failure.
+   */
+  private eventQueue: Promise<void> = Promise.resolve();
+
+  private enqueueEvent<T>(run: () => Promise<T>): Promise<T> {
+    const result = this.eventQueue.then(run, run);
+    this.eventQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  /**
+   * Cross-orbital listens relay — the host half of the circuit the
+   * per-orbital composition cannot see: a listener registered under a
+   * DIFFERENT orbital than the emitter's. Each match runs the listener's
+   * `triggers` event through the listener's own orbital composition
+   * (targeted delivery — the same shape the deleted bus fan-out posted,
+   * minus its blanket `originClientId` skip: G-RUNTIME-031). Recursion is
+   * bounded by a per-entry visited set (distinct
+   * orbital/trait/triggers/from keys, mirroring the composition's own
+   * cascade visited-set) plus a hop cap. MUST only run holding the event
+   * queue.
+   *
+   * @param sourceOrbital The orbital whose composition produced `emits`,
+   *   or undefined for external producers (os/substrate handlers). The
+   *   source orbital is skipped unless `includeSourceOrbital` — its own
+   *   listeners already ran in-band (composition emits), or the caller
+   *   explicitly wants them (ticks, which never enter the composition).
+   */
+  private async relayEmittedEvents(
+    sourceOrbital: string | undefined,
+    emits: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>,
+    opts: { includeSourceOrbital: boolean; visited: Set<string> },
+  ): Promise<void> {
+    const queue = [...emits];
+    let hops = 0;
+    while (queue.length > 0) {
+      const emitted = queue.shift();
+      if (emitted === undefined) break;
+      for (const [orbitalName, registered] of this.orbitals) {
+        if (orbitalName === sourceOrbital && !opts.includeSourceOrbital) continue;
+        for (const target of collectListenerTargets(
+          this.traitIndexFor(registered),
+          emitted.source,
+          emitted.event,
+          emitted.payload,
+        )) {
+          const from = registered.manager.getState(target.listenerTrait, target.entityId)?.currentState;
+          const key = `${orbitalName}:${target.listenerTrait}:${target.triggers}:${from ?? ''}`;
+          if (opts.visited.has(key)) continue;
+          if (hops >= CROSS_ORBITAL_RELAY_CAP) {
+            xOrbitalLog.warn('relay:truncated', { event: emitted.event, hops });
+            return;
+          }
+          opts.visited.add(key);
+          hops += 1;
+          try {
+            const response = await evaluateOrbitalEvent(
+              this.makeEvaluateDeps(registered, { viewer: this.config.defaultUser }),
+              {
+                event: target.triggers,
+                ...(target.triggersId !== undefined ? { eventId: target.triggersId } : {}),
+                ...(target.payload !== undefined ? { payload: target.payload } : {}),
+                ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
+                targetTrait: target.listenerTrait,
+              },
+            );
+            queue.push(...response.emittedEvents);
+          } catch (error) {
+            // One listener's failure must not strand the remaining relay
+            // (the old bus fan-out's handlers were independent too).
+            xOrbitalLog.error('relay:error', {
+              orbital: orbitalName,
+              trait: target.listenerTrait,
+              event: target.triggers,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
     }
   }
+
+  /**
+   * Entry point for events produced OUTSIDE any orbital's composition —
+   * the OS effect handlers (fs/net/child_process watchers) and the agent
+   * substrate handlers (the deleted bus's last producers). Fans the event
+   * out to every registered orbital's matching listeners. Runs on the
+   * event queue; errors are logged, never thrown at the producer.
+   */
+  private dispatchExternalEvent(event: string, payload?: EventPayload): void {
+    this.enqueueEvent(async () => {
+      await this.relayEmittedEvents(
+        undefined,
+        [{ event, ...(payload !== undefined ? { payload } : {}) }],
+        { includeSourceOrbital: true, visited: new Set<string>() },
+      );
+    }).catch((error: Error) => {
+      xOrbitalLog.error('dispatchExternalEvent:error', {
+        event,
+        error: error.message,
+      });
+    });
+  }
+
 
   /**
    * Execute effects from a transition
@@ -2501,6 +2238,13 @@ export class OrbitalServerRuntime {
         sigilTheme,
         extraEffectHandlers: this.config.effectHandlers,
         deliverEmit: (event, eventPayload, stamp, fromPersistSuccess) => {
+          // Observability tap, NOT circuit routing (W4): the runtime's own
+          // fan-out is the composition's in-band loop + the host's
+          // cross-orbital relay — nothing inside the runtime subscribes to
+          // the bus anymore. The emit still fires here because the bus is
+          // the public firehose (`getEventBus().onAny`) tests and
+          // diagnostics observe the circuit through (including tick emits,
+          // which have no response to read).
           this.eventBus.emit(event, eventPayload, stamp, eventRouteKey(event, stamp.eventId));
           if (fromPersistSuccess) {
             this.liveBroadcastSink?.({ event, payload: eventPayload, source: stamp, originClientId });

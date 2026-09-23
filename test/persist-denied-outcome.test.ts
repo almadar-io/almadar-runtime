@@ -16,14 +16,13 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
+import { isEntityCall, isEntityReference, type OrbitalSchema } from '@almadar/core';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const schemaPath = join(__dirname, 'fixtures/trait-wars.orb');
 
-// `JSON.parse`'s inferred type (no annotation) mirrors gap-analysis.test.ts's
-// `traitWarsSchema` — the fixture is untyped .orb JSON.
-function loadSchema() {
-    return JSON.parse(readFileSync(schemaPath, 'utf-8'));
+function loadSchema(): OrbitalSchema {
+    return JSON.parse(readFileSync(schemaPath, 'utf-8')) as OrbitalSchema;
 }
 
 const DEPLOY_PAYLOAD = {
@@ -38,11 +37,13 @@ const DEPLOY_PAYLOAD = {
 describe('OrbitalServerRuntime persist denial', () => {
     it('stamps denied:true when the declared @create policy rejects the write', async () => {
         const schema = loadSchema();
-        const battleOrbital = schema.orbitals.find(
-            (o: Record<string, unknown>) => o.name === 'TacticalBattle',
-        );
+        const battleOrbital = schema.orbitals.find((o) => o.name === 'TacticalBattle')!;
+        const entity = battleOrbital.entity;
+        if (isEntityReference(entity) || isEntityCall(entity)) {
+            throw new Error('expected TacticalBattle to carry an inline entity');
+        }
         // Literal-false policy — denies every create regardless of bindings.
-        battleOrbital.entity.create_policy = ['=', 'a', 'b'];
+        entity.create_policy = ['=', 'a', 'b'];
 
         const runtime = new OrbitalServerRuntime({ debug: false });
         await runtime.register(schema);

@@ -16,6 +16,7 @@ import type {
   EventSource,
   ResolvedTrait,
   SExpr,
+  RuntimeValue,
 } from '@almadar/core';
 
 /**
@@ -157,10 +158,10 @@ import {
  * an arbitrary runtime value; it is not exposed in public APIs.
  */
 interface ReflectedObject {
-  [key: string]: unknown;
+  [key: string]: RuntimeValue;
 }
 
-function isNonNullObject(value: unknown): value is ReflectedObject {
+function isNonNullObject(value: RuntimeValue): value is ReflectedObject {
   return typeof value === 'object' && value !== null;
 }
 
@@ -181,7 +182,7 @@ function assertHasFunctionMethods(
  *
  * @throws RendererContractViolationError when the value is not a valid manager.
  */
-export function assertIsSlotManager(value: unknown): asserts value is SlotManager {
+export function assertIsSlotManager(value: RuntimeValue): asserts value is SlotManager {
   if (!isNonNullObject(value)) {
     throw new RendererContractViolationError('SlotManager must be a non-null object');
   }
@@ -201,7 +202,7 @@ export function assertIsSlotManager(value: unknown): asserts value is SlotManage
  * @throws RendererContractViolationError when the value is not a valid manager.
  */
 export function assertIsMultiSourceSlotManager(
-  value: unknown,
+  value: RuntimeValue,
 ): asserts value is MultiSourceSlotManager {
   if (!isNonNullObject(value)) {
     throw new RendererContractViolationError('MultiSourceSlotManager must be a non-null object');

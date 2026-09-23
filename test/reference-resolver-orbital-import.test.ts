@@ -17,6 +17,8 @@ import type {
   EventId,
   OrbitalId,
   PageId,
+  Effect,
+  RenderUIEffect,
 } from '@almadar/core';
 
 /** Narrow a resolved `EntityField` to its `relation` variant — throws on any
@@ -344,8 +346,8 @@ describe('ReferenceResolver — orbital import materialization (W3-J)', () => {
     if (!result.success) return;
 
     const list = findTrait(result.data[0], 'NotesANoteList');
-    const effects = list.stateMachine!.transitions[0].effects as unknown[];
-    const renderUi = effects[0] as unknown[];
+    const effects = list.stateMachine!.transitions[0].effects!;
+    const renderUi = effects[0] as RenderUIEffect;
     const config = renderUi[2] as { children: string[] };
     expect(config.children).toEqual(['@trait.NotesANoteDetailRouter', '@trait.NotesANoteToOmit']);
   });
@@ -414,7 +416,7 @@ describe('ReferenceResolver — orbital import materialization (W3-J)', () => {
 
     const router = findTrait(result.data[0], 'NotesANoteDetailRouter');
     const transitions = router.stateMachine!.transitions;
-    const byEvent = (e: string) => transitions.find((t) => t.event === e)!.effects![0] as unknown[];
+    const byEvent = (e: string) => transitions.find((t) => t.event === e)!.effects![0] as Effect;
     expect(byEvent('SELECT')).toEqual(['navigate', '/local-things']);
     expect(byEvent('SELECT_WITH_PARAMS')).toEqual(['navigate', '/local-things/:id', { id: '@payload.id' }]);
     expect(byEvent('SELECT_WITH_CRUMB')).toEqual([
@@ -2081,9 +2083,9 @@ describe('ReferenceResolver — orbital import Stage B: entities {}', () => {
     expect(leadField.entityId).toBe(CONSUMER_PERSON_ID);
 
     const gate = findTeamTrait(teams, 'TeamsTeamApproverGate');
-    const fetchEffect = gate.stateMachine!.transitions[0].effects![0] as unknown[];
+    const fetchEffect = gate.stateMachine!.transitions[0].effects![0] as Effect;
     expect(fetchEffect).toEqual(['fetch', 'Person']);
-    const renderUi = gate.stateMachine!.transitions[0].effects![1] as unknown[];
+    const renderUi = gate.stateMachine!.transitions[0].effects![1] as RenderUIEffect;
     expect((renderUi[2] as { entity: string }).entity).toBe('Person');
 
     const rosterPage = (teams.pages as Page[]).find((p) => p.name === 'TeamsTeamRosterPage')!;

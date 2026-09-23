@@ -8,7 +8,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import express from 'express';
 import http from 'node:http';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import type { OrbitalSchema } from '@almadar/core';
+import type { EntityRow, OrbitalSchema } from '@almadar/core';
 
 const schema: OrbitalSchema = {
   name: 'entity-rows-test-app',
@@ -122,7 +122,7 @@ describe('GET /:orbital/entities/:entityType', () => {
     // is the only existence check this route makes).
     const res = await fetch(`http://localhost:${port}/api/orbitals/Notes/entities/Ghost`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { success: boolean; rows: unknown[] };
+    const body = (await res.json()) as { success: boolean; rows: EntityRow[] };
     expect(body.success).toBe(true);
     expect(body.rows).toEqual([]);
   });

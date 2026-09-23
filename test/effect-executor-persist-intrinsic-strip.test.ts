@@ -26,6 +26,7 @@ import {
     type EffectContext,
     type EntityRow,
 } from '../src/index.js';
+import type { PersistBatchOperation } from '@almadar/core';
 
 function makeContext(entity: EntityRow, resolveIntrinsicFields?: (entityType: string) => readonly string[]) {
     const persist = vi.fn(async (_action: string, _entityType: string, data?: EntityRow) => ({
@@ -89,7 +90,7 @@ describe('EffectExecutor persist — intrinsic frame strip', () => {
 
         await executor.execute(['persist', 'batch', [['update', 'Message', 'row-1', '@entity']]]);
 
-        const batchArg = persist.mock.calls[0]?.[2] as { operations: unknown[][] };
+        const batchArg = persist.mock.calls[0]?.[2] as { operations: PersistBatchOperation[] };
         const [, , , opData] = batchArg.operations[0];
         expect(opData).toEqual({ id: 'row-1', text: 'hi' });
     });
@@ -104,7 +105,7 @@ describe('EffectExecutor persist — intrinsic frame strip', () => {
             [['update', 'Message', 'row-1', { draft: 'x', body: 'y' }]],
         ]);
 
-        const batchArg = persist.mock.calls[0]?.[2] as { operations: unknown[][] };
+        const batchArg = persist.mock.calls[0]?.[2] as { operations: PersistBatchOperation[] };
         const [, , , opData] = batchArg.operations[0];
         expect(opData).toEqual({ body: 'y' });
     });

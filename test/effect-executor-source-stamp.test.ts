@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
-import { EffectExecutor, type BindingContext, type EffectContext } from '../src/index.js';
-import { asTraitId, asOrbitalId, asEventId } from '@almadar/core';
+import { EffectExecutor, type BindingContext, type EffectContext, type EffectHandlers } from '../src/index.js';
+import { asTraitId, asOrbitalId, asEventId, type BusEventSource } from '@almadar/core';
 
 /**
  * `EffectExecutor.sourceStamp` — V4 dual-carry ids (2026-09-22, the chat
@@ -58,7 +58,7 @@ describe('EffectExecutor.sourceStamp — V4 dual-carry ids', () => {
     });
 
     it('stamps eventId from the emits contract only for a matching event name', async () => {
-        const emit = vi.fn();
+        const emit = vi.fn<EffectHandlers['emit']>();
         const handlers = stubEffectHandlers({ emit });
         const bindings: BindingContext = { entity: {} };
         const context: EffectContext = {
@@ -74,7 +74,7 @@ describe('EffectExecutor.sourceStamp — V4 dual-carry ids', () => {
 
         await executor.executeAll([['emit', 'CHANNEL_SELECTED', {}]]);
 
-        const stamp = emit.mock.calls[0]?.[2] as Record<string, unknown>;
+        const stamp = emit.mock.calls[0]?.[2] as BusEventSource;
         expect(stamp['eventId']).toBeUndefined();
         expect(stamp['traitId']).toBe('trt_composer');
         expect(stamp['orbitalId']).toBe('orb_chat');

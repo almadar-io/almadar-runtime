@@ -10,6 +10,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EffectExecutor, type EffectHandlers } from '../src/index.js';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
+import type { EventPayload } from '@almadar/core';
 
 function makeExecutor(sendServer: EffectHandlers['sendServer']): {
     executor: EffectExecutor;
@@ -70,7 +71,7 @@ describe('send-server operator — interpreter path', () => {
 
     it('produces the server wire-message shape from a custom sendServer implementation', async () => {
         const sent: string[] = [];
-        const sendServer = vi.fn((event: string, payload?: Record<string, unknown>) => {
+        const sendServer = vi.fn((event: string, payload?: EventPayload) => {
             const msg = JSON.stringify({
                 type: 'ORBITAL_EVENT',
                 payload: { orbital: 'ChatOrbital', event, payload: payload ?? null },
