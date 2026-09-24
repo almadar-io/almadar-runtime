@@ -15,6 +15,7 @@ import type {
     BindingContext,
     RuntimeConfig,
     TransitionObserver,
+    RollbackCause,
     EntityRow,
     EventPayload,
     ConfigContext,
@@ -22,6 +23,7 @@ import type {
 } from '../types.js';
 import type { EventId, UserContext } from '@almadar/core';
 import { interpolateValue, createContextFromBindings } from '../evaluation/BindingResolver.js';
+import type { DispatchView } from '../evaluation/dispatch-memory.js';
 import { evaluateGuard } from '@almadar/evaluator';
 import { createLogger } from '@almadar/logger';
 
@@ -39,6 +41,9 @@ export type { TraitState, TraitDefinition };
  * its own INIT/LOAD/$MOUNT self-loop.
  */
 export const LIFECYCLE_EVENTS = ['INIT', 'LOAD', '$MOUNT'] as const;
+
+/** Wire-only event a client sends when a trait leaves the page; the server stops counting it as mounted. */
+export const UNMOUNT_EVENT = '$UNMOUNT';
 
 // ============================================================================
 // Core Functions
@@ -176,6 +181,10 @@ export interface ProcessEventOptions {
      * EvaluationContext has no user to compare against.
      */
     user?: UserContext;
+    /** The dispatch's `now` stamp for guard evaluation. */
+    now?: number;
+    /** The delivery and this trait's dispatch log, for `@event` / `@prevEvents` / `@prevStates` in guards. */
+    dispatch?: DispatchView;
     /**
      * Guard evaluation error handling mode. (RCG-02)
      * - "permissive": Guard errors allow the transition (default, backwards-compatible)
@@ -227,6 +236,8 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
         traitState, trait, eventKey, eventId, payload, entityData,
         config,
         user,
+        now,
+        dispatch,
         guardMode = 'permissive',
         strictBindings = false,
         contextExtensions,
@@ -287,6 +298,10 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
             // we just need to pass it through here.
             config,
             user,
+            ...(now !== undefined ? { now } : {}),
+            fromState: traitState.currentState,
+            toState: transition.to,
+            ...(dispatch !== undefined ? dispatch : {}),
         }, strictBindings, contextExtensions);
 
         try {
@@ -401,6 +416,8 @@ export interface QueuedEvent {
     entityByTrait?: Record<string, EntityRow>;
     /** Authenticated viewer at enqueue time, for `@user` guard resolution. */
     user?: UserContext;
+    /** The `now` stamp taken at enqueue — the dispatch start. */
+    now: number;
 }
 
 /**
@@ -806,6 +823,7 @@ export class StateMachineManager {
     ): Array<{ traitName: string; result: TransitionResult }> {
         const results: Array<{ traitName: string; result: TransitionResult }> = [];
         const scope = scopeOf(entityData);
+        const dispatchNow = Date.now();
         const candidates = new Set(
             selectDispatchCandidates(this.traits.keys(), { targetTrait, activeTraits: allowedTraits, excludeTrait }),
         );
@@ -827,6 +845,7 @@ export class StateMachineManager {
                 entityData: perTraitEntity,
                 config: this.traitConfigs.get(traitName),
                 user,
+                now: dispatchNow,
                 guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,
                 contextExtensions: this.config.contextExtensions,
@@ -910,6 +929,15 @@ export class StateMachineManager {
         });
     }
 
+    /** Undo an optimistic commit: seed `toState` and report the hop back to the observer. */
+    rollbackState(traitName: string, toState: string, entityId: string | undefined, cause: RollbackCause): void {
+        const from = this.getState(traitName, entityId)?.currentState;
+        this.seedState(traitName, toState, entityId);
+        if (from !== undefined && from !== toState) {
+            this.observer?.onRollback?.({ traitName, from, to: toState, cause });
+        }
+    }
+
     /**
      * Commit a trait's final state (upsert) and notify the observer per
      * executed hop — the commit half of a caller-driven cascade
@@ -970,10 +998,11 @@ export class StateMachineManager {
         user?: UserContext
     ): void {
         const scope = scopeOf(entityData);
+        const now = Date.now();
         for (const [traitName] of this.traits) {
             const key = compositeKey(traitName, scope);
             const queue = this.queues.get(key) ?? [];
-            queue.push({ eventKey, eventId, payload, entityData, entityByTrait, user });
+            queue.push({ eventKey, eventId, payload, entityData, entityByTrait, user, now });
             this.queues.set(key, queue);
         }
     }
@@ -1016,6 +1045,7 @@ export class StateMachineManager {
                 entityData: perTraitEntity,
                 config: this.traitConfigs.get(traitName),
                 user: entry.user,
+                now: entry.now,
                 guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,
                 contextExtensions: this.config.contextExtensions,

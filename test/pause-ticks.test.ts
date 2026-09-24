@@ -36,6 +36,8 @@ function tickSchema(): OrbitalSchema {
               {
                 name: 'beat',
                 interval: 10,
+                // Background so this suite isolates the global pause from mount scoping.
+                runsInBackground: true,
                 effects: [['emit', 'PULSE', {}]],
               },
             ],

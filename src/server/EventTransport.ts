@@ -182,9 +182,13 @@ export interface HttpTransportOptions {
 export function createHttpTransport(options: HttpTransportOptions): EventTransport {
   const { serverUrl, getAccessToken } = options;
   const fetchFn = options.fetch ?? fetch.bind(globalThis);
+  // The registered schema's name addresses every event to its catalog
+  // behavior — orbital names alone are not unique across a catalog.
+  let behavior: string | undefined;
 
   return {
     async register(schema) {
+      behavior = schema.name;
       try {
         const res = await fetchFn(`${serverUrl}/register`, {
           method: 'POST',
@@ -225,7 +229,9 @@ export function createHttpTransport(options: HttpTransportOptions): EventTranspo
       const res = await fetchFn(`${serverUrl}/${orbitalName}/events`, {
         method: 'POST',
         headers: await authHeaders(getAccessToken),
-        body: JSON.stringify(request),
+        body: JSON.stringify(
+          request.behavior === undefined && behavior !== undefined ? { ...request, behavior } : request,
+        ),
       });
       return (await res.json()) as OrbitalEventResponse;
     },

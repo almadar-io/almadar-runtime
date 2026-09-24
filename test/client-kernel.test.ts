@@ -95,6 +95,20 @@ function schema(): OrbitalSchema {
               ],
             },
           },
+          // A sibling of Persistor on the persisted Note entity: server-backed
+          // (persistedAwaited), writing its frame with no server-only effect.
+          {
+            name: 'NoteReader',
+            linkedEntity: 'Note',
+            scope: 'instance',
+            stateMachine: {
+              states: [{ name: 'idle', isInitial: true }, { name: 'read' }],
+              events: [],
+              transitions: [
+                { from: 'idle', to: 'read', event: 'READ', effects: [['set', '@entity.title', 'client']] },
+              ],
+            },
+          },
         ],
       },
     ],
@@ -251,9 +265,13 @@ describe('createClientKernel — posting rule per topology', () => {
     };
     const kernel = createClientKernel({ ...o, transport });
 
-    // No server-only effect fires here (bare transition), yet the stateful
-    // topology still posts — the server holds the authoritative state.
+    // A [runtime] trait with no server effect is client-only: never posted.
     await kernel.dispatch({ event: 'READ', targetTrait: 'CursorReader' });
+    expect(transport.send).toHaveBeenCalledTimes(0);
+
+    // A persisted trait's bare transition still posts on the stateful
+    // topology — the server holds the authoritative state.
+    await kernel.dispatch({ event: 'READ', targetTrait: 'NoteReader' });
     expect(transport.send).toHaveBeenCalledTimes(1);
     expect(posted[0]).toEqual({ event: 'READ', hasTraits: false });
 
@@ -274,8 +292,8 @@ describe('createClientKernel — posting rule per topology', () => {
 describe('createClientKernel — G5 sibling rows', () => {
   it('a server entityByTrait row for one trait lands in every sibling trait bound to the same entity', async () => {
     // Stateful topology (`carriesCircuitState: false`) so the kernel posts
-    // this dispatch even though MOVE's `set` effect produces no server leg —
-    // the posting rule that actually gets the response fold to run here.
+    // NoteReader's bare READ (persisted entity) — the posting rule that gets
+    // the response fold to run here.
     const o = opts({ carriesCircuitState: false });
 
     const serverResponse: OrbitalEventResponse = {
@@ -283,18 +301,18 @@ describe('createClientKernel — G5 sibling rows', () => {
       transitioned: true,
       states: {},
       emittedEvents: [],
-      entityByTrait: { Move: { id: 'c-1', x: 42 } },
+      entityByTrait: { NoteReader: { id: 'n-1', title: 'server' } },
     };
     const transport = createInProcessTransport(async () => serverResponse, { carriesCircuitState: false });
     const kernel = createClientKernel({ ...o, transport });
 
-    await kernel.dispatch({ event: 'MOVE', targetTrait: 'Move', payload: { x: 1 } });
+    await kernel.dispatch({ event: 'READ', targetTrait: 'NoteReader' });
 
-    // Move's OWN frame carries the server row.
-    expect(o.store.frames.get('Move')).toMatchObject({ id: 'c-1', x: 42 });
-    // CursorReader is bound to the SAME "Cursor" entity and has never
+    // NoteReader's OWN frame carries the server row.
+    expect(o.store.frames.get('NoteReader')).toMatchObject({ id: 'n-1', title: 'server' });
+    // Persistor is bound to the SAME "Note" entity and has never
     // dispatched — its frame still picks up the row (G5).
-    expect(o.store.frames.get('CursorReader')).toMatchObject({ id: 'c-1', x: 42 });
+    expect(o.store.frames.get('Persistor')).toMatchObject({ id: 'n-1', title: 'server' });
   });
 });
 
@@ -318,7 +336,9 @@ describe('createClientKernel — gaps closed after the W5b hook split', () => {
     await vi.waitFor(() => expect(transport.send).toHaveBeenCalledTimes(1));
     const outcome = await kernel.dispatch({ event: 'MOVE', targetTrait: 'Move', payload: { x: 9 } });
 
-    expect(outcome.mode).toBe('runtimeOptimistic');
+    // Move is a client-only [runtime] trait (no server effect of its own):
+    // it commits immediately and is never queued behind the tick's post.
+    expect(outcome.mode).toBe('hybridClientOnly');
     expect(o.store.frames.get('Move')?.['x']).toBe(9);
     releaseTick?.();
   });

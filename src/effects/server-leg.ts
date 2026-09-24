@@ -37,10 +37,29 @@ export interface EffectDelegate {
  */
 export class ServerLegCollector implements EffectDelegate {
     private effects: Effect[] = [];
+    private source: string | undefined;
+    private readonly sources = new Set<string>();
+
+    /** Attribute every effect delegated while `run` executes to `trait`. */
+    async attribute(trait: string, run: () => Promise<void>): Promise<void> {
+        const previous = this.source;
+        this.source = trait;
+        try {
+            await run();
+        } finally {
+            this.source = previous;
+        }
+    }
+
+    /** Traits whose own effects were delegated to the server. */
+    delegatingTraits(): ReadonlySet<string> {
+        return this.sources;
+    }
 
     delegate(effect: Effect, target: DelegateTarget): void {
         if (target === 'server') {
             this.effects.push(effect);
+            if (this.source !== undefined) this.sources.add(this.source);
         }
     }
 

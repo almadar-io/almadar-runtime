@@ -16,7 +16,9 @@
  * @packageDocumentation
  */
 import { StateMachineManager, type TraitDefinition } from '../traits/StateMachineCore.js';
-import type { EntityRow, RuntimeConfig, TransitionObserver } from '../types.js';
+import type { EntityRow, RollbackCause, RuntimeConfig, TransitionObserver } from '../types.js';
+import { MountLifecycle } from './mount-lifecycle.js';
+import type { WorklistItem } from './evaluateOrbitalEvent.js';
 
 /**
  * A trait instance's state + entity frame at a point in time — the twin of
@@ -34,6 +36,8 @@ export interface CircuitStore {
   /** The entity-frame map (`(set @entity.X)` writes), keyed by
    *  `IndexedTrait.frameKey`. */
   readonly frames: Map<string, EntityRow>;
+  /** The current mount's lifecycle — which traits still await INIT, and what is held for them. */
+  readonly mount: MountLifecycle<WorklistItem>;
   /**
    * Capture `trait`'s current state + its frame row, for a
    * `runtimeOptimistic` dispatch's pre-commit rollback point. `frameKey`
@@ -44,11 +48,11 @@ export interface CircuitStore {
   snapshot(trait: string, entityId?: string, frameKey?: string): TraitSnapshot;
   /**
    * Roll `trait` back to a prior snapshot: state via a reconcile write (no
-   * guard evaluation — `seedState`), frame via REPLACE (never merge — an
+   * guard evaluation — `rollbackState`, which reports the hop to the observer), frame via REPLACE (never merge — an
    * optimistic commit may have added fields since the snapshot that a merge
    * would keep, the same reasoning as `RuntimeKernel::restore_trait`).
    */
-  restore(trait: string, entityId: string | undefined, snapshot: TraitSnapshot, frameKey?: string): void;
+  restore(trait: string, entityId: string | undefined, snapshot: TraitSnapshot, frameKey: string | undefined, cause: RollbackCause): void;
   /**
    * Notify subscribers that circuit state changed. Callers (the client
    * role, `client-role.ts`) call this ONCE after a dispatch/fold finishes
@@ -81,6 +85,7 @@ export function createMemoryCircuitStore(
   return {
     manager,
     frames,
+    mount: new MountLifecycle<WorklistItem>(),
     snapshot(trait, entityId, frameKey) {
       const key = frameKey ?? trait;
       const frame = frames.get(key);
@@ -89,10 +94,10 @@ export function createMemoryCircuitStore(
         frame: frame !== undefined ? { ...frame } : undefined,
       };
     },
-    restore(trait, entityId, snap, frameKey) {
+    restore(trait, entityId, snap, frameKey, cause) {
       const key = frameKey ?? trait;
       if (snap.state !== '') {
-        manager.seedState(trait, snap.state, entityId);
+        manager.rollbackState(trait, snap.state, entityId, cause);
       }
       if (snap.frame === undefined) {
         frames.delete(key);

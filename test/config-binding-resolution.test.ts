@@ -343,3 +343,21 @@ describe('@config.<render-ui knob> — nested bindings inside the resolved tree'
         expect(Array.isArray(result.children)).toBe(true);
     });
 });
+
+// ============================================================================
+// §72 — nested literal string lists inside struct-typed config values
+// ============================================================================
+
+describe('nested literal lists (G-ORB-COMPILER-020 / §72)', () => {
+    it('an unwrapped operator-headed nested list is evaluated as a call — the bug the compiler wrap prevents', () => {
+        const ctx = makeCtx({});
+        const tree: RuntimeValue = { sections: [{ title: 'Meta', fields: ['and', 'slug', 'name'] }] };
+        expect(interpolateValue(tree, ctx)).not.toEqual(tree);
+    });
+
+    it('a ["list", …]-wrapped nested list (what inline now emits) resolves to the literal array', () => {
+        const ctx = makeCtx({});
+        const tree: RuntimeValue = { sections: [{ title: 'Meta', fields: ['list', 'and', 'slug'] }] };
+        expect(interpolateValue(tree, ctx)).toEqual({ sections: [{ title: 'Meta', fields: ['and', 'slug'] }] });
+    });
+});

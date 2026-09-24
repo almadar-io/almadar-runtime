@@ -19,7 +19,7 @@ import { isPersistBatchOperation } from "@almadar/core";
 // promoted from this file (the JS interpreter's own definition, canonical
 // per CLAUDE.md's "converge on the TypeScript implementation" ruling).
 // Re-exported here so every existing importer keeps working unchanged.
-import type { ServerBatchSummary, ServerEffectResult } from "@almadar/core";
+import type { ClientEffectByTrait, ServerBatchSummary, ServerEffectResult } from "@almadar/core";
 export type { ServerBatchSummary, ServerEffectResult } from "@almadar/core";
 import type { PersistenceAdapter } from "../entities/PersistenceAdapter.js";
 // Type-only — erased before runtime (isolatedModules), so this does not pull
@@ -106,7 +106,7 @@ export interface CreateServerEffectHandlersOptions {
    */
   clientEffects?: ClientEffectTuple[];
   /** Same effects as `clientEffects`, tagged per originating trait — see `context.traitName`. */
-  clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>;
+  clientEffectsByTrait?: ClientEffectByTrait[];
   /** Source stamp applied to all emits. */
   source?: { orbital?: string; trait?: string };
   /** Consumer-supplied `call-service` handler. When absent, calls warn and return null. */

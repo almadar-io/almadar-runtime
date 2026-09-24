@@ -517,7 +517,18 @@ export class ExternalOrbitalLoader {
       .replace(/^behaviors\//, "")
       .replace(/\.orb$/, "");
 
-    const tiers = ["atoms", "molecules", "organisms"] as const;
+    // Tiers are whatever the registry actually holds, never a hardcoded
+    // list — same doctrine as the topic discovery below. The registry has
+    // grown `templates` (ui/game, ui/core, ui/marketing) and any future
+    // tier; the previous ["atoms","molecules","organisms"] constant silently
+    // failed every `std/behaviors/<name>` import whose behavior lives in a
+    // non-listed tier (std-snake's `ui-game-shell` was the live casualty).
+    const discoverTiers = (dir: string): string[] =>
+      fs.existsSync(dir)
+        ? fs.readdirSync(dir, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name)
+        : [];
 
     // Build candidate list across all configured roots: std first, then any
     // companion package (@almadar-io/behaviors). For each root we try the
@@ -544,25 +555,28 @@ export class ExternalOrbitalLoader {
             .filter((entry) => entry.isDirectory())
             .map((entry) => entry.name)
         : [];
+      const allTiers = new Set<string>();
       for (const topic of topics) {
+        const tiers = discoverTiers(path.join(registryRoot, topic));
         for (const tier of tiers) {
-          candidates.push(path.join(root, "behaviors", "registry", topic, tier, `${name}.orb`));
+          allTiers.add(tier);
+          candidates.push(path.join(registryRoot, topic, tier, `${name}.orb`));
         }
       }
-      // UI family layout: behaviors/registry/ui/<family>/{atoms,molecules,organisms}/<name>.orb
+      // UI family layout: behaviors/registry/ui/<family>/<tier>/<name>.orb
       const uiRoot = path.join(root, "behaviors", "registry", "ui");
       if (fs.existsSync(uiRoot)) {
         const families = fs.readdirSync(uiRoot, { withFileTypes: true })
           .filter((entry) => entry.isDirectory())
           .map((entry) => entry.name);
         for (const family of families) {
-          for (const tier of tiers) {
+          for (const tier of discoverTiers(path.join(uiRoot, family))) {
             candidates.push(path.join(uiRoot, family, tier, `${name}.orb`));
           }
         }
       }
       // Back-compat: pre-topic flat-tier layout (std 6.1–7.10).
-      for (const tier of tiers) {
+      for (const tier of allTiers) {
         candidates.push(path.join(root, "behaviors", "registry", tier, `${name}.orb`));
       }
       // Oldest back-compat: flat `<root>/behaviors/<name>.orb`.

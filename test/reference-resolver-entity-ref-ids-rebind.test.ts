@@ -113,15 +113,16 @@ describe('applyLinkedEntityRename refreshes the entityRefIds entry on rebind', (
     expect(trait.entityRefIds?.ConsumerEntity).toBe('ent_CNSM0000000000000000000');
   });
 
-  it('rebinding to a consumer entity whose id is not yet known in scope keeps the stale id under the renamed key (Rust parity fallback)', async () => {
+  it('rebinding to a consumer entity whose id is not yet known in scope drops the renamed key (never the atom\'s id under the consumer\'s name)', async () => {
     const resolver = new ReferenceResolver({ basePath: '.', loader: makeAtomLoader() });
     const orbital: OrbitalDefinition = {
       name: 'Consumer',
       uses: [{ from: './atom.orb', as: 'Atom' }],
-      // No `id` — an entity `entityIdsInScope` cannot resolve. Matches the
-      // compiled path's own `entity_ids.get(name).unwrap_or(old_id)`
-      // fallback: rename the key, but never invent or drop an id no scope
-      // actually knows.
+      // No `id` — an entity `entityIdsInScope` cannot resolve. The atom's id
+      // under the consumer's name would make the id-first reader resolve the
+      // token straight back to the atom's entity (project-friday's imported
+      // chat rail fetched `BrowseItem`), so the key is dropped — same rule as
+      // the compiled path's `rewrite_entity_ref_ids`.
       entity: { name: 'ConsumerEntity', persistence: 'persistent', fields: [{ name: 'id', type: 'string', required: true }] },
       traits: [{ ref: 'Atom.traits.AtomTrait', linkedEntity: 'ConsumerEntity' }],
       pages: [],
@@ -134,7 +135,8 @@ describe('applyLinkedEntityRename refreshes the entityRefIds entry on rebind', (
     const rebound = result.data.traits.find((rt) => rt.trait.name === 'AtomTrait');
     const trait = rebound!.trait;
     expect(trait.entityRefIds?.AtomEntity).toBeUndefined();
-    expect(trait.entityRefIds?.ConsumerEntity).toBe('ent_ATOM00000000000000000000');
+    expect(trait.entityRefIds?.ConsumerEntity).toBeUndefined();
+    expect(trait.linkedEntity).toBe('ConsumerEntity');
   });
 
   it('leaves entityRefIds untouched when no rebind is requested (no-op path)', async () => {

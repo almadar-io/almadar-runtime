@@ -38,6 +38,7 @@ import {
   applyListenPayloadMapping,
   isRuntimeEntity,
   type BusEventSource,
+  type ClientEffectByTrait,
   type ClientEffectTuple,
   type EntityRow,
   type EventId,
@@ -51,10 +52,10 @@ import {
 } from '@almadar/core';
 import { createLogger } from '@almadar/logger';
 import {
-  createMinimalContext,
   evaluateGuard,
   evaluateListenPayloadExpr,
 } from '@almadar/evaluator';
+import { createContextFromBindings } from './BindingResolver.js';
 import {
   findInitialState,
   findTransition,
@@ -72,9 +73,11 @@ import {
   type PayloadValidationFailure,
 } from '../traits/PayloadValidator.js';
 import type { IndexedTrait, TraitIndex } from '../traits/trait-index.js';
-import type { EvaluationContextExtensions } from '../types.js';
+import type { BindingContext, EvaluationContextExtensions } from '../types.js';
 import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
-import type { SExpr } from '@almadar/core';
+import { dispatchVisitKey, type DeliveryRecord, type SExpr } from '@almadar/core';
+import { isLifecycleEvent, type MountLifecycle } from './mount-lifecycle.js';
+import { DispatchMemory } from './dispatch-memory.js';
 
 const evaluateLog = createLogger('almadar:runtime:evaluate');
 
@@ -120,6 +123,8 @@ export interface EvaluateOrbitalEventDeps {
   relayMask?: ReadonlySet<string>;
   /** Normalized viewer (hosts normalize `request.user` claims). */
   user?: UserContext;
+  /** Override for the dispatch's `now` stamp (tests); otherwise stamped once at entry. */
+  now?: number;
   /** Default directly-addressed row id (request.entityId wins). */
   entityId?: string;
   originClientId?: string;
@@ -137,15 +142,16 @@ export interface EvaluateOrbitalEventDeps {
    */
   runtimeRowSentinel?: boolean;
   /**
-   * `(trait, event)` pairs the caller has ALREADY delivered elsewhere
-   * (`\u0000`-joined, the client role's `alreadyDeliveredKey` format) —
-   * pre-seeded into the worklist's visited set so a listener chain that
-   * cycles back onto an already-delivered pair is not re-run (the twin of
-   * Rust `apply_server_response` seeding its own cascade's visited set
-   * from the same `already_delivered`). Hosts that deliver every emit
-   * themselves (stateless, stateful) leave this unset.
+   * `(trait, event)` pairs the caller already delivered elsewhere (the client
+   * role's `alreadyDeliveredKey` format). The worklist skips them on every
+   * path, not only at the top level; twin of Rust `run_cascade`'s
+   * `already_delivered`. Hosts that deliver every emit themselves leave it unset.
    */
   seedVisited?: ReadonlySet<string>;
+  /** The mount's lifecycle: routed deliveries to a trait wait for its own INIT/LOAD/$MOUNT (see `mount-lifecycle.ts`). */
+  mount?: MountLifecycle<WorklistItem>;
+  /** `@event` for the seed when it is itself a delivery (a relayed or folded emit); a direct dispatch has none. */
+  seedDelivery?: DeliveryRecord;
 }
 
 /** One dispatched trait's per-step effect output (see `runTraitCascade`). */
@@ -156,7 +162,7 @@ interface StepOutcome {
   event: string;
 }
 
-interface WorklistItem {
+export interface WorklistItem {
   trait: string;
   from: string;
   event: string;
@@ -169,6 +175,12 @@ interface WorklistItem {
    *  the render-effect split: only on-page traits' client effects are
    *  delivered (nothing off-page hosts the render). */
   onPage: boolean;
+  /** What `@event` reads for this delivery (the source emit for a listens delivery). */
+  delivery: DeliveryRecord;
+  /** A listens `when`, evaluated when the delivery is processed so it sees the listener's log. */
+  listenGuard?: SExpr;
+  /** A fan-out delivery runs from the listener's state when it is processed, not when it was queued (Clause 5.3). */
+  fromAtDelivery?: boolean;
 }
 
 /**
@@ -185,6 +197,7 @@ export async function evaluateOrbitalEvent(
   request: OrbitalEventRequest,
 ): Promise<OrbitalEventResponse> {
   const { traitIndex, manager, persistence, frames } = deps;
+  const now = deps.now ?? Date.now();
   const event = request.event;
   const eventKey = normalizeEventKey(event);
 
@@ -196,10 +209,15 @@ export async function evaluateOrbitalEvent(
     : undefined;
   const targetTrait = request.targetTrait ??
     (rawPayload?.['_targetTrait'] as string | undefined);
+  const awaitingSidecar = rawPayload?.['_awaitingInit'];
+  const awaitingInit = Array.isArray(awaitingSidecar)
+    ? awaitingSidecar.filter((t): t is string => typeof t === 'string')
+    : undefined;
   const cleanPayload = rawPayload ? { ...rawPayload } : undefined;
   if (cleanPayload) {
     delete cleanPayload['_activeTraits'];
     delete cleanPayload['_targetTrait'];
+    delete cleanPayload['_awaitingInit'];
   }
   const delegatedServerLeg = request.targetTrait !== undefined &&
     (request.traits !== undefined || request.entityByTrait !== undefined);
@@ -407,7 +425,7 @@ export async function evaluateOrbitalEvent(
   const emittedEvents: OrbitalEventResponse['emittedEvents'] = [];
   const effectResults: ServerEffectResult[] = [];
   const clientEffects: ClientEffectTuple[] = [];
-  const clientEffectsByTrait: Array<{ traitName: string; effect: ClientEffectTuple }> = [];
+  const clientEffectsByTrait: ClientEffectByTrait[] = [];
   const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
   const entityByTrait: Record<string, EntityRow> = {};
   let transitioned = false;
@@ -415,6 +433,8 @@ export async function evaluateOrbitalEvent(
   const rejections: TransitionRejection[] = [];
   const truncatedTraits: string[] = [];
 
+  const seedDelivery: DeliveryRecord = deps.seedDelivery ?? request.delivery ??
+    { event, ...(cleanPayload !== undefined ? { payload: cleanPayload } : {}), source: {} };
   const queue: WorklistItem[] = targets.map(({ trait, from }) => ({
     trait,
     from,
@@ -422,22 +442,71 @@ export async function evaluateOrbitalEvent(
     payload: cleanPayload,
     entityId: traitEntityIds.get(trait) ?? entityId,
     onPage: true,
+    delivery: seedDelivery,
   }));
+  // A server leg carries the client's mount: deliveries held for a trait the
+  // client has since initialized go out first, ahead of this request's seeds.
+  if (deps.mount !== undefined && awaitingInit !== undefined) {
+    const lifecycleTarget = isLifecycleEvent(event) ? targetTrait : undefined;
+    queue.unshift(...deps.mount.sync(awaitingInit, lifecycleTarget));
+  }
+  const memory = new DispatchMemory();
+  if (request.dispatchLog !== undefined && request.targetTrait !== undefined) {
+    memory.seed(request.targetTrait, request.dispatchLog);
+  }
+  // A trait's own addressing, the ONE rule both a step (which commits state
+  // under it) and the fan-out (which reads a listener's from-state under
+  // it) use: a forwarded/round-tripped id wins, then the stateless
+  // `[runtime]` sentinel.
+  // The scope a trait last committed under in THIS request is its address for
+  // every later delivery.
+  const scopeByTrait = new Map<string, string | undefined>();
+  // A row a step minted mid-arm (persist create): later READS use it, the
+  // state machine stays addressed where the event came in.
+  const rowByTrait = new Map<string, string>();
+  const stepEntityId = (traitName: string, entry: IndexedTrait, forwarded: string | undefined): string | undefined =>
+    forwarded ??
+    (scopeByTrait.has(traitName) ? scopeByTrait.get(traitName) : undefined) ??
+    (deps.runtimeRowSentinel === true && isRuntimeEntity(entry.entity) ? 'runtime' : undefined);
+  // Traits the requester itself dispatched are on its page by construction
+  // — a fan-out landing back on one must still deliver its render.
+  const requesterTraits = new Set(targets.map((t) => t.trait));
   const visited = new Set<string>();
   let steps = 0;
 
   while (queue.length > 0 && steps < CROSS_TRAIT_CASCADE_CAP) {
     const item = queue.shift();
     if (!item) break;
-    const visitKey = `${item.trait}:${item.event}:${item.from}`;
-    if (visited.has(visitKey)) continue;
-    if (deps.seedVisited?.has(`${item.trait}\u0000${item.event}`) === true) {
+    if (item.fromAtDelivery === true) {
+      const listenerEntry = traitIndex.byName.get(item.trait);
+      if (listenerEntry !== undefined) {
+        item.from = manager.getState(item.trait, stepEntityId(item.trait, listenerEntry, item.entityId))?.currentState ??
+          findInitialState(listenerEntry.traitDef);
+      }
+    }
+    if (deps.seedVisited?.has(alreadyDeliveredKey(item.trait, item.event)) === true) {
       evaluateLog.info('dispatch:already-delivered', {
         trait: item.trait,
         event: item.event,
         from: item.from,
         ...(deps.logContext ?? {}),
       });
+      continue;
+    }
+    if (item.fromAtDelivery === true && !isLifecycleEvent(item.event) && deps.mount?.isAwaiting(item.trait) === true) {
+      evaluateLog.info('fanout:held-until-init', { trait: item.trait, event: item.event, ...(deps.logContext ?? {}) });
+      deps.mount.hold(item.trait, item);
+      continue;
+    }
+    const visitKey = dispatchVisitKey(item.trait, item.event, item.from, item.payload);
+    if (visited.has(visitKey)) continue;
+    if (item.listenGuard !== undefined && !listenGuardPasses(item.listenGuard, {
+      payload: item.delivery.payload,
+      state: item.from,
+      fromState: item.from,
+      ...memory.view(item.trait, item.delivery),
+    })) {
+      evaluateLog.info('fanout:listen-guard-blocked', { trait: item.trait, event: item.event, ...(deps.logContext ?? {}) });
       continue;
     }
     visited.add(visitKey);
@@ -451,14 +520,12 @@ export async function evaluateOrbitalEvent(
       continue;
     }
 
-    // The trait's own addressing: a forwarded/round-tripped id wins, then
-    // the request-level id, then the stateless `[runtime]` sentinel.
-    let currentEntityId = item.entityId ??
-      (deps.runtimeRowSentinel === true && isRuntimeEntity(entry.entity) ? 'runtime' : undefined);
+    const currentEntityId = stepEntityId(item.trait, entry, item.entityId);
+    let rowId = rowByTrait.get(item.trait) ?? currentEntityId;
 
     const readFrame = async (): Promise<EntityRow> => {
-      const persisted = currentEntityId
-        ? ((await persistence.getById(entry.entity.name, currentEntityId)) ?? {})
+      const persisted = rowId
+        ? ((await persistence.getById(entry.entity.name, rowId)) ?? {})
         : {};
       return {
         ...(collectDeclaredEntityDefaults(entry.entity) ?? {}),
@@ -469,11 +536,14 @@ export async function evaluateOrbitalEvent(
 
     const cascade = await runTraitCascade<StepOutcome>({
       trait: entry.traitDef,
+      delivery: item.delivery,
+      memory,
       fromState: item.from,
       eventKey: item.event,
       payload: item.payload,
       config: entry.config,
       user: deps.user,
+      now,
       ...(deps.guardMode !== undefined ? { guardMode: deps.guardMode } : {}),
       ...(deps.strictBindings !== undefined ? { strictBindings: deps.strictBindings } : {}),
       ...(deps.contextExtensions !== undefined ? { contextExtensions: deps.contextExtensions } : {}),
@@ -482,25 +552,28 @@ export async function evaluateOrbitalEvent(
         const emittedStart = emittedEvents.length;
         const effectStart = effectResults.length;
         const itemClientEffects: ClientEffectTuple[] = [];
-        const itemClientEffectsByTrait: Array<{ traitName: string; effect: ClientEffectTuple }> = [];
+        const itemClientEffectsByTrait: ClientEffectByTrait[] = [];
         // A fresh persisted read per step (the stage re-merges frames +
         // declared defaults internally); a prior step's persist must be
         // visible to this step, exactly like a fresh request would.
-        const persistedEntity = currentEntityId
-          ? ((await persistence.getById(entry.entity.name, currentEntityId)) ?? {})
+        const persistedEntity = rowId
+          ? ((await persistence.getById(entry.entity.name, rowId)) ?? {})
           : {};
         await deps.runEffects(item.trait, {
           effects: stepEffects,
           payload: step.payload,
           entityData: persistedEntity,
-          entityId: currentEntityId,
+          entityId: rowId,
           emittedEvents,
           fetchedData,
           clientEffects: itemClientEffects,
           effectResults,
           ...(deps.user !== undefined ? { user: deps.user } : {}),
+          now,
           clientEffectsByTrait: itemClientEffectsByTrait,
+          firing: { event: step.event, fromState: step.fromState },
           ...(deps.originClientId !== undefined ? { originClientId: deps.originClientId } : {}),
+          dispatch: step.dispatch,
         });
         // Render-facing effects are delivered only for traits the
         // requesting page hosts (an off-page listener's effects ran, but
@@ -510,13 +583,19 @@ export async function evaluateOrbitalEvent(
           clientEffectsByTrait.push(...itemClientEffectsByTrait);
         }
         // A step's `persist create` on a row that had none mints the real
-        // id — every read from here on must use it.
-        if (currentEntityId === undefined) {
+        // id — every read from here on uses it; the state stays addressed
+        // where the event came in. A `[shared]` entity's frame is the one
+        // working instance its traits share: a create records a row, it
+        // never re-addresses that instance.
+        if (rowId === undefined && !entry.isSharedEntity) {
           const created = effectResults.slice(effectStart).find(
             (r) => r.effect === 'persist' && r.action === 'create' && r.entityType === entry.entity.name && r.success,
           );
           const createdId = (created?.data as EntityRow | undefined)?.id;
-          if (typeof createdId === 'string') currentEntityId = createdId;
+          if (typeof createdId === 'string') {
+            rowId = createdId;
+            rowByTrait.set(item.trait, createdId);
+          }
         }
         return {
           effectResults: [{
@@ -533,6 +612,7 @@ export async function evaluateOrbitalEvent(
 
     // Commit the cascade's final state (+ observer trace per hop — the
     // same contract `sendEvent` fulfills for the verification registry).
+    scopeByTrait.set(item.trait, currentEntityId);
     manager.commitState(
       item.trait,
       cascade.finalState,
@@ -603,8 +683,12 @@ export async function evaluateOrbitalEvent(
     // ANOTHER trait declares a matching listen for gets that trait's own
     // transition run too. Skipped for relay-masked traits — the origin
     // client's own relay completes those (its mounted set is the mask).
+    if (isLifecycleEvent(item.event) && deps.mount?.isAwaiting(item.trait) === true) {
+      for (const held of deps.mount.initialized(item.trait)) queue.push(held);
+    }
     for (const emitted of cascade.emitted) {
-      for (const target of collectListenerTargets(traitIndex, emitted.source, emitted.event, emitted.payload, relayMask)) {
+      const delivery = deliveryOf(emitted);
+      for (const target of collectListenerTargets(traitIndex, emitted.source, emitted.event, emitted.payload, relayMask, { deferGuards: true })) {
         // Mark consumed so the client's own relay (if the source trait
         // is also on-page) doesn't ALSO re-apply this hop.
         emitted.source = { ...emitted.source, dispatched: true };
@@ -619,12 +703,16 @@ export async function evaluateOrbitalEvent(
 
         queue.push({
           trait: target.listenerTrait,
-          from: manager.getState(target.listenerTrait, target.entityId)?.currentState ??
-            findInitialState(target.entry.traitDef),
+          from: findInitialState(target.entry.traitDef),
+          fromAtDelivery: true,
           event: target.triggers,
           payload: target.payload,
           ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
-          onPage: activeTraits?.has(target.listenerTrait) === true,
+          // Withheld only when the requester's page is KNOWN and excludes it
+          // — the client filters renders by its own mounted set anyway.
+          onPage: activeTraits === undefined || activeTraits.has(target.listenerTrait) || requesterTraits.has(target.listenerTrait),
+          delivery,
+          ...(target.listener.guard !== undefined ? { listenGuard: target.listener.guard as SExpr } : {}),
         });
       }
     }
@@ -685,6 +773,45 @@ export async function evaluateOrbitalEvent(
  * dispatch of its `triggers` event needs (mapped payload, forwarded row
  * id, the trigger's V4 id for rename-proof matching).
  */
+/** The record `@event` reads for an emit delivered to a listener. */
+export function deliveryOf(emitted: { event: string; payload?: EventPayload; source?: BusEventSource }): DeliveryRecord {
+  return {
+    event: emitted.event,
+    ...(emitted.payload !== undefined ? { payload: emitted.payload } : {}),
+    source: { ...(emitted.source ?? {}) },
+  };
+}
+
+/** A listens `when` view for a delivery that starts a fresh dispatch: the emit as `@event`, empty logs. */
+export function freshDeliveryGuardBindings(
+  delivery: DeliveryRecord,
+  stateOf: (listenerTrait: string) => string,
+): (listenerTrait: string) => BindingContext {
+  return (listenerTrait) => {
+    const state = stateOf(listenerTrait);
+    return {
+      payload: delivery.payload,
+      state,
+      fromState: state,
+      ...new DispatchMemory().view(listenerTrait, delivery),
+    };
+  };
+}
+
+/** A listens `when` over the listener's view; an evaluation error blocks the delivery. */
+function listenGuardPasses(guard: SExpr, bindings: BindingContext): boolean {
+  try {
+    return evaluateGuard(guard, createContextFromBindings(bindings));
+  } catch {
+    return false;
+  }
+}
+
+/** A `(trait, event)` pair a client already delivered; the one format `seedVisited` and `alreadyDeliveredFrom` share. */
+export function alreadyDeliveredKey(trait: string, event: string): string {
+  return `${trait}\u0000${event}`;
+}
+
 export interface CollectedListenerTarget {
   listenerTrait: string;
   /** The listener's index entry (initial-state fallback, emit stamping). */
@@ -715,6 +842,12 @@ export function collectListenerTargets(
   event: string,
   payload: EventPayload | undefined,
   skip?: ReadonlySet<string>,
+  opts: {
+    /** Leave each `when` to the caller, which evaluates it at delivery time. */
+    deferGuards?: boolean;
+    /** The listener's view for a `when` evaluated here (a fresh dispatch: empty logs). */
+    guardBindings?: (listenerTrait: string) => BindingContext;
+  } = {},
 ): CollectedListenerTarget[] {
   const targets: CollectedListenerTarget[] = [];
   for (const [listenerName, listenerEntry] of traitIndex.byName) {
@@ -732,17 +865,9 @@ export function collectListenerTargets(
         continue;
       }
 
-      if (listener.guard) {
-        let guardPassed: boolean;
-        try {
-          guardPassed = evaluateGuard(
-            listener.guard as SExpr,
-            createMinimalContext({}, payload),
-          );
-        } catch {
-          guardPassed = false;
-        }
-        if (!guardPassed) continue;
+      if (listener.guard && opts.deferGuards !== true) {
+        const bindings = opts.guardBindings?.(listenerName) ?? { payload };
+        if (!listenGuardPasses(listener.guard as SExpr, bindings)) continue;
       }
 
       const mappedPayload = applyListenPayloadMapping(

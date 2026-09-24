@@ -528,9 +528,11 @@ function isRenderChildrenMap(value: RuntimeValue[]): value is RenderChildrenMap 
 }
 
 /**
- * Check if an array is an S-expression.
+ * Check if an array is an S-expression call (vs literal data). The one
+ * call-vs-data classifier for runtime values — prop trees and entity field
+ * defaults alike.
  */
-function isSExpression(value: RuntimeValue[]): boolean {
+export function isSExpression(value: RuntimeValue[]): boolean {
     if (value.length === 0) return false;
 
     const first = value[0];
@@ -624,6 +626,14 @@ export function createContextFromBindings(
     if (bindings.user) {
         ctx.user = bindings.user;
     }
+    if (bindings.now !== undefined) {
+        ctx.now = bindings.now;
+    }
+    if (bindings.event !== undefined) ctx.event = bindings.event;
+    if (bindings.prevEvents !== undefined) ctx.prevEvents = bindings.prevEvents;
+    if (bindings.prevStates !== undefined) ctx.prevStates = bindings.prevStates;
+    if (bindings.fromState !== undefined) ctx.fromState = bindings.fromState;
+    if (bindings.toState !== undefined) ctx.toState = bindings.toState;
     // Render-resolved schema sigils (`@pages`, `@currentTheme`) — seeded onto
     // the render binding context only. Guards build their context via
     // `createMinimalContext` (no `pages`/`currentTheme`), so the sigils are

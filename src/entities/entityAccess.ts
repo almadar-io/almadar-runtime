@@ -22,6 +22,8 @@ import { createContextFromBindings } from '../evaluation/BindingResolver.js';
 /** Bind shape every access check evaluates against. */
 export interface AccessBindings {
   user?: UserContext;
+  /** The dispatch's `now` stamp, so a time-based policy agrees with the dispatch's guards. */
+  now?: number;
   payload?: EventPayload;
   /**
    * The issuing trait's call-site config. Required so a policy/filter that
@@ -82,7 +84,7 @@ export function applyRowAccess<T extends EntityRow>(
   const predicates = [policy, filter].filter((p): p is SExpr => p !== undefined);
   return rows.filter((entity) => {
     const ctx = createContextFromBindings(
-      { entity, payload: bindings.payload, current: entity, user: bindings.user, config: bindings.config },
+      { entity, payload: bindings.payload, current: entity, user: bindings.user, config: bindings.config, ...(bindings.now !== undefined ? { now: bindings.now } : {}) },
       false,
     );
     return predicates.every((predicate) => {
@@ -114,7 +116,7 @@ export function checkMutationAccess(
     return true;
   }
   const ctx = createContextFromBindings(
-    { entity: row, payload: bindings.payload, current: row, user: bindings.user, config: bindings.config },
+    { entity: row, payload: bindings.payload, current: row, user: bindings.user, config: bindings.config, ...(bindings.now !== undefined ? { now: bindings.now } : {}) },
     false,
   );
   try {

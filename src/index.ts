@@ -35,6 +35,7 @@ export type {
   RuntimeConfig,
   ExecutionEnvironment,
   TransitionObserver,
+  RollbackCause,
   EvaluationContextExtensions,
 } from "./types.js";
 
@@ -70,6 +71,7 @@ export {
   createContextFromBindings,
   createMinimalContext,
   deferEntityBindings,
+  isSExpression,
   type DeferredPatternValue,
   type EvaluationContext,
 } from "./evaluation/BindingResolver.js";
@@ -84,6 +86,7 @@ export {
   selectDispatchCandidates,
   StateMachineManager,
   LIFECYCLE_EVENTS,
+  UNMOUNT_EVENT,
   type ProcessEventOptions,
 } from "./traits/StateMachineCore.js";
 

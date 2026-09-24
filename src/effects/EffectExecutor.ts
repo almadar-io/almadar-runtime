@@ -16,6 +16,7 @@ import type {
     BrowserFilePickerOptions,
     BrowserGeolocationOptions,
 } from '../types.js';
+import { getOperatorRunsOn } from '@almadar/std/registry';
 import { HANDLER_MANIFEST } from '../types.js';
 import type { EffectDelegate } from './server-leg.js';
 import { interpolateValue, createContextFromBindings, deferEntityBindings } from '../evaluation/BindingResolver.js';
@@ -169,14 +170,26 @@ function resolveArgs(
  */
 function interpolateFilterTraitRefs(value: SExpr, ctx: ReturnType<typeof createContextFromBindings>): SExpr {
     if (typeof value === 'string') {
+        // A `@config.X` leaf is the value the resolver would have spliced in —
+        // resolve it, then give an `@entity.*` value it yields the same
+        // trait-frame treatment as a spliced default.
+        if (value.startsWith('@config.')) {
+            const knob = interpolateValue(value, ctx);
+            return typeof knob === 'string' && (knob === '@entity' || knob.startsWith('@entity.'))
+                ? interpolateFilterTraitRefs(knob, ctx)
+                : (knob as SExpr);
+        }
         return value === '@entity' || value.startsWith('@entity.')
             ? (interpolateValue(value, ctx) as SExpr)
             : value;
     }
     if (Array.isArray(value)) {
-        // The row-scoped read — preserve byte-for-byte.
+        // The row-scoped read keeps `@entity` (the candidate row); only a
+        // config-named field argument resolves.
         if (value.length >= 2 && value[0] === 'object/get' && value[1] === '@entity') {
-            return value;
+            return value.map((v, i) =>
+                i >= 2 && typeof v === 'string' && v.startsWith('@config.') ? interpolateFilterTraitRefs(v, ctx) : v,
+            ) as SExpr;
         }
         return value.map((v) => interpolateFilterTraitRefs(v as SExpr, ctx)) as SExpr;
     }
@@ -259,17 +272,13 @@ export class EffectExecutor {
     }
 
     /**
-     * Route a server-only effect (`persist`/`fetch`/`call-service`) to the
-     * configured `delegate` instead of executing it locally — the twin of
-     * `executor.rs`'s `do_persist`/`do_fetch`/`do_call_service` early-return
-     * when `self.environment.is_client()`. Returns `true` when the caller
-     * must not also execute the effect (delegated, or silently dropped as
-     * server-only with no delegate configured — Rust's `noop` case).
-     * `environment` defaults to `'server'`, so this is a no-op for every
-     * existing caller — none of which set it.
+     * On a client host, hand a registry `runsOn: 'server'` effect to the
+     * `delegate` instead of executing it (twin of `executor.rs`
+     * `delegate_to_server`). Returns `true` when the caller must not also
+     * execute it: delegated, or dropped as server-only with no delegate.
      */
     private delegateIfClient(operator: string, args: RuntimeValue[]): boolean {
-        if (this.environment !== 'client') return false;
+        if (this.environment !== 'client' || getOperatorRunsOn(operator) !== 'server') return false;
         this.delegate?.delegate([operator, ...args], 'server');
         return true;
     }
@@ -809,6 +818,10 @@ export class EffectExecutor {
      * `status: 'failed'` instead of the default `'executed'`.
      */
     private async dispatch(operator: string, args: RuntimeValue[]): Promise<{ failed: true; error: string } | void> {
+        if (this.delegateIfClient(operator, args)) {
+            effectLog.debug('effect:delegated-to-server-leg', { operator, target: String(args[0]), traitName: this.context.traitName, transition: this.context.transition });
+            return;
+        }
         switch (operator) {
             // === Universal Effects ===
 
@@ -952,20 +965,6 @@ export class EffectExecutor {
                     success: emitCfg?.success,
                     failure: emitCfg?.failure,
                 });
-                // Client-role environment (`options.environment === 'client'`):
-                // route to `options.delegate` instead of executing — the twin
-                // of `executor.rs`'s `do_persist` client branch. Checked before
-                // the legacy bridge flag below so a caller setting BOTH gets
-                // leg collection, never a silent drop.
-                if (this.delegateIfClient('persist', args)) {
-                    persistLog.debug('persist:delegated-to-server-leg', {
-                        action,
-                        entityType: action === 'batch' ? 'batch' : String(args[1]),
-                        traitName: this.context.traitName,
-                        transition: this.context.transition,
-                    });
-                    return;
-                }
                 // Bridge mode (`EffectHandlers.persistDelegated`): the server
                 // runs this persist and reports its outcome in the response;
                 // the client's handler is a placeholder. Reading its `undefined`
@@ -1133,12 +1132,6 @@ export class EffectExecutor {
                 const params = args[2] as ServiceParams | undefined;
                 // Optional trailing options object carrying `emit:` at args[3].
                 const emitCfg = this.extractEmitConfig(args[3]);
-                // Client-role environment: route to `options.delegate` instead
-                // of calling the handler — see the `persist` case above.
-                if (this.delegateIfClient('call-service', args)) {
-                    effectLog.debug('call-service:delegated-to-server-leg', { service, action, traitName: this.context.traitName, transition: this.context.transition });
-                    break;
-                }
                 // Bridge mode (`EffectHandlers.callServiceDelegated`): the server
                 // already ran this call-service and its cascade carries the
                 // result — no local call, no local emit (mirrors `persistDelegated`).
@@ -1161,15 +1154,6 @@ export class EffectExecutor {
             }
 
             case 'fetch': {
-                // Client-role environment: route to `options.delegate` instead
-                // of calling the handler — see the `persist` case above.
-                // Checked before the `handlers.fetch` presence check, mirroring
-                // `executor.rs`'s `do_fetch`, which gates on environment before
-                // consulting `self.fetch_handler`.
-                if (this.delegateIfClient('fetch', args)) {
-                    effectLog.debug('fetch:delegated-to-server-leg', { entityType: String(args[0]), traitName: this.context.traitName, transition: this.context.transition });
-                    break;
-                }
                 if (this.handlers.fetch) {
                     const entityType = args[0] as string;
                     const rawOpt = args[1];
@@ -1185,6 +1169,13 @@ export class EffectExecutor {
                             include?: string[];
                         } | undefined;
                     const emitCfg = this.extractEmitConfig(rawOpt);
+                    // A declared id that resolved to nothing must never widen into a collection fetch (Rust `resolve_fetch_id`).
+                    if (options !== undefined && 'id' in options && (options.id === undefined || options.id === null || options.id === '')) {
+                        const error = new Error(`${entityType} fetch: id resolved to ${String(options.id)}`);
+                        effectLog.warn('fetch:unresolved-id', { entityType, traitName: this.context.traitName, transition: this.context.transition });
+                        this.emitFailure(emitCfg, error);
+                        break;
+                    }
                     try {
                         const result = await this.handlers.fetch(entityType, options);
                         // Authors read fetched records via `@payload.data`. The
@@ -1408,7 +1399,7 @@ export class EffectExecutor {
                     // downstream renderers don't have to re-validate.
                     const patternRaw = args[1];
                     const pattern: PatternConfig | null =
-                        patternRaw === null
+                        patternRaw === null || patternRaw === undefined
                             ? null
                             : (patternRaw as PatternConfig);
                     const props = args[2] as PatternProps | undefined;

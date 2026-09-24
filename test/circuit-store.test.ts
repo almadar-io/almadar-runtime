@@ -26,7 +26,7 @@ describe('CircuitStore — snapshot/restore', () => {
     expect(store.manager.getState('T')?.currentState).toBe('busy');
     expect(store.frames.get('T')).toEqual({ count: 2 });
 
-    store.restore('T', undefined, snap);
+    store.restore('T', undefined, snap, undefined, 'server-rejected');
 
     expect(store.manager.getState('T')?.currentState).toBe('idle');
     expect(store.frames.get('T')).toEqual({ count: 1 });
@@ -40,7 +40,7 @@ describe('CircuitStore — snapshot/restore', () => {
     store.frames.set('T', { count: 99 });
     expect(store.frames.get('T')).toBeDefined();
 
-    store.restore('T', undefined, snap);
+    store.restore('T', undefined, snap, undefined, 'server-rejected');
     expect(store.frames.has('T')).toBe(false);
   });
 
@@ -59,7 +59,7 @@ describe('CircuitStore — snapshot/restore', () => {
     store.frames.set('$shared::Entity', { x: 1 });
     const snap = store.snapshot('A', undefined, '$shared::Entity');
     store.frames.set('$shared::Entity', { x: 2 });
-    store.restore('A', undefined, snap, '$shared::Entity');
+    store.restore('A', undefined, snap, '$shared::Entity', 'server-rejected');
     expect(store.frames.get('$shared::Entity')).toEqual({ x: 1 });
   });
 });

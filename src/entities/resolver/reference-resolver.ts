@@ -2871,8 +2871,10 @@ function renameEntitiesInTrait(
  * it) can still be a DIFFERENT declaration with a DIFFERENT id — std-wiki's
  * `WikiAttachmentList = PageAtom.traits.WikiAttachmentList -> WikiAttachment`
  * next to its OWN `entityRefIds[WikiPage]`, foreign to a consumer that
- * ALSO happens to declare a `WikiPage`. A name `entityIds` does not know at
- * all keeps its old id — the only honest choice left. Two-path parity twin
+ * ALSO happens to declare a `WikiPage`. An UNRENAMED name `entityIds` does not
+ * know keeps its old id; a RENAMED one with no known id is dropped — its old
+ * id names the pre-rename entity, and the id-first reader would resolve the
+ * token straight back to it. Two-path parity twin
  * of Rust's `rewrite_entity_ref_ids` (`orbital-compiler/src/phases/inline/
  * rewrite.rs`), called from the SAME sites: the orbital-import materializer
  * (after {@link renameEntitiesInTrait}) and the ordinary trait-ref
@@ -2893,7 +2895,11 @@ function rewriteEntityRefIds(
   const out: Record<string, EntityId> = {};
   for (const [from, oldId] of Object.entries(refs)) {
     const name = entitySubs.get(from) ?? from;
-    out[name] = entityIds.get(name) ?? oldId;
+    const id = entityIds.get(name);
+    if (id !== undefined) out[name] = id;
+    // A renamed key never inherits its predecessor's id: the id-first reader
+    // would resolve it straight back to the pre-rename entity.
+    else if (name === from) out[name] = oldId;
   }
   return { ...trait, entityRefIds: out };
 }
@@ -5371,7 +5377,27 @@ export class ReferenceResolver {
         });
       }
     }
-    if (work.length === 0) return { errors: [], auxEntities: [], pulledNames: new Set() };
+    // Rust twin `rename_map` (inline/trait.rs): each explicit rebind's
+    // atom-side name → the name it was bound under. A declared trait's
+    // source-scoped listens name its frame co-siblings by their ATOM names
+    // (`Authority = Frame.traits.TacticsAuthority` listens `PlayerIntent.MOVE`
+    // while the consumer bound `Player = Frame.traits.PlayerIntent`).
+    const renameMap = new Map<string, string>();
+    for (const rt of resolved) {
+      if (rt.source.type === "imported" && rt.trait.name && rt.trait.name !== rt.source.traitName) {
+        renameMap.set(rt.source.traitName, rt.trait.name);
+      }
+    }
+    const renameDeclared = (traits: readonly ResolvedTrait[], all: readonly ResolvedTrait[]): void => {
+      if (renameMap.size === 0) return;
+      const ids = new Map<string, TraitId | undefined>();
+      for (const rt of all) if (rt.trait.name) ids.set(rt.trait.name, rt.trait.id);
+      for (const rt of traits) rt.trait = rewriteListenSources(rt.trait, renameMap, ids);
+    };
+    if (work.length === 0) {
+      renameDeclared(resolved, resolved);
+      return { errors: [], auxEntities: [], pulledNames: new Set() };
+    }
 
     const errors: string[] = [];
     const consumerDeclared = new Set(resolved.map((r) => r.trait.name).filter(Boolean));
@@ -5739,6 +5765,7 @@ export class ReferenceResolver {
     }
 
     if (pulled.length === 0 && parentRewrites.size === 0) {
+      renameDeclared(resolved, resolved);
       return { errors, auxEntities, pulledNames: new Set() };
     }
 
@@ -5760,10 +5787,11 @@ export class ReferenceResolver {
     }
     for (const rt of pulled) {
       const owner = rt.trait.name ? ownerOf.get(rt.trait.name) : undefined;
-      const subs = owner ? ownerSubs.get(owner) : undefined;
-      if (!subs) continue;
+      const subs = new Map([...renameMap, ...(owner ? ownerSubs.get(owner) ?? [] : [])]);
+      if (subs.size === 0) continue;
       rt.trait = rewriteListenSources(rt.trait, subs, idByName);
     }
+    renameDeclared(resolved, [...resolved, ...pulled]);
 
     refResolverLog.info("sibling-pull", {
       pulled: pulled.map((p) => ({
@@ -5826,6 +5854,7 @@ export class ReferenceResolver {
     if (typeof traitRef !== "string" && "ref" in traitRef) {
       const refObj = traitRef as {
         ref: string;
+        id?: TraitId;
         refId?: TraitId;
         name?: string;
         config?: TraitConfig;
@@ -5834,7 +5863,7 @@ export class ReferenceResolver {
         listens?: TraitEventListener[];
         typeArgs?: Record<string, string>;
       };
-      return this.resolveTraitRefString(
+      return withCallSiteTraitId(refObj.id, await this.resolveTraitRefString(
         refObj.ref,
         imports,
         chain,
@@ -5847,7 +5876,7 @@ export class ReferenceResolver {
         refObj.typeArgs,
         embedCtx,
         aliasEntityRenames,
-      );
+      ));
     }
 
     // Case 3: String reference
@@ -7245,6 +7274,28 @@ export class ReferenceResolver {
       return next;
     });
 
+    // `listens {}` — declared routes INTO the imported set (Rust twin: the
+    // `obj.listens` pass in `resolve_orbital_reference`). A source naming an
+    // imported trait follows the prefix; any other source is a host sibling.
+    for (const { trait: target, ...listen } of ref.listens ?? []) {
+      const finalName = subs.get(target);
+      const index = finalName === undefined ? -1 : finalTraits.findIndex((t) => t.name === finalName);
+      if (index < 0) {
+        return {
+          success: false,
+          errors: [
+            `Orbital "${localName}" listens routes into "${target}", which is not a trait of the imported set ` +
+              `(after omit/only) (ORB_O_LISTEN_TARGET_UNKNOWN)`,
+          ],
+        };
+      }
+      const source = listen.source;
+      const imported = source?.kind === 'trait' ? subs.get(source.trait) : undefined;
+      const routed = imported !== undefined ? { ...listen, source: { kind: 'trait' as const, trait: imported } } : listen;
+      const trait = finalTraits[index];
+      finalTraits[index] = { ...trait, listens: [...(trait.listens ?? []), routed] };
+    }
+
     // (A) the primary/auxiliary entities' own relation fields (e.g.
     // `authorId: Author`, a self-relation `parentId: Note`, or an array
     // relation `tagIds: [NoteTagRef]`) still name upstream's un-prefixed
@@ -7689,4 +7740,17 @@ export async function resolveSchema(
   resolver.uniquifyCrossOrbitalPulledSiblings(resolved);
 
   return { success: true, data: resolved, warnings };
+}
+
+/**
+ * A call-site trait reference (`trait ChannelRail = Browse.traits.X`) is its
+ * own node with its own id — every id-scoped `listens` naming it is keyed on
+ * that id, so the resolved trait must carry it rather than the atom's.
+ */
+function withCallSiteTraitId<T extends { trait: Trait }>(
+  id: TraitId | undefined,
+  result: ResolveResult<T>,
+): ResolveResult<T> {
+  if (id === undefined || !result.success) return result;
+  return { ...result, data: { ...result.data, trait: { ...result.data.trait, id } } };
 }

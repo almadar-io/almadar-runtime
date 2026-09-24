@@ -92,6 +92,8 @@ export interface RuntimeRenderPattern {
  * flow through the binding context without type widening.
  */
 import type { TraitConfig } from '@almadar/core';
+import type { RunsOn } from '@almadar/std';
+import { getOperatorRunsOn, getStdEffectOperators } from '@almadar/std/registry';
 export type ConfigContext = TraitConfig;
 
 // ============================================================================
@@ -587,6 +589,17 @@ export interface BindingContext {
     config?: ConfigContext;
     /** Authenticated viewer behind `@user.x` — ownership (`@user.id`) and role gates. */
     user?: UserContext;
+    /** The dispatch's one `now` stamp (ms epoch) — every guard, effect and time operator in it reads this. */
+    now?: number;
+    /** `@event`: the delivery being processed (`deliveryRecordValue`, Runtime Spec Clause 5.5). */
+    event?: EventPayload;
+    /** `@prevEvents`: deliveries this trait already received this dispatch. */
+    prevEvents?: EventPayload[];
+    /** `@prevStates`: states this trait left this dispatch. */
+    prevStates?: string[];
+    /** `@fromState` / `@toState`: the transition's ends. */
+    fromState?: string;
+    toState?: string;
     /**
      * The host orbital's pages for the `@pages` render sigil (`href`/`label`
      * per inline page). Seeded onto the render binding context only — never
@@ -808,19 +821,38 @@ export interface TransitionObserver {
             durationMs?: number;
         }>;
     }): void;
+    /**
+     * Called when an optimistic dispatch is undone: the state moved back from
+     * `from` to `to` because the server rejected the leg or never answered.
+     */
+    onRollback?(trace: { traitName: string; from: string; to: string; cause: RollbackCause }): void;
+}
+
+/** Why an optimistic dispatch was rolled back. */
+export type RollbackCause = 'transport-error' | 'server-rejected';
+
+/** JS-only effect spellings and the registry operator each aliases (G-RUNTIME-043). */
+const EFFECT_ALIASES: Record<string, string> = { render: 'render-ui' };
+
+/** `ops` plus every alias whose target is in it, sorted. */
+function withAliases(ops: string[]): string[] {
+    const aliases = Object.keys(EFFECT_ALIASES).filter((alias) => ops.includes(EFFECT_ALIASES[alias]));
+    return [...ops, ...aliases].sort();
+}
+
+/** Effect operators whose registry `runsOn` is not `site`. */
+function effectsNotOn(site: RunsOn): string[] {
+    return withAliases(getStdEffectOperators().filter((op) => getOperatorRunsOn(op) !== site));
 }
 
 /**
- * Maps execution environments to their available effect handlers.
+ * Effect handlers each execution environment is expected to carry. `client`
+ * and `server` derive from the registry's `runsOn`; `ssr` is a render mode
+ * (one server-side page render), not an execution site, so it stays listed.
  */
 export const HANDLER_MANIFEST: Record<ExecutionEnvironment, string[]> = {
-    client: ["render-ui", "render", "navigate", "navigate-back", "emit", "set", "log", "ref", "deref", "watch", "send-server", "browser/open-file-picker", "browser/clipboard-read", "browser/clipboard-write", "browser/geolocation-current"],
-    server: ["persist", "fetch", "fetch-stream", "call-service", "emit", "set", "spawn", "despawn", "log", "ref", "deref", "swap!", "atomic", "os/watch-files", "os/watch-process", "os/watch-port", "os/watch-http", "os/watch-cron", "os/watch-signal", "os/watch-env", "os/debounce"],
-    test: [
-        "render-ui", "render", "navigate", "navigate-back", "emit", "set",
-        "persist", "fetch", "call-service", "spawn", "despawn", "log",
-        "ref", "deref", "swap!", "watch", "atomic", "send-server",
-        "browser/open-file-picker", "browser/clipboard-read", "browser/clipboard-write", "browser/geolocation-current",
-    ],
-    ssr: ["render-ui", "render", "fetch", "emit", "set", "log", "ref", "deref"],
+    client: effectsNotOn('server'),
+    server: effectsNotOn('client'),
+    test: withAliases(getStdEffectOperators()),
+    ssr: withAliases(["render-ui", "fetch", "emit", "set", "log", "ref", "deref"]),
 };

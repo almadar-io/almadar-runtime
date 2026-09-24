@@ -22,16 +22,20 @@
  */
 import {
   computeTraitDispatchMode,
+  isStaticallyFalse,
   orbitalInlineEntities,
   type BusEventSource,
   type DispatchMode,
   type Entity,
   type OrbitalDefinition,
+  type SExpr,
+  type SExprAtom,
   type Trait,
   type TraitConfig,
   type TraitConfigValue,
 } from '@almadar/core';
 import { createLogger } from '@almadar/logger';
+import { getOperatorRunsOn } from '@almadar/std/registry';
 import { collectDeclaredConfigDefaults } from './config-defaults.js';
 import { findEntityAmongOrbitals, parseOrbitalTraits } from './OrbitalTraitParsing.js';
 import type { TraitDefinition } from '../types.js';
@@ -124,6 +128,53 @@ function containsConfigForward(value: TraitConfigValue): boolean {
  * `configOverridesByTrait` < call-site `uses` override (forward-stripped) —
  * reproduced here so no ui-side merge remains.
  */
+type BindingResolver = (binding: string) => SExprAtom | undefined;
+
+/**
+ * True when `expr` calls an effect whose registry site is `server`, at any
+ * depth. Fold-aware (twin of orbital-core `sexpr_runs_server_effect`): an
+ * `if`/`when` branch whose condition is statically false never runs.
+ */
+export function runsServerEffect(expr: SExpr, resolve?: BindingResolver): boolean {
+  if (Array.isArray(expr)) {
+    const head = expr[0];
+    if ((head === 'if' || head === 'when') && expr.length >= 3) {
+      const thenLive = !isStaticallyFalse(expr[1], resolve);
+      if (head === 'if') {
+        return (thenLive && runsServerEffect(expr[2], resolve)) || (expr[3] !== undefined && runsServerEffect(expr[3], resolve));
+      }
+      return thenLive && expr.slice(2).some((e) => runsServerEffect(e, resolve));
+    }
+    if (typeof head === 'string' && getOperatorRunsOn(head) === 'server') return true;
+    return expr.some((e) => runsServerEffect(e, resolve));
+  }
+  if (expr !== null && typeof expr === 'object') return Object.values(expr).some((e) => runsServerEffect(e, resolve));
+  return false;
+}
+
+/**
+ * Whether a trait's own effects reach the server: any transition, or any
+ * client tick (a `[background]` tick runs on the host, not a dispatch). The
+ * `touchesServer` fact of the dispatch rule (`computeTraitDispatchMode`).
+ */
+export function touchesServer(
+  traitDef: TraitDefinition,
+  irTrait: Pick<Trait, 'ticks'>,
+  config?: Readonly<Record<string, TraitConfigValue>>,
+): boolean {
+  // Config stays a binding in JS guards (Rust inlines it): a scalar knob is a
+  // known literal here, anything else stays undecidable.
+  const resolve: BindingResolver = (binding) => {
+    if (!binding.startsWith('@config.')) return undefined;
+    const value = config?.[binding.slice('@config.'.length)];
+    return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null ? value : undefined;
+  };
+  return traitDef.transitions.some((t) =>
+    !(t.guard !== undefined && isStaticallyFalse(t.guard, resolve)) &&
+    (t.effects ?? []).some((e) => runsServerEffect(e, resolve))) ||
+    (irTrait.ticks ?? []).some((tick) => tick.runsInBackground !== true && (tick.effects as SExpr[]).some((e) => runsServerEffect(e, resolve)));
+}
+
 export function buildTraitIndex(
   orbitals: readonly OrbitalDefinition[],
   configOverridesByTrait?: Readonly<Record<string, TraitConfig>>,
@@ -180,7 +231,7 @@ export function buildTraitIndex(
         ...(orbital.id !== undefined ? { orbitalId: orbital.id as BusEventSource['orbitalId'] } : {}),
         frameKey: isShared ? `$shared::${traitEntity.name}` : traitDef.name,
         isSharedEntity: isShared,
-        dispatchMode: computeTraitDispatchMode(irTrait, traitEntity),
+        dispatchMode: computeTraitDispatchMode(irTrait, traitEntity, touchesServer(traitDef, irTrait as Trait, config)),
       });
     }
   }

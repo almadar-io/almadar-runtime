@@ -35,7 +35,8 @@ import {
 } from './StateMachineCore.js';
 import type { TransitionResult } from '../types.js';
 import { createLogger } from '@almadar/logger';
-import type { BusEventSource, EntityRow, EventPayload } from '@almadar/core';
+import { dispatchVisitKey, type BusEventSource, type DeliveryRecord, type EntityRow, type EventPayload } from '@almadar/core';
+import { DispatchMemory, type EffectDispatch } from '../evaluation/dispatch-memory.js';
 
 const cascadeLog = createLogger('almadar:runtime:trait-cascade');
 
@@ -78,9 +79,14 @@ export interface RunTraitCascadeOptions<TEffectResult> {
     getEntityData: () => Promise<EntityRow> | EntityRow;
     config?: ProcessEventOptions['config'];
     user?: ProcessEventOptions['user'];
+    now?: ProcessEventOptions['now'];
     guardMode?: ProcessEventOptions['guardMode'];
     strictBindings?: ProcessEventOptions['strictBindings'];
     contextExtensions?: ProcessEventOptions['contextExtensions'];
+    /** The seed's delivery record; a direct dispatch with no emitter has an empty `source`. */
+    delivery?: DeliveryRecord;
+    /** The enclosing dispatch's memory, shared across every trait it reaches. */
+    memory?: DispatchMemory;
     /** Runs one step's effects (the caller's own `EffectExecutor`/
      *  `executeEffects` wiring — the two callers' setups differ too much to
      *  share this part) and reports what it emitted, so this loop can decide
@@ -89,7 +95,7 @@ export interface RunTraitCascadeOptions<TEffectResult> {
      *  must read `@payload.X` off it, not the original top-level request's. */
     runEffects: (
         effects: TransitionResult['effects'],
-        step: { fromState: string; toState: string; event: string; payload?: EventPayload },
+        step: { fromState: string; toState: string; event: string; payload?: EventPayload; dispatch: EffectDispatch },
     ) => Promise<CascadeStepEffectsResult<TEffectResult>>;
     maxSteps?: number;
     /** Named identifiers for the cap-hit warning log only — e.g. the
@@ -128,15 +134,15 @@ export async function runTraitCascade<TEffectResult>(
     options: RunTraitCascadeOptions<TEffectResult>,
 ): Promise<TraitCascadeResult<TEffectResult>> {
     const {
-        trait, fromState, eventKey, payload, getEntityData, config, user,
+        trait, fromState, eventKey, payload, getEntityData, config, user, now,
         guardMode, strictBindings, contextExtensions, runEffects,
         maxSteps = DEFAULT_MAX_STEPS, logContext,
     } = options;
+    const memory = options.memory ?? new DispatchMemory();
 
     const effectResults: TEffectResult[] = [];
     const emitted: CascadeEmittedEvent[] = [];
-    // Keyed by `${event}:${fromState}` — the same shape orbital-core's own
-    // `visited` cycle-guard uses in `RuntimeKernel::dispatch`.
+    // `dispatchVisitKey`, the one delivery identity both runtimes share.
     const visited = new Set<string>();
 
     // A WORKLIST, not a single cursor: one step's effects can emit several
@@ -154,8 +160,12 @@ export async function runTraitCascade<TEffectResult>(
     // arm no longer matches, `processEvent` reports `executed: false` and
     // this branch simply drops — the same outcome a real client's own
     // independent dispatch of the same event would reach.
-    interface QueuedEvent { event: string; payload?: EventPayload }
-    const queue: QueuedEvent[] = [{ event: eventKey, payload }];
+    interface QueuedEvent { event: string; payload?: EventPayload; delivery: DeliveryRecord }
+    const queue: QueuedEvent[] = [{
+        event: eventKey,
+        payload,
+        delivery: options.delivery ?? { event: eventKey, ...(payload !== undefined ? { payload } : {}), source: {} },
+    }];
 
     let currentState = fromState;
     let steps = 0;
@@ -175,11 +185,12 @@ export async function runTraitCascade<TEffectResult>(
         // A TRUE cycle (no payload change either) still gets caught, same
         // as before; anything that genuinely never converges still hits
         // the numeric `maxSteps` cap below.
-        const stepKey = `${item.event}:${stepFromState}:${JSON.stringify(item.payload) ?? ''}`;
+        const stepKey = dispatchVisitKey(trait.name, item.event, stepFromState, item.payload);
         if (visited.has(stepKey)) continue; // this branch cycles — drop it, keep draining the rest of the queue
         visited.add(stepKey);
 
         const entityData = await getEntityData();
+        const view = memory.view(trait.name, item.delivery);
         const result = processEvent({
             traitState: { traitName: trait.name, currentState: stepFromState, previousState: null, lastEvent: null, context: {} },
             trait,
@@ -188,15 +199,19 @@ export async function runTraitCascade<TEffectResult>(
             entityData,
             config,
             user,
+            ...(now !== undefined ? { now } : {}),
             guardMode,
             strictBindings,
             contextExtensions,
+            dispatch: view,
         });
+        memory.recordDelivery(trait.name, item.delivery);
 
         if (!result.executed) continue; // no matching/guarded-through arm from the CURRENT state — drop this branch
         steps += 1;
         if (steps === 1) executed = true;
         currentState = result.newState;
+        memory.recordTransition(trait.name, stepFromState, result.newState);
 
         if (result.effects.length > 0) {
             const stepOutcome = await runEffects(result.effects, {
@@ -204,6 +219,7 @@ export async function runTraitCascade<TEffectResult>(
                 toState: result.newState,
                 event: item.event,
                 payload: item.payload,
+                dispatch: { ...view, fromState: stepFromState, toState: result.newState },
             });
             effectResults.push(...stepOutcome.effectResults);
             emitted.push(...stepOutcome.emitted);
@@ -222,13 +238,18 @@ export async function runTraitCascade<TEffectResult>(
                 // moved the state past it) still no-ops identically on a
                 // client re-running the same state machine, so this is safe
                 // either way.
+                const delivery: DeliveryRecord = {
+                    event: e.event,
+                    ...(e.payload !== undefined ? { payload: e.payload } : {}),
+                    source: { ...(e.source ?? {}) },
+                };
                 e.source = { ...e.source, dispatched: true };
                 // The next step's guard/effect bindings must see THIS
                 // event's own payload (e.g. a fetch's `{data: [...]}`), not
                 // the original top-level request's — a `(set @entity.total
                 // (array/sum @payload.data amount))` arm reads
                 // `@payload.data` off whatever event it's reacting to.
-                queue.push({ event: e.event, payload: e.payload });
+                queue.push({ event: e.event, payload: e.payload, delivery });
             }
         }
     }

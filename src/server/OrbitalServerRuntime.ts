@@ -42,17 +42,25 @@
 import type {
   Router as ExpressRouter,
   Request,
-  Response,
-  NextFunction,
+  Response,  NextFunction,
 } from "express";
+// Type-only: the VALUE is loaded lazily inside `withRegistrationMutation`
+// via dynamic import — same keep-it-out-of-the-browser-bundle idiom as
+// `createOsHandlers`/`@almadar/server` below.
+import type { AsyncLocalStorage as BracketAsyncLocalStorage } from "node:async_hooks";
 import { EventBus } from "../events/EventBus.js";
+import type { EffectDispatch } from "../evaluation/dispatch-memory.js";
 import { eventRouteKey } from "../events/identity/routing.js";
 import {
   evaluateOrbitalEvent,
   collectListenerTargets,
+  deliveryOf,
+  freshDeliveryGuardBindings,
   type EvaluateEffectRunner,
   type EvaluateOrbitalEventDeps,
+  type WorklistItem,
 } from "../evaluation/evaluateOrbitalEvent.js";
+import { MountLifecycle } from "../evaluation/mount-lifecycle.js";
 import { buildTraitIndexForOrbital, type TraitIndex } from "../traits/trait-index.js";
 import { createTickScheduler, type TickHandle, type TickScheduler } from "../time/TickScheduler.js";
 import { isValidCronExpression } from "../time/cron.js";
@@ -60,6 +68,8 @@ import { parseDurationString } from "../time/duration.js";
 import {
   StateMachineManager,
   LIFECYCLE_EVENTS,
+  UNMOUNT_EVENT,
+  findInitialState,
 } from "../traits/StateMachineCore.js";
 import { EffectExecutor } from "../effects/EffectExecutor.js";
 import { parseOrbitalTraits } from "../traits/OrbitalTraitParsing.js";
@@ -198,12 +208,14 @@ export type {
   ClientNavigateBackTuple,
   TransitionRejection,
 } from "@almadar/core";
+import { themeDataKey } from "@almadar/core";
 import type {
   OrbitalEventRequest,
   OrbitalEventResponse,
+  ClientEffectByTrait,
   ClientEffectTuple,
 } from "@almadar/core";
-import { isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isPageReference, type NavItem, type ThemeRef, type Page, type PageRef,
+import { dispatchVisitKey, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isPageReference, type NavItem, type Page, type PageRef,
 } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, entityAccessPoliciesByStoreKey } from "@almadar/core/mock";
 import { checkMutationAccess } from "../entities/entityAccess.js";
@@ -250,6 +262,8 @@ export type RuntimeTrait = Trait;
 /** @deprecated Use TraitTick from @almadar/core */
 export type RuntimeTraitTick = TraitTick;
 
+const ANONYMOUS_CLIENT = '\u0000anonymous';
+
 /**
  * Incremental-push item streamed to an SSE client mid-dispatch (an emitted
  * event or a client effect), before the response resolves.
@@ -276,6 +290,8 @@ export interface RegisteredOrbital {
    */
   configByTrait: Map<string, TraitConfig>;
   manager: StateMachineManager;
+  /** The client's mount, followed from each leg's `_awaitingInit` (see `mount-lifecycle.ts`). */
+  mount: MountLifecycle<WorklistItem>;
   entityData: Map<string, EntityRow>; // entityId -> data
   /**
    * Per-trait scalar state set by `(set @entity.X Y)`. Mirrors compiled's
@@ -521,18 +537,6 @@ function deriveNavLabel(name: string): string {
   return name;
 }
 
-/**
- * Derive the `data-theme` selector-key string from an orbital's `theme`.
- * `ThemeRef` string → the name; inline `ThemeDefinition` → its `name`; absent
- * → empty string. Mirrors the Rust resolver's `theme_data_key` (variant axis
- * is the open decision; the base name is the key for now).
- */
-function themeDataKey(theme: ThemeRef | undefined): string {
-  if (theme === undefined) return '';
-  if (typeof theme === 'string') return theme;
-  return theme.name;
-}
-
 /** The baseline theme `@currentTheme` falls back to when an orbital declares
  * no `theme`. Keeps standalone renders (no rabit) styled; rabit overrides
  * globally via `Orbital.theme`. Mirrors the compiler's `DEFAULT_THEME_KEY`. */
@@ -558,6 +562,8 @@ export class OrbitalServerRuntime {
    *  visibility replaces. */
   public readonly persistence: PersistenceAdapter;
   private tickBindings: TickBinding[] = [];
+  /** `orbital::trait` → the clients that have it mounted (Runtime Spec Clause 8.3). */
+  private readonly mountedBy = new Map<string, Set<string>>();
   // One coalesced clock for every tick this runtime registers — replaces
   // "one setInterval per tick" with a single accumulator loop so ticks due
   // in the same pass fire together instead of on independent timers.
@@ -799,7 +805,50 @@ export class OrbitalServerRuntime {
    * `stdLibPath`), which matches how every caller in this monorepo has the
    * std registry on disk.
    */
+  /**
+   * The in-flight (or last-completed) app mutation — `register()` chains its
+   * body onto this, and `unregisterAll()` stamps a marker after clearing.
+   * `processOrbitalEvent` consults it when the requested orbital is missing:
+   * during a catalog-style app swap the new schema's registration is already
+   * in flight while a client's first events arrive, and answering those with
+   * an immediate `Orbital not found` 404 (the pre-fix behavior) races the
+   * swap — big multi-orbital organisms lost their mount INITs intermittently
+   * while single-orbital ones almost always won. Awaiting the epoch and
+   * re-reading the map turns the race into a brief wait. `BrowserPlayground`
+   * gated dispatches on registration ad hoc for the same race; the epoch is
+   * the canonical, host-wide fix.
+   */
+  private registrationEpoch: Promise<unknown> | null = null;
+
+  /**
+   * Reentrancy guard for `withRegistrationMutation`. While a bracket is
+   * open, `register()`/`unregisterAll()` must NOT chain/stamp the epoch:
+   * the callback's sequential awaits already order them, and chaining a
+   * `register()` awaited by the callback onto the bracket's gate would
+   * deadlock (callback → register → epoch → gate → callback's finally).
+   */
+  private registrationMutationDepth = 0;
+
   async register(schema: OrbitalSchema): Promise<void> {
+    if (this.registrationMutationDepth > 0) {
+      // Inside a withRegistrationMutation bracket — ordering is guaranteed
+      // by the callback's awaits; chaining onto the bracket epoch would
+      // deadlock. See registrationMutationDepth.
+      await this.doRegister(schema);
+      return;
+    }
+    const previous = this.registrationEpoch ?? Promise.resolve();
+    // Chain on BOTH fulfillment and rejection: a failed previous mutation
+    // must not wedge the queue for the next schema.
+    const epoch = previous.then(
+      () => this.doRegister(schema),
+      () => this.doRegister(schema),
+    );
+    this.registrationEpoch = epoch;
+    await epoch;
+  }
+
+  private async doRegister(schema: OrbitalSchema): Promise<void> {
     if (this.config.debug) {
       registerLog.debug('register:schema', { name: schema.name });
     }
@@ -1132,6 +1181,7 @@ export class OrbitalServerRuntime {
       manager,
       entityData: new Map(),
       traitFieldStates: new Map(),
+      mount: new MountLifecycle<WorklistItem>(),
     });
 
     // A newly registered orbital's entities must appear in every
@@ -1356,8 +1406,11 @@ export class OrbitalServerRuntime {
     tick: RuntimeTraitTick,
     registered: RegisteredOrbital,
   ): Promise<void> {
+    // Mount-scoped by default: an unmounted trait's tick is paused, not fired (Runtime Spec Clause 8.3).
+    if (tick.runsInBackground !== true && !this.isTraitMounted(orbitalName, traitName)) return;
     const entityType = registered.entity.name;
     const emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }> = [];
+    const now = Date.now();
 
     try {
       // Get all entities (or filtered by appliesTo)
@@ -1389,6 +1442,7 @@ export class OrbitalServerRuntime {
                 "unknown",
               // A tick has no request user; only a dev host's ambient persona.
               user: this.config.defaultUser,
+              now,
             }, false, this.config.contextExtensions);
 
             const guardPasses = evaluateGuard(
@@ -1432,6 +1486,11 @@ export class OrbitalServerRuntime {
             clientEffects,
             tickEffectResults,
             this.config.defaultUser,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            now,
           );
 
           if (this.config.debug) {
@@ -1481,9 +1540,37 @@ export class OrbitalServerRuntime {
   /**
    * Unregister all orbitals and clean up
    */
+  /** A client mounts a trait by dispatching its lifecycle event and releases it with `$UNMOUNT`. */
+  private recordMount(orbitalName: string, request: OrbitalEventRequest, mounted: boolean): void {
+    const client = request.clientId ?? ANONYMOUS_CLIENT;
+    const traits = request.targetTrait !== undefined ? [request.targetTrait] : (request.traits ?? []).map((t) => t.trait);
+    for (const traitName of traits) {
+      const key = `${orbitalName}::${traitName}`;
+      const clients = this.mountedBy.get(key) ?? new Set<string>();
+      if (mounted) clients.add(client);
+      else clients.delete(client);
+      if (clients.size > 0) this.mountedBy.set(key, clients);
+      else this.mountedBy.delete(key);
+    }
+  }
+
+  /** Drop every mount a disconnected client held, so its traits' mount-scoped ticks pause. */
+  releaseClient(clientId: string): void {
+    for (const [key, clients] of this.mountedBy) {
+      clients.delete(clientId);
+      if (clients.size === 0) this.mountedBy.delete(key);
+    }
+  }
+
+  /** True while at least one client has `traitName` mounted. */
+  isTraitMounted(orbitalName: string, traitName: string): boolean {
+    return (this.mountedBy.get(`${orbitalName}::${traitName}`)?.size ?? 0) > 0;
+  }
+
   unregisterAll(): void {
     // Clean up ticks
     this.cleanupTicks();
+    this.mountedBy.clear();
 
     this.orbitals.clear();
     this.eventBus.clear();
@@ -1507,6 +1594,92 @@ export class OrbitalServerRuntime {
     if (this.substrateHandlers) {
       this.substrateHandlers.cleanup();
       this.substrateHandlers = null;
+    }
+
+    // Stamp the mutation epoch AFTER the clear completes: a concurrent
+    // processOrbitalEvent that finds an orbital missing consults
+    // `registrationEpoch`, and a marker here (rather than nothing) keeps a
+    // just-cleared runtime from answering stale lookups while the matching
+    // register() is still chaining behind it. NOTE: this marker only covers
+    // the clear itself — hosts that unregister → resolve → register as a swap
+    // must bracket the WHOLE sequence in `withRegistrationMutation`, or the
+    // resolve window between this marker and the upcoming register() answers
+    // dispatches with a premature 404 (G-RUNTIME-039). Inside such a bracket
+    // the stamp is skipped (the bracket's own epoch covers the swap, and
+    // stamping here would deadlock it — see registrationMutationDepth).
+    if (this.registrationMutationDepth === 0) {
+      this.registrationEpoch = (this.registrationEpoch ?? Promise.resolve())
+        .then(() => undefined, () => undefined);
+    }
+  }
+
+  /**
+   * Bracket a multi-step app mutation (the classic swap is
+   * `unregisterAll()` → resolve next schema → `register()`) as ONE
+   * registration epoch. `register()` alone chains only its own body onto
+   * the epoch, so between `unregisterAll()` and the `register()` call the
+   * runtime's map is empty while the epoch marker has already resolved —
+   * any `processOrbitalEvent` that lands in that gap (the resolve of a big
+   * organism takes real time) 404s `Orbital not found` even though the
+   * requested orbital is milliseconds away from landing. Inside this
+   * bracket the epoch stays pending for the WHOLE callback, so mid-swap
+   * dispatches await the completed swap and then resolve against the new
+   * app. A failed callback still releases the epoch (chained on both
+   * branches), so a failed swap falls through to the honest 404 instead of
+   * wedging the queue. Callbacks SERIALIZE: each bracket awaits the previous
+   * epoch before running `fn`, so two hosts swapping at once (a catalog
+   * select racing a preview remount's `/register`) cannot interleave their
+   * unregister/register sequences into a mixed registry. A bracket opened
+   * from INSIDE another bracket's callback runs `fn` directly — detected
+   * via the AsyncLocalStorage context below (a depth counter alone can't
+   * tell a true nest from a concurrent caller) — because the outer
+   * callback's awaits already serialize it and queueing on the outer gate
+   * would deadlock. Deadlock-free otherwise: `doRegister` never dispatches
+   * events, so awaiting dispatches never block registration progress.
+   */
+  /**
+   * Reentrancy context for `withRegistrationMutation`. A depth counter alone
+   * cannot distinguish "called from inside a bracket callback" (must run
+   * directly — queueing on the outer gate would deadlock) from "called
+   * concurrently while another bracket is in flight" (must queue — running
+   * directly would interleave two swaps). The ALS marks the callback's async
+   * context, which separates the two exactly.
+   */
+  private bracketAls: Promise<BracketAsyncLocalStorage<symbol>> | null = null;
+  private ensureBracketAls(): Promise<BracketAsyncLocalStorage<symbol>> {
+    this.bracketAls ??= import('node:async_hooks').then(
+      ({ AsyncLocalStorage }) => new AsyncLocalStorage<symbol>(),
+    );
+    return this.bracketAls;
+  }
+
+  async withRegistrationMutation<T>(fn: () => Promise<T>): Promise<T> {
+    // Publish the gate SYNCHRONOUSLY: a dispatch arriving in the same tick
+    // as the bracket call must see a pending epoch, not a resolved one —
+    // any await (including the ALS load below) before this publication
+    // would reopen the 404 window the bracket exists to close.
+    const previous = this.registrationEpoch ?? Promise.resolve();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.registrationEpoch = previous.then(() => gate, () => gate);
+    this.registrationMutationDepth++;
+    try {
+      const als = await this.ensureBracketAls();
+      if (als.getStore() !== undefined) {
+        // Called from inside an open bracket's callback — the outer
+        // callback's awaits already serialize us; queueing on the epoch
+        // would deadlock. Our transient gate released here is harmless.
+        release();
+        return await fn();
+      }
+      await previous.catch(() => undefined);
+      const nestingToken = Symbol('withRegistrationMutation');
+      return await als.run(nestingToken, fn);
+    } finally {
+      this.registrationMutationDepth--;
+      release();
     }
   }
 
@@ -1559,6 +1732,22 @@ export class OrbitalServerRuntime {
           persistence: auxRef.persistence,
         });
       }
+    }
+  }
+
+  /**
+   * Return every registered orbital's circuit to boot: trait states to their
+   * initial states, frames and row cache emptied, and a fresh mount (no trait
+   * awaiting INIT, nothing held). The hermetic-reset twin of
+   * `resetMockPersistence`: a reset walk must not inherit the previous walk's
+   * circuit any more than its rows.
+   */
+  resetCircuitState(): void {
+    for (const registered of this.orbitals.values()) {
+      registered.manager.resetAll();
+      registered.traitFieldStates.clear();
+      registered.entityData.clear();
+      registered.mount = new MountLifecycle<WorklistItem>();
     }
   }
 
@@ -1808,6 +1997,21 @@ export class OrbitalServerRuntime {
    * resolves. Used by the SSE streaming path to write items to the
    * response as they arrive rather than buffering and flushing at the end.
    */
+  /**
+   * Read an orbital by name, awaiting an in-flight registration mutation
+   * first when the lookup misses (G-RUNTIME-038): mid-swap lookups 404ed
+   * against the emptied map even though the requested orbital was
+   * milliseconds from landing. A failed mutation falls through to the miss.
+   */
+  private async resolveRegisteredOrbital(orbitalName: string): Promise<RegisteredOrbital | undefined> {
+    let registered = this.orbitals.get(orbitalName);
+    if (!registered && this.registrationEpoch !== null) {
+      await this.registrationEpoch.catch(() => undefined);
+      registered = this.orbitals.get(orbitalName);
+    }
+    return registered;
+  }
+
   async processOrbitalEvent(
     orbitalName: string,
     request: OrbitalEventRequest,
@@ -1824,7 +2028,7 @@ export class OrbitalServerRuntime {
     await this.ensureOsHandlers();
     await this.ensureAgentSubstrateHandlers();
 
-    const registered = this.orbitals.get(orbitalName);
+    const registered = await this.resolveRegisteredOrbital(orbitalName);
     if (!registered) {
       return {
         success: false,
@@ -1833,6 +2037,14 @@ export class OrbitalServerRuntime {
         emittedEvents: [],
         error: `Orbital not found: ${orbitalName}`,
       };
+    }
+
+    if (request.event === UNMOUNT_EVENT) {
+      this.recordMount(orbitalName, request, false);
+      return { success: true, transitioned: false, states: {}, emittedEvents: [] };
+    }
+    if ((LIFECYCLE_EVENTS as readonly string[]).includes(request.event)) {
+      this.recordMount(orbitalName, request, true);
     }
 
     const response = await this.enqueueEvent(() =>
@@ -1923,7 +2135,6 @@ export class OrbitalServerRuntime {
     // user always wins; `defaultUser` only fills the gap for a dev host
     // that has no auth (see the config field's doc).
     const viewer = normalizeUserContext(request.user) ?? this.config.defaultUser;
-    const activeTraits = (request.payload as EventPayload | undefined)?._activeTraits as string[] | undefined;
 
     // A TARGETED request carrying circuit state is the client role's
     // delegated server leg — the composition's own delegated-leg semantics
@@ -1948,19 +2159,13 @@ export class OrbitalServerRuntime {
       }
     }
 
-    // G-RUNTIME-031: the relay mask is DATA — the traits the requesting
-    // client completes itself (its mounted set). The fan-out skips exactly
-    // these; off-page listeners run server-side (the deleted blanket
-    // `originClientId` skip suppressed them). A delegated leg masks
-    // nothing — the client folds the response instead of relaying.
-    const relayMask = isDelegatedLeg
-      ? undefined
-      : activeTraits !== undefined && activeTraits.length > 0
-        ? new Set(activeTraits)
-        : undefined;
-
+    // This host HOLDS every trait's state, so it runs every listener itself
+    // (G-RUNTIME-031's off-page listeners included); the client's mounted
+    // set only scopes which renders come back (`_activeTraits`, read by the
+    // composition). Leaving on-page listeners to the client left this
+    // host's held state stale (G-RUNTIME-042).
     const response = await evaluateOrbitalEvent(
-      this.makeEvaluateDeps(registered, { viewer, onPush, originClientId: request.clientId, relayMask }),
+      this.makeEvaluateDeps(registered, { viewer, onPush, originClientId: request.clientId }),
       serverRequest,
     );
 
@@ -1973,6 +2178,7 @@ export class OrbitalServerRuntime {
     await this.relayEmittedEvents(orbitalName, response.emittedEvents, {
       includeSourceOrbital: false,
       visited: new Set<string>(),
+      into: response,
     });
 
     return response;
@@ -1992,7 +2198,6 @@ export class OrbitalServerRuntime {
       viewer?: UserContext;
       onPush?: (item: PushItem) => void;
       originClientId?: string;
-      relayMask?: ReadonlySet<string>;
     },
   ): EvaluateOrbitalEventDeps {
     const runEffects: EvaluateEffectRunner = async (traitName, args) => {
@@ -2012,6 +2217,10 @@ export class OrbitalServerRuntime {
         args.clientEffectsByTrait,
         context.onPush,
         originClientId,
+        undefined,
+        args.now,
+        args.dispatch,
+        args.firing,
       );
       await this.rerenderCallsiteCaptureChildren(
         registered,
@@ -2027,6 +2236,7 @@ export class OrbitalServerRuntime {
         args.clientEffectsByTrait,
         context.onPush,
         originClientId,
+        args.now,
       );
     };
     return {
@@ -2034,8 +2244,12 @@ export class OrbitalServerRuntime {
       manager: registered.manager,
       persistence: this.persistence,
       frames: registered.traitFieldStates,
+      mount: registered.mount,
       runEffects,
-      ...(context.relayMask !== undefined ? { relayMask: context.relayMask } : {}),
+      // This host holds every trait's state and runs every listener itself:
+      // an explicit empty mask, so the composition's request-shape mask (for
+      // a host that holds no state) never silences a target's own listens.
+      relayMask: new Set<string>(),
       ...(context.viewer !== undefined ? { user: context.viewer } : {}),
       ...(context.originClientId !== undefined ? { originClientId: context.originClientId } : {}),
       ...(this.config.contextExtensions !== undefined ? { contextExtensions: this.config.contextExtensions } : {}),
@@ -2101,23 +2315,44 @@ export class OrbitalServerRuntime {
   private async relayEmittedEvents(
     sourceOrbital: string | undefined,
     emits: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>,
-    opts: { includeSourceOrbital: boolean; visited: Set<string> },
+    opts: {
+      includeSourceOrbital: boolean;
+      visited: Set<string>;
+      /** The requesting response: each relay hop's renders, rows and states
+       *  fold into it so the requester sees the work its event caused. */
+      into?: OrbitalEventResponse;
+    },
   ): Promise<void> {
     const queue = [...emits];
     let hops = 0;
     while (queue.length > 0) {
       const emitted = queue.shift();
       if (emitted === undefined) break;
+      // The composition already fanned an emit out within the orbital that
+      // produced it; skip THAT orbital (the emit's own), not the request's —
+      // a relay hop's answer must still reach the requesting orbital.
+      const producedIn = emitted.source?.orbital ?? sourceOrbital;
       for (const [orbitalName, registered] of this.orbitals) {
-        if (orbitalName === sourceOrbital && !opts.includeSourceOrbital) continue;
+        if (orbitalName === producedIn && !opts.includeSourceOrbital) continue;
+        const delivery = deliveryOf(emitted);
+        const traitIndex = this.traitIndexFor(registered);
         for (const target of collectListenerTargets(
-          this.traitIndexFor(registered),
+          traitIndex,
           emitted.source,
           emitted.event,
           emitted.payload,
+          undefined,
+          {
+            guardBindings: freshDeliveryGuardBindings(delivery, (listener) => {
+              const entry = traitIndex.byName.get(listener);
+              return registered.manager.getState(listener)?.currentState ??
+                (entry !== undefined ? findInitialState(entry.traitDef) : '');
+            }),
+          },
         )) {
-          const from = registered.manager.getState(target.listenerTrait, target.entityId)?.currentState;
-          const key = `${orbitalName}:${target.listenerTrait}:${target.triggers}:${from ?? ''}`;
+          const from = registered.manager.getState(target.listenerTrait, target.entityId)?.currentState ??
+            findInitialState(target.entry.traitDef);
+          const key = `${orbitalName}\u0000${dispatchVisitKey(target.listenerTrait, target.triggers, from, target.payload)}`;
           if (opts.visited.has(key)) continue;
           if (hops >= CROSS_ORBITAL_RELAY_CAP) {
             xOrbitalLog.warn('relay:truncated', { event: emitted.event, hops });
@@ -2127,7 +2362,7 @@ export class OrbitalServerRuntime {
           hops += 1;
           try {
             const response = await evaluateOrbitalEvent(
-              this.makeEvaluateDeps(registered, { viewer: this.config.defaultUser }),
+              { ...this.makeEvaluateDeps(registered, { viewer: this.config.defaultUser }), seedDelivery: delivery },
               {
                 event: target.triggers,
                 ...(target.triggersId !== undefined ? { eventId: target.triggersId } : {}),
@@ -2137,6 +2372,7 @@ export class OrbitalServerRuntime {
               },
             );
             queue.push(...response.emittedEvents);
+            if (opts.into !== undefined) foldRelayHop(opts.into, response);
           } catch (error) {
             // One listener's failure must not strand the remaining relay
             // (the old bus fan-out's handlers were independent too).
@@ -2191,7 +2427,7 @@ export class OrbitalServerRuntime {
     effectResults: ServerEffectResult[],
     /** Already-normalized viewer (see `processOrbitalEvent`'s `viewer`). */
     user?: UserContext,
-    clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>,
+    clientEffectsByTrait?: ClientEffectByTrait[],
     onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void,
     /** Per-request originating client (from `OrbitalEventRequest.clientId`); absent for ticks. Carried through to persist-envelope broadcast items so the sink can exclude the origin. */
     originClientId?: string,
@@ -2203,6 +2439,12 @@ export class OrbitalServerRuntime {
      * non-embedded execution.
      */
     callsitePayload?: EventPayload,
+    /** The dispatch's `now` stamp. */
+    now?: number,
+    /** The transition being run, for post-commit `state` and the dispatch roots. */
+    dispatch?: EffectDispatch,
+    /** The firing transition's event and from-state, stamped on each client effect. */
+    firing?: { event: string; fromState: string },
   ): Promise<void> {
     const sigilPages: NavItem[] = [];
     const seenPaths = new Set<string>();
@@ -2255,7 +2497,7 @@ export class OrbitalServerRuntime {
         mockMode: this.config.mode === 'mock',
         contextExtensions: this.config.contextExtensions,
       },
-      { traitName, effects, payload, entityData, entityId, emittedEvents, fetchedData, clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, callsitePayload },
+      { traitName, effects, payload, entityData, entityId, emittedEvents, fetchedData, clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, callsitePayload, ...(now !== undefined ? { now } : {}), ...(dispatch !== undefined ? { dispatch } : {}), ...(firing !== undefined ? { firing } : {}) },
     );
   }
 
@@ -2298,9 +2540,10 @@ export class OrbitalServerRuntime {
     clientEffects: ClientEffectTuple[],
     effectResults: ServerEffectResult[],
     user: UserContext | undefined,
-    clientEffectsByTrait: Array<{ traitName: string; effect: ClientEffectTuple }> | undefined,
+    clientEffectsByTrait: ClientEffectByTrait[] | undefined,
     onPush: ((item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void) | undefined,
     originClientId: string | undefined,
+    now: number | undefined,
     visited: Set<string> = new Set(),
   ): Promise<void> {
     const children = this.callsiteCaptureChildrenByTrait.get(traitName);
@@ -2334,6 +2577,7 @@ export class OrbitalServerRuntime {
         onPush,
         originClientId,
         callsitePayload,
+        now,
       );
       await this.rerenderCallsiteCaptureChildren(
         registered,
@@ -2349,6 +2593,7 @@ export class OrbitalServerRuntime {
         clientEffectsByTrait,
         onPush,
         originClientId,
+        now,
         visited,
       );
     }
@@ -2709,9 +2954,12 @@ export class OrbitalServerRuntime {
     });
 
     // Get orbital info
-    router.get("/:orbital", (req: Request, res: Response) => {
+    router.get("/:orbital", async (req: Request, res: Response, next: NextFunction) => {
+      try {
       const orbitalName = req.params.orbital as string;
-      const registered = this.orbitals.get(orbitalName);
+      // Await an in-flight swap before the 404 (G-RUNTIME-038) — a state
+      // fetch racing a select/reload must not error against the emptied map.
+      const registered = await this.resolveRegisteredOrbital(orbitalName);
       if (!registered) {
         res.status(404).json({ success: false, error: "Orbital not found" });
         return;
@@ -2735,6 +2983,9 @@ export class OrbitalServerRuntime {
           })),
         },
       });
+      } catch (error) {
+        next(error);
+      }
     });
 
     // Get an entity's FULL mock-store row set (verification/tooling only —
@@ -2747,13 +2998,16 @@ export class OrbitalServerRuntime {
     router.get("/:orbital/entities/:entityType", (req: Request, res: Response, next: NextFunction) => {
       const orbitalName = req.params.orbital as string;
       const entityType = req.params.entityType as string;
-      if (!this.orbitals.has(orbitalName)) {
-        res.status(404).json({ success: false, error: "Orbital not found" });
-        return;
-      }
-      this.persistence.list(entityType)
-        .then((rows) => {
-          res.json({ success: true, entityType, rows });
+      // Same mid-swap await as GET /:orbital (G-RUNTIME-038).
+      this.resolveRegisteredOrbital(orbitalName)
+        .then((registered) => {
+          if (!registered) {
+            res.status(404).json({ success: false, error: "Orbital not found" });
+            return;
+          }
+          return this.persistence.list(entityType).then((rows) => {
+            res.json({ success: true, entityType, rows });
+          });
         })
         .catch(next);
     });
@@ -2925,3 +3179,17 @@ export function createOrbitalServerRuntime(
 // stateless `@almadar-io/playground-runtime` path can reuse the exact same
 // `listens {}` matching predicate for its own cross-orbital cascade instead
 // of a second, divergent copy — see that module's doc comment.
+
+/** Fold one cross-orbital relay hop's results into the requesting response. */
+function foldRelayHop(into: OrbitalEventResponse, hop: OrbitalEventResponse): void {
+  if (hop.clientEffects !== undefined && hop.clientEffects.length > 0) {
+    into.clientEffects = [...(into.clientEffects ?? []), ...hop.clientEffects];
+  }
+  if (hop.clientEffectsByTrait !== undefined && hop.clientEffectsByTrait.length > 0) {
+    into.clientEffectsByTrait = [...(into.clientEffectsByTrait ?? []), ...hop.clientEffectsByTrait];
+  }
+  if (hop.entityByTrait !== undefined) {
+    into.entityByTrait = { ...(into.entityByTrait ?? {}), ...hop.entityByTrait };
+  }
+  into.states = { ...into.states, ...hop.states };
+}

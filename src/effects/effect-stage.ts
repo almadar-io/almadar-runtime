@@ -11,7 +11,8 @@ import { EffectExecutor, clientResolvesRenderBindings } from './EffectExecutor.j
 import type { ServerEffectResult } from './ServerEffectHandlers.js';
 import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
 import { stampEmitSource } from '../events/emit-stamp.js';
-import { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults } from '../traits/config-defaults.js';
+import type { EffectDispatch } from '../evaluation/dispatch-memory.js';
+import { buildConfigBinding, buildEntityBinding } from '../traits/config-defaults.js';
 import { createContextFromBindings } from '../evaluation/BindingResolver.js';
 import { evaluate } from '@almadar/evaluator';
 import type {
@@ -28,6 +29,7 @@ import type {
 import { isEffectTuple } from '../types.js';
 import type {
   BusEventSource,
+  ClientEffectByTrait,
   ClientEffectTuple,
   Entity,
   EntityField,
@@ -142,7 +144,11 @@ export interface ServerEffectStageArgs {
   effectResults: ServerEffectResult[];
   /** Already-normalized viewer (see `processOrbitalEvent`'s `viewer`). */
   user?: UserContext;
-  clientEffectsByTrait?: Array<{ traitName: string; effect: ClientEffectTuple }>;
+  /** The dispatch's `now` stamp. */
+  now?: number;
+  clientEffectsByTrait?: ClientEffectByTrait[];
+  /** The transition whose effects these are; tags each client effect with its provenance. */
+  firing?: { event: string; fromState: string };
   onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void;
   /** Per-request originating client (from `OrbitalEventRequest.clientId`); absent for ticks. Carried through to persist-envelope broadcast items so the sink can exclude the origin. */
   originClientId?: string;
@@ -154,6 +160,8 @@ export interface ServerEffectStageArgs {
    * non-embedded execution.
    */
   callsitePayload?: EventPayload;
+  /** The transition being run: `state`/`@toState` read its target, `@fromState` its source (Runtime Spec Clause 3.3). Absent for ticks. */
+  dispatch?: EffectDispatch;
 }
 
 /**
@@ -303,10 +311,13 @@ export async function runServerEffectStage(
     clientEffects,
     effectResults,
     user,
+    now,
     clientEffectsByTrait,
+    firing,
     onPush,
     originClientId,
     callsitePayload,
+    dispatch,
   } = args;
   const entityType = deps.entity.name;
 
@@ -330,7 +341,7 @@ export async function runServerEffectStage(
   // attribute correctly.
   const pushClientEffect = (effect: ClientEffectTuple): void => {
     clientEffects.push(effect);
-    clientEffectsByTrait?.push({ traitName, effect });
+    clientEffectsByTrait?.push({ traitName, effect, ...firing });
     onPush?.({ type: 'effect', data: effect });
   };
 
@@ -552,7 +563,7 @@ export async function runServerEffectStage(
           deps.validateRelationCardinality?.(type, data || {});
         }
 
-        const accessBindings = { user: bindingsRef?.user, payload: bindingsRef?.payload, config: bindingsRef?.config };
+        const accessBindings = { user: bindingsRef?.user, payload: bindingsRef?.payload, config: bindingsRef?.config, now: bindingsRef?.now };
         const mutationPolicy = deps.resolvedSchema
           ? entityAccessPolicies(deps.resolvedSchema, type)?.[
               action === 'create' ? 'create' : action === 'update' ? 'update' : 'delete'
@@ -767,7 +778,7 @@ export async function runServerEffectStage(
         const readPolicy = deps.resolvedSchema
           ? entityAccessPolicies(deps.resolvedSchema, fetchEntityType)?.read
           : undefined;
-        const accessBindings = { user: bindingsRef?.user, payload: bindingsRef?.payload, config: bindingsRef?.config };
+        const accessBindings = { user: bindingsRef?.user, payload: bindingsRef?.payload, config: bindingsRef?.config, now: bindingsRef?.now };
 
         if (options?.id) {
           // Single entity fetch
@@ -1083,8 +1094,10 @@ export async function runServerEffectStage(
   const bindings: BindingContext = {
     entity: entityData,
     payload,
-    state: state?.currentState || "unknown",
+    state: dispatch?.toState ?? (state?.currentState || "unknown"),
     user,
+    ...(now !== undefined ? { now } : {}),
+    ...(dispatch !== undefined ? dispatch : {}),
   };
   // Surface the composing effect's triggering payload for a JSX-hoisted
   // inline child trait's `@callsitePayload.<field>` captures — both a
@@ -1112,75 +1125,13 @@ export async function runServerEffectStage(
   // backend.rs emits `DEFAULT_<TRAIT>_CONFIG` + `mergedConfig`; the runtime
   // path needs the same merge or std-modal/std-confirmation render bare in
   // playground while the compiled bundle renders correctly.
-  const traitDef = deps.irTraits.find((t) => t.name === traitName);
-  const declaredDefaults = collectDeclaredConfigDefaults(traitDef);
-  // An embedded sub-trait (e.g. std-browse's `DataGrid1`) never gets an
-  // entry in `configByTrait` — that map is only populated for `_resolved`-
-  // wrapped ref traits (see registerOrbitalAsync), and an inline atom
-  // sub-trait pulled in via `@trait.X` isn't one. Its OWN declared config
-  // (`declaredDefaults` above) is the only source, and for a `@config.X`
-  // forward field that's the literal unresolved string. `resolvedTraitConfigs`
-  // (built once at register() via `buildResolvedTraitConfigs`) chains that
-  // forward through to the trait that actually embeds it — merge it in
-  // ahead of `callSiteOverride` (a real call-site override still wins).
-  const resolvedDefaults = deps.resolvedTraitConfigs[traitName];
-  const callSiteOverrideRaw = deps.configByTrait.get(traitName);
-  // Drop unresolved `@config.X` forwards from the call-site config before it
-  // spreads last: for an embedded sub-trait rendered from a state-machine
-  // transition (e.g. std-health-score's inline DataGrid `fields={@config.
-  // fields}`), the call-site value IS the literal forward string, the same
-  // one `resolvedDefaults` already substituted to a concrete value. Spread
-  // raw, it would clobber the resolved array back to `"@config.fields"` and
-  // push an unresolved frame over the bridge — the server half of the
-  // render oscillation. A concrete override (a real array/scalar) still wins.
-  // A `@callsitePayload.<field>` override — whole-value or nested inside an
-  // S-expression — passes through RAW here (no eager resolution). It
-  // resolves later through the standard `@config.*` binding-forward
-  // recursion in `interpolateString` once `bindings.callsitePayload` is
-  // populated above, the same path a declared config default carrying the
-  // same capture already goes through — one owner (the `callsitePayload`
-  // binding root), not a `configByTrait`-only preprocessing pass.
-  const callSiteOverride = callSiteOverrideRaw
-    ? Object.fromEntries(
-        Object.entries(callSiteOverrideRaw).filter(
-          ([, v]) => !(typeof v === 'string' && v.startsWith('@config.')),
-        ),
-      )
-    : undefined;
-  if (declaredDefaults || resolvedDefaults || callSiteOverride) {
-    bindings.config = {
-      ...(declaredDefaults ?? {}),
-      ...(resolvedDefaults ?? {}),
-      ...(callSiteOverride ?? {}),
-    };
-  }
-
-  // A config value that IS a `@user.*` binding ("viewerName: @user.name")
-  // reaches the s-expr evaluator as a raw string: `resolveBinding` carries
-  // no config→user forward hop (interpolateString's hop covers only plain
-  // string props), so on apps whose viewer field was missing the SIGIL TEXT
-  // itself leaked into the UI (2026-08-22 survey: 13 detail pages rendered
-  // a literal "@user.name" account chip). Resolve the forward one hop here
-  // against the request viewer: a resolved field substitutes, a missing one
-  // becomes '' (blank hides the account menu) — never the sigil.
-  if (bindings.config) {
-    const USER_FORWARD = /^@user(?:\.[\w]+)+$/;
-    let changed = false;
-    const resolved: Record<string, TraitConfigValue> = {};
-    for (const [key, value] of Object.entries(bindings.config)) {
-      if (typeof value === 'string' && USER_FORWARD.test(value)) {
-        const cur = getNestedValue(user, value.slice('@user.'.length));
-        resolved[key] =
-          typeof cur === 'string' || typeof cur === 'number' || typeof cur === 'boolean'
-            ? cur
-            : '';
-        changed = true;
-      } else {
-        resolved[key] = value;
-      }
-    }
-    if (changed) bindings.config = resolved;
-  }
+  const config = buildConfigBinding({
+    traitDef: deps.irTraits.find((t) => t.name === traitName),
+    resolvedDefaults: deps.resolvedTraitConfigs[traitName],
+    callSiteOverride: deps.configByTrait.get(traitName),
+    user,
+  });
+  if (config !== undefined) bindings.config = config;
 
   // Render-resolved schema sigils (`@pages`, `@currentTheme`). `@pages` is
   // APP-WIDE: an orbital is authored in isolation and cannot know its
@@ -1200,15 +1151,14 @@ export async function runServerEffectStage(
   // (before any event fires a `(set)`) see undefined → blank UI even though
   // the entity schema declares a sensible default. Mirrors the `@config`
   // merge applied above (declared defaults < call-site override). RC-2.
-  const entityFieldDefaults = collectDeclaredEntityDefaults(deps.entity);
-  const traitFieldState = deps.frames.get(deps.frameKeyFor(traitName));
-  if (entityFieldDefaults || traitFieldState) {
-    bindings.entity = {
-      ...(entityFieldDefaults ?? {}),
-      ...(bindings.entity ?? {}),
-      ...(traitFieldState ?? {}),
-    };
-  }
+  // The defaults are the trait's OWN entity's, not the orbital's primary one.
+  const traitEntityName = deps.irTraits.find((t) => t.name === traitName)?.linkedEntity ?? entityType;
+  const entityBinding = buildEntityBinding({
+    entity: { fields: deps.entityFieldsFor(traitEntityName) },
+    persisted: bindings.entity,
+    frame: deps.frames.get(deps.frameKeyFor(traitName)),
+  });
+  if (entityBinding !== undefined) bindings.entity = entityBinding;
 
   // Add initial named entity binding
   if (entityType) {
