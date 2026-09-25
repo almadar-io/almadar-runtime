@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "6.90.0",
+  "version": "6.91.0",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -12,7 +12,15 @@
     "@almadar/server": false,
     "./dist/createOsHandlers.js": false,
     "@almadar/integrations": false,
-    "@almadar/integrations/runtime": false
+    "@almadar/integrations/runtime": false,
+    "async_hooks": false,
+    "child_process": false,
+    "fs": false,
+    "fs/promises": false,
+    "http": false,
+    "net": false,
+    "path": false,
+    "url": false
   },
   "exports": {
     ".": {
