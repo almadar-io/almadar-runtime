@@ -247,7 +247,7 @@ export { InMemoryPersistence } from "./entities/PersistenceAdapter.js";
 export { MockPersistenceAdapter, createMockPersistence } from "./entities/MockPersistenceAdapter.js";
 
 // Server-side effect handlers factory — the `fetch`/`persist`/`set`/`ref`/
-// `deref`/`swap!`/`atomic`/`callService` layer. Mirrors the handlers built
+// `deref`/`swap`/`atomic`/`callService` layer. Mirrors the handlers built
 // inline in `OrbitalServerRuntime.executeEffects` so client-side offline
 // previews run the same semantics against an `InMemoryPersistence`.
 export {

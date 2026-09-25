@@ -56,6 +56,7 @@ import {
 import { entityAccessPolicies } from '@almadar/core/mock';
 import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from '../entities/entityAccess.js';
 import { findEntityAmongOrbitals } from '../traits/OrbitalTraitParsing.js';
+import { defaultCallService } from './defaultCallService.js';
 import { getPatternFieldsContract } from '@almadar/core/patterns';
 
 const effectLog = createLogger("almadar:runtime:effects");
@@ -744,7 +745,7 @@ export async function runServerEffectStage(
             ...paramsEcho,
           } as EntityRow;
         } else {
-          effectLog.warn('call-service:not-configured', { service, action });
+          result = await defaultCallService(service, action, params, user ? { principal: user.id, role: user.role } : undefined);
         }
 
         effectResults.push({
@@ -762,7 +763,8 @@ export async function runServerEffectStage(
           success: false,
           error: err instanceof Error ? err.message : String(err),
         });
-        return null;
+        // The executor routes a throw to the declared `emit.failure`.
+        throw err;
       }
     },
 
@@ -907,7 +909,7 @@ export async function runServerEffectStage(
         const current = await deps.persistence.getById(swapEntityType, swapEntityId);
         if (!current) {
           effectResults.push({
-            effect: 'swap!',
+            effect: 'swap',
             entityType: swapEntityType,
             success: false,
             error: `Entity ${swapEntityType}/${swapEntityId} not found`,
@@ -941,10 +943,10 @@ export async function runServerEffectStage(
           newData = { ...current, ...(transform as EntityRow) };
         } else {
           effectResults.push({
-            effect: 'swap!',
+            effect: 'swap',
             entityType: swapEntityType,
             success: false,
-            error: 'swap! transform must be an S-expression or object',
+            error: 'swap transform must be an S-expression or object',
           });
           return null;
         }
@@ -953,7 +955,7 @@ export async function runServerEffectStage(
         await deps.persistence.update(swapEntityType, swapEntityId, newData);
 
         effectResults.push({
-          effect: 'swap!',
+          effect: 'swap',
           entityType: swapEntityType,
           data: { id: swapEntityId, ...newData },
           success: true,
@@ -962,7 +964,7 @@ export async function runServerEffectStage(
         return newData;
       } catch (error) {
         effectResults.push({
-          effect: 'swap!',
+          effect: 'swap',
           entityType: swapEntityType,
           success: false,
           error: error instanceof Error ? error.message : String(error),

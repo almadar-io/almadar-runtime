@@ -409,7 +409,7 @@ export class EffectExecutor {
             'log': this.handlers.log,
             'ref': this.handlers.ref,
             'deref': this.handlers.deref,
-            'swap!': this.handlers.swap,
+            'swap': this.handlers.swap,
             'watch': this.handlers.watch,
             'atomic': this.handlers.atomic,
             'behavior/compose': this.handlers.composeBehaviors,
@@ -1299,14 +1299,14 @@ export class EffectExecutor {
                 break;
             }
 
-            case 'swap!': {
+            case 'swap': {
                 if (this.handlers.swap) {
                     const swapEntityType = args[0] as string;
                     const swapEntityId = args[1] as string;
                     const swapTransform = args[2] as SExpr;
                     await this.handlers.swap(swapEntityType, swapEntityId, swapTransform);
                 } else {
-                    this.logUnsupported('swap!');
+                    this.logUnsupported('swap');
                 }
                 break;
             }

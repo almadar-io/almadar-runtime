@@ -145,6 +145,18 @@ export function runsServerEffect(expr: SExpr, resolve?: BindingResolver): boolea
       }
       return thenLive && expr.slice(2).some((e) => runsServerEffect(e, resolve));
     }
+    // Binding positions name values: a `let` pair's name and a
+    // `fn`/`lambda` param list are never calls.
+    if (head === 'let' && expr.length >= 2) {
+      const bindings = expr[1];
+      const boundLive = Array.isArray(bindings)
+        ? bindings.some((pair) => (Array.isArray(pair) ? pair.slice(1).some((e) => runsServerEffect(e, resolve)) : runsServerEffect(pair, resolve)))
+        : runsServerEffect(bindings, resolve);
+      return boundLive || expr.slice(2).some((e) => runsServerEffect(e, resolve));
+    }
+    if ((head === 'fn' || head === 'lambda') && expr.length >= 3) {
+      return expr.slice(2).some((e) => runsServerEffect(e, resolve));
+    }
     if (typeof head === 'string' && getOperatorRunsOn(head) === 'server') return true;
     return expr.some((e) => runsServerEffect(e, resolve));
   }

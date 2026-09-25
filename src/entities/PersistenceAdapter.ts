@@ -2,7 +2,7 @@
  * PersistenceAdapter — the storage contract for runtime effect handlers.
  *
  * The server-side runtime and the in-browser mock runtime both invoke
- * `fetch` / `persist` / `ref` / `deref` / `swap!` effects against an
+ * `fetch` / `persist` / `ref` / `deref` / `swap` effects against an
  * implementation of this interface. Extracted from
  * `OrbitalServerRuntime.ts` so it can be imported by browser code that
  * cannot depend on the server module (which pulls in express).

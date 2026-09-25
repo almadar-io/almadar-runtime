@@ -57,6 +57,15 @@ describe('trait index dispatch mode', () => {
     expect(modeOf({ runtime: true, tickEffects: [['fetch', 'Row', {}]] })).toBe('runtimeOptimistic');
     expect(modeOf({ runtime: true, tickEffects: [['fetch', 'Row', {}]], background: true })).toBe('hybridClientOnly');
   });
+  it('a binding named like a server operator is not server work', () => {
+    const optimistic = (effects: Effect[]): boolean => modeOf({ runtime: true, effects }) === 'runtimeOptimistic';
+    expect(optimistic([['let', [['swap', ['>', '@a', '@b']]], ['set', '@entity.x', '@swap']]])).toBe(false);
+    expect(optimistic([['let', [['fetch', 1], ['persist', 2]], ['set', '@entity.x', '@fetch']]])).toBe(false);
+    expect(optimistic([['set', '@entity.xs', ['array/map', '@entity.xs', ['fn', ['swap', 'i'], '@swap']]]])).toBe(false);
+    expect(optimistic([['let', [['rows', ['fetch', 'Row', {}]]], ['set', '@entity.x', '@rows']]])).toBe(true);
+    expect(optimistic([['let', [['swap', true]], ['persist', 'create', 'Row', {}]]])).toBe(true);
+    expect(optimistic([['set', '@entity.xs', ['array/map', '@entity.xs', ['fn', ['swap', 'i'], ['fetch', 'Row', {}]]]]])).toBe(true);
+  });
   it('control: a persisted trait awaits whatever its effects', () => {
     expect(modeOf({ runtime: false, effects: [['set', '@entity.x', 1]] })).toBe('persistedAwaited');
   });

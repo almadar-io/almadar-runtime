@@ -383,7 +383,7 @@ export interface EffectHandlers {
     /** Log a message */
     log?: (message: string, level?: 'log' | 'warn' | 'error', data?: RuntimeValue) => void;
 
-    // Resource operators (ref/deref/swap!/watch/atomic)
+    // Resource operators (ref/deref/swap/watch/atomic)
 
     /** Ref: declarative data subscription (server: same as fetch) */
     ref?: (

@@ -231,6 +231,12 @@ export async function evaluateOrbitalEvent(
   //    the response's `states` map).
   // ------------------------------------------------------------------
   const entityId = request.entityId ?? deps.entityId;
+  // Where a trait's state lives absent a forwarded id: the stateless
+  // `[runtime]` sentinel. Carried states seed here so every step finds them.
+  const defaultAddress = (entry: IndexedTrait | undefined): string | undefined =>
+    deps.runtimeRowSentinel === true && entry !== undefined && isRuntimeEntity(entry.entity) ? 'runtime' : undefined;
+  const carriedAddress = (trait: string): string | undefined =>
+    entityId ?? defaultAddress(traitIndex.byName.get(trait));
   // Per-trait directly-addressed row ids (a round-tripped row carrying an
   // id — including the `'runtime'` sentinel — keeps its own addressing).
   const traitEntityIds = new Map<string, string>();
@@ -293,6 +299,14 @@ export async function evaluateOrbitalEvent(
       const stateIsFact = request.targetTrait !== undefined || declared !== undefined ||
         (targetEntry.traitDef.states?.length ?? 0) === 1;
       targets = stateIsFact ? [{ trait: targetTrait, from }] : [];
+      // A delegated leg's other carried traits are the listeners its fan-out
+      // runs; they must run from the client's states, not their initial ones.
+      if (request.traits !== undefined) {
+        const carried = new Set(selectDispatchCandidates(request.traits.map(({ trait }) => trait), { activeTraits }));
+        for (const { trait, from: carriedFrom } of request.traits) {
+          if (trait !== targetTrait && carried.has(trait)) manager.seedState(trait, carriedFrom, carriedAddress(trait));
+        }
+      }
     }
   } else if (request.traits !== undefined) {
     if (request.traits.length === 0) {
@@ -316,7 +330,7 @@ export async function evaluateOrbitalEvent(
     targets = request.traits.filter(({ trait }) => dispatchable.has(trait));
     // Seed the surviving declarations (the client's own current states).
     for (const { trait, from } of targets) {
-      manager.seedState(trait, from, entityId);
+      manager.seedState(trait, from, carriedAddress(trait));
     }
   } else {
     // Discovery (a fresh mount — the stateful host's registration-time
@@ -467,7 +481,7 @@ export async function evaluateOrbitalEvent(
   const stepEntityId = (traitName: string, entry: IndexedTrait, forwarded: string | undefined): string | undefined =>
     forwarded ??
     (scopeByTrait.has(traitName) ? scopeByTrait.get(traitName) : undefined) ??
-    (deps.runtimeRowSentinel === true && isRuntimeEntity(entry.entity) ? 'runtime' : undefined);
+    defaultAddress(entry);
   // Traits the requester itself dispatched are on its page by construction
   // — a fan-out landing back on one must still deliver its render.
   const requesterTraits = new Set(targets.map((t) => t.trait));
@@ -618,9 +632,7 @@ export async function evaluateOrbitalEvent(
       cascade.finalState,
       currentEntityId,
       item.event,
-      cascade.executed
-        ? cascade.effectResults.map((s) => ({ from: s.from, to: s.to, event: s.event }))
-        : undefined,
+      cascade.executed ? cascade.hops : undefined,
     );
     states[item.trait] = cascade.finalState;
     transitioned = transitioned || cascade.executed;
@@ -636,8 +648,8 @@ export async function evaluateOrbitalEvent(
     });
     // NOTE: the step runner already appended each step's results to the
     // SHARED `effectResults` array (it receives the array in its args) —
-    // `cascade.effectResults`' slices are the cascade's own bookkeeping
-    // (commitState's hop trace), re-pushing them here double-counted every
+    // `cascade.effectResults`' slices are the cascade's own bookkeeping,
+    // re-pushing them here double-counted every
     // effect (seen as a duplicated persist entry in the client-role fold).
 
     // Structured rejection per non-fired dispatch (reported only when

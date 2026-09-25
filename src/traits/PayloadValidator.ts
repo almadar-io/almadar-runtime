@@ -8,7 +8,7 @@
  * @packageDocumentation
  */
 
-import type { PayloadField } from '@almadar/core';
+import { payloadTypeContainer, type PayloadField } from '@almadar/core';
 import type { TraitDefinition, EventPayload } from '../types.js';
 import type { SExpr } from '@almadar/core';
 
@@ -32,7 +32,8 @@ export interface PayloadValidationFailure {
 /**
  * Validate an incoming event payload against its trait's declared
  * `stateMachine.events[i].payloadSchema`. Currently checks the
- * `required: true` flag against undefined/null values — i.e. enforces
+ * `required: true` flag against undefined/null values, and the container a
+ * present field's `type` declares (`[X]` → array, `object` → object) — enforces
  * the `!` author marker at the API boundary so the persist effect
  * never sees a missing-but-required field.
  *
@@ -58,14 +59,19 @@ export function validateEventPayload(
     if (!schema || schema.length === 0) return [];
     const failures: PayloadValidationFailure[] = [];
     for (const field of schema) {
-        if (!field.required) continue;
         const value = payload?.[field.name];
-        if (value === undefined) {
-            failures.push({ event: eventKey, field: field.name, reason: 'missing', expectedType: field.type });
+        if (value === undefined || value === null) {
+            if (field.required) {
+                failures.push({ event: eventKey, field: field.name, reason: value === undefined ? 'missing' : 'null', expectedType: field.type });
+            }
             continue;
         }
-        if (value === null) {
-            failures.push({ event: eventKey, field: field.name, reason: 'null', expectedType: field.type });
+        const container = payloadTypeContainer(field.type);
+        const wrongContainer =
+            (container.kind === 'array' && !Array.isArray(value)) ||
+            (container.kind === 'object' && (typeof value !== 'object' || Array.isArray(value)));
+        if (wrongContainer) {
+            failures.push({ event: eventKey, field: field.name, reason: 'wrong-type', expectedType: field.type });
         }
     }
     return failures;

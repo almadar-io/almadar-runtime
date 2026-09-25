@@ -39,7 +39,7 @@ import {
 import { findInitialState } from '../traits/StateMachineCore.js';
 import type { TraitIndex } from '../traits/trait-index.js';
 import type { CircuitStore, TraitSnapshot } from './circuit-store.js';
-import type { EntityRow } from '@almadar/core';
+import type { EntityRow, SExpr } from '@almadar/core';
 import { EffectExecutor, clientResolvesRenderBindings } from '../effects/EffectExecutor.js';
 import { createClientEffectHandlers } from '../effects/ClientEffectHandlers.js';
 import { ServerLegCollector } from '../effects/server-leg.js';
@@ -513,6 +513,19 @@ function stripCircuitState(request: OrbitalEventRequest): OrbitalEventRequest {
   return stripped;
 }
 
+/** The response minus everything it carries for `traits` (rows, states, renders). */
+function withoutTraits(response: OrbitalEventResponse, traits: ReadonlySet<string>): OrbitalEventResponse {
+  const keep = <T>(record: Record<string, T> | undefined): Record<string, T> | undefined =>
+    record === undefined ? undefined : Object.fromEntries(Object.entries(record).filter(([trait]) => !traits.has(trait)));
+  const byTrait = response.clientEffectsByTrait?.filter((e) => !traits.has(e.traitName));
+  return {
+    ...response,
+    states: keep(response.states) ?? {},
+    ...(response.entityByTrait !== undefined ? { entityByTrait: keep(response.entityByTrait) } : {}),
+    ...(byTrait !== undefined ? { clientEffectsByTrait: byTrait, clientEffects: byTrait.map((e) => e.effect) } : {}),
+  };
+}
+
 /**
  * Fold a server `OrbitalEventResponse` into `store`: `entityByTrait` merges
  * into `frames` (server wins), and the rows of `writtenTraits` fan out to
@@ -542,7 +555,7 @@ function stripCircuitState(request: OrbitalEventRequest): OrbitalEventRequest {
  */
 export async function applyOrbitalEventResponse(
   store: CircuitStore,
-  response: OrbitalEventResponse,
+  serverResponse: OrbitalEventResponse,
   alreadyDelivered: ReadonlySet<string>,
   opts: ClientRoleOpts,
   writtenTraits: ReadonlySet<string> = new Set(),
@@ -550,6 +563,12 @@ export async function applyOrbitalEventResponse(
   clientEffects: ClientEffectTuple[];
   clientEffectsByTrait: ClientEffectByTrait[];
 }> {
+  // A client-only trait still awaiting its INIT on this mount: no host holds
+  // its deliveries (its INIT never posts), so whatever the host ran for it ran
+  // before INIT. Drop that and hold the delivery here until INIT (Clause 4.1).
+  const heldHere = new Set(store.mount.awaitingTraits().filter((trait) =>
+    opts.traitIndex.byName.get(trait)?.dispatchMode === 'hybridClientOnly'));
+  const response = heldHere.size > 0 ? withoutTraits(serverResponse, heldHere) : serverResponse;
   const clientEffects: ClientEffectTuple[] = [...(response.clientEffects ?? [])];
   const clientEffectsByTrait: ClientEffectByTrait[] =
     [...(response.clientEffectsByTrait ?? [])];
@@ -575,18 +594,33 @@ export async function applyOrbitalEventResponse(
   for (const emitted of response.emittedEvents) {
     const sourceTrait = emitted.source?.trait ?? '';
     if (alreadyDelivered.has(alreadyDeliveredKey(sourceTrait, emitted.event))) continue;
+
+    const delivery = deliveryOf(emitted);
+    for (const target of collectListenerTargets(opts.traitIndex, emitted.source, emitted.event, emitted.payload, undefined, { deferGuards: true })) {
+      if (!heldHere.has(target.listenerTrait)) continue;
+      store.mount.hold(target.listenerTrait, {
+        trait: target.listenerTrait,
+        from: findInitialState(target.entry.traitDef),
+        fromAtDelivery: true,
+        event: target.triggers,
+        payload: target.payload,
+        ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
+        onPage: true,
+        delivery,
+        ...(target.listener.guard !== undefined ? { listenGuard: target.listener.guard as SExpr } : {}),
+      });
+    }
     // The server's own fan-out already ran this emit's listeners (their
     // rows/renders are in this response) — re-running them here doubles
     // every effect.
     if (emitted.source?.dispatched === true) continue;
 
-    const delivery = deliveryOf(emitted);
     const targets = collectListenerTargets(opts.traitIndex, emitted.source, emitted.event, emitted.payload, undefined, {
       guardBindings: freshDeliveryGuardBindings(delivery, (listener) => {
         const entry = opts.traitIndex.byName.get(listener);
         return store.manager.getState(listener)?.currentState ?? (entry !== undefined ? findInitialState(entry.traitDef) : '');
       }),
-    });
+    }).filter((target) => !heldHere.has(target.listenerTrait));
     for (const target of targets) {
       // A fresh, per-fan-out collector — any further server-only effect the
       // fanned listener's arm fires is not drained/posted from here,

@@ -4,7 +4,7 @@
  * Mirrors the handlers built inline in
  * `OrbitalServerRuntime.executeEffects` so both the real server runtime
  * AND the in-browser mock runtime (`@almadar/ui` OrbPreview autoMock) can
- * share the same `fetch` / `persist` / `set` / `ref` / `deref` / `swap!` /
+ * share the same `fetch` / `persist` / `set` / `ref` / `deref` / `swap` /
  * `atomic` / `callService` semantics against a `PersistenceAdapter`.
  *
  * Browser-safe: only imports core + this package's browser-safe modules.
@@ -44,6 +44,7 @@ import type {
 import { EffectExecutor } from "./EffectExecutor.js";
 import { createContextFromBindings } from "../evaluation/BindingResolver.js";
 import { evaluate } from "@almadar/evaluator";
+import { defaultCallService } from './defaultCallService.js';
 import { createLogger } from '@almadar/logger';
 
 /** FATAL: re-measured and gated clean — a persist that resolves no row key
@@ -504,37 +505,15 @@ export function createServerEffectHandlers(
             viewer ? { principal: viewer.id, role: viewer.role } : undefined,
           );
         } else {
-          // Mock fallback: synthetic result satisfying common service-atom
-          // emit shapes ({id, clientSecret, success, status, params-echo}).
-          // Mirrors createClientEffectHandlers + OrbitalServerRuntime mock
-          // mode so service-atom chains advance end-to-end in offline /
-          // standalone-preview without explicit handler wiring.
-          const mockId = `mock_${service}_${action}_${Math.random().toString(36).slice(2, 10)}`;
-          const paramsEcho: Partial<EntityRow> = {};
-          if (params && typeof params === "object") {
-            for (const [k, v] of Object.entries(params as ServiceParams)) {
-              if (
-                v !== undefined &&
-                (typeof v === "string" ||
-                  typeof v === "number" ||
-                  typeof v === "boolean" ||
-                  v === null ||
-                  v instanceof Date)
-              ) {
-                paramsEcho[k] = v;
-              }
-            }
-          }
-          result = {
-            id: mockId,
-            clientSecret: `secret_${mockId}`,
-            success: true,
-            status: "succeeded",
-            ...paramsEcho,
-          } as EntityRow;
-          if (debug) {
-            effectLog.warn('call-service-not-configured-using-mock', { service, action });
-          }
+          // No host handler: the same @almadar/integrations provider compiled
+          // apps use, configured from the env (a missing key is a named failure).
+          const viewer = bindings?.user;
+          result = await defaultCallService(
+            service,
+            action,
+            params,
+            viewer ? { principal: viewer.id, role: viewer.role } : undefined,
+          );
         }
         record({
           effect: "call-service",
@@ -550,7 +529,8 @@ export function createServerEffectHandlers(
           success: false,
           error: err instanceof Error ? err.message : String(err),
         });
-        return null;
+        // The executor routes a throw to the declared `emit.failure`.
+        throw err;
       }
     },
 
@@ -685,7 +665,7 @@ export function createServerEffectHandlers(
         const current = await persistence.getById(swapEntityType, swapEntityId);
         if (!current) {
           record({
-            effect: "swap!",
+            effect: "swap",
             entityType: swapEntityType,
             success: false,
             error: `Entity ${swapEntityType}/${swapEntityId} not found`,
@@ -712,16 +692,16 @@ export function createServerEffectHandlers(
           newData = { ...current, ...transform };
         } else {
           record({
-            effect: "swap!",
+            effect: "swap",
             entityType: swapEntityType,
             success: false,
-            error: "swap! transform must be an S-expression or object",
+            error: "swap transform must be an S-expression or object",
           });
           return null;
         }
         await persistence.update(swapEntityType, swapEntityId, newData);
         record({
-          effect: "swap!",
+          effect: "swap",
           entityType: swapEntityType,
           data: { id: swapEntityId, ...newData },
           success: true,
@@ -729,7 +709,7 @@ export function createServerEffectHandlers(
         return newData;
       } catch (err) {
         record({
-          effect: "swap!",
+          effect: "swap",
           entityType: swapEntityType,
           success: false,
           error: err instanceof Error ? err.message : String(err),

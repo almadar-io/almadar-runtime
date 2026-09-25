@@ -171,6 +171,7 @@ import type {
   EntityRow,
   EventPayload,
   EvaluationContextExtensions,
+  TransitionObserver,
 } from "../types.js";
 import { collectDeclaredConfigDefaults } from "../traits/config-defaults.js";
 // Backward-compat: `collectDeclaredConfigDefaults` used to live here. The package
@@ -570,6 +571,11 @@ export class OrbitalServerRuntime {
   private readonly tickScheduler: TickScheduler = createTickScheduler();
   private loader: SchemaLoader | null = null;
   private preprocessedCache = new Map<string, PreprocessedSchema>();
+  private readonly transitionObservers = new Set<TransitionObserver>();
+  private readonly transitionFanout: TransitionObserver = {
+    onTransition: (trace) => { for (const o of this.transitionObservers) o.onTransition(trace); },
+    onRollback: (trace) => { for (const o of this.transitionObservers) o.onRollback?.(trace); },
+  };
   private entitySharingMap: EntitySharingMap = {};
   private eventNamespaceMap: EventNamespaceMap = {};
   private osHandlers: OsHandlerResult | null = null;
@@ -1160,7 +1166,7 @@ export class OrbitalServerRuntime {
 
     const manager = new StateMachineManager(traitDefs, {
       contextExtensions: this.config.contextExtensions,
-    });
+    }, this.transitionFanout);
 
     // Bind each trait's call-site config to the manager so `@config.X`
     // resolves inside guard expressions at runtime. The orbital's
@@ -3089,6 +3095,12 @@ export class OrbitalServerRuntime {
    */
   getEventBus(): EventBus {
     return this.eventBus;
+  }
+
+  /** Observe every executed hop (listener deliveries included) on every orbital; returns the unsubscribe. */
+  observeTransitions(observer: TransitionObserver): () => void {
+    this.transitionObservers.add(observer);
+    return () => { this.transitionObservers.delete(observer); };
   }
 
   /**

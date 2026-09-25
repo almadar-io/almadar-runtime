@@ -38,7 +38,7 @@ describe('runsOn delegation', () => {
     it('a server never delegates, not even with a delegate configured', async () => {
         const collector = new ServerLegCollector();
         const { executor } = makeExecutor('server', collector);
-        await executor.executeWithResults([['swap!', '@entity.n', 2], ['emit', 'SAVED']]);
+        await executor.executeWithResults([['swap', '@entity.n', 2], ['emit', 'SAVED']]);
         expect(collector.drain()).toEqual([]);
     });
 

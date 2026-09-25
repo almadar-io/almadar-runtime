@@ -118,6 +118,8 @@ export interface TraitCascadeResult<TEffectResult> {
     /** Number of steps actually run (1 if no cascade occurred, 0 if the
      *  initial event didn't match anything). */
     steps: number;
+    /** Every executed step, in order — effectless hops included. */
+    hops: Array<{ from: string; to: string; event: string }>;
     /** Set when `maxSteps` was hit — the cascade stopped early, logged, not thrown. */
     cappedAt?: number;
 }
@@ -142,6 +144,7 @@ export async function runTraitCascade<TEffectResult>(
 
     const effectResults: TEffectResult[] = [];
     const emitted: CascadeEmittedEvent[] = [];
+    const hops: Array<{ from: string; to: string; event: string }> = [];
     // `dispatchVisitKey`, the one delivery identity both runtimes share.
     const visited = new Set<string>();
 
@@ -212,6 +215,7 @@ export async function runTraitCascade<TEffectResult>(
         if (steps === 1) executed = true;
         currentState = result.newState;
         memory.recordTransition(trait.name, stepFromState, result.newState);
+        hops.push({ from: stepFromState, to: result.newState, event: item.event });
 
         if (result.effects.length > 0) {
             const stepOutcome = await runEffects(result.effects, {
@@ -259,5 +263,5 @@ export async function runTraitCascade<TEffectResult>(
         cascadeLog.warn('cascade:cap-hit', { trait: trait.name, maxSteps, ...logContext });
     }
 
-    return { executed, finalState: currentState, effectResults, emitted, steps, cappedAt };
+    return { executed, finalState: currentState, effectResults, emitted, steps, hops, cappedAt };
 }

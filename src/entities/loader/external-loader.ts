@@ -519,7 +519,7 @@ export class ExternalOrbitalLoader {
 
     // Tiers are whatever the registry actually holds, never a hardcoded
     // list — same doctrine as the topic discovery below. The registry has
-    // grown `templates` (ui/game, ui/core, ui/marketing) and any future
+    // grown `templates` (ui/game, ui/core) and any future
     // tier; the previous ["atoms","molecules","organisms"] constant silently
     // failed every `std/behaviors/<name>` import whose behavior lives in a
     // non-listed tier (std-snake's `ui-game-shell` was the live casualty).
