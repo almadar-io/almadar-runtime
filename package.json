@@ -93,17 +93,21 @@
     }
   },
   "devDependencies": {
+    "@almadar-io/behaviors": "^0.16.180",
     "@almadar/eslint-plugin": "^2.20.0",
+    "@almadar/orb": "^17.4.0",
     "@types/express": "^5.0.0",
     "@types/node": "^20.0.0",
+    "@types/semver": "^7.7.0",
     "@typescript-eslint/parser": "8.65.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "eslint": "10.0.0",
     "express": "^5.0.0",
+    "semver": "^7.7.2",
     "tsup": "^8.0.0",
     "turbo": "^2.8.17",
-    "vitest": "^2.1.0",
-    "@typescript/native": "npm:typescript@^7.0.2",
-    "typescript": "npm:@typescript/typescript6@^6.0.2"
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^2.1.0"
   },
   "repository": {
     "type": "git",
@@ -118,5 +122,8 @@
     "interpreter"
   ],
   "homepage": "https://github.com/almadar-io/almadar#readme",
-  "packageManager": "pnpm@10.30.3"
+  "packageManager": "pnpm@10.30.3",
+  "engines": {
+    "node": ">=22.19.0"
+  }
 }

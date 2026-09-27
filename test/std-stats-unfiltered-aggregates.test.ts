@@ -8,12 +8,11 @@ import { join } from 'node:path';
 import type { EntityRow, OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { buildTraitIndex, createIndexStageRunner, evaluateOrbitalEvent, InMemoryPersistence, StateMachineManager } from '../src/index.js';
-
-const R = join(__dirname, '..', '..', '..');
+import { STD_ROOT } from './helpers/behavior-packages.js';
 
 async function cardsFor(metrics: ReadonlyArray<Record<string, string | ReadonlyArray<string | boolean>>>) {
-  const raw = JSON.parse(readFileSync(join(R, 'packages/almadar-std/behaviors/registry/ui/core/atoms/std-stats.orb'), 'utf-8')) as OrbitalSchema;
-  const r = await preprocessSchema(raw, { basePath: join(R, 'packages/almadar-std'), stdLibPath: join(R, 'packages/almadar-std'), allowOutsideBasePath: true });
+  const raw = JSON.parse(readFileSync(join(STD_ROOT, 'behaviors/registry/ui/core/atoms/std-stats.orb'), 'utf-8')) as OrbitalSchema;
+  const r = await preprocessSchema(raw, { basePath: STD_ROOT, stdLibPath: STD_ROOT, allowOutsideBasePath: true });
   if (!r.success) throw new Error(r.errors.join('; '));
   const s = r.data.schema;
   const traitIndex = buildTraitIndex(s.orbitals, { StatsItemStats: { metrics: [...metrics] } });

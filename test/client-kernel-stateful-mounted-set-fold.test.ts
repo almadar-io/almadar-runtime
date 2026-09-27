@@ -7,7 +7,7 @@
  */
 import { getTraitName } from '@almadar/core';
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
@@ -20,9 +20,9 @@ import {
   type IndexedTrait,
   type TraitIndex,
 } from '../src/index.js';
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
-const TT_ORB = join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry/app/organisms/std-time-tracking.orb');
+const TT_ORB = join(IO_ROOT, 'behaviors/registry/app/organisms/std-time-tracking.orb');
 
 function restrict(full: TraitIndex, names: ReadonlySet<string>): TraitIndex {
   const byName = new Map<string, IndexedTrait>();
@@ -30,12 +30,12 @@ function restrict(full: TraitIndex, names: ReadonlySet<string>): TraitIndex {
   return { byName, allEntities: full.allEntities, orbitals: full.orbitals };
 }
 
-describe.skipIf(!existsSync(TT_ORB))('stateful fold of mounted listeners (std-time-tracking /reports)', () => {
+describe('stateful fold of mounted listeners (std-time-tracking /reports)', () => {
   it('the stat tiles and the billable chart render the aggregated values', async () => {
     const raw = JSON.parse(readFileSync(TT_ORB, 'utf-8')) as OrbitalSchema;
     const resolved = await preprocessSchema(raw, {
-      basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-      stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+      basePath: IO_ROOT,
+      stdLibPath: STD_ROOT,
       allowOutsideBasePath: true,
     });
     if (!resolved.success) throw new Error(resolved.errors.join('; '));

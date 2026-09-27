@@ -7,8 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
-
-const REPO_ROOT = join(__dirname, '..', '..', '..');
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
 function schemaWithUses(uses: { as: string; from: string }[]): OrbitalSchema {
   return {
@@ -25,8 +24,8 @@ function schemaWithUses(uses: { as: string; from: string }[]): OrbitalSchema {
 
 async function resolve(uses: { as: string; from: string }[]) {
   return preprocessSchema(schemaWithUses(uses), {
-    basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-    stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+    basePath: IO_ROOT,
+    stdLibPath: STD_ROOT,
     allowOutsideBasePath: true,
   });
 }

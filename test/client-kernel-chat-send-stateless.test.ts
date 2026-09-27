@@ -6,7 +6,7 @@
  */
 import { getTraitName } from '@almadar/core';
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EntityRow, OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
@@ -23,18 +23,18 @@ import {
   type IndexedTrait,
   type TraitIndex,
 } from '../src/index.js';
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
 const CHAT_ORBS = [
-  join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry/app/organisms/std-realtime-chat.orb'),
-  join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry/project-friday/organisms/project-friday.orb'),
-].filter((p) => existsSync(p));
+  join(IO_ROOT, 'behaviors/registry/app/organisms/std-realtime-chat.orb'),
+  join(IO_ROOT, 'behaviors/registry/project-friday/organisms/project-friday.orb'),
+];
 
 async function resolve(orbPath: string): Promise<OrbitalSchema> {
   const raw = JSON.parse(readFileSync(orbPath, 'utf-8')) as OrbitalSchema;
   const resolved = await preprocessSchema(raw, {
-    basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-    stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+    basePath: IO_ROOT,
+    stdLibPath: STD_ROOT,
     allowOutsideBasePath: true,
   });
   if (!resolved.success) throw new Error(resolved.errors.join('; '));

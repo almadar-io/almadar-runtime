@@ -8,13 +8,13 @@
  * std-realtime-chat's rail click, auto-open and thread were all dead.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OrbitalSchema, TraitRef } from '@almadar/core';
 import { resolveSchema } from '../src/entities/resolver/reference-resolver.js';
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
-const BEHAVIORS_ROOT = join(REPO_ROOT, 'packages/almadar-behaviors');
+const BEHAVIORS_ROOT = IO_ROOT;
 const ORGANISMS = [
   join(BEHAVIORS_ROOT, 'behaviors/registry/app/organisms/std-realtime-chat.orb'),
   join(BEHAVIORS_ROOT, 'behaviors/registry/project-friday/organisms/project-friday.orb'),
@@ -33,14 +33,14 @@ function refIds(schema: OrbitalSchema): Map<string, string> {
   return out;
 }
 
-describe.each(ORGANISMS.filter((p) => existsSync(p)))('call-site trait ids survive resolution (%s)', (orbPath) => {
+describe.each(ORGANISMS)('call-site trait ids survive resolution (%s)', (orbPath) => {
   it('every named reference resolves to a trait carrying the reference\'s own id', async () => {
     const input = JSON.parse(readFileSync(orbPath, 'utf-8')) as OrbitalSchema;
     const expected = refIds(input);
     expect(expected.size).toBeGreaterThan(0);
     const result = await resolveSchema(input, {
       basePath: BEHAVIORS_ROOT,
-      stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+      stdLibPath: STD_ROOT,
       allowOutsideBasePath: true,
     });
     expect(result.success).toBe(true);

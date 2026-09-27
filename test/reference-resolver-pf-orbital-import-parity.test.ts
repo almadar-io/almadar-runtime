@@ -22,38 +22,32 @@
  * `composed-trait-listen-eventid-routing.test.ts`'s real-plugin suite.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { OrbitalSchema, Orbital, Trait, TraitRef } from '@almadar/core';
+import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, STD_ROOT, orbSpawnEnv } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
-const PF_LOLO = join(
-  REPO_ROOT,
-  'packages/almadar-behaviors/behaviors/lolo/project-friday/organisms/project-friday.lolo',
-);
-const ORB_BIN = join(homedir(), 'bin', 'orb');
-const ORBITAL_BIN = join(homedir(), 'bin', 'orbital');
-const canRun = existsSync(ORB_BIN) && existsSync(ORBITAL_BIN) && existsSync(PF_LOLO);
+const PF_LOLO = join(IO_ROOT, 'behaviors/lolo/project-friday/organisms/project-friday.lolo');
+const ORB_BIN = ORB_BIN_INSTALLED;
+const ORBITAL_BIN = ORB_BIN_INSTALLED;
 
-const CLI_ENV = { ...process.env, ALMADAR_DEV: '1', ALMADAR_ROOT: REPO_ROOT };
+const CLI_ENV = orbSpawnEnv();
 
 function isTrait(t: TraitRef): t is Trait {
   return typeof t === 'object' && 'stateMachine' in t;
 }
 
-describe.skipIf(!canRun)(
+describe(
   'ReferenceResolver — real-organism JS-vs-Rust orbital-import parity (Project Friday, B4-J6)',
   () => {
-    if (!canRun) return;
     const dir = mkdtempSync(join(tmpdir(), 'pf-parity-'));
     const pfOrbPath = join(dir, 'pf.orb');
     const pfResolvedPath = join(dir, 'pf-resolved.orb');
-    execFileSync(ORB_BIN, ['emit', 'orb', PF_LOLO, '-o', pfOrbPath], { env: CLI_ENV, maxBuffer: 64 * 1024 * 1024 });
-    execFileSync(ORBITAL_BIN, ['resolve', pfOrbPath, '-o', pfResolvedPath], {
-      env: CLI_ENV,
+    execFileSync(ORB_BIN, ['emit', 'orb', PF_LOLO, '-o', pfOrbPath], { cwd: PACKAGE_ROOT, env: CLI_ENV, maxBuffer: 64 * 1024 * 1024 });
+    execFileSync(ORBITAL_BIN, ['resolve', pfOrbPath, '-o', pfResolvedPath], { cwd: PACKAGE_ROOT, env: CLI_ENV,
       maxBuffer: 64 * 1024 * 1024,
     });
     const pfSchema = JSON.parse(readFileSync(pfOrbPath, 'utf-8')) as OrbitalSchema;
@@ -67,8 +61,8 @@ describe.skipIf(!canRun)(
     for (const orbitalName of ['TimesheetOrbital', 'ApprovalRequestOrbital'] as const) {
       it(`"${orbitalName}" resolves the same trait SET through both paths (order-independent)`, async () => {
         const result = await preprocessSchema(pfSchema, {
-          basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-          stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+          basePath: IO_ROOT,
+          stdLibPath: STD_ROOT,
           allowOutsideBasePath: true,
         });
         expect(result.success).toBe(true);
@@ -102,8 +96,8 @@ describe.skipIf(!canRun)(
 
     it('both AppLayout shells forward the imported app-level appName/navItems knobs (uses { config } override)', async () => {
       const result = await preprocessSchema(pfSchema, {
-        basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-        stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+        basePath: IO_ROOT,
+        stdLibPath: STD_ROOT,
         allowOutsideBasePath: true,
       });
       expect(result.success).toBe(true);

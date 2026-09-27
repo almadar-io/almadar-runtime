@@ -22,10 +22,9 @@ import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loa
 // `<case>.upstream.json` file holding `{ orbital, orbitals, sourcePath }`
 // when the schema needs an external load — see `loadUpstreamFor` below).
 
-const FIXTURES_DIR = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../../orbital-rust/crates/orbital-compiler/tests/fixtures/orbital_import_stage_b',
-);
+// orbital-rust's Stage B goldens (`orbital-compiler` `assert_or_write_fixture`, UPDATE_FIXTURES=1),
+// copied in: CI checks this package out alone.
+const FIXTURES_DIR = path.join(import.meta.dirname, 'fixtures', 'orbital_import_stage_b');
 
 function sortKeysDeep(value: RuntimeValue): RuntimeValue {
   if (Array.isArray(value)) return value.map(sortKeysDeep);
@@ -115,15 +114,6 @@ function loaderFor(fixture: StageBFixture): SchemaLoader {
   };
 }
 
-const fixturesDirExists = fs.existsSync(FIXTURES_DIR);
-if (!fixturesDirExists) {
-  console.warn(
-    `[reference-resolver-stage-b-fixtures] SKIPPED: fixtures directory not found at ` +
-      `${FIXTURES_DIR} — B2-R (orbital-rust) has not landed the Stage B fixture set yet. ` +
-      `Re-run this suite once orbital-rust/crates/orbital-compiler/tests/fixtures/orbital_import_stage_b/*.json exists.`,
-  );
-}
-
 // Fixtures with a bespoke `expected` shape (not a full `OrbitalDefinition`)
 // get their OWN dedicated comparison below instead of the generic
 // materialization-equality loop.
@@ -133,12 +123,10 @@ const BESPOKE_SHAPE_FIXTURES = new Set(['sentinel_payload.json']);
 // out-of-orbital relation unmapped is refused here at resolve while Rust defers
 // the same finding to validate — the Rust writer must map it (`entities {}`).
 
-describe.skipIf(!fixturesDirExists)('ReferenceResolver — Stage B cross-path fixture parity (B2-R ↔ B2-J)', () => {
-  const caseFiles = fixturesDirExists
-    ? fs.readdirSync(FIXTURES_DIR).filter((f) => f.endsWith('.json') && !BESPOKE_SHAPE_FIXTURES.has(f))
-    : [];
+describe('ReferenceResolver — Stage B cross-path fixture parity (B2-R ↔ B2-J)', () => {
+  const caseFiles = fs.readdirSync(FIXTURES_DIR).filter((f) => f.endsWith('.json') && !BESPOKE_SHAPE_FIXTURES.has(f));
 
-  if (fixturesDirExists && caseFiles.length === 0) {
+  if (caseFiles.length === 0) {
     it.fails('fixtures directory exists but is empty — nothing to compare', () => {
       throw new Error(`${FIXTURES_DIR} exists but has no *.json fixtures`);
     });
@@ -185,9 +173,8 @@ function noopLoader(): SchemaLoader {
 }
 
 const SENTINEL_FIXTURE = path.join(FIXTURES_DIR, 'sentinel_payload.json');
-const sentinelFixtureExists = fixturesDirExists && fs.existsSync(SENTINEL_FIXTURE);
 
-describe.skipIf(!sentinelFixtureExists)(
+describe(
   'ReferenceResolver — sentinel resolution fixture parity (sentinel_payload.json, C1-J1)',
   () => {
     it('resolves @entity / $<TypeParam> payload sentinels identically to the compiled path', async () => {

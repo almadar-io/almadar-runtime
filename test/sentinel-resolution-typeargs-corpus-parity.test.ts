@@ -25,17 +25,17 @@
  * `reference-resolver-pf-orbital-import-parity.test.ts`.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { homedir } from 'node:os';
+
 import { join } from 'node:path';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { EventPayloadField, Orbital, OrbitalSchema, Trait, TraitRef } from '@almadar/core';
+import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, STD_ROOT, orbSpawnEnv } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
-const ORBITAL_BIN = join(homedir(), 'bin', 'orbital');
-const BEHAVIORS_REGISTRY = join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry');
-const CLI_ENV = { ...process.env, ALMADAR_DEV: '1', ALMADAR_ROOT: REPO_ROOT };
+const ORBITAL_BIN = ORB_BIN_INSTALLED;
+const BEHAVIORS_REGISTRY = join(IO_ROOT, 'behaviors/registry');
+const CLI_ENV = orbSpawnEnv();
 
 /** Every registry trait authoring a call-site `typeArgs` override, verified
  * via `grep -rl '"typeArgs"' packages/*\/behaviors/registry` (2026-09-06). */
@@ -45,8 +45,6 @@ const GATE_CASES = [
   { file: 'app/organisms/std-cms.orb', trait: 'ArticleApprovalReview' },
   { file: 'app/organisms/std-cicd-pipeline.orb', trait: 'DeploymentApproval' },
 ] as const;
-
-const canRun = existsSync(ORBITAL_BIN) && GATE_CASES.every((c) => existsSync(join(BEHAVIORS_REGISTRY, c.file)));
 
 /** `preprocessSchema` (UsesIntegration.ts) wraps any resolved trait that
  * carries `config`/`linkedEntity` into `{ref, config, linkedEntity,
@@ -95,18 +93,18 @@ function projectTrait(orbitals: readonly Orbital[], traitName: string): Map<stri
   return out;
 }
 
-describe.skipIf(!canRun)('sentinel-resolution — call-site typeArgs corpus parity (C1-J3, item A)', () => {
+describe('sentinel-resolution — call-site typeArgs corpus parity (C1-J3, item A)', () => {
   for (const { file, trait: traitName } of GATE_CASES) {
     it(`"${file}"'s "${traitName}" — JS preprocessSchema payload markers match Rust orbital resolve`, async () => {
       const orbPath = join(BEHAVIORS_REGISTRY, file);
       const jsSchema = JSON.parse(readFileSync(orbPath, 'utf-8')) as OrbitalSchema;
       const rustSchema = JSON.parse(
-        execFileSync(ORBITAL_BIN, ['resolve', orbPath], { env: CLI_ENV, maxBuffer: 64 * 1024 * 1024 }).toString(),
+        execFileSync(ORBITAL_BIN, ['resolve', orbPath], { cwd: PACKAGE_ROOT, env: CLI_ENV, maxBuffer: 64 * 1024 * 1024 }).toString(),
       ) as { orbitals: Orbital[] };
 
       const result = await preprocessSchema(jsSchema, {
-        basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-        stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+        basePath: IO_ROOT,
+        stdLibPath: STD_ROOT,
         allowOutsideBasePath: true,
       });
       expect(result.success).toBe(true);

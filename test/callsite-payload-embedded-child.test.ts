@@ -23,13 +23,12 @@
  * frame lands in `clientEffectsByTrait` alongside the parent's.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/server/OrbitalServerRuntime.js';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { ClientEffectTuple, OrbitalSchema, RuntimeValue, Trait } from '@almadar/core';
-
-const REPO_ROOT = join(__dirname, '..', '..', '..');
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
 // `['render-ui', slot, pattern, props, priority]` — the resolved leaf
 // values (label/disabled/content/…) live in `pattern` (index 2), the fully
@@ -180,18 +179,14 @@ describe('callsite-payload capture — embedded child re-render (synthetic)', ()
 // trait `preprocessSchema` needs to inline).
 // ============================================================================
 
-const HELPDESK_ORB = join(
-  REPO_ROOT,
-  'packages/almadar-behaviors/behaviors/registry/app/organisms/std-helpdesk.orb',
-);
-const canRunHelpdesk = existsSync(HELPDESK_ORB);
+const HELPDESK_ORB = join(IO_ROOT, 'behaviors/registry/app/organisms/std-helpdesk.orb');
 
-describe.skipIf(!canRunHelpdesk)('callsite-payload capture — std-helpdesk (real organism)', () => {
+describe('callsite-payload capture — std-helpdesk (real organism)', () => {
   async function registerHelpdesk(): Promise<OrbitalServerRuntime> {
     const raw = JSON.parse(readFileSync(HELPDESK_ORB, 'utf-8')) as OrbitalSchema;
     const result = await preprocessSchema(raw, {
-      basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-      stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+      basePath: IO_ROOT,
+      stdLibPath: STD_ROOT,
       allowOutsideBasePath: true,
     });
     expect(result.success).toBe(true);

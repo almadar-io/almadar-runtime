@@ -4,7 +4,7 @@
  * contract says they persist the row's status like SET_STATUS. Both topologies.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EntityRow, OrbitalSchema } from '@almadar/core';
 import { DEFAULT_VIEWER } from '@almadar/core';
@@ -20,9 +20,9 @@ import {
   evaluateOrbitalEvent,
   StateMachineManager,
 } from '../src/index.js';
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
-const ORB = join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry/app/atoms/std-driver.orb');
+const ORB = join(IO_ROOT, 'behaviors/registry/app/atoms/std-driver.orb');
 const TRAIT = 'DriverRoster';
 
 const cases = (['stateful', 'stateless'] as const).flatMap((topology) => [
@@ -31,12 +31,12 @@ const cases = (['stateful', 'stateless'] as const).flatMap((topology) => [
   { topology, event: 'TERMINATE', status: 'terminated' },
 ]);
 
-describe.skipIf(!existsSync(ORB)).each(cases)('std-driver $event ($topology)', ({ topology, event, status }) => {
+describe.each(cases)('std-driver $event ($topology)', ({ topology, event, status }) => {
   it(`persists status ${status} on the opened driver and nothing else`, async () => {
     const raw = JSON.parse(readFileSync(ORB, 'utf-8')) as OrbitalSchema;
     const resolved = await preprocessSchema(raw, {
-      basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-      stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+      basePath: IO_ROOT,
+      stdLibPath: STD_ROOT,
       allowOutsideBasePath: true,
     });
     if (!resolved.success) throw new Error(resolved.errors.join('; '));

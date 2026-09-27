@@ -10,14 +10,13 @@ import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { buildTraitIndex } from '../src/index.js';
-
-const REPO_ROOT = join(__dirname, '..', '..', '..');
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
 async function listenSources(file: string, trait: string): Promise<{ sources: string[]; ids: (string | undefined)[]; index: ReturnType<typeof buildTraitIndex> }> {
-  const raw = JSON.parse(readFileSync(join(REPO_ROOT, file), 'utf-8')) as OrbitalSchema;
+  const raw = JSON.parse(readFileSync(file, 'utf-8')) as OrbitalSchema;
   const resolved = await preprocessSchema(raw, {
-    basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-    stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+    basePath: IO_ROOT,
+    stdLibPath: STD_ROOT,
     allowOutsideBasePath: true,
   });
   if (!resolved.success) throw new Error(resolved.errors.join('; '));
@@ -30,7 +29,7 @@ async function listenSources(file: string, trait: string): Promise<{ sources: st
 
 describe('explicit rebind renames reach sibling listen sources', () => {
   it('std-vector-tactics: Authority listens to Player, by name and id', async () => {
-    const { sources, ids, index } = await listenSources('packages/almadar-behaviors/behaviors/registry/game/organisms/std-vector-tactics.orb', 'Authority');
+    const { sources, ids, index } = await listenSources(join(IO_ROOT, 'behaviors/registry/game/organisms/std-vector-tactics.orb'), 'Authority');
     expect(sources.length).toBeGreaterThan(0);
     expect(new Set(sources)).toEqual(new Set(['Player']));
     const playerId = index.byName.get('Player')?.irTrait.id;
@@ -38,7 +37,7 @@ describe('explicit rebind renames reach sibling listen sources', () => {
   });
 
   it('control: the frame itself keeps its own PlayerIntent source', async () => {
-    const { sources } = await listenSources('packages/almadar-std/behaviors/registry/ui/game/organisms/std-tactics-board-2d.orb', 'TacticsAuthority');
+    const { sources } = await listenSources(join(STD_ROOT, 'behaviors/registry/ui/game/organisms/std-tactics-board-2d.orb'), 'TacticsAuthority');
     expect(sources).toContain('PlayerIntent');
   });
 });

@@ -46,16 +46,16 @@
  * Skips (not fails) when the dev binary isn't on this machine.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { homedir } from 'node:os';
+
 import { join } from 'node:path';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { Orbital, OrbitalSchema, Trait, TraitRef } from '@almadar/core';
+import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, STD_ROOT, orbSpawnEnv } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
-const ORBITAL_BIN = join(homedir(), 'bin', 'orbital');
-const CLI_ENV = { ...process.env, ALMADAR_DEV: '1', ALMADAR_ROOT: REPO_ROOT };
+const ORBITAL_BIN = ORB_BIN_INSTALLED;
+const CLI_ENV = orbSpawnEnv();
 
 interface GateCase {
   readonly label: string;
@@ -68,37 +68,35 @@ interface GateCase {
 const GATE_CASES: readonly GateCase[] = [
   {
     label: 'std-approval-gate (the atom itself)',
-    file: join(REPO_ROOT, 'packages/almadar-std/behaviors/registry/infra/atoms/std-approval-gate.orb'),
-    basePath: join(REPO_ROOT, 'packages/almadar-std'),
+    file: join(STD_ROOT, 'behaviors/registry/infra/atoms/std-approval-gate.orb'),
+    basePath: STD_ROOT,
     composingTrait: 'ApprovalGateReview',
   },
   {
     label: 'std-purchase-order (POApproval composes ApprovalGateReview)',
-    file: join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry/app/atoms/std-purchase-order.orb'),
-    basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
+    file: join(IO_ROOT, 'behaviors/registry/app/atoms/std-purchase-order.orb'),
+    basePath: IO_ROOT,
     composingTrait: 'POApproval',
   },
   {
     label: 'std-cms (ArticleApprovalReview composes ApprovalGateReview)',
-    file: join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry/app/organisms/std-cms.orb'),
-    basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
+    file: join(IO_ROOT, 'behaviors/registry/app/organisms/std-cms.orb'),
+    basePath: IO_ROOT,
     composingTrait: 'ArticleApprovalReview',
   },
   {
     label: 'std-cicd-pipeline (DeploymentApproval composes ApprovalGateReview)',
-    file: join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry/app/organisms/std-cicd-pipeline.orb'),
-    basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
+    file: join(IO_ROOT, 'behaviors/registry/app/organisms/std-cicd-pipeline.orb'),
+    basePath: IO_ROOT,
     composingTrait: 'DeploymentApproval',
   },
   {
     label: 'std-wiki (WikiPublishApproval composes ApprovalGateReview)',
-    file: join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry/app/organisms/std-wiki.orb'),
-    basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
+    file: join(IO_ROOT, 'behaviors/registry/app/organisms/std-wiki.orb'),
+    basePath: IO_ROOT,
     composingTrait: 'WikiPublishApproval',
   },
 ];
-
-const canRun = existsSync(ORBITAL_BIN) && GATE_CASES.every((c) => existsSync(c.file));
 
 /** `preprocessSchema` (UsesIntegration.ts) wraps a resolved trait carrying
  * `config`/`linkedEntity` into `{ref, config, linkedEntity, _resolved:
@@ -139,19 +137,19 @@ function projectEmitNames(orbitals: readonly Orbital[]): Map<string, EmitNamePro
   return out;
 }
 
-describe.skipIf(!canRun)(
+describe(
   'ReferenceResolver — two-hop @config.<knob> emit-name override, JS-vs-Rust corpus parity (C1-J4, item A)',
   () => {
     for (const { label, file, basePath, composingTrait } of GATE_CASES) {
       it(`${label} — CloseButton and ${composingTrait}'s emit/event-key sets match Rust "orbital resolve"`, async () => {
         const jsSchema = JSON.parse(readFileSync(file, 'utf-8')) as OrbitalSchema;
         const rustSchema = JSON.parse(
-          execFileSync(ORBITAL_BIN, ['resolve', file], { env: CLI_ENV, maxBuffer: 64 * 1024 * 1024 }).toString(),
+          execFileSync(ORBITAL_BIN, ['resolve', file], { cwd: PACKAGE_ROOT, env: CLI_ENV, maxBuffer: 64 * 1024 * 1024 }).toString(),
         ) as { orbitals: Orbital[] };
 
         const result = await preprocessSchema(jsSchema, {
           basePath,
-          stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+          stdLibPath: STD_ROOT,
           allowOutsideBasePath: true,
         });
         expect(result.success).toBe(true);

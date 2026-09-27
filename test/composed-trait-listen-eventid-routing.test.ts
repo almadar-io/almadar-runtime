@@ -35,14 +35,15 @@
  * which was already correct there.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync } from 'node:fs';
+
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { asOrbitalId, asEntityId, asTraitId, asEventId, isInlineTrait } from '@almadar/core';
 import type { OrbitalSchema, Trait, Entity, EventPayload } from '@almadar/core';
+import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, orbSpawnEnv } from './helpers/behavior-packages.js';
 
 const ORB = asOrbitalId('orb_01HCCAAAAAAAAAAAAAAAAAAAAA');
 const ENT = asEntityId('ent_01HCCAAAAAAAAAAAAAAAAAAAAA');
@@ -363,13 +364,8 @@ describe('listen-level guard evaluation (kernel parity)', () => {
 // the synthetic test above is the portable regression; this is the
 // real-world confirmation.
 // ---------------------------------------------------------------------------
-const REPO_ROOT = join(__dirname, '..', '..', '..');
-const ORB_PATH = join(
-  REPO_ROOT,
-  'packages/almadar-behaviors/behaviors/registry/plugins/atoms/vim-mode.orb',
-);
-const ORB_BIN = join(homedir(), 'bin', 'orbital');
-const canRunRealPlugin = existsSync(ORB_BIN) && existsSync(ORB_PATH);
+const ORB_PATH = join(IO_ROOT, 'behaviors/registry/plugins/atoms/vim-mode.orb');
+const ORB_BIN = ORB_BIN_INSTALLED;
 
 function resolveViaCli(schema: object): OrbitalSchema {
   const tmpFile = join(tmpdir(), `vim-mode-cascade-${Date.now()}-${Math.random().toString(36).slice(2)}.orb`);
@@ -377,7 +373,8 @@ function resolveViaCli(schema: object): OrbitalSchema {
   try {
     const out = execFileSync(ORB_BIN, ['resolve', tmpFile], {
       encoding: 'utf-8',
-      env: { ...process.env, ALMADAR_DEV: '1', ALMADAR_ROOT: REPO_ROOT },
+      cwd: PACKAGE_ROOT,
+      env: orbSpawnEnv(),
       maxBuffer: 32 * 1024 * 1024,
     });
     return JSON.parse(out) as OrbitalSchema;
@@ -386,7 +383,7 @@ function resolveViaCli(schema: object): OrbitalSchema {
   }
 }
 
-describe.skipIf(!canRunRealPlugin)('vim-mode plugin: composed-trait cascade end-to-end (real schema)', () => {
+describe('vim-mode plugin: composed-trait cascade end-to-end (real schema)', () => {
   it('SHELL_PLUGIN_ENABLED -> Shell.PLUGIN_ENABLED -> VimStudioBridge registers commands + shows NORMAL status', async () => {
     const raw = JSON.parse(readFileSync(ORB_PATH, 'utf-8')) as OrbitalSchema;
     const resolved = resolveViaCli(raw);

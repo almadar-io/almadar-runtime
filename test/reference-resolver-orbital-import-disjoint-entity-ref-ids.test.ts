@@ -21,15 +21,13 @@
 
 import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { Entity, EntityId, EntityRef, OrbitalSchema } from '@almadar/core';
 import { asOrbitalId } from '@almadar/core';
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const REGISTRY_DIR = path.join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry');
-const hasCorpus = existsSync(REGISTRY_DIR);
+const REGISTRY_DIR = path.join(IO_ROOT, 'behaviors/registry');
 
 // `orb emit orb orbital_import_disjoint.lolo` output, verbatim (ids are the
 // real derived ids from that emit — irrelevant to this test beyond being
@@ -84,11 +82,11 @@ const DISJOINT_RAW_SCHEMA: OrbitalSchema = {
   version: '1.0.0',
 };
 
-describe.skipIf(!hasCorpus)('orbital_import_disjoint.lolo — entityRefIds coverage on the JS path (C)', () => {
+describe('orbital_import_disjoint.lolo — entityRefIds coverage on the JS path (C)', () => {
   it('every entityRefIds key is declared in its orbital with the matching id, on both imports', async () => {
     const result = await preprocessSchema(DISJOINT_RAW_SCHEMA, {
-      basePath: path.join(REPO_ROOT, 'packages/almadar-behaviors'),
-      stdLibPath: path.join(REPO_ROOT, 'packages/almadar-std'),
+      basePath: IO_ROOT,
+      stdLibPath: STD_ROOT,
       allowOutsideBasePath: true,
     });
     expect(result.success).toBe(true);

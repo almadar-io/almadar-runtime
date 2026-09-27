@@ -5,7 +5,7 @@
  * host painted the INIT zeros.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EntityRow, OrbitalSchema } from '@almadar/core';
 import { DEFAULT_VIEWER, getTraitName } from '@almadar/core';
@@ -23,9 +23,9 @@ import {
   type IndexedTrait,
   type TraitIndex,
 } from '../src/index.js';
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
-const ORB = join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry/marketing/organisms/std-storefront.orb');
+const ORB = join(IO_ROOT, 'behaviors/registry/marketing/organisms/std-storefront.orb');
 
 function restrict(full: TraitIndex, names: ReadonlySet<string>): TraitIndex {
   const byName = new Map<string, IndexedTrait>();
@@ -33,12 +33,12 @@ function restrict(full: TraitIndex, names: ReadonlySet<string>): TraitIndex {
   return { byName, allEntities: full.allEntities, orbitals: full.orbitals };
 }
 
-describe.skipIf(!existsSync(ORB)).each(['stateful', 'stateless'] as const)('storefront shop stats (%s)', (topology) => {
+describe.each(['stateful', 'stateless'] as const)('storefront shop stats (%s)', (topology) => {
   it('the Products card holds the catalog count after mount', async () => {
     const raw = JSON.parse(readFileSync(ORB, 'utf-8')) as OrbitalSchema;
     const resolved = await preprocessSchema(raw, {
-      basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-      stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+      basePath: IO_ROOT,
+      stdLibPath: STD_ROOT,
       allowOutsideBasePath: true,
     });
     if (!resolved.success) throw new Error(resolved.errors.join('; '));

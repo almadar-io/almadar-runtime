@@ -130,18 +130,18 @@
  * already final).
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveSchema } from '../src/entities/resolver/reference-resolver.js';
 import type { OrbitalSchema, Orbital, Trait, TraitRef } from '@almadar/core';
+import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, STD_ROOT, orbSpawnEnv } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
-const BEHAVIORS_ROOT = join(REPO_ROOT, 'packages/almadar-behaviors');
+const BEHAVIORS_ROOT = IO_ROOT;
 const REGISTRY_ORGANISMS = join(BEHAVIORS_ROOT, 'behaviors/registry/app/organisms');
-const ORB_BIN = join(homedir(), 'bin', 'orb');
-const ORBITAL_BIN = join(homedir(), 'bin', 'orbital');
+const ORB_BIN = ORB_BIN_INSTALLED;
+const ORBITAL_BIN = ORB_BIN_INSTALLED;
 
 const ORGANISMS = [
   'std-api-gateway',
@@ -152,9 +152,8 @@ const ORGANISMS = [
 ] as const;
 
 const registryPaths = ORGANISMS.map((name) => join(REGISTRY_ORGANISMS, `${name}.orb`));
-const canRun = existsSync(ORB_BIN) && existsSync(ORBITAL_BIN) && registryPaths.every((p) => existsSync(p));
 
-const CLI_ENV = { ...process.env, ALMADAR_DEV: '1', ALMADAR_ROOT: REPO_ROOT };
+const CLI_ENV = orbSpawnEnv();
 
 function isTrait(t: TraitRef): t is Trait {
   return typeof t === 'object' && 'stateMachine' in t;
@@ -174,8 +173,7 @@ function buildFixtures(): readonly Fixture[] {
     return ORGANISMS.map((name) => {
       const orbPath = join(REGISTRY_ORGANISMS, `${name}.orb`);
       const resolvedPath = join(dir, `${name}.resolved.orb`);
-      execFileSync(ORBITAL_BIN, ['resolve', orbPath, '-o', resolvedPath], {
-        env: CLI_ENV,
+      execFileSync(ORBITAL_BIN, ['resolve', orbPath, '-o', resolvedPath], { cwd: PACKAGE_ROOT, env: CLI_ENV,
         maxBuffer: 64 * 1024 * 1024,
       });
       return {
@@ -193,8 +191,8 @@ function buildFixtures(): readonly Fixture[] {
   }
 }
 
-describe.skipIf(!canRun)('ReferenceResolver — real-organism JS-vs-Rust entityRefIds parity (C1-J5)', () => {
-  const fixtures = canRun ? buildFixtures() : [];
+describe('ReferenceResolver — real-organism JS-vs-Rust entityRefIds parity (C1-J5)', () => {
+  const fixtures = buildFixtures();
 
   // GREEN today: proves the fix's own mechanism (schema-wide sequential
   // visibility renaming an `entityRefIds` KEY to the rebind target) works
@@ -212,7 +210,7 @@ describe.skipIf(!canRun)('ReferenceResolver — real-organism JS-vs-Rust entityR
     if (!fixture) return;
     const result = await resolveSchema(fixture.jsInputSchema, {
       basePath: BEHAVIORS_ROOT,
-      stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+      stdLibPath: STD_ROOT,
       allowOutsideBasePath: true,
     });
     expect(result.success).toBe(true);
@@ -232,7 +230,7 @@ describe.skipIf(!canRun)('ReferenceResolver — real-organism JS-vs-Rust entityR
     it(`${name}: every trait in every orbital carries the SAME entityRefIds map (keys AND ids) as Rust`, async () => {
       const result = await resolveSchema(jsInputSchema, {
         basePath: BEHAVIORS_ROOT,
-        stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+        stdLibPath: STD_ROOT,
         allowOutsideBasePath: true,
       });
       expect(result.success).toBe(true);

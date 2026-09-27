@@ -15,16 +15,14 @@
 
 import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+
 import { ReferenceResolver } from '../src/entities/resolver/reference-resolver.js';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 import type { OrbitalDefinition, OrbitalSchema, Orbital, TraitRef } from '@almadar/core';
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const REGISTRY_DIR = path.join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry');
-const hasCorpus = existsSync(REGISTRY_DIR);
+const REGISTRY_DIR = path.join(IO_ROOT, 'behaviors/registry');
 
 // Three levels: `Organism` (the top-level consumer) -> `PageAtom` (an
 // intermediate atom whose OWN trait is a REF, never inline) -> `Base` (the
@@ -127,18 +125,15 @@ describe('ReferenceResolver — nested composed trait refs (ledger (i))', () => 
   });
 });
 
-describe.skipIf(!hasCorpus)('ReferenceResolver — nested composed trait refs: real std-notes.orb corpus case', () => {
+describe('ReferenceResolver — nested composed trait refs: real std-notes.orb corpus case', () => {
   it('preprocessSchema succeeds on std-notes.orb and resolves the nested NoteSubpages ref in NoteOrbital', async () => {
-    const stdNotesPath = path.join(
-      REPO_ROOT,
-      'packages/almadar-behaviors/behaviors/registry/app/organisms/std-notes.orb',
-    );
+    const stdNotesPath = path.join(IO_ROOT, 'behaviors/registry/app/organisms/std-notes.orb');
     const fs = await import('node:fs/promises');
     const schema = JSON.parse(await fs.readFile(stdNotesPath, 'utf8')) as OrbitalSchema;
 
     const result = await preprocessSchema(schema, {
-      basePath: path.join(REPO_ROOT, 'packages/almadar-behaviors'),
-      stdLibPath: path.join(REPO_ROOT, 'packages/almadar-std'),
+      basePath: IO_ROOT,
+      stdLibPath: STD_ROOT,
       allowOutsideBasePath: true,
     });
 

@@ -16,6 +16,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { collectDeclaredConfigDefaults } from '../src/server/OrbitalServerRuntime.js';
 import type { OrbitalSchema, Trait } from '@almadar/core';
+import { STD_ROOT } from './helpers/behavior-packages.js';
 
 function resolveStdRegistry(): string {
     try {
@@ -25,7 +26,7 @@ function resolveStdRegistry(): string {
         );
     } catch {
         // monorepo fallback
-        return path.resolve(__dirname, '../../../packages/almadar-std/behaviors/registry');
+        return path.join(STD_ROOT, 'behaviors/registry');
     }
 }
 const STD_REGISTRY = resolveStdRegistry();

@@ -11,17 +11,17 @@ import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { buildTraitIndex, collectListenerTargets } from '../src/index.js';
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
-const PF = 'packages/almadar-behaviors/behaviors/registry/project-friday/organisms/project-friday.orb';
+const PF = join(IO_ROOT, 'behaviors/registry/project-friday/organisms/project-friday.orb');
 const OPTS = {
-  basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-  stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+  basePath: IO_ROOT,
+  stdLibPath: STD_ROOT,
   allowOutsideBasePath: true,
 };
 
 function pf(): OrbitalSchema {
-  return JSON.parse(readFileSync(join(REPO_ROOT, PF), 'utf-8')) as OrbitalSchema;
+  return JSON.parse(readFileSync(PF, 'utf-8')) as OrbitalSchema;
 }
 
 describe('orbital import listens', () => {

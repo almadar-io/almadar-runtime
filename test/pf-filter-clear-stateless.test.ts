@@ -7,7 +7,7 @@
  * Project Friday's traits come in through whole-orbital imports.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EntityRow, OrbitalSchema } from '@almadar/core';
 import { DEFAULT_VIEWER, getTraitName } from '@almadar/core';
@@ -25,9 +25,9 @@ import {
   type IndexedTrait,
   type TraitIndex,
 } from '../src/index.js';
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
-const PF_ORB = join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry/project-friday/organisms/project-friday.orb');
+const PF_ORB = join(IO_ROOT, 'behaviors/registry/project-friday/organisms/project-friday.orb');
 const FILTER = 'FinanceTransactionOrbitalTransactionFilter';
 const BROWSE = 'FinanceTransactionOrbitalTransactionBrowseList';
 
@@ -37,12 +37,12 @@ function restrict(full: TraitIndex, names: ReadonlySet<string>): TraitIndex {
   return { byName, allEntities: full.allEntities, orbitals: full.orbitals };
 }
 
-describe.skipIf(!existsSync(PF_ORB))('project-friday transactions filter, stateless', () => {
+describe('project-friday transactions filter, stateless', () => {
   it('clearing the type filter refetches the browse list unfiltered', async () => {
     const raw = JSON.parse(readFileSync(PF_ORB, 'utf-8')) as OrbitalSchema;
     const resolved = await preprocessSchema(raw, {
-      basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-      stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+      basePath: IO_ROOT,
+      stdLibPath: STD_ROOT,
       allowOutsideBasePath: true,
     });
     if (!resolved.success) throw new Error(resolved.errors.join('; '));

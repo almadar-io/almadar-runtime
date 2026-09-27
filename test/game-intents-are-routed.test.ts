@@ -10,19 +10,19 @@
  * must reach that trait through a declared route.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { buildTraitIndex, collectListenerTargets, LIFECYCLE_EVENTS } from '../src/index.js';
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = join(__dirname, '..', '..', '..');
 const DIRS = [
-  join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry/game/organisms'),
-  join(REPO_ROOT, 'packages/almadar-std/behaviors/registry/ui/game/organisms'),
-  join(REPO_ROOT, 'packages/almadar-std/behaviors/registry/ui/game/atoms'),
+  join(IO_ROOT, 'behaviors/registry/game/organisms'),
+  join(STD_ROOT, 'behaviors/registry/ui/game/organisms'),
+  join(STD_ROOT, 'behaviors/registry/ui/game/atoms'),
 ];
-const ORBS = DIRS.filter((d) => existsSync(d)).flatMap((d) => readdirSync(d).filter((f) => f.endsWith('.orb')).sort().map((f) => join(d, f)));
+const ORBS = DIRS.flatMap((d) => readdirSync(d).filter((f) => f.endsWith('.orb')).sort().map((f) => join(d, f)));
 
 type Transition = { event: string; effects?: unknown[] };
 type Tick = { effects?: unknown[] };
@@ -54,8 +54,8 @@ describe.each(ORBS)('%s', (file) => {
   it('every intent a trait emits reaches the traits that handle it', async () => {
     const raw = JSON.parse(readFileSync(file, 'utf-8')) as OrbitalSchema;
     const resolved = await preprocessSchema(raw, {
-      basePath: join(REPO_ROOT, 'packages/almadar-behaviors'),
-      stdLibPath: join(REPO_ROOT, 'packages/almadar-std'),
+      basePath: IO_ROOT,
+      stdLibPath: STD_ROOT,
       allowOutsideBasePath: true,
     });
     if (!resolved.success) throw new Error(resolved.errors.join('; '));

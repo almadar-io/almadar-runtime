@@ -17,16 +17,14 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 import type { Orbital, OrbitalDefinition, OrbitalSchema, TraitRef } from '@almadar/core';
 import { normalizeCallSiteConfigToValues, isCallSiteConfigDeclaration } from '@almadar/core';
+import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const REGISTRY_DIR = path.join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry');
-const hasCorpus = existsSync(REGISTRY_DIR);
+const REGISTRY_DIR = path.join(IO_ROOT, 'behaviors/registry');
 
 /** The upstream `Typo` behavior — one inline trait declaring `content` with
  *  no default of its own, matching `UiTypo.traits.TypographyRender`'s role
@@ -230,7 +228,7 @@ describe('ReferenceResolver — {ref}-entry call-site config forward through the
  * preprocess because `preprocessSchema` fails the whole schema on the first
  * orbital error.
  */
-describe.skipIf(!hasCorpus)('ReferenceResolver — {ref}-entry call-site config forward: real registry corpus', () => {
+describe('ReferenceResolver — {ref}-entry call-site config forward: real registry corpus', () => {
   const cases: ReadonlyArray<{
     file: string;
     trait: string;
@@ -247,12 +245,12 @@ describe.skipIf(!hasCorpus)('ReferenceResolver — {ref}-entry call-site config 
 
   for (const { file, trait, knob, expected } of cases) {
     it(`resolves ${file}'s ${trait}.${knob} to the declaring atom's literal`, async () => {
-      const schemaPath = path.join(REPO_ROOT, 'packages/almadar-behaviors/behaviors/registry', file);
+      const schemaPath = path.join(IO_ROOT, 'behaviors/registry', file);
       const schema = JSON.parse(await fs.readFile(schemaPath, 'utf8')) as OrbitalSchema;
 
       const result = await preprocessSchema(schema, {
-        basePath: path.join(REPO_ROOT, 'packages/almadar-behaviors'),
-        stdLibPath: path.join(REPO_ROOT, 'packages/almadar-std'),
+        basePath: IO_ROOT,
+        stdLibPath: STD_ROOT,
         allowOutsideBasePath: true,
       });
 
@@ -280,17 +278,14 @@ describe.skipIf(!hasCorpus)('ReferenceResolver — {ref}-entry call-site config 
  * consumer: declared defaults (`resolveForwardedSiblingConfigFrom`) and the
  * `{ref}`-entry call-site path (`resolveCallSiteConfigForwards`) tested here.
  */
-describe.skipIf(!hasCorpus)('ReferenceResolver — forwardedFrom provenance on a collapsed call-site forward', () => {
+describe('ReferenceResolver — forwardedFrom provenance on a collapsed call-site forward', () => {
   it('records the original `@config.<knob>` token on std-time-tracking.orb\'s TimesheetAppLayout.config.appName', async () => {
-    const schemaPath = path.join(
-      REPO_ROOT,
-      'packages/almadar-behaviors/behaviors/registry/app/organisms/std-time-tracking.orb',
-    );
+    const schemaPath = path.join(IO_ROOT, 'behaviors/registry/app/organisms/std-time-tracking.orb');
     const schema = JSON.parse(await fs.readFile(schemaPath, 'utf8')) as OrbitalSchema;
 
     const result = await preprocessSchema(schema, {
-      basePath: path.join(REPO_ROOT, 'packages/almadar-behaviors'),
-      stdLibPath: path.join(REPO_ROOT, 'packages/almadar-std'),
+      basePath: IO_ROOT,
+      stdLibPath: STD_ROOT,
       allowOutsideBasePath: true,
     });
 

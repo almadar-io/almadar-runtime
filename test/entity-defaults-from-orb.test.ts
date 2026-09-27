@@ -13,6 +13,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { collectDeclaredEntityDefaults } from '../src/traits/config-defaults.js';
 import { isEntityReference, isEntityCall, type Entity, type OrbitalSchema } from '@almadar/core';
+import { STD_ROOT } from './helpers/behavior-packages.js';
 
 function resolveStdRegistry(): string {
     try {
@@ -21,7 +22,7 @@ function resolveStdRegistry(): string {
             'behaviors/registry',
         );
     } catch {
-        return path.resolve(__dirname, '../../../packages/almadar-std/behaviors/registry');
+        return path.join(STD_ROOT, 'behaviors/registry');
     }
 }
 const STD_REGISTRY = resolveStdRegistry();
