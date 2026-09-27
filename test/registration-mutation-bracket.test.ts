@@ -171,6 +171,27 @@ describe('OrbitalServerRuntime — registration-mutation bracket', () => {
     expect(rt.listOrbitals()).toEqual(['OldOrbital']);
   });
 
+  it('negative control: two unbracketed register routes interleaving mix both apps', async () => {
+    const rt = new OrbitalServerRuntime({ mode: 'real', debug: false, persistence: slowPersistence(50) });
+    await rt.register(oldAppSchema());
+
+    // The builder POST /register body, twice, as two tabs hit it at once:
+    // each clears then registers, with no bracket around the pair.
+    const first = (async () => {
+      rt.unregisterAll();
+      await rt.register(accountingSchema());
+    })();
+    const second = (async () => {
+      rt.unregisterAll();
+      await rt.register(oldAppSchema());
+    })();
+    await Promise.all([first, second]);
+
+    // The hole, pinned: the second clear lands while the first register is
+    // still seeding, so both apps survive. Hosts must bracket the swap.
+    expect(rt.listOrbitals()).toEqual(['JournalOrbital', 'OldOrbital']);
+  });
+
   it('a failed swap releases the epoch — later dispatches get the honest 404, and the next register is not wedged', async () => {
     const rt = new OrbitalServerRuntime({ mode: 'real', debug: false, persistence: new InMemoryPersistence() });
     await rt.register(oldAppSchema());
