@@ -34,7 +34,9 @@ async function chatRuntime(orbPath: string) {
   // A whole-orbital import (`reference`) prefixes the imported traits with the orbital name.
   const imported = raw.orbitals.some((o) => o.name === 'ChatMessageOrbital' && 'reference' in o && o.reference !== undefined);
   const trait = (name: string): string => (imported ? `ChatMessageOrbital${name}` : name);
-  return { runtime, persistence, trait };
+  // The host names no viewer, so the runtime presents the app's first declared persona.
+  const viewer = runtime.getDefaultUser()?.id ?? '';
+  return { runtime, persistence, trait, viewer };
 }
 
 function threadContents(response: OrbitalEventResponse, threadTrait: string): unknown[] {
@@ -43,18 +45,18 @@ function threadContents(response: OrbitalEventResponse, threadTrait: string): un
   return Array.isArray(rows) ? rows.map((r) => (r !== null && typeof r === 'object' && !Array.isArray(r) ? r['content'] : undefined)) : [];
 }
 
-async function viewerMemberships(persistence: MockPersistenceAdapter) {
+async function viewerMemberships(persistence: MockPersistenceAdapter, viewer: string) {
   return (await persistence.list('ChannelMember'))
-    .filter((m) => m['member'] === 'viewer-1')
+    .filter((m) => m['member'] === viewer)
     .sort((a, b) => String(b['lastMessageAt'] ?? '').localeCompare(String(a['lastMessageAt'] ?? '')));
 }
 
 describe.each(CHAT_ORBS)('chat server circuit (%s)', (orbPath) => {
   it('the auto-opened conversation\'s thread lists its messages', async () => {
-    const { runtime, persistence, trait } = await chatRuntime(orbPath);
-    const channel = (await viewerMemberships(persistence))[0]?.['channel'];
+    const { runtime, persistence, trait, viewer } = await chatRuntime(orbPath);
+    const channel = (await viewerMemberships(persistence, viewer))[0]?.['channel'];
     expect(typeof channel).toBe('string');
-    await persistence.create('ChatMessage', { channel, content: 'hello from seed', sender: 'viewer-1', senderName: 'Dev Viewer', timestamp: '2026-09-24T00:00:00.000Z' });
+    await persistence.create('ChatMessage', { channel, content: 'hello from seed', sender: viewer, senderName: 'Viewer', timestamp: '2026-09-24T00:00:00.000Z' });
 
     const response = await runtime.processOrbitalEvent('ChatMessageOrbital', { event: 'INIT', targetTrait: trait('ChannelRail') });
     const opened = response.emittedEvents.find((e) => e.event === 'CONVERSATION_OPENED');
@@ -63,12 +65,12 @@ describe.each(CHAT_ORBS)('chat server circuit (%s)', (orbPath) => {
   }, 120_000);
 
   it('picking another conversation opens it (thread lists ITS messages)', async () => {
-    const { runtime, persistence, trait } = await chatRuntime(orbPath);
-    const memberships = await viewerMemberships(persistence);
+    const { runtime, persistence, trait, viewer } = await chatRuntime(orbPath);
+    const memberships = await viewerMemberships(persistence, viewer);
     expect(memberships.length).toBeGreaterThan(1);
     await runtime.processOrbitalEvent('ChatMessageOrbital', { event: 'INIT', targetTrait: trait('ChannelRail') });
     const other = memberships[memberships.length - 1];
-    await persistence.create('ChatMessage', { channel: other['channel'], content: 'in the other room', sender: 'viewer-1', senderName: 'Dev Viewer', timestamp: '2026-09-24T00:00:00.000Z' });
+    await persistence.create('ChatMessage', { channel: other['channel'], content: 'in the other room', sender: viewer, senderName: 'Viewer', timestamp: '2026-09-24T00:00:00.000Z' });
     // A rail row click reaches the composer through
     // `ChannelRail.VIEW -> SELECT_CHANNEL with { channel: ?row.channel }`.
     const response = await runtime.processOrbitalEvent('ChatMessageOrbital', {

@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "6.96.0",
+  "version": "6.97.0",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -53,6 +53,11 @@
       "import": "./dist/mockRandom.js",
       "require": "./dist/mockRandom.js"
     },
+    "./mockPersistence": {
+      "types": "./dist/mockPersistence.d.ts",
+      "import": "./dist/mockPersistence.js",
+      "require": "./dist/mockPersistence.js"
+    },
     "./ui": {
       "types": "./dist/ui/index.d.ts",
       "import": "./dist/ui/index.js",
@@ -77,10 +82,10 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
-    "@almadar/core": "^10.110.0",
+    "@almadar/core": "^10.111.0",
     "@almadar/evaluator": "^2.52.0",
-    "@almadar/integrations": "^2.39.0",
-    "@almadar/logger": "^1.14.0",
+    "@almadar/integrations": "^2.40.0",
+    "@almadar/logger": "^1.15.0",
     "@almadar/server": "^2.48.0",
     "@almadar/std": "^16.235.0"
   },

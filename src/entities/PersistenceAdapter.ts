@@ -10,6 +10,7 @@
  * @packageDocumentation
  */
 import type { EntityRow } from "../types.js";
+import type { RowPage, RowPageRequest, StoreFilter } from "@almadar/core";
 
 /**
  * Storage contract for CRUD operations on runtime entity rows.
@@ -28,6 +29,12 @@ export interface PersistenceAdapter {
   delete(entityType: string, id: string): Promise<void>;
   getById(entityType: string, id: string): Promise<EntityRow | null>;
   list(entityType: string): Promise<EntityRow[]>;
+  /** Number of rows of `entityType`, without reading them; needed by a row quota. */
+  countRows?(entityType: string): Promise<number>;
+  /** Rows matching every filter, pushed down to the store where it can; absent = filter over `list`. */
+  query?(entityType: string, filters: readonly StoreFilter<EntityRow>[]): Promise<EntityRow[]>;
+  /** One page, pushed down to the store where it can; absent = page over `list`. */
+  listPage?(entityType: string, request: RowPageRequest<EntityRow>): Promise<RowPage<EntityRow>>;
 }
 
 /**

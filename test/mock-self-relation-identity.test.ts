@@ -70,3 +70,38 @@ describe('self-relation identity column', () => {
     }
   });
 });
+
+describe('self-identity owner column (`id` compared to @user.id)', () => {
+  const employee: EntitySchema = {
+    name: 'Employee',
+    fields: [
+      { name: 'id', type: 'string', required: true },
+      { name: 'name', type: 'string', required: true },
+    ],
+  };
+
+  it('makes exactly one row the viewer, keeping every row and its store key', async () => {
+    const adapter = new MockPersistenceAdapter({ ownerId: 'viewer-1', ownerFields: ['Employee.id'] });
+    adapter.registerEntity(employee, 6);
+    const rows = await adapter.list('Employee');
+    expect(rows).toHaveLength(6);
+    expect(rows.filter((r) => r.id === 'viewer-1')).toHaveLength(1);
+    expect(await adapter.getById('Employee', 'viewer-1')).toMatchObject({ id: 'viewer-1' });
+    expect(new Set(rows.map((r) => r.id)).size).toBe(6);
+  });
+
+  it('a persona switch moves that one row to the new viewer and the store follows', async () => {
+    const adapter = new MockPersistenceAdapter({ ownerId: 'viewer-1', ownerFields: ['Employee.id'] });
+    adapter.registerEntity(employee, 6);
+    adapter.restampOwner('viewer-2');
+    expect(await adapter.getById('Employee', 'viewer-1')).toBeNull();
+    expect(await adapter.getById('Employee', 'viewer-2')).toMatchObject({ id: 'viewer-2' });
+    expect(await adapter.list('Employee')).toHaveLength(6);
+  });
+
+  it('control: a non-id owner column still gives the viewer every other row', async () => {
+    const adapter = new MockPersistenceAdapter({ ownerId: 'viewer-1', ownerFields: ['Note.authorId'] });
+    adapter.registerEntity({ name: 'Note', fields: [{ name: 'id', type: 'string', required: true }, { name: 'authorId', type: 'string', required: true }] }, 6);
+    expect((await adapter.list('Note')).filter((r) => r.authorId === 'viewer-1')).toHaveLength(3);
+  });
+});

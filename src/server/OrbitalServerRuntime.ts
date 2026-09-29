@@ -216,9 +216,9 @@ import type {
   ClientEffectByTrait,
   ClientEffectTuple,
 } from "@almadar/core";
-import { dispatchVisitKey, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, DEFAULT_VIEWER, isPageReference, type NavItem, type Page, type PageRef,
+import { dispatchVisitKey, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, resolveDefaultViewer, DEFAULT_VIEWER, isPageReference, type NavItem, type Page, type PageRef,
 } from "@almadar/core";
-import { ownerFieldsFromSchema, identityEntityName, entityAccessPoliciesByStoreKey } from "@almadar/core/mock";
+import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf, entityAccessPoliciesByStoreKey } from "@almadar/core/mock";
 import { checkMutationAccess } from "../entities/entityAccess.js";
 import { runServerEffectStage } from "../effects/effect-stage.js";
 import { MockPersistenceAdapter } from "../entities/MockPersistenceAdapter.js";
@@ -631,6 +631,7 @@ export class OrbitalServerRuntime {
       // so no `@user.role` guard changes outcome — see its doc in @almadar/core.
       defaultUser: config.defaultUser ?? DEFAULT_VIEWER,
     };
+    this.viewerNamedByHost = config.defaultUser !== undefined;
     this.eventBus = new EventBus();
 
     // Initialize loader only if a fully-configured one was handed in, or if
@@ -897,9 +898,9 @@ export class OrbitalServerRuntime {
     }
 
     // BEFORE the loop: registerOrbital seeds each entity eagerly
-    // (MockPersistenceAdapter.registerEntity -> seed), so owner columns learned
-    // after it would arrive too late to stamp a single row.
-    this.applyIdentityOwnerFields(schema);
+    // (MockPersistenceAdapter.registerEntity -> seed), so owner columns, the
+    // owner gate and the identity-first order must all be in place first.
+    this.prepareMockSeeding(schema);
 
     // Register all orbitals (await to ensure instance seeding completes)
     for (const orbital of schema.orbitals) {
@@ -915,24 +916,55 @@ export class OrbitalServerRuntime {
     this.resolvedSchema = schema;
     this.resolvedTraitConfigs = buildResolvedTraitConfigs(schema);
     this.callsiteCaptureChildrenByTrait = this.buildCallsiteCaptureChildrenByTrait(schema);
-    this.installOwnerGate();
+    this.flushPendingOwnerRestamp();
   }
 
   /**
-   * Teach the mock seeder which columns hold the viewer's id, derived from the
-   * schema's `[identity]` entity. No-op for a program that declares none, so
-   * unmigrated apps seed exactly as before. Mirrors
-   * `orbital-core/src/runtime/seed.rs::owner_fields_from_schema` — a feature
-   * that lives on only one execution path is not a feature.
+   * Everything the mock seeder needs before the first entity seeds: the owner
+   * columns derived from the `[identity]` entity (twin of `seed.rs`
+   * `owner_fields_from_schema`), the `@create` owner gate, and the shared seed
+   * order's first step, the `[identity]` entity itself — its rows are the
+   * persona roster and the first draws of the seeded stream on every path
+   * (`seed.rs` `seed_sample_data_as`, the compiled `seedMockData.ts`).
    */
-  private applyIdentityOwnerFields(schema: OrbitalSchema): void {
+  private prepareMockSeeding(schema: OrbitalSchema): void {
     if (!(this.persistence instanceof MockPersistenceAdapter)) return;
     const derived = ownerFieldsFromSchema(schema);
-    if (derived.length === 0) return;
-    this.persistence.addOwnerFields(derived);
-    persistLog.debug('mock:identity-owner-fields', {
-      identity: identityEntityName(schema),
-      columns: derived,
+    if (derived.length > 0) {
+      this.persistence.addOwnerFields(derived);
+      persistLog.debug('mock:identity-owner-fields', {
+        identity: identityEntityName(schema),
+        columns: derived,
+      });
+    }
+    this.installOwnerGate(schema);
+    // A viewer nobody named is the app's first declared persona (the compiled seeder and the
+    // Rust probes resolve it the same way): seed the roster unstamped, then stamp for them.
+    if (!this.viewerNamedByHost) this.persistence.restampOwner(undefined);
+    this.seedIdentityEntity(schema);
+    if (!this.viewerNamedByHost) {
+      const identity = identityEntitiesOf(schema.orbitals ?? [])[0]?.name;
+      const roster = identity
+        ? this.persistence.rowsOf(identity).map((row) => personaFromIdentityRow(row)).filter((p): p is UserContext => p !== undefined)
+        : [];
+      const viewer = resolveDefaultViewer(roster);
+      this.config.defaultUser = viewer;
+      this.persistence.restampOwner(viewer.id);
+    }
+  }
+
+  private seedIdentityEntity(schema: OrbitalSchema): void {
+    if (this.config.mode !== 'mock' || !(this.persistence instanceof MockPersistenceAdapter)) return;
+    const identity = identityEntitiesOf(schema.orbitals ?? [])[0];
+    if (!identity?.name || !identity.fields) return;
+    if (identity.instances && identity.instances.length > 0) return;
+    this.persistence.registerEntity({
+      name: identity.name,
+      id: identity.id,
+      collection: identity.collection,
+      fields: identity.fields.filter((f): f is typeof f & { name: string } => typeof f.name === 'string' && f.name.length > 0),
+      persistence: identity.persistence,
+      identity: true,
     });
   }
 
@@ -967,7 +999,7 @@ export class OrbitalServerRuntime {
     this.appThemeKey = themeDataKey(schema.theme) || undefined;
 
     // Before the loop — see the note in register(): seeding is eager.
-    this.applyIdentityOwnerFields(schema);
+    this.prepareMockSeeding(schema);
 
     for (const orbital of schema.orbitals) {
       this.registerOrbital(orbital);
@@ -979,7 +1011,7 @@ export class OrbitalServerRuntime {
     this.resolvedSchema = schema;
     this.resolvedTraitConfigs = buildResolvedTraitConfigs(schema);
     this.callsiteCaptureChildrenByTrait = this.buildCallsiteCaptureChildrenByTrait(schema);
-    this.installOwnerGate();
+    this.flushPendingOwnerRestamp();
   }
 
   /**
@@ -1241,6 +1273,7 @@ export class OrbitalServerRuntime {
           collection: entity.collection,
           fields,
           persistence: entity.persistence,
+          identity: entity.identity,
         });
         if (this.config.debug) {
           persistLog.debug('mock:seeded', { entity: entity.name, count: this.persistence.count(entity.name) });
@@ -1283,6 +1316,7 @@ export class OrbitalServerRuntime {
           collection: auxEntity.collection,
           fields: auxFields,
           persistence: auxEntity.persistence,
+          identity: auxEntity.identity,
         });
         if (this.config.debug) {
           persistLog.debug('mock:seeded-auxiliary', {
@@ -1703,6 +1737,7 @@ export class OrbitalServerRuntime {
       timestamp: new Date().toISOString(),
     });
     this.persistence.clearAll();
+    if (this.resolvedSchema) this.seedIdentityEntity(this.resolvedSchema);
     for (const registered of this.orbitals.values()) {
       const entity = registered.entity;
       if (entity?.name && entity.fields) {
@@ -1717,6 +1752,7 @@ export class OrbitalServerRuntime {
           collection: entity.collection,
           fields,
           persistence: entity.persistence,
+          identity: entity.identity,
         });
       }
       // Auxiliary entities (imported atom entities) were registered at boot;
@@ -1736,6 +1772,7 @@ export class OrbitalServerRuntime {
           collection: auxRef.collection,
           fields: auxFields,
           persistence: auxRef.persistence,
+          identity: auxRef.identity,
         });
       }
     }
@@ -1784,6 +1821,7 @@ export class OrbitalServerRuntime {
   setDefaultUser(user: UserContext | undefined): void {
     const previousId = this.config.defaultUser?.id;
     this.config.defaultUser = user;
+    this.viewerNamedByHost = true;
     if (
       this.persistence instanceof MockPersistenceAdapter &&
       user?.id !== undefined &&
@@ -1792,6 +1830,10 @@ export class OrbitalServerRuntime {
       this.restampOwnerGated(user);
     }
   }
+
+  /** Whether the host named the viewer (constructor or `setDefaultUser`). If not, the viewer is
+   *  the app's first declared persona, resolved as soon as its roster is seeded. */
+  private viewerNamedByHost = false;
 
   /** setDefaultUser can land before register() finishes resolving the schema
    *  (a dev host pins a persona right after boot). An ungated restamp there
@@ -1822,11 +1864,12 @@ export class OrbitalServerRuntime {
    * re-registers, and the deterministic reseed re-stamps with the current
    * ownerId — gating only the switch path would leak right there). Reads the
    * CURRENT default user at evaluation time so one installation covers every
-   * later switch. Then flushes any switch that arrived before the schema.
+   * later switch. Installed before the first seed, so the initial rows are
+   * gated exactly as every reseed is.
    */
-  private installOwnerGate(): void {
-    if (!(this.persistence instanceof MockPersistenceAdapter) || !this.resolvedSchema) return;
-    const policiesByStore = entityAccessPoliciesByStoreKey(this.resolvedSchema);
+  private installOwnerGate(schema: OrbitalSchema): void {
+    if (!(this.persistence instanceof MockPersistenceAdapter)) return;
+    const policiesByStore = entityAccessPoliciesByStoreKey(schema);
     this.persistence.setOwnerGate((storeKey, candidateRow) => {
       const user = this.config.defaultUser;
       if (!user) return true;
@@ -1841,6 +1884,10 @@ export class OrbitalServerRuntime {
       if (!persona) return false;
       return checkMutationAccess(candidateRow, policiesByStore.get(storeKey)?.create, { user: persona });
     });
+  }
+
+  /** Flush a persona switch that arrived before the schema was resolved. */
+  private flushPendingOwnerRestamp(): void {
     if (this.pendingOwnerRestamp) {
       this.pendingOwnerRestamp = false;
       const user = this.config.defaultUser;

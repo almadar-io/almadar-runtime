@@ -40,7 +40,13 @@ describe('stateful fold of mounted listeners (std-time-tracking /reports)', () =
     });
     if (!resolved.success) throw new Error(resolved.errors.join('; '));
     const s = resolved.data.schema;
-    const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
+    // A roster persona: the mock owner gate never lets a viewer outside the
+    // [identity] roster author seeded rows, so only a roster member owns hours.
+    const runtime = new OrbitalServerRuntime({
+      mode: 'mock',
+      debug: false,
+      defaultUser: { id: 'Employee Id 1', name: 'Employee 1', email: 'employee1@example.com', role: 'employee' },
+    });
     await runtime.register(s);
 
     const full = buildTraitIndex(s.orbitals);

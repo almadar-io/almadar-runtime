@@ -10,13 +10,11 @@
 import type { PersistenceAdapter } from '../server/OrbitalServerRuntime.js';
 import type { EntityRow } from '../types.js';
 import type { EntityField, EntityId, EntityPersistence, FieldValue } from '@almadar/core';
-import { linkSelfRelationField, RESERVED_FIELD_NAMES, sampleRow, sampleRowCount } from '@almadar/core/mock';
+import { crossRelationValue, isRelationPlaceholder, linkSelfRelationField, RESERVED_FIELD_NAMES, sampleRow, sampleRowCount } from '@almadar/core/mock';
 import { createLogger } from '@almadar/logger';
 import {
   seedRandom,
-  randomArrayElement,
   randomInt,
-  shuffleArray,
   randomPastDate,
 } from './mockRandom.js';
 
@@ -56,6 +54,18 @@ type RelationField = NamedEntityField & {
   relation: { entity: string; entityId?: EntityId; cardinality?: string; field?: string };
 };
 
+/** The store keeps timestamps as ISO strings; a supplied Date or string is kept, anything else is absent. */
+function isoTimestamp(value: FieldValue | undefined): string | undefined {
+  if (value instanceof Date) return value.toISOString();
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** Which seeded rows the viewer owns through `column`: every other row, except the row's own
+ *  `id` (a self-identity column), where the viewer is exactly one row, the first. */
+function stampsRow(column: string, index: number): boolean {
+  return column === 'id' ? index === 0 : index % 2 === 0;
+}
+
 function isRelationField(field: NamedEntityField): field is RelationField {
   return field.type === 'relation';
 }
@@ -83,6 +93,8 @@ export interface EntitySchema {
   fields: NamedEntityField[];
   /** Pre-authored instance data from the schema (used instead of generated mocks) */
   seedData?: EntityRow[];
+  /** `[identity]`: the rows are the persona roster, so every field is filled. */
+  identity?: boolean;
   /** A `[runtime]` entity is a per-orbital singleton, so it seeds ONE row whose
    *  values equal its declared defaults. Without this the persistence layer can
    *  disagree with the declared-default layer in the `@entity` merge and boot a
@@ -141,6 +153,13 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * list to re-point the stamp when the default user changes later.
    */
   private ownerStampedCells: Array<{ entity: string; id: string; column: string }> = [];
+  /**
+   * Owner cells the gate kept from the viewer at seed time with no eligible fallback
+   * owner. A later persona switch stamps the ones the new viewer may create, so a host
+   * that seeds as the synthetic viewer and then presents a roster persona gives that
+   * persona its rows.
+   */
+  private ownerDeferredCells: Array<{ entity: string; id: string; column: string }> = [];
 
   constructor(config: MockPersistenceConfig = {}) {
     this.config = {
@@ -202,6 +221,14 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     for (const cell of this.ownerStampedCells) {
       const row = this.stores.get(cell.entity)?.get(cell.id);
       if (!row) continue;
+      if (cell.column === 'id') {
+        if (this.ownerGate && !this.ownerGate(cell.entity, { ...row, id: newOwnerId })) {
+          skipped++;
+          continue;
+        }
+        this.rekeyRow(cell.entity, cell.id, newOwnerId);
+        continue;
+      }
       if (this.ownerGate && !this.ownerGate(cell.entity, { ...row, [cell.column]: newOwnerId })) {
         const fallbackId = this.firstEligibleOwner(cell.entity, cell.column, row);
         if (fallbackId === undefined) {
@@ -214,6 +241,19 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       }
       row[cell.column] = newOwnerId;
     }
+    const stillDeferred: Array<{ entity: string; id: string; column: string }> = [];
+    for (const cell of this.ownerDeferredCells) {
+      const row = this.stores.get(cell.entity)?.get(cell.id);
+      if (!row) continue;
+      if (this.ownerGate && !this.ownerGate(cell.entity, { ...row, [cell.column]: newOwnerId })) {
+        stillDeferred.push(cell);
+        continue;
+      }
+      if (cell.column === 'id') this.rekeyRow(cell.entity, cell.id, newOwnerId);
+      else row[cell.column] = newOwnerId;
+      this.ownerStampedCells.push({ ...cell, id: cell.column === 'id' ? newOwnerId : cell.id });
+    }
+    this.ownerDeferredCells = stillDeferred;
     mockLog.debug('mock:owner-restamped', {
       from: oldOwnerId,
       to: newOwnerId,
@@ -221,6 +261,22 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       skipped,
       fallbackStamps,
     });
+  }
+
+  /**
+   * Give a row a new id in place: the store keeps its order and every stamped
+   * cell that named the old id follows it.
+   */
+  private rekeyRow(storeKey: string, oldId: string, newId: string): void {
+    const store = this.stores.get(storeKey);
+    const row = store?.get(oldId);
+    if (!store || !row || oldId === newId) return;
+    const entries = [...store.entries()].map(([id, r]): [string, EntityRow] => (id === oldId ? [newId, { ...r, id: newId }] : [id, r]));
+    store.clear();
+    for (const [id, r] of entries) store.set(id, r);
+    for (const cell of [...this.ownerStampedCells, ...this.ownerDeferredCells]) {
+      if (cell.entity === storeKey && cell.id === oldId) cell.id = newId;
+    }
   }
 
   /**
@@ -384,7 +440,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         { name: schema.name, persistence: schema.persistence, fields: schema.fields },
         requested,
       );
-      this.seed(schema.name, schema.fields, count, schema.persistence);
+      this.seed(schema.name, schema.fields, count, schema.persistence, schema.identity);
     }
 
     // Phase 9.6.A: re-link relation fields across ALL registered entities.
@@ -402,18 +458,14 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * of nested-tree atoms (e.g. std-thread-comments-linear with ThreadPost.
    * replies → [ThreadPost]) render empty reply cards.
    *
-   * Cross-entity relations pick random IDs from the target store. EVERY
-   * self-referential relation, any cardinality, is linked deterministically
-   * instead via `@almadar/core/mock`'s `linkSelfRelationField`: row 0 stays a
-   * root (never referenced), row *i* parents to row ⌊(i−1)/2⌋ — one shared
-   * forest, real roots, no cycles. `one`/`many-to-one` self-relations (a
-   * parent column like `Tag.parentId : Tag`) store the scalar parent id;
-   * `many`/`one-to-many`/`many-to-many` self-relations (a children list like
-   * `ChatMessage.replies : [ChatMessage]`) store the forest's children-id
-   * list — no more random cross-linking, so the root row is never referenced
-   * and stays deletable under `onDelete: restrict`. The runtime caps
-   * recursion at depth=2 in `populateRelations`, so deep chains render two
-   * levels then stop.
+   * Cross-entity relations take `crossRelationValue` from `@almadar/core/mock`:
+   * deterministic (row *i* → target *i* mod n, or 2–3 consecutive ids), so no
+   * PRNG draw happens here and every path links identically. Every
+   * self-referential relation goes through `linkSelfRelationField`'s forest:
+   * row 0 stays a root, row *i* parents to row ⌊(i−1)/2⌋ (scalar parent id for
+   * `one`/`many-to-one`, the children-id list otherwise) — no cycles, and the
+   * root stays deletable under `onDelete: restrict`. Only placeholder cells are
+   * filled. Twin of `orbital-core/src/runtime/seed.rs` `link_relation_fields`.
    *
    * Entities sharing a collection are linked once per STORE, over the union
    * of their declared relation fields (first declarer of a field name wins).
@@ -464,58 +516,30 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
           this.resolveStoreKey(field.relation.entity);
         const targetStore = this.stores.get(targetKey);
         if (!targetStore || targetStore.size === 0) continue;
-        const sameStore = targetStore === store;
         const cardinality = field.relation.cardinality ?? 'many';
+        // Only placeholder cells are filled: a stamped owner, an authored value
+        // or a row a user has since written keeps what it holds, so relinking
+        // after every registration never rewrites data (twin of seed.rs).
+        const fillable = (row: EntityRow): boolean =>
+          isRelationPlaceholder(row[field.name]) &&
+          !stampedCellKeys.has(stampedCellKey(storeKey, row['id'] as string, field.name));
 
-        if (sameStore) {
+        if (targetStore === store) {
           if (isOwnerColumn) {
-            // A self-relation `ownerFieldsFromSchema` also flags as an owner
-            // column (e.g. `Person.staffAccount : Person`) means "this row's
-            // own account IS itself" — an identity self-pointer, not a
-            // parent-child tree. The forest below would otherwise leave row
-            // 0 (the root) with a permanently blank value — exactly the row
-            // most likely to BE the current viewer, so the one self-lookup
-            // that matters (`staffAccount == @user.id`) always missed.
-            // Every row gets its own id, skipping only cells `seed()`
-            // already owner-stamped (same guard `linkSelfRelationField`
-            // itself receives below, so the two mechanisms keep composing).
+            // A self-relation that is also an owner column (`Person.staffAccount
+            // : Person`) means "this row's own account IS itself": every row
+            // points at its own id rather than joining the parent forest.
             for (const row of rows) {
-              const selfId = row['id'] as string;
-              if (
-                (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) ||
-                stampedCellKeys.has(stampedCellKey(storeKey, selfId, field.name))
-              ) {
-                continue;
-              }
-              row[field.name] = selfId;
+              if (fillable(row)) row[field.name] = row['id'] as string;
             }
             continue;
           }
-          // Deterministic forest — see @almadar/core/mock's
-          // `linkSelfRelationField` doc. Every cardinality on a self-relation
-          // goes through the SAME forest: scalar parent for one/many-to-one,
-          // children-id list for many/one-to-many/many-to-many.
-          linkSelfRelationField(rows, { name: field.name, cardinality }, (row, i) =>
-            (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) ||
-            stampedCellKeys.has(stampedCellKey(storeKey, row['id'] as string, field.name)),
-          );
+          linkSelfRelationField(rows, { name: field.name, cardinality }, (row) => !fillable(row));
           continue;
         }
 
-        for (const row of rows) {
-          const selfId = row['id'] as string;
-          // A schema-derived owner column IS a relation to the [identity]
-          // entity, so this pass would overwrite the viewer stamp `seed()` just
-          // assigned (or the eligible-owner fallback picked) and every
-          // ownership-scoped view would render empty, or a wrongly-credited
-          // draft, again. Deliberate/gated assignment wins over random linking.
-          if (
-            (this.config.ownerId !== undefined && row[field.name] === this.config.ownerId) ||
-            stampedCellKeys.has(stampedCellKey(storeKey, selfId, field.name))
-          ) {
-            continue;
-          }
-          // Eligible IDs: every id in the (cross-entity) target store.
+        rows.forEach((row, i) => {
+          if (!fillable(row)) return;
           let eligible: string[] = [...targetStore.keys()];
           if (isOwnerColumn && this.ownerCandidateGate) {
             const gate = this.ownerCandidateGate;
@@ -523,15 +547,9 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
               gate(storeKey, { ...row, [field.name]: id }, targetStore.get(id)!),
             );
           }
-          if (eligible.length === 0) continue;
-          if (cardinality === 'one' || cardinality === 'many-to-one') {
-            row[field.name] = randomArrayElement(eligible);
-          } else {
-            // many / one-to-many / many-to-many → pick 2–4 IDs
-            const pickCount = Math.min(eligible.length, randomInt({ min: 2, max: 4 }));
-            row[field.name] = shuffleArray(eligible.slice()).slice(0, pickCount);
-          }
-        }
+          const value = crossRelationValue(eligible, i, cardinality);
+          if (value !== undefined) row[field.name] = value;
+        });
       }
     }
   }
@@ -558,7 +576,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       const absent = candidates.filter((f) => row[f.name] === undefined);
       if (absent.length === 0) continue;
       const sample = sampleRow(
-        { name: schema.name, persistence: schema.persistence, fields: absent },
+        { name: schema.name, persistence: schema.persistence, fields: absent, ...(schema.identity ? { identity: true } : {}) },
         { index, strategy: 'seeded', persistence: schema.persistence },
       );
       for (const f of absent) {
@@ -599,7 +617,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   /**
    * Seed an entity with mock data.
    */
-  seed(entityName: string, fields: EntityField[], count: number, persistence?: EntityPersistence): void {
+  seed(entityName: string, fields: EntityField[], count: number, persistence?: EntityPersistence, identity?: boolean): void {
     const store = this.getStore(entityName);
     const normalized = entityName.toLowerCase();
     const storeKey = this.resolveStoreKey(entityName);
@@ -611,27 +629,32 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     // Declared owner columns for THIS entity (see MockPersistenceConfig.ownerFields).
     const ownerCols = this.parsedOwnerFields()
       .filter(({ entity }) => entity.toLowerCase() === normalized)
-      .map(({ field }) => field);
+      .map(({ field }) => field)
+      .sort((a, b) => Number(b === 'id') - Number(a === 'id'));
     const ownerId = this.config.ownerId;
 
     const generated: Array<{ id: string; updatedAt: string }> = [];
     let fallbackStamps = 0;
     for (let i = 0; i < count; i++) {
-      const item = this.generateMockItem(entityName, fields, i + 1, persistence);
+      const item = this.generateMockItem(entityName, fields, i + 1, persistence, identity);
       // Give the viewer every other row, so an ownership-scoped view has real
       // data while a second persona still sees a different set — unless the
       // ownerGate says this viewer could not have authored the row (a reseed
       // runs AFTER a persona switch updated ownerId, so this path needs the
       // same gate as restampOwner or the switch leaks through re-register).
-      if (ownerId && ownerCols.length > 0 && i % 2 === 0) {
+      if (ownerId && ownerCols.length > 0) {
         for (const col of ownerCols) {
+          if (!stampsRow(col, i)) continue;
           if (this.ownerGate && !this.ownerGate(storeKey, { ...item, [col]: ownerId })) {
             // The default viewer can't own this row under the entity's
             // @create policy (e.g. a reader-default persona, author-only
             // policy) — stamp the first policy-eligible identity instead of
             // leaving whatever random value `sampleRow` generated.
             const fallbackId = this.firstEligibleOwner(storeKey, col, item);
-            if (fallbackId === undefined) continue;
+            if (fallbackId === undefined) {
+              this.ownerDeferredCells.push({ entity: storeKey, id: item.id as string, column: col });
+              continue;
+            }
             item[col] = fallbackId;
             this.ownerStampedCells.push({ entity: storeKey, id: item.id as string, column: col });
             fallbackStamps++;
@@ -676,6 +699,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     fields: EntityField[],
     index: number,
     persistence?: EntityPersistence,
+    identity?: boolean,
   ): EntityRow {
     const id = this.nextId(entityName);
     // Both timestamps come from the seeded PRNG, so a fixed seed reproduces them.
@@ -689,7 +713,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     );
     return {
       ...sampleRow(
-        { name: entityName, persistence, fields },
+        { name: entityName, persistence, fields, ...(identity ? { identity: true } : {}) },
         { index, strategy: 'seeded', persistence },
       ),
       id,
@@ -707,10 +731,8 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   // PersistenceAdapter Implementation
   // ============================================================================
 
-  async create(
-    entityType: string,
-    data: EntityRow
-  ): Promise<{ id: string }> {
+  /** Synchronous twin of `create`, returning the stored row (the compiled path's `MockDataService` API). */
+  insertRow(entityType: string, data: EntityRow): EntityRow {
     const store = this.getStore(entityType);
     this.assertFileValuesWithinCeiling(entityType, data);
     const suppliedId = typeof data.id === 'string' && data.id.length > 0 ? data.id : undefined;
@@ -722,15 +744,22 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
 
     const withDefaults = this.applyFieldDefaults(entityType, data);
 
-    const item = {
+    const item: EntityRow = {
       ...withDefaults,
       id,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: isoTimestamp(data.createdAt) ?? now,
+      updatedAt: isoTimestamp(data.updatedAt) ?? now,
     };
 
     store.set(id, item);
-    return { id };
+    return item;
+  }
+
+  async create(
+    entityType: string,
+    data: EntityRow
+  ): Promise<{ id: string }> {
+    return { id: this.insertRow(entityType, data).id as string };
   }
 
   /**
@@ -782,48 +811,62 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     return result;
   }
 
+  /** Synchronous twin of `update`: the updated row, or null when there is no such row. */
+  patchRow(entityType: string, id: string, data: EntityRow): EntityRow | null {
+    const store = this.getStore(entityType);
+    this.assertFileValuesWithinCeiling(entityType, data);
+    const existing = store.get(id);
+    if (!existing) return null;
+
+    const updated: EntityRow = {
+      ...existing,
+      ...data,
+      id, // Preserve original ID
+      updatedAt: isoTimestamp(data.updatedAt) ?? new Date().toISOString(),
+    };
+
+    store.set(id, updated);
+    return updated;
+  }
+
   async update(
     entityType: string,
     id: string,
     data: EntityRow
   ): Promise<void> {
-    const store = this.getStore(entityType);
-    this.assertFileValuesWithinCeiling(entityType, data);
-    const existing = store.get(id);
-
-    if (!existing) {
+    if (!this.patchRow(entityType, id, data)) {
       throw new Error(`Entity ${entityType} with id ${id} not found`);
     }
+  }
 
-    const updated = {
-      ...existing,
-      ...data,
-      id, // Preserve original ID
-      updatedAt: new Date().toISOString(),
-    };
-
-    store.set(id, updated);
+  /** Synchronous twin of `delete`: whether a row was removed. */
+  removeRow(entityType: string, id: string): boolean {
+    return this.getStore(entityType).delete(id);
   }
 
   async delete(entityType: string, id: string): Promise<void> {
-    const store = this.getStore(entityType);
-    if (!store.has(id)) {
+    if (!this.removeRow(entityType, id)) {
       throw new Error(`Entity ${entityType} with id ${id} not found`);
     }
-    store.delete(id);
+  }
+
+  rowOf(entityType: string, id: string): EntityRow | null {
+    return this.getStore(entityType).get(id) ?? null;
+  }
+
+  rowsOf(entityType: string): EntityRow[] {
+    return Array.from(this.getStore(entityType).values());
   }
 
   async getById(
     entityType: string,
     id: string
   ): Promise<EntityRow | null> {
-    const store = this.getStore(entityType);
-    return store.get(id) ?? null;
+    return this.rowOf(entityType, id);
   }
 
   async list(entityType: string): Promise<Array<EntityRow>> {
-    const store = this.getStore(entityType);
-    return Array.from(store.values());
+    return this.rowsOf(entityType);
   }
 
   // ============================================================================
@@ -846,6 +889,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     this.stores.clear();
     this.idCounters.clear();
     this.ownerStampedCells = [];
+    this.ownerDeferredCells = [];
     this.storeKeyByEntity.clear();
     this.idLabelByStoreKey.clear();
     this.storeNameById.clear();
