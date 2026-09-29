@@ -176,12 +176,45 @@ export interface HttpTransportOptions {
   getAccessToken?: AccessTokenProvider;
   /** Custom fetch function (for testing or custom auth). */
   fetch?: typeof fetch;
+  /**
+   * Gzip JSON request bodies of at least `COMPRESSED_BODY_MIN_BYTES` (`Content-Encoding: gzip`).
+   * Browsers never compress request bodies, so a registered schema otherwise goes up raw. Only
+   * for servers that inflate request bodies (Express's JSON parser does).
+   */
+  compressRequests?: boolean;
+}
+
+/** Bodies below this stay plain: compressing them costs more than it saves. */
+export const COMPRESSED_BODY_MIN_BYTES = 32 * 1024;
+
+/** A JSON request body, gzipped (`encoding: 'gzip'`) when `compress` is set and it is large enough to be worth it. */
+export async function encodeJsonBody(value: object, compress: boolean): Promise<{ body: string | Uint8Array<ArrayBuffer>; encoding?: 'gzip' }> {
+  const text = JSON.stringify(value);
+  if (!compress || text.length < COMPRESSED_BODY_MIN_BYTES || typeof CompressionStream === 'undefined') return { body: text };
+  const bytes = new TextEncoder().encode(text);
+  const source = new ReadableStream<BufferSource>({ start(controller) { controller.enqueue(bytes); controller.close(); } });
+  const gzipped = source.pipeThrough(new CompressionStream('gzip'));
+  return { body: new Uint8Array(await new Response(gzipped).arrayBuffer()), encoding: 'gzip' };
+}
+
+async function jsonPost(
+  fetchFn: typeof fetch,
+  url: string,
+  value: object,
+  getAccessToken: AccessTokenProvider | undefined,
+  compress: boolean,
+): Promise<Response> {
+  const headers = await authHeaders(getAccessToken);
+  const { body, encoding } = await encodeJsonBody(value, compress);
+  if (encoding) headers['Content-Encoding'] = encoding;
+  return fetchFn(url, { method: 'POST', headers, body });
 }
 
 /** HTTP transport — POSTs to a server speaking the canonical playground-runtime contract. */
 export function createHttpTransport(options: HttpTransportOptions): EventTransport {
   const { serverUrl, getAccessToken } = options;
   const fetchFn = options.fetch ?? fetch.bind(globalThis);
+  const compress = options.compressRequests === true;
   // The registered schema's name addresses every event to its catalog
   // behavior — orbital names alone are not unique across a catalog.
   let behavior: string | undefined;
@@ -190,11 +223,7 @@ export function createHttpTransport(options: HttpTransportOptions): EventTranspo
     async register(schema) {
       behavior = schema.name;
       try {
-        const res = await fetchFn(`${serverUrl}/register`, {
-          method: 'POST',
-          headers: await authHeaders(getAccessToken),
-          body: JSON.stringify({ schema }),
-        });
+        const res = await jsonPost(fetchFn, `${serverUrl}/register`, { schema }, getAccessToken, compress);
         const parsed = OrbitalRegisterResponseSchema.safeParse(await res.json());
         if (!parsed.success) {
           log.error('register:malformed-response', { issues: JSON.stringify(parsed.error.issues) });
@@ -226,13 +255,13 @@ export function createHttpTransport(options: HttpTransportOptions): EventTranspo
     },
 
     async send(orbitalName, request) {
-      const res = await fetchFn(`${serverUrl}/${orbitalName}/events`, {
-        method: 'POST',
-        headers: await authHeaders(getAccessToken),
-        body: JSON.stringify(
-          request.behavior === undefined && behavior !== undefined ? { ...request, behavior } : request,
-        ),
-      });
+      const res = await jsonPost(
+        fetchFn,
+        `${serverUrl}/${orbitalName}/events`,
+        request.behavior === undefined && behavior !== undefined ? { ...request, behavior } : request,
+        getAccessToken,
+        compress,
+      );
       return (await res.json()) as OrbitalEventResponse;
     },
 

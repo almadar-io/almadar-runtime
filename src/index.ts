@@ -178,6 +178,8 @@ export {
   createHttpTransport,
   createInProcessTransport,
   deriveCarriesCircuitState,
+  encodeJsonBody,
+  COMPRESSED_BODY_MIN_BYTES,
   type EventTransport,
   type EventTransportRegisterResult,
   type AccessTokenProvider,
