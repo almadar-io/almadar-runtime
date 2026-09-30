@@ -507,7 +507,7 @@ function needsPreprocessing(schema: OrbitalSchema): boolean {
  * contribute; string and `{ ref }` page references are skipped (they have no
  * resolvable path/name at this layer).
  */
-function inlineNavItems(pages: readonly PageRef[]): NavItem[] {
+export function inlineNavItems(pages: readonly PageRef[]): NavItem[] {
   const items: NavItem[] = [];
   for (const page of pages) {
     if (isPageReference(page)) continue;
@@ -518,23 +518,13 @@ function inlineNavItems(pages: readonly PageRef[]): NavItem[] {
     if (p.path.includes(':')) continue;
     const item: NavItem = {
       href: p.path,
-      // `@label` annotation wins; else derive by stripping a trailing
-      // `Page` suffix from `name` (`ContactsPage` → `Contacts`).
-      label: p.label ?? deriveNavLabel(p.name),
+      // The declared `@label`, else the page name as written (never derived).
+      label: p.label ?? p.name,
     };
     if (typeof p.icon === 'string') item.icon = p.icon;
     items.push(item);
   }
   return items;
-}
-
-/** Derive a human nav label from a page `name`: strip a trailing `Page`
- * suffix. Mirrors the compiler's `derive_nav_label`. */
-function deriveNavLabel(name: string): string {
-  if (name.endsWith('Page') && name.length > 'Page'.length) {
-    return name.slice(0, -'Page'.length);
-  }
-  return name;
 }
 
 /** The baseline theme `@currentTheme` falls back to when an orbital declares
