@@ -9,8 +9,10 @@
 
 import type { PersistenceAdapter } from '../server/OrbitalServerRuntime.js';
 import type { EntityRow } from '../types.js';
-import type { EntityField, EntityId, EntityPersistence, FieldValue } from '@almadar/core';
-import { crossRelationValue, isRelationPlaceholder, linkSelfRelationField, RESERVED_FIELD_NAMES, sampleRow, sampleRowCount } from '@almadar/core/mock';
+import type { EntityField, EntityId, EntityPersistence, FieldValue, OrbitalSchema, UserContext } from '@almadar/core';
+import { personaFromIdentityRow } from '@almadar/core';
+import { crossRelationValue, entityAccessPoliciesByStoreKey, isRelationPlaceholder, linkSelfRelationField, RESERVED_FIELD_NAMES, sampleRow, sampleRowCount } from '@almadar/core/mock';
+import { applyRowAccess, checkMutationAccess } from './entityAccess.js';
 import { createLogger } from '@almadar/logger';
 import {
   seedRandom,
@@ -229,7 +231,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         this.rekeyRow(cell.entity, cell.id, newOwnerId);
         continue;
       }
-      if (this.ownerGate && !this.ownerGate(cell.entity, { ...row, [cell.column]: newOwnerId })) {
+      if (!this.viewerMayOwn(cell.entity, cell.column, row, newOwnerId)) {
         const fallbackId = this.firstEligibleOwner(cell.entity, cell.column, row);
         if (fallbackId === undefined) {
           skipped++;
@@ -245,7 +247,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     for (const cell of this.ownerDeferredCells) {
       const row = this.stores.get(cell.entity)?.get(cell.id);
       if (!row) continue;
-      if (this.ownerGate && !this.ownerGate(cell.entity, { ...row, [cell.column]: newOwnerId })) {
+      if (!this.viewerMayOwn(cell.entity, cell.column, row, newOwnerId)) {
         stillDeferred.push(cell);
         continue;
       }
@@ -318,6 +320,40 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
   }
 
   /**
+   * "Does `@read` admit this identity to `candidateRow`?" When some roster
+   * identity is admitted only while the owner column holds its id, the column
+   * is ownership-scoped (`Employee.staffAccount`: the employee the row is
+   * about) and every identity `@read` admits as its owner may own it — so each
+   * such persona gets rows of its own. Otherwise `@create` decides as before.
+   */
+  private ownerReadGate?: (storeKey: string, candidateRow: EntityRow, candidateIdentityRow: EntityRow) => boolean;
+
+  setOwnerReadGate(gate: ((storeKey: string, candidateRow: EntityRow, candidateIdentityRow: EntityRow) => boolean) | undefined): void {
+    this.ownerReadGate = gate;
+  }
+
+  /** The identities (seed order) that may own an ownership-scoped `column`; undefined when `@read` does not scope it. */
+  private readOwners(storeKey: string, column: string, row: EntityRow): string[] | undefined {
+    const gate = this.ownerReadGate;
+    if (!gate || column === 'id') return undefined;
+    const identityStoreKey = this.resolveOwnerColumnTargetStore(storeKey, column);
+    const identityStore = identityStoreKey ? this.stores.get(identityStoreKey) : undefined;
+    if (!identityStore) return undefined;
+    const identities = [...identityStore.values()];
+    const admitsAsOwner = (identityRow: EntityRow): boolean => gate(storeKey, { ...row, [column]: identityRow['id'] as string }, identityRow);
+    const scoped = identities.some((identityRow) => admitsAsOwner(identityRow) && !gate(storeKey, { ...row, [column]: '' }, identityRow));
+    if (!scoped) return undefined;
+    return identities.filter(admitsAsOwner).map((identityRow) => identityRow['id'] as string);
+  }
+
+  /** May the viewer own `row`'s `column` — `@read` ownership when it scopes the column, else the `@create` gate. */
+  private viewerMayOwn(storeKey: string, column: string, row: EntityRow, viewerId: string): boolean {
+    const readers = this.readOwners(storeKey, column, row);
+    if (readers !== undefined) return readers.includes(viewerId);
+    return !this.ownerGate || this.ownerGate(storeKey, { ...row, [column]: viewerId });
+  }
+
+  /**
    * The store an owner column's relation field targets, resolved the same
    * way `linkRelationFields` resolves any relation target (id sibling wins
    * over the `entity` name string) — but keyed by STORE, mirroring that
@@ -350,6 +386,8 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
    * caller keeps today's skip behavior in that case.
    */
   private firstEligibleOwner(storeKey: string, column: string, row: EntityRow): string | undefined {
+    const readers = this.readOwners(storeKey, column, row);
+    if (readers !== undefined) return readers[0];
     if (!this.ownerCandidateGate) return undefined;
     const identityStoreKey = this.resolveOwnerColumnTargetStore(storeKey, column);
     const identityStore = identityStoreKey ? this.stores.get(identityStoreKey) : undefined;
@@ -541,7 +579,10 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
         rows.forEach((row, i) => {
           if (!fillable(row)) return;
           let eligible: string[] = [...targetStore.keys()];
-          if (isOwnerColumn && this.ownerCandidateGate) {
+          const readers = isOwnerColumn ? this.readOwners(storeKey, field.name, row) : undefined;
+          if (readers !== undefined) {
+            eligible = readers;
+          } else if (isOwnerColumn && this.ownerCandidateGate) {
             const gate = this.ownerCandidateGate;
             eligible = eligible.filter((id) =>
               gate(storeKey, { ...row, [field.name]: id }, targetStore.get(id)!),
@@ -645,7 +686,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
       if (ownerId && ownerCols.length > 0) {
         for (const col of ownerCols) {
           if (!stampsRow(col, i)) continue;
-          if (this.ownerGate && !this.ownerGate(storeKey, { ...item, [col]: ownerId })) {
+          if (!this.viewerMayOwn(storeKey, col, item, ownerId)) {
             // The default viewer can't own this row under the entity's
             // @create policy (e.g. a reader-default persona, author-only
             // policy) — stamp the first policy-eligible identity instead of
@@ -911,4 +952,36 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
  */
 export function createMockPersistence(config?: MockPersistenceConfig): MockPersistenceAdapter {
   return new MockPersistenceAdapter(config);
+}
+
+/**
+ * Install the schema's access policies as the seeder's owner gates — the one
+ * installation both the runtime (`OrbitalServerRuntime`) and the compiled apps'
+ * `MockDataService` use. `@create` decides who may author a row (`viewer()` is
+ * read at evaluation time, so one installation covers every persona switch);
+ * `@read` decides a column it scopes by ownership (see `setOwnerReadGate`).
+ */
+export function installPolicyOwnerGates(
+  adapter: MockPersistenceAdapter,
+  schema: OrbitalSchema,
+  viewer: () => UserContext | undefined,
+): void {
+  const policiesByStore = entityAccessPoliciesByStoreKey(schema);
+  adapter.setOwnerGate((storeKey, candidateRow) => {
+    const user = viewer();
+    if (!user) return true;
+    return checkMutationAccess(candidateRow, policiesByStore.get(storeKey)?.create, { user });
+  });
+  // A row without a usable identity id fails closed rather than evaluating as anonymous.
+  adapter.setOwnerCandidateGate((storeKey, candidateRow, candidateIdentityRow) => {
+    const persona = personaFromIdentityRow(candidateIdentityRow);
+    if (!persona) return false;
+    return checkMutationAccess(candidateRow, policiesByStore.get(storeKey)?.create, { user: persona });
+  });
+  adapter.setOwnerReadGate((storeKey, candidateRow, candidateIdentityRow) => {
+    const read = policiesByStore.get(storeKey)?.read;
+    const persona = personaFromIdentityRow(candidateIdentityRow);
+    if (read === undefined || !persona) return false;
+    return applyRowAccess([candidateRow], read, undefined, { user: persona }).length === 1;
+  });
 }

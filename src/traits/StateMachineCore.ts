@@ -776,6 +776,26 @@ export class StateMachineManager {
     }
 
     /**
+     * The lifecycle event an embedded child can be repainted with: the one it
+     * handles from its current state, provided every matching arm stays in that
+     * state and only renders. A repaint never moves a trait (a loaded list's
+     * `browsing -> loading` INIT) nor reloads it (a fetch + spinner self-loop).
+     */
+    repaintLifecycleEvent(traitName: string, entityId?: string): string | undefined {
+        const trait = this.traits.get(traitName);
+        const state = this.getOrInitState(traitName, entityId ?? SINGLETON_SCOPE);
+        if (!trait || !state) return undefined;
+        for (const event of LIFECYCLE_EVENTS) {
+            const arms = findMatchingTransitions(trait, state.currentState, event);
+            if (arms.length === 0) continue;
+            const repaints = arms.every((t) => t.to === state.currentState
+                && (t.effects ?? []).every((effect) => Array.isArray(effect) && effect[0] === 'render-ui'));
+            return repaints ? event : undefined;
+        }
+        return undefined;
+    }
+
+    /**
      * Send an event to all traits.
      *
      * `entityByTrait` lets callers supply per-trait entity rows for guard

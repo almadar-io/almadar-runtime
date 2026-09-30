@@ -16,7 +16,7 @@
  * @packageDocumentation
  */
 import { StateMachineManager, type TraitDefinition } from '../traits/StateMachineCore.js';
-import type { EntityRow, RollbackCause, RuntimeConfig, TransitionObserver } from '../types.js';
+import type { EntityRow, EventPayload, RollbackCause, RuntimeConfig, TransitionObserver } from '../types.js';
 import { MountLifecycle } from './mount-lifecycle.js';
 import type { WorklistItem } from './evaluateOrbitalEvent.js';
 
@@ -38,6 +38,8 @@ export interface CircuitStore {
   readonly frames: Map<string, EntityRow>;
   /** The current mount's lifecycle — which traits still await INIT, and what is held for them. */
   readonly mount: MountLifecycle<WorklistItem>;
+  /** Embedded child → the payload its composer last composed it with (sticky `@callsitePayload`). */
+  readonly callsitePayloads: Map<string, EventPayload>;
   /**
    * Capture `trait`'s current state + its frame row, for a
    * `runtimeOptimistic` dispatch's pre-commit rollback point. `frameKey`
@@ -86,6 +88,7 @@ export function createMemoryCircuitStore(
     manager,
     frames,
     mount: new MountLifecycle<WorklistItem>(),
+    callsitePayloads: new Map<string, EventPayload>(),
     snapshot(trait, entityId, frameKey) {
       const key = frameKey ?? trait;
       const frame = frames.get(key);

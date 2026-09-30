@@ -226,9 +226,11 @@ function createClientEffectRunner(
       deps.store.frames.set(frameKey, frame);
     }
 
+    const capture = args.callsitePayload ?? deps.store.callsitePayloads.get(traitName);
+    if (args.callsitePayload !== undefined) deps.store.callsitePayloads.set(traitName, args.callsitePayload);
     const pushClientEffect = (effect: ClientEffectTuple): void => {
       args.clientEffects.push(effect);
-      args.clientEffectsByTrait?.push({ traitName, effect, ...args.firing });
+      args.clientEffectsByTrait?.push({ traitName, effect, ...args.firing, ...(capture !== undefined ? { callsitePayload: capture } : {}) });
       args.onPush?.({ type: 'effect', data: effect });
     };
 
@@ -279,7 +281,7 @@ function createClientEffectRunner(
         ...(config !== undefined ? { config } : {}),
         ...(args.user !== undefined ? { user: args.user } : {}),
         ...(args.now !== undefined ? { now: args.now } : {}),
-        ...(args.callsitePayload !== undefined ? { callsitePayload: args.callsitePayload } : {}),
+        ...(capture !== undefined ? { callsitePayload: capture } : {}),
         ...(args.dispatch !== undefined ? args.dispatch : {}),
       },
       context: {
@@ -579,6 +581,11 @@ export async function applyOrbitalEventResponse(
     emitted: response.emittedEvents.map((e) => e.event),
   });
   if (response.entityByTrait) fanOutEntityRows(store, opts.traitIndex, response.entityByTrait, writtenTraits);
+  // A held child's frame waits for its INIT, but the payload it was composed
+  // with is exactly what that INIT's repaint needs.
+  for (const frame of serverResponse.clientEffectsByTrait ?? []) {
+    if (frame.callsitePayload !== undefined) store.callsitePayloads.set(frame.traitName, frame.callsitePayload);
+  }
 
   const traitEntityIds = new Map<string, string>();
   if (response.entityByTrait) {

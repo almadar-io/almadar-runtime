@@ -27,7 +27,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/server/OrbitalServerRuntime.js';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
-import type { ClientEffectTuple, OrbitalSchema, RuntimeValue, Trait } from '@almadar/core';
+import type { ClientEffectTuple, OrbitalSchema, RenderUIEffect, RuntimeValue, Trait } from '@almadar/core';
 import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
 // `['render-ui', slot, pattern, props, priority]` — the resolved leaf
@@ -233,5 +233,241 @@ describe('callsite-payload capture — std-helpdesk (real organism)', () => {
     const props = renderPatternFor(resp.clientEffectsByTrait, 'InlineTypographyRender22');
     expect(props).toBeDefined();
     expect(props?.content).toBe('Boom');
+  });
+});
+
+// ============================================================================
+// (c) A repaint never moves the embedded child. std-inventory /stock-levels:
+// every parent transition replayed the ledger's `browsing -> loading` INIT and
+// the response carried `loading`, so the page sat on its spinner.
+// ============================================================================
+
+function buildPassThroughSchema(): OrbitalSchema {
+  const render = (children: string[]): RenderUIEffect => ['render-ui', 'main', { type: 'stack', children }];
+  const host: Trait = {
+    name: 'Host',
+    scope: 'instance',
+    linkedEntity: 'Ticket',
+    stateMachine: {
+      states: [{ name: 'idle', isInitial: true }],
+      events: [{ key: 'PING', name: 'Ping' }],
+      transitions: [{ from: 'idle', to: 'idle', event: 'PING', effects: [render(['@trait.Ledger'])] }],
+    },
+  };
+  const ledger: Trait = {
+    name: 'Ledger',
+    scope: 'instance',
+    linkedEntity: 'Ticket',
+    stateMachine: {
+      states: [{ name: 'loading', isInitial: true }, { name: 'browsing' }],
+      events: [{ key: 'INIT', name: 'Init' }, { key: 'LOADED', name: 'Loaded' }],
+      transitions: [
+        { from: 'loading', to: 'loading', event: 'INIT', effects: [render(['@trait.Child'])] },
+        { from: 'loading', to: 'browsing', event: 'LOADED', effects: [render(['@trait.Child'])] },
+        { from: 'browsing', to: 'loading', event: 'INIT', effects: [render(['@trait.Child'])] },
+      ],
+    },
+  };
+  const child: Trait = {
+    name: 'Child',
+    scope: 'instance',
+    linkedEntity: 'Ticket',
+    config: { content: { type: 'string', default: '@callsitePayload.label' } },
+    stateMachine: {
+      states: [{ name: 'idle', isInitial: true }],
+      events: [{ key: 'INIT', name: 'Init' }],
+      transitions: [{ from: 'idle', to: 'idle', event: 'INIT', effects: [['render-ui', 'main', { type: 'button', label: '@config.content' }]] }],
+    },
+  };
+  return {
+    name: 'PassThroughApp',
+    schemaVersion: 4,
+    orbitals: [{
+      name: 'HostOrbital',
+      entity: { name: 'Ticket', persistence: 'runtime', fields: [{ name: 'id', type: 'string' }] },
+      traits: [host, ledger, child],
+      pages: [],
+    }],
+  };
+}
+
+describe('callsite-payload capture — a repaint keeps the embedded child in its state', () => {
+  it('a loaded pass-through child stays loaded; its grandchild repaints with what the child composed it with', async () => {
+    const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
+    await runtime.register(buildPassThroughSchema());
+    await runtime.processOrbitalEvent('HostOrbital', { event: 'INIT', targetTrait: 'Ledger' });
+    await runtime.processOrbitalEvent('HostOrbital', { event: 'LOADED', targetTrait: 'Ledger', payload: { label: 'Ledger' } });
+    const resp = await runtime.processOrbitalEvent('HostOrbital', { event: 'PING', targetTrait: 'Host', payload: { label: 'Fresh' } });
+    expect(resp.states?.['Ledger']).toBe('browsing');
+    expect(resp.clientEffectsByTrait?.some((e) => e.traitName === 'Ledger')).toBe(false);
+    expect(renderPatternFor(resp.clientEffectsByTrait, 'Child')?.label).toBe('Ledger');
+  });
+
+  it('control: a child whose lifecycle arm is a self-loop is repainted under the payload', async () => {
+    const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
+    await runtime.register(buildPassThroughSchema());
+    await runtime.processOrbitalEvent('HostOrbital', { event: 'INIT', targetTrait: 'Ledger' });
+    const resp = await runtime.processOrbitalEvent('HostOrbital', { event: 'PING', targetTrait: 'Host', payload: { label: 'Fresh' } });
+    expect(resp.states?.['Ledger']).toBe('loading');
+    expect(resp.clientEffectsByTrait?.some((e) => e.traitName === 'Ledger')).toBe(true);
+    expect(renderPatternFor(resp.clientEffectsByTrait, 'Child')?.label).toBe('Fresh');
+  });
+});
+
+// ============================================================================
+// (d) A capture nested inside a `children` array of pattern objects — the
+// std-timeline shape (`{type: timeline, entity: ?data}` hoisted next to sibling
+// `@trait.X` refs). std-construction-pm /site-diary: the rows loaded and the
+// timeline rendered "No events".
+// ============================================================================
+
+describe('callsite-payload capture — nested inside a children array', () => {
+  it('the composing payload reaches a pattern object inside the child\'s children', async () => {
+    const host: Trait = {
+      name: 'Feed',
+      scope: 'instance',
+      linkedEntity: 'Ticket',
+      stateMachine: {
+        states: [{ name: 'loading', isInitial: true }, { name: 'browsing' }],
+        events: [{ key: 'LOADED', name: 'Loaded' }],
+        transitions: [{ from: 'loading', to: 'browsing', event: 'LOADED', effects: [['render-ui', 'main', { type: 'stack', children: ['@trait.Body'] }]] }],
+      },
+    };
+    const body: Trait = {
+      name: 'Body',
+      scope: 'instance',
+      linkedEntity: 'Ticket',
+      config: {
+        children: { type: 'unknown', default: ['@trait.Title', { type: 'timeline', entity: '@callsitePayload.data', fields: ['title'] }] },
+      },
+      stateMachine: {
+        states: [{ name: 'idle', isInitial: true }],
+        events: [{ key: 'INIT', name: 'Init' }],
+        transitions: [{ from: 'idle', to: 'idle', event: 'INIT', effects: [['render-ui', 'main', { type: 'stack', children: '@config.children' }]] }],
+      },
+    };
+    const title: Trait = {
+      name: 'Title',
+      scope: 'instance',
+      linkedEntity: 'Ticket',
+      stateMachine: {
+        states: [{ name: 'idle', isInitial: true }],
+        events: [{ key: 'INIT', name: 'Init' }],
+        transitions: [{ from: 'idle', to: 'idle', event: 'INIT', effects: [['render-ui', 'main', { type: 'typography', content: 'Log' }]] }],
+      },
+    };
+    const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
+    await runtime.register({
+      name: 'NestedApp',
+      schemaVersion: 4,
+      orbitals: [{
+        name: 'FeedOrbital',
+        entity: { name: 'Ticket', persistence: 'runtime', fields: [{ name: 'id', type: 'string' }] },
+        traits: [host, body, title],
+        pages: [],
+      }],
+    });
+    const rows = [{ id: 't1', title: 'Pour' }, { id: 't2', title: 'Frame' }];
+    const resp = await runtime.processOrbitalEvent('FeedOrbital', { event: 'LOADED', targetTrait: 'Feed', payload: { data: rows } });
+    const stack = renderPatternFor(resp.clientEffectsByTrait, 'Body');
+    const children = stack?.children as Array<Record<string, RuntimeValue> | string> | undefined;
+    const timeline = children?.find((c): c is Record<string, RuntimeValue> => typeof c === 'object' && c !== null && c['type'] === 'timeline');
+    expect(timeline?.['entity']).toEqual(rows);
+  });
+});
+
+// ============================================================================
+// (e) The capture is sticky: a child's own lifecycle run resolves
+// `@callsitePayload` to the payload its composer last composed it with (the
+// compiled path renders the child inside its composer with `lastPayload`), and
+// the child's frame carries that payload so a client can repaint it the same way.
+// ============================================================================
+
+describe('callsite-payload capture — sticky across the child\'s own lifecycle', () => {
+  it('the child\'s own INIT after composition keeps the composed payload', async () => {
+    const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
+    await runtime.register(buildSyntheticSchema());
+    await runtime.processOrbitalEvent('HostOrbital', { event: 'LOADED', targetTrait: 'Host', payload: { error: 'Boom', data: { status: 'resolved' } } });
+    const own = await runtime.processOrbitalEvent('HostOrbital', { event: 'INIT', targetTrait: 'Child' });
+    expect(renderPatternFor(own.clientEffectsByTrait, 'Child')?.label).toBe('Boom');
+    const entry = own.clientEffectsByTrait?.find((e) => e.traitName === 'Child');
+    expect(entry?.callsitePayload).toEqual({ error: 'Boom', data: { status: 'resolved' } });
+  });
+
+  it('control: before any composition the child\'s own INIT has no payload to capture', async () => {
+    const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
+    await runtime.register(buildSyntheticSchema());
+    const own = await runtime.processOrbitalEvent('HostOrbital', { event: 'INIT', targetTrait: 'Child' });
+    expect(renderPatternFor(own.clientEffectsByTrait, 'Child')?.label).toBeUndefined();
+    expect(own.clientEffectsByTrait?.find((e) => e.traitName === 'Child')?.callsitePayload).toBeUndefined();
+  });
+
+  it('edge: a later composition replaces the sticky payload', async () => {
+    const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
+    await runtime.register(buildSyntheticSchema());
+    await runtime.processOrbitalEvent('HostOrbital', { event: 'LOADED', targetTrait: 'Host', payload: { error: 'First', data: { status: 'open' } } });
+    await runtime.processOrbitalEvent('HostOrbital', { event: 'LOADED', targetTrait: 'Host', payload: { error: 'Second', data: { status: 'open' } } });
+    const own = await runtime.processOrbitalEvent('HostOrbital', { event: 'INIT', targetTrait: 'Child' });
+    expect(renderPatternFor(own.clientEffectsByTrait, 'Child')?.label).toBe('Second');
+  });
+});
+
+// ============================================================================
+// (f) Walking THROUGH a child that is not repainted (its lifecycle arm
+// reloads) must not recompose that child's own children with the ancestor's
+// payload — they keep what their composer last gave them. std-devops-dashboard
+// /activity: ActivityPanel's INIT walked through ActivityFeed and repainted the
+// feed's timeline under `{}`, erasing its rows.
+// ============================================================================
+
+function buildWalkThroughSchema(): OrbitalSchema {
+  const host: Trait = {
+    name: 'Host', scope: 'instance', linkedEntity: 'Ticket',
+    stateMachine: {
+      states: [{ name: 'idle', isInitial: true }],
+      events: [{ key: 'PING', name: 'Ping' }],
+      transitions: [{ from: 'idle', to: 'idle', event: 'PING', effects: [['render-ui', 'main', { type: 'stack', children: ['@trait.Feed'] }]] }],
+    },
+  };
+  const feed: Trait = {
+    name: 'Feed', scope: 'instance', linkedEntity: 'Ticket',
+    stateMachine: {
+      states: [{ name: 'browsing', isInitial: true }],
+      events: [{ key: 'INIT', name: 'Init' }, { key: 'LOADED', name: 'Loaded' }],
+      transitions: [
+        { from: 'browsing', to: 'browsing', event: 'INIT', effects: [['set', '@entity.id', 'reload'], ['render-ui', 'main', { type: 'spinner' }]] },
+        { from: 'browsing', to: 'browsing', event: 'LOADED', effects: [['render-ui', 'main', { type: 'stack', children: ['@trait.Leaf'] }]] },
+      ],
+    },
+  };
+  const leaf: Trait = {
+    name: 'Leaf', scope: 'instance', linkedEntity: 'Ticket',
+    config: { content: { type: 'string', default: '@callsitePayload.label' } },
+    stateMachine: {
+      states: [{ name: 'idle', isInitial: true }],
+      events: [{ key: 'INIT', name: 'Init' }],
+      transitions: [{ from: 'idle', to: 'idle', event: 'INIT', effects: [['render-ui', 'main', { type: 'button', label: '@config.content' }]] }],
+    },
+  };
+  return {
+    name: 'WalkApp', schemaVersion: 4,
+    orbitals: [{ name: 'HostOrbital', entity: { name: 'Ticket', persistence: 'runtime', fields: [{ name: 'id', type: 'string' }] }, traits: [host, feed, leaf], pages: [] }],
+  };
+}
+
+describe('callsite-payload capture — walking through a reloading child', () => {
+  it('the grandchild keeps the payload its own composer gave it', async () => {
+    const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
+    await runtime.register(buildWalkThroughSchema());
+    await runtime.processOrbitalEvent('HostOrbital', { event: 'LOADED', targetTrait: 'Feed', payload: { label: 'Mine' } });
+    const resp = await runtime.processOrbitalEvent('HostOrbital', { event: 'PING', targetTrait: 'Host', payload: { label: 'Host' } });
+    expect(renderPatternFor(resp.clientEffectsByTrait, 'Leaf')?.label).toBe('Mine');
+  });
+
+  it('control: a grandchild never composed yet takes the ancestor\'s payload', async () => {
+    const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
+    await runtime.register(buildWalkThroughSchema());
+    const resp = await runtime.processOrbitalEvent('HostOrbital', { event: 'PING', targetTrait: 'Host', payload: { label: 'Host' } });
+    expect(renderPatternFor(resp.clientEffectsByTrait, 'Leaf')?.label).toBe('Host');
   });
 });

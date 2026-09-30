@@ -218,10 +218,9 @@ import type {
 } from "@almadar/core";
 import { dispatchVisitKey, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, resolveDefaultViewer, DEFAULT_VIEWER, isPageReference, type NavItem, type Page, type PageRef,
 } from "@almadar/core";
-import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf, entityAccessPoliciesByStoreKey } from "@almadar/core/mock";
-import { checkMutationAccess } from "../entities/entityAccess.js";
+import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf } from "@almadar/core/mock";
 import { runServerEffectStage } from "../effects/effect-stage.js";
-import { MockPersistenceAdapter } from "../entities/MockPersistenceAdapter.js";
+import { installPolicyOwnerGates, MockPersistenceAdapter } from "../entities/MockPersistenceAdapter.js";
 import {
   preprocessSchema,
   type PreprocessedSchema,
@@ -618,6 +617,8 @@ export class OrbitalServerRuntime {
    * `resolvedTraitConfigs` uses). See `rerenderCallsiteCaptureChildren`.
    */
   private callsiteCaptureChildrenByTrait: ReadonlyMap<string, ReadonlySet<string>> = new Map();
+  /** Embedded child → the payload its composer last composed it with (sticky `@callsitePayload`). */
+  private composedCallsitePayloads = new Map<string, EventPayload>();
 
   constructor(config: OrbitalServerRuntimeConfig = {}) {
     this.config = {
@@ -1859,7 +1860,8 @@ export class OrbitalServerRuntime {
 
   /**
    * Install the schema's `@create` directives as the mock seeder's owner
-   * gate — the single authority on who may author a row. Consulted by BOTH
+   * gate — the authority on who may author a row, unless `@read` scopes the
+   * owner column by ownership (then its owner-readers own the rows). Consulted by BOTH
    * `restampOwner` (persona switches) and `seed()` (a client connect
    * re-registers, and the deterministic reseed re-stamps with the current
    * ownerId — gating only the switch path would leak right there). Reads the
@@ -1869,22 +1871,9 @@ export class OrbitalServerRuntime {
    */
   private installOwnerGate(schema: OrbitalSchema): void {
     if (!(this.persistence instanceof MockPersistenceAdapter)) return;
-    const policiesByStore = entityAccessPoliciesByStoreKey(schema);
-    this.persistence.setOwnerGate((storeKey, candidateRow) => {
-      const user = this.config.defaultUser;
-      if (!user) return true;
-      return checkMutationAccess(candidateRow, policiesByStore.get(storeKey)?.create, { user });
-    });
-    // Per-candidate twin of the gate above, for linkRelationFields and the
-    // eligible-owner seed fallback: may THIS identity row (not the current
-    // default user) own the candidate row? A row without a usable `id` fails
-    // closed rather than being evaluated as an unauthenticated request.
-    this.persistence.setOwnerCandidateGate((storeKey, candidateRow, candidateIdentityRow) => {
-      const persona = personaFromIdentityRow(candidateIdentityRow);
-      if (!persona) return false;
-      return checkMutationAccess(candidateRow, policiesByStore.get(storeKey)?.create, { user: persona });
-    });
+    installPolicyOwnerGates(this.persistence, schema, () => this.config.defaultUser);
   }
+
 
   /** Flush a persona switch that arrived before the schema was resolved. */
   private flushPendingOwnerRestamp(): void {
@@ -2499,6 +2488,9 @@ export class OrbitalServerRuntime {
     /** The firing transition's event and from-state, stamped on each client effect. */
     firing?: { event: string; fromState: string },
   ): Promise<void> {
+    if (callsitePayload !== undefined) this.composedCallsitePayloads.set(traitName, callsitePayload);
+    const capture = callsitePayload ?? this.composedCallsitePayloads.get(traitName);
+    const framesBefore = clientEffectsByTrait?.length ?? 0;
     const sigilPages: NavItem[] = [];
     const seenPaths = new Set<string>();
     for (const reg of this.orbitals.values()) {
@@ -2550,8 +2542,13 @@ export class OrbitalServerRuntime {
         mockMode: this.config.mode === 'mock',
         contextExtensions: this.config.contextExtensions,
       },
-      { traitName, effects, payload, entityData, entityId, emittedEvents, fetchedData, clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, callsitePayload, ...(now !== undefined ? { now } : {}), ...(dispatch !== undefined ? { dispatch } : {}), ...(firing !== undefined ? { firing } : {}) },
+      { traitName, effects, payload, entityData, entityId, emittedEvents, fetchedData, clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, callsitePayload: capture, ...(now !== undefined ? { now } : {}), ...(dispatch !== undefined ? { dispatch } : {}), ...(firing !== undefined ? { firing } : {}) },
     );
+    if (capture !== undefined && clientEffectsByTrait !== undefined) {
+      for (const frame of clientEffectsByTrait.slice(framesBefore)) {
+        if (frame.traitName === traitName) frame.callsitePayload = capture;
+      }
+    }
   }
 
   /**
@@ -2567,9 +2564,9 @@ export class OrbitalServerRuntime {
    * DIRECT children that need this — either because the child itself
    * captures, or because it is a pass-through to a capturing descendant.
    * The child's lifecycle event (INIT/LOAD/$MOUNT) is re-dispatched
-   * TARGETED at just that trait, from its CURRENT state (the same
-   * guard-aware `sendEvent`/`canHandleEvent` lookup a mount-time INIT
-   * uses), then its effects run through the SAME `executeEffects` used
+   * TARGETED at just that trait, from its CURRENT state, only when that
+   * arm stays in the state (`repaintLifecycleEvent` — a repaint never moves
+   * the child; otherwise only its descendants are visited), then its effects run through the SAME `executeEffects` used
    * everywhere else, with `payload: {}` (a lifecycle event carries none)
    * and `callsitePayload` set so `@callsitePayload.*` resolves — pushing
    * into the SAME `clientEffects`/`clientEffectsByTrait`/`effectResults`
@@ -2598,21 +2595,31 @@ export class OrbitalServerRuntime {
     originClientId: string | undefined,
     now: number | undefined,
     visited: Set<string> = new Set(),
+    /** Walking through a child that was not repainted: its children keep the payload they were last composed with. */
+    keepComposed = false,
   ): Promise<void> {
     const children = this.callsiteCaptureChildrenByTrait.get(traitName);
     if (!children || children.size === 0) return;
     for (const childName of children) {
       if (visited.has(childName)) continue;
       visited.add(childName);
-      const lifecycleEvent = LIFECYCLE_EVENTS.find((evt) => registered.manager.canHandleEvent(childName, evt));
-      if (lifecycleEvent === undefined) continue;
-      const [entry] = registered.manager.sendEvent(lifecycleEvent, {}, entityData, undefined, undefined, childName, user);
-      if (!entry || !entry.result.executed) continue;
+      const composedWith = keepComposed ? this.composedCallsitePayloads.get(childName) ?? callsitePayload : callsitePayload;
+      const lifecycleEvent = registered.manager.repaintLifecycleEvent(childName);
+      const [entry] = lifecycleEvent === undefined
+        ? []
+        : registered.manager.sendEvent(lifecycleEvent, {}, entityData, undefined, undefined, childName, user);
+      if (!entry || !entry.result.executed) {
+        await this.rerenderCallsiteCaptureChildren(
+          registered, childName, composedWith, entityData, entityId, emittedEvents, fetchedData,
+          clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, now, visited, true,
+        );
+        continue;
+      }
       xOrbitalLog.debug('callsite-capture-child:rerender', () => ({
         referrer: traitName,
         child: childName,
         lifecycleEvent,
-        callsitePayload: JSON.stringify(callsitePayload),
+        callsitePayload: JSON.stringify(composedWith),
       }));
       await this.executeEffects(
         registered,
@@ -2629,13 +2636,13 @@ export class OrbitalServerRuntime {
         clientEffectsByTrait,
         onPush,
         originClientId,
-        callsitePayload,
+        composedWith,
         now,
       );
       await this.rerenderCallsiteCaptureChildren(
         registered,
         childName,
-        callsitePayload,
+        composedWith,
         entityData,
         entityId,
         emittedEvents,
@@ -2648,6 +2655,7 @@ export class OrbitalServerRuntime {
         originClientId,
         now,
         visited,
+        keepComposed,
       );
     }
   }

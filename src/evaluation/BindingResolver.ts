@@ -11,6 +11,7 @@
 
 import {
     evaluate,
+    lambdaSourceOf,
     resolveBinding,
     createMinimalContext,
     type EvaluationContext,
@@ -462,7 +463,8 @@ function interpolateArray(value: RuntimeValue[], ctx: EvaluationContext): Runtim
     }
 
     if (isSExpression(value)) {
-        const result = evaluate(value as Parameters<typeof evaluate>[0], ctx);
+        const evaluated = evaluate(value as Parameters<typeof evaluate>[0], ctx);
+        const result = storesLambdaInLiteral(value) ? restoreLambdaSources(evaluated) : evaluated;
         bindLog.debug('sexpr:eval', () => ({
             operator: typeof value[0] === 'string' ? value[0] : '<non-string>',
             argCount: value.length - 1,
@@ -508,6 +510,77 @@ function interpolateArray(value: RuntimeValue[], ctx: EvaluationContext): Runtim
         if (interpolated !== item) anyChanged = true;
     }
     return anyChanged ? mapped : value;
+}
+
+function isFnForm(node: RuntimeValue): boolean {
+    return Array.isArray(node) && (node[0] === 'fn' || node[0] === 'lambda');
+}
+
+function isPlainRecord(value: RuntimeValue): value is { [key: string]: RuntimeValue } {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+}
+
+function containsFnForm(node: RuntimeValue): boolean {
+    if (isFnForm(node)) return true;
+    if (Array.isArray(node)) return node.some(containsFnForm);
+    if (isPlainRecord(node)) return Object.values(node).some(containsFnForm);
+    return false;
+}
+
+const storesLambdaCache = new WeakMap<object, boolean>();
+
+/**
+ * Does this expression tree build a literal (`{ … }` or a list of them) that
+ * holds a `(fn …)` — a stored lambda, as opposed to one an operator consumes?
+ * Static per tree, so the result walk below only runs for those trees.
+ */
+function storesLambdaInLiteral(node: RuntimeValue): boolean {
+    if (node === null || typeof node !== 'object') return false;
+    const cached = storesLambdaCache.get(node);
+    if (cached !== undefined) return cached;
+    let found: boolean;
+    if (isPlainRecord(node)) {
+        found = Object.values(node).some(containsFnForm) || Object.values(node).some(storesLambdaInLiteral);
+    } else if (Array.isArray(node)) {
+        found = node.some(storesLambdaInLiteral);
+    } else {
+        found = false;
+    }
+    storesLambdaCache.set(node, found);
+    return found;
+}
+
+/**
+ * A lambda the evaluator stored in a result is a function, which JSON drops at
+ * the server bridge and no renderer can serialise. Swap each one for the
+ * `(fn …)` it was built from — the form a render-prop lambda already travels
+ * in — leaving every other value, and the identity of untouched containers, as
+ * it was.
+ */
+function restoreLambdaSources(value: RuntimeValue): RuntimeValue {
+    if (typeof value === 'function') return lambdaSourceOf(value) ?? value;
+    if (Array.isArray(value)) {
+        let changed = false;
+        const out = value.map((item: RuntimeValue) => {
+            const next = restoreLambdaSources(item);
+            if (next !== item) changed = true;
+            return next;
+        });
+        return changed ? out : value;
+    }
+    if (isPlainRecord(value)) {
+        let changed = false;
+        const out: { [key: string]: RuntimeValue } = {};
+        for (const [key, item] of Object.entries(value)) {
+            const next = restoreLambdaSources(item);
+            if (next !== item) changed = true;
+            out[key] = next;
+        }
+        return changed ? out : value;
+    }
+    return value;
 }
 
 /**

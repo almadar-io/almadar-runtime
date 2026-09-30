@@ -1269,6 +1269,8 @@ function callSiteRungValue(rungConfig: CallSiteConfig, knob: string): TraitConfi
 interface ConfigForwardResult {
   readonly value: TraitConfigValue | undefined;
   readonly reachedSchemaConfigOnly: boolean;
+  /** `@config.<key>` of the rung key the value was finally read from. */
+  readonly target?: string;
 }
 
 function walkConfigForwardChain(
@@ -1307,7 +1309,64 @@ function walkConfigForwardChain(
   const reachesSchemaConfigRung = value === undefined || value === currentForward;
   if (reachesSchemaConfigRung) value = schemaConfig?.[knob]?.default;
   if (value === undefined || value === currentForward) return unresolved;
-  return { value, reachedSchemaConfigOnly: reachesSchemaConfigRung };
+  return { value, reachedSchemaConfigOnly: reachesSchemaConfigRung, target: currentForward };
+}
+
+/**
+ * `value` with every nested `@config.<knob>` leaf `resolve` supplies replaced
+ * by its value (G-CROSS-024) — `undefined` when nothing changed. A knob in
+ * `own` is the trait's own live read and is never folded. Twin of Rust's
+ * `substitute_nested_forwards` (`phases/inline/trait.rs`).
+ */
+function substituteNestedForwards(
+  value: TraitConfigValue,
+  own: ReadonlySet<string>,
+  resolve: (forward: string) => ConfigForwardResult,
+  tokens: string[],
+): TraitConfigValue | undefined {
+  if (typeof value === "string") {
+    if (!value.startsWith("@config.") || own.has(value.slice("@config.".length))) return undefined;
+    const hit = resolve(value);
+    if (hit.value === undefined) return undefined;
+    tokens.push(hit.target ?? value);
+    return hit.value;
+  }
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((item) => {
+      const v = substituteNestedForwards(item, own, resolve, tokens);
+      if (v === undefined) return item;
+      changed = true;
+      return v;
+    });
+    return changed ? next : undefined;
+  }
+  if (value !== null && typeof value === "object") {
+    let changed = false;
+    const next: Record<string, TraitConfigValue> = {};
+    for (const [k, item] of Object.entries(value)) {
+      const v = substituteNestedForwards(item, own, resolve, tokens);
+      next[k] = v === undefined ? item : v;
+      if (v !== undefined) changed = true;
+    }
+    return changed ? next : undefined;
+  }
+  return undefined;
+}
+
+/** A declared field with its nested forwards folded, or `undefined` when none resolved. */
+function foldNestedForwards(
+  field: ConfigFieldDeclaration,
+  own: ReadonlySet<string>,
+  resolve: (forward: string) => ConfigForwardResult,
+): ConfigFieldDeclaration | undefined {
+  const value = field.default;
+  if (value === undefined || typeof value !== "object" || value === null) return undefined;
+  const tokens: string[] = [];
+  const next = substituteNestedForwards(value, own, resolve, tokens);
+  if (next === undefined) return undefined;
+  const nestedForwardedFrom = [...new Set([...(field.nestedForwardedFrom ?? []), ...tokens])];
+  return { ...field, default: next, nestedForwardedFrom };
 }
 
 /**
@@ -1327,9 +1386,20 @@ function resolveConfigForwards(
   schemaOnlyKeys?: Set<string>,
 ): DeclaredTraitConfig | undefined {
   let next: Record<string, ConfigFieldDeclaration> | undefined;
+  const own = new Set(Object.keys(declared));
+  const resolveNested = (forward: string): ConfigForwardResult =>
+    walkConfigForwardChain(forward, parentChain, orbitalConfig, upstreamOrbitalConfig, upstreamSchemaConfig, schemaConfig);
   for (const [key, field] of Object.entries(declared)) {
     const forward = field.default;
-    if (typeof forward !== "string" || !forward.startsWith("@config.")) continue;
+    if (typeof forward !== "string") {
+      const folded = foldNestedForwards(field, own, resolveNested);
+      if (folded) {
+        next ??= { ...declared };
+        next[key] = folded;
+      }
+      continue;
+    }
+    if (!forward.startsWith("@config.")) continue;
     const { value, reachedSchemaConfigOnly } = walkConfigForwardChain(
       forward,
       parentChain,
@@ -1379,6 +1449,39 @@ function resolveCallSiteConfigForwards(
     // plain wiring-value override has no metadata carrier to hang it on and
     // stays a plain value (B4-J5, `ConfigFieldDeclaration.forwardedFrom`).
     next[key] = isCallSiteConfigDeclaration(entry) ? { ...entry, default: value, forwardedFrom: forward } : value;
+  }
+  return next;
+}
+
+/**
+ * A `{ref}` entry's call-site override with its NESTED `@config.<k>` leaves
+ * folded through the same chain (G-CROSS-024) — the whole-string half is
+ * {@link resolveCallSiteConfigForwards}. `own` is the resolved trait's
+ * declared knobs plus the override's own keys: those stay live reads.
+ */
+function resolveNestedCallSiteForwards(
+  config: CallSiteConfig,
+  own: ReadonlySet<string>,
+  parentChain: readonly CallSiteConfig[],
+  orbitalConfig: DeclaredTraitConfig | undefined,
+  schemaConfig: DeclaredTraitConfig | undefined,
+): CallSiteConfig | undefined {
+  const resolve = (forward: string): ConfigForwardResult =>
+    walkConfigForwardChain(forward, parentChain, orbitalConfig, undefined, undefined, schemaConfig);
+  let next: Record<string, TraitConfigValue | ConfigFieldDeclaration> | undefined;
+  for (const [key, entry] of Object.entries(config)) {
+    if (isCallSiteConfigDeclaration(entry)) {
+      const folded = foldNestedForwards(entry, own, resolve);
+      if (!folded) continue;
+      next ??= { ...config };
+      next[key] = folded;
+      continue;
+    }
+    if (entry === null || typeof entry !== "object") continue;
+    const value = substituteNestedForwards(entry, own, resolve, []);
+    if (value === undefined) continue;
+    next ??= { ...config };
+    next[key] = value;
   }
   return next;
 }
@@ -4508,9 +4611,17 @@ export class ReferenceResolver {
       // atom entity (`RenewalRisk` the orbital's own primary vs a
       // DIFFERENT generic atom's OWN `RenewalRisk` placeholder) never
       // overwrites the orbital's real id with a foreign one.
+      // Only THIS orbital's own names guard — a same-named entity declared
+      // by a DIFFERENT orbital (schema-wide roster) is overridden by the
+      // atom's, exactly like `entity_ids.extend(collect_orbital_entity_ids)`.
+      const ownNames = new Set(inlineEntityRefsOf(orbital).map((e) => e.name));
       const next = new Map(this.entityIdsInScope);
+      const pulledNames = new Set<string>();
       for (const e of gap22AuxEntities) {
-        if (e.id && !next.has(e.name)) next.set(e.name, e.id);
+        if (e.id && !ownNames.has(e.name) && !pulledNames.has(e.name)) {
+          next.set(e.name, e.id);
+          pulledNames.add(e.name);
+        }
       }
       this.entityIdsInScope = next;
     }
@@ -5931,7 +6042,7 @@ export class ReferenceResolver {
     // atom's own internal composition — out of scope here), so this is a
     // no-op there, matching prior behavior exactly.
     const localName = overrideName ?? (parsed ? parsed.traitName : ref);
-    const resolvedConfig =
+    let resolvedConfig =
       config && embedCtx
         ? resolveEmbedderConfigForward(config, localName, embedCtx, this.schemaConfig)
         : config;
@@ -6041,6 +6152,16 @@ export class ReferenceResolver {
       // rename, `@trait.FilteredItemSearch` substrings in render-ui
       // patterns would fail to resolve because the trait index keys
       // would still hold the atom's original name.
+      if (resolvedConfig && embedCtx) {
+        const nested = resolveNestedCallSiteForwards(
+          resolvedConfig,
+          new Set([...Object.keys(trait.config ?? {}), ...Object.keys(resolvedConfig)]),
+          embedderChain(localName, embedCtx.traitRefs, embedCtx.embedGraph),
+          embedCtx.orbitalConfig,
+          this.schemaConfig,
+        );
+        if (nested) resolvedConfig = nested as TraitConfig;
+      }
       const baseTrait: Trait = overrideName
         ? { ...trait, name: overrideName }
         : trait;
@@ -6106,6 +6227,16 @@ export class ReferenceResolver {
     // map when the ref carries a `refId`, else the existing name-keyed map.
     const localTrait = (refId && this.localTraitsById.get(refId)) ?? this.localTraits.get(ref);
     if (localTrait) {
+      if (resolvedConfig && embedCtx) {
+        const nested = resolveNestedCallSiteForwards(
+          resolvedConfig,
+          new Set([...Object.keys(localTrait.config ?? {}), ...Object.keys(resolvedConfig)]),
+          embedderChain(localName, embedCtx.traitRefs, embedCtx.embedGraph),
+          embedCtx.orbitalConfig,
+          this.schemaConfig,
+        );
+        if (nested) resolvedConfig = nested as TraitConfig;
+      }
       const baseLocal: Trait = overrideName
         ? { ...localTrait, name: overrideName }
         : localTrait;
