@@ -48,6 +48,12 @@ import type {
 // via dynamic import — same keep-it-out-of-the-browser-bundle idiom as
 // `createOsHandlers`/`@almadar/server` below.
 import type { AsyncLocalStorage as BracketAsyncLocalStorage } from "node:async_hooks";
+
+/** One context's hold on the runtime event queue; released while it awaits a service. */
+interface EventQueueHold {
+  held: boolean;
+  release: () => void;
+}
 import { EventBus } from "../events/EventBus.js";
 import type { EffectDispatch } from "../evaluation/dispatch-memory.js";
 import { eventRouteKey } from "../events/identity/routing.js";
@@ -184,6 +190,7 @@ import type {
   OrbitalDefinition,
   Entity,
   EntityField,
+  RelationEntityField,
   EntityId,
   Trait,
   TraitTick,
@@ -193,7 +200,10 @@ import type {
   RuntimeValue,
   UserContext,
   RawUserClaims,
+  ServiceHostPorts,
 } from "@almadar/core";
+import { entityAccessPolicies } from "@almadar/core/mock";
+import { applyRowAccess } from "../entities/entityAccess.js";
 
 // Single upstream owner (`@almadar/core`'s `types/bus.ts`) — both execution
 // paths (this runtime and orbital-shell-typescript's generated handlers,
@@ -215,7 +225,10 @@ import type {
   OrbitalEventResponse,
   ClientEffectByTrait,
   ClientEffectTuple,
+  ExternalInput,
+  ExternalInputRequest,
 } from "@almadar/core";
+import { externalInputsOf, findExternalInput } from "@almadar/core";
 import { dispatchVisitKey, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, resolveDefaultViewer, DEFAULT_VIEWER, isPageReference, type NavItem, type Page, type PageRef,
 } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf } from "@almadar/core/mock";
@@ -2044,6 +2057,67 @@ export class OrbitalServerRuntime {
     return registered;
   }
 
+  /** The program's declared external inputs: what an outside client may send which trait. */
+  listExternalInputs(): ExternalInput[] {
+    return this.resolvedSchema ? externalInputsOf(this.resolvedSchema) : [];
+  }
+
+  /**
+   * The outside-client input channel: an API caller, an agent acting as the
+   * user, an MCP client. Only a declared external input of the target trait is
+   * dispatched — through `processOrbitalEvent`, so guards, entity policies and
+   * cascades apply exactly as for a click. Anything else is refused with
+   * `not-an-external-input`. The app's own UI keeps using `processOrbitalEvent`.
+   */
+  /**
+   * The running app lent to one `call-service` provider as the caller: the
+   * declared inputs, the input channel as `user`, and the rows `user` may read
+   * (the entity's `@read` policy, the same rule a `fetch` effect applies).
+   */
+  servicePorts(caller: { orbital: string; trait: string }, user: UserContext | undefined): ServiceHostPorts {
+    return {
+      caller,
+      inputs: () => this.listExternalInputs(),
+      dispatchInput: (orbital, request) =>
+        this.dispatchExternalInput(orbital, { ...request, ...(user !== undefined ? { user } : {}) }),
+      read: async (entity) => {
+        const readPolicy = this.resolvedSchema ? entityAccessPolicies(this.resolvedSchema, entity)?.read : undefined;
+        return applyRowAccess(await this.persistence.list(entity), readPolicy, undefined, { user });
+      },
+    };
+  }
+
+  async dispatchExternalInput(
+    orbitalName: string,
+    request: ExternalInputRequest,
+    onPush?: (item: PushItem) => void,
+  ): Promise<OrbitalEventResponse> {
+    const declared = this.resolvedSchema
+      ? findExternalInput(this.resolvedSchema, orbitalName, request.targetTrait, request.event)
+      : undefined;
+    if (!declared) {
+      return {
+        success: false,
+        transitioned: false,
+        states: {},
+        emittedEvents: [],
+        error: `'${request.event}' is not an external input of ${orbitalName}.${request.targetTrait}`,
+        rejections: [{ code: 'not-an-external-input', trait: request.targetTrait, event: request.event }],
+      };
+    }
+    return this.processOrbitalEvent(
+      orbitalName,
+      {
+        event: request.event,
+        payload: request.payload ?? {},
+        targetTrait: request.targetTrait,
+        ...(request.user !== undefined ? { user: request.user } : {}),
+        ...(request.entityId !== undefined ? { entityId: request.entityId } : {}),
+      },
+      onPush,
+    );
+  }
+
   async processOrbitalEvent(
     orbitalName: string,
     request: OrbitalEventRequest,
@@ -2317,13 +2391,54 @@ export class OrbitalServerRuntime {
    */
   private eventQueue: Promise<void> = Promise.resolve();
 
-  private enqueueEvent<T>(run: () => Promise<T>): Promise<T> {
-    const result = this.eventQueue.then(run, run);
-    this.eventQueue = result.then(
-      () => undefined,
-      () => undefined,
+  /** Wait for the queue, then hold it until the returned release is called. FIFO. */
+  private acquireEventQueue(): Promise<() => void> {
+    const previous = this.eventQueue;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.eventQueue = previous.then(() => held);
+    return previous.then(() => release);
+  }
+
+  /** Which queue hold the current async context runs under (see `outsideEventQueue`). */
+  private queueHoldAls: Promise<BracketAsyncLocalStorage<EventQueueHold>> | null = null;
+  private ensureQueueHoldAls(): Promise<BracketAsyncLocalStorage<EventQueueHold>> {
+    this.queueHoldAls ??= import('node:async_hooks').then(
+      ({ AsyncLocalStorage }) => new AsyncLocalStorage<EventQueueHold>(),
     );
-    return result;
+    return this.queueHoldAls;
+  }
+
+  private async enqueueEvent<T>(run: () => Promise<T>): Promise<T> {
+    const als = await this.ensureQueueHoldAls();
+    const hold: EventQueueHold = { held: true, release: await this.acquireEventQueue() };
+    try {
+      return await als.run(hold, run);
+    } finally {
+      if (hold.held) hold.release();
+    }
+  }
+
+  /**
+   * Run `work` with this context's queue hold released, then re-acquire it (in
+   * FIFO order behind whatever queued meanwhile). Dispatches that land while
+   * released run as their own dispatches; their commits and the held run's
+   * later commit follow server-arrival last-write-wins. Outside a hold, `work`
+   * just runs.
+   */
+  private async outsideEventQueue<T>(work: () => Promise<T>): Promise<T> {
+    const hold = (await this.ensureQueueHoldAls()).getStore();
+    if (hold === undefined || !hold.held) return work();
+    hold.held = false;
+    hold.release();
+    try {
+      return await work();
+    } finally {
+      hold.release = await this.acquireEventQueue();
+      hold.held = true;
+    }
   }
 
   /**
@@ -2510,10 +2625,12 @@ export class OrbitalServerRuntime {
         entityFieldsFor: (type) => this.entityFieldsFor(registered, type),
         validateRelationCardinality: (type, data) => this.validateRelationCardinality(type, data),
         enforceOnDeleteRules: (type, id) => this.enforceOnDeleteRules(type, id),
-        populateRelations: (entities, type, include) => this.populateRelations(entities, type, include),
+        populateRelations: (entities, type, include) => this.populateRelations(registered, entities, type, include),
         sigilPages,
         sigilTheme,
         extraEffectHandlers: this.config.effectHandlers,
+        outsideEventQueue: (work) => this.outsideEventQueue(work),
+        servicePorts: (caller, user) => this.servicePorts(caller, user),
         deliverEmit: (event, eventPayload, stamp, fromPersistSuccess) => {
           // Observability tap, NOT circuit routing (W4): the runtime's own
           // fan-out is the composition's in-band loop + the host's
@@ -2790,6 +2907,7 @@ export class OrbitalServerRuntime {
   }
 
   private async populateRelations(
+    registered: RegisteredOrbital,
     entities: EntityRow[],
     entityType: string,
     include: string[],
@@ -2809,24 +2927,13 @@ export class OrbitalServerRuntime {
       return;
     }
     visited.add(entityType);
-    // Find the orbital that owns this entity type
-    let entityFields: Array<{ name: string; type: string; relation?: { entity?: string; entityId?: EntityId; cardinality?: string; onDelete?: string } }> | undefined;
+    // EntityField.name is optional in @almadar/core 7+ (Rust IR parity); only
+    // named top-level fields carry FK metadata.
+    const entityFields = this.entityFieldsFor(registered, entityType).filter(
+      (f): f is typeof f & { name: string } => typeof f.name === 'string' && f.name.length > 0,
+    );
 
-    for (const [, registered] of this.orbitals) {
-      if (registered.entity.name === entityType) {
-        // EntityField.name is optional in @almadar/core 7+ to match the
-        // Rust IR (FieldDefinition.name: Option<String>). For relation
-        // population we only care about named top-level fields; nameless
-        // nested item descriptors don't carry FK metadata.
-        entityFields = registered.entity.fields.filter(
-          (f): f is typeof f & { name: string } =>
-            typeof f.name === 'string' && f.name.length > 0,
-        );
-        break;
-      }
-    }
-
-    if (!entityFields) {
+    if (entityFields.length === 0) {
       if (this.config.debug) {
         persistLog.warn('populate:no-entity-def', { entityType });
       }
@@ -2836,7 +2943,7 @@ export class OrbitalServerRuntime {
     // Process each include field
     for (const includeField of include) {
       // Find the relation field (check both "fieldName" and "fieldNameId" patterns)
-      const relationField = entityFields.find(f => {
+      const relationField = entityFields.find((f): f is RelationEntityField & { name: string } => {
         if (f.type !== 'relation') return false;
         // Match "company" against "company" or "companyId"
         return f.name === includeField ||
@@ -2910,43 +3017,68 @@ export class OrbitalServerRuntime {
         : includeField;
 
       // Self-referential relations (target entity === source entity, e.g.
-      // ThreadPost.replies : [ThreadPost]) would otherwise attach LIVE store
-      // rows that also appear in `entities` and get hydrated themselves —
-      // producing mutual object references (A.replies→B, B.replies→A) that make
-      // `res.json()` throw "Converting circular structure to JSON" → 500. Attach
-      // a shallow clone instead, and for the self-referential case neutralize the
-      // child's own back-pointer field so hydrated children are leaves (one level
-      // of hydration, no cycle).
+      // ThreadPost.replies : [ThreadPost]) hydrate as a TREE of shallow clones:
+      // every descendant is loaded, and a branch ends where an id repeats one
+      // of its ancestors, so the payload has no shared or circular references
+      // (live store rows here made `res.json()` throw → 500).
       const isSelfRef = relatedEntityType === entityType;
-      const hydrateClone = (id: string): EntityRow | undefined => {
+      const idsOf = (value: EntityRow[string]): string[] => {
+        if (typeof value === 'string') return [value];
+        const ids: string[] = [];
+        if (Array.isArray(value)) for (const id of value) if (typeof id === 'string') ids.push(id);
+        return ids;
+      };
+      const selfTree = isSelfRef && cardinality !== 'one' && cardinality !== 'many-to-one';
+      if (selfTree) {
+        let frontier = [...relatedEntities.values()];
+        while (frontier.length > 0) {
+          const next: EntityRow[] = [];
+          for (const row of frontier) {
+            for (const id of idsOf(row[foreignKeyField])) {
+              if (relatedEntities.has(id)) continue;
+              const loaded = await this.persistence.getById(relatedEntityType, id);
+              if (loaded) {
+                relatedEntities.set(id, loaded);
+                next.push(loaded);
+              }
+            }
+          }
+          frontier = next;
+        }
+      }
+      const hydrateClone = (id: string, ancestors: ReadonlySet<string>): EntityRow | undefined => {
         const related = relatedEntities.get(id);
         if (!related) return undefined;
         const copy: EntityRow = { ...related };
-        if (isSelfRef) copy[foreignKeyField] = [];
+        if (selfTree) {
+          const lineage = new Set(ancestors).add(id);
+          copy[foreignKeyField] = idsOf(related[foreignKeyField])
+            .filter((childId) => !lineage.has(childId))
+            .map((childId) => hydrateClone(childId, lineage))
+            .filter((child): child is EntityRow => child !== undefined);
+        } else if (isSelfRef) {
+          copy[foreignKeyField] = [];
+        }
         return copy;
       };
 
       for (const entity of entities) {
         const fkValue = entity[foreignKeyField];
+        const lineage = new Set(typeof entity.id === 'string' ? [entity.id] : []);
         // Population attaches related EntityRow objects to the entity at runtime.
         // This mutates beyond the EntityRow type, so we use Object.defineProperty.
         if (cardinality === 'one' || cardinality === 'many-to-one') {
           if (typeof fkValue === 'string' && relatedEntities.has(fkValue)) {
             Object.defineProperty(entity, populatedFieldName, {
-              value: hydrateClone(fkValue),
+              value: hydrateClone(fkValue, lineage),
               writable: true, enumerable: true, configurable: true,
             });
           }
         } else {
-          if (Array.isArray(fkValue)) {
-            const fkIds = (fkValue as string[]).filter((id): id is string => typeof id === 'string');
+          const fkIds = idsOf(fkValue).filter((id) => !lineage.has(id) && relatedEntities.has(id));
+          if (Array.isArray(fkValue) || fkIds.length > 0) {
             Object.defineProperty(entity, populatedFieldName, {
-              value: fkIds.map(hydrateClone).filter(Boolean),
-              writable: true, enumerable: true, configurable: true,
-            });
-          } else if (typeof fkValue === 'string' && relatedEntities.has(fkValue)) {
-            Object.defineProperty(entity, populatedFieldName, {
-              value: [hydrateClone(fkValue)],
+              value: fkIds.map((id) => hydrateClone(id, lineage)).filter((child): child is EntityRow => child !== undefined),
               writable: true, enumerable: true, configurable: true,
             });
           }
@@ -3002,6 +3134,32 @@ export class OrbitalServerRuntime {
         }),
       );
       res.json({ success: true, orbitals });
+    });
+
+    // Declared external inputs (before `/:orbital`, which would capture "inputs").
+    router.get("/inputs", (_req: Request, res: Response) => {
+      res.json({ success: true, inputs: this.listExternalInputs() });
+    });
+
+    // Outside-client input channel: only a declared external input, as the
+    // authenticated user — a `user` in the body is never trusted.
+    router.post("/:orbital/inputs", async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const orbitalName = req.params.orbital as string;
+        const firebaseUser = (req as Request & { firebaseUser?: OrbitalEventRequest["user"] }).firebaseUser;
+        const body = req.body as Partial<ExternalInputRequest>;
+        const result = await this.dispatchExternalInput(orbitalName, {
+          targetTrait: String(body.targetTrait ?? ""),
+          event: String(body.event ?? ""),
+          ...(body.payload !== undefined ? { payload: body.payload } : {}),
+          ...(body.entityId !== undefined ? { entityId: body.entityId } : {}),
+          ...(firebaseUser !== undefined ? { user: firebaseUser } : {}),
+        });
+        const refused = result.rejections?.some((r) => r.code === "not-an-external-input") === true;
+        res.status(refused ? 403 : 200).json(result);
+      } catch (error) {
+        next(error);
+      }
     });
 
     // Get orbital info

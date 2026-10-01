@@ -60,6 +60,12 @@ export interface EffectExecutorOptions {
     context: EffectContext;
     /** Enable debug logging */
     debug?: boolean;
+    /**
+     * Called when a `persist` is refused before its handler runs (a create
+     * missing a required field) — no handler records it, so the host does (the
+     * server stage reports it in the response's effectResults).
+     */
+    onPersistRefused?: (refusal: { args: RuntimeValue[]; error: string }) => void;
     /** When true, log warnings when bindings resolve to undefined (RCG-01) */
     strictBindings?: boolean;
     /** Additional fields to spread onto EvaluationContext (e.g., { agent: AgentContext }) */
@@ -247,6 +253,7 @@ export class EffectExecutor {
     private bindings: BindingContext;
     private context: EffectContext;
     private debug: boolean;
+    private onPersistRefused?: EffectExecutorOptions['onPersistRefused'];
     private strictBindings: boolean;
     private contextExtensions?: EvaluationContextExtensions;
     private evaluator?: SExpressionEvaluator;
@@ -261,6 +268,7 @@ export class EffectExecutor {
         this.bindings = options.bindings;
         this.context = options.context;
         this.debug = options.debug ?? false;
+        this.onPersistRefused = options.onPersistRefused;
         this.strictBindings = options.strictBindings ?? false;
         this.contextExtensions = options.contextExtensions;
         this.evaluator = options.evaluator;
@@ -639,6 +647,7 @@ export class EffectExecutor {
                         status: 'failed',
                         error: outcome.error,
                         durationMs: Date.now() - start,
+                        ...(outcome.refusedBeforeHandler === true ? { refusedBeforeHandler: true } : {}),
                     });
                 } else {
                     results.push({
@@ -817,7 +826,10 @@ export class EffectExecutor {
      * — reports that outcome here so `executeWithResults` can record it as
      * `status: 'failed'` instead of the default `'executed'`.
      */
-    private async dispatch(operator: string, args: RuntimeValue[]): Promise<{ failed: true; error: string } | void> {
+    private async dispatch(
+        operator: string,
+        args: RuntimeValue[],
+    ): Promise<{ failed: true; error: string; refusedBeforeHandler?: true } | void> {
         if (this.delegateIfClient(operator, args)) {
             effectLog.debug('effect:delegated-to-server-leg', { operator, target: String(args[0]), traitName: this.context.traitName, transition: this.context.transition });
             return;
@@ -1011,7 +1023,8 @@ export class EffectExecutor {
                                 .map(({ entityType: t, missing }) => `persist create ${t}: required field(s) ${missing.join(', ')} missing`)
                                 .join('; ');
                             this.emitFailure(emitCfg, new Error(missingError));
-                            return { failed: true, error: missingError };
+                            this.onPersistRefused?.({ args, error: missingError });
+                            return { failed: true, error: missingError, refusedBeforeHandler: true };
                         }
                         const batchSummary = await this.handlers.persist('batch', '', {
                             operations,
@@ -1050,7 +1063,8 @@ export class EffectExecutor {
                                 persistLog.error('persist:required-missing', { entityType, missing });
                                 const missingError = `persist create ${entityType}: required field(s) ${missing.join(', ')} missing`;
                                 this.emitFailure(emitCfg, new Error(missingError), { entityType });
-                                return { failed: true, error: missingError };
+                                this.onPersistRefused?.({ args, error: missingError });
+                                return { failed: true, error: missingError, refusedBeforeHandler: true };
                             }
                         }
                         // The persisted row (create: submitted data + the

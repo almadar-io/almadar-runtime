@@ -687,6 +687,7 @@ export async function postServerLeg(
   store: CircuitStore,
   opts: ClientRoleOpts,
   request?: OrbitalEventRequest,
+  onBeforeSend?: () => void,
 ): Promise<OrbitalEventResponse> {
   if (dispatch.mode === 'hybridClientOnly' && dispatch.serverLeg === undefined) {
     return dispatch.response;
@@ -714,6 +715,7 @@ export async function postServerLeg(
 
   legToSend = withMountedSet(legToSend, opts);
 
+  onBeforeSend?.();
   let posted: OrbitalEventResponse;
   try {
     posted = await transport.send(orbitalName, legToSend);
@@ -769,6 +771,18 @@ export interface ClientKernelOpts extends ClientRoleOpts {
 export interface ClientKernelOutcome {
   response: OrbitalEventResponse;
   mode: DispatchMode;
+  /**
+   * True when `onLocal` already received the local arm's response (the leg
+   * was posted). `serverEffects` then holds only what the server's fold
+   * added — the local ones were painted before the round trip.
+   */
+  localPainted?: boolean;
+  serverEffects?: Pick<OrbitalEventResponse, 'clientEffects' | 'clientEffectsByTrait'>;
+}
+
+/** Per-dispatch hooks: `onLocal` sees the locally-evaluated response before its server leg is sent. */
+export interface ClientDispatchHooks {
+  onLocal?: (local: OrbitalEventResponse) => void;
 }
 
 export interface ClientKernel {
@@ -794,14 +808,32 @@ export interface ClientKernel {
    * out on a per-(event, trait) newest-wins lane outside the FIFO, with no
    * rollback, so a tick round trip never delays a command.
    */
-  dispatch(request: OrbitalEventRequest): Promise<ClientKernelOutcome>;
+  dispatch(request: OrbitalEventRequest, hooks?: ClientDispatchHooks): Promise<ClientKernelOutcome>;
   readonly store: CircuitStore;
 }
 
 interface QueuedKernelEntry {
   request: OrbitalEventRequest;
+  hooks: ClientDispatchHooks[];
   resolvers: Array<(outcome: ClientKernelOutcome) => void>;
   rejecters: Array<(err: Error) => void>;
+}
+
+/**
+ * The server's share of a posted dispatch's effects. A successful post
+ * returns `[...local, ...folded]` (postServerLeg's merge), so the server's are
+ * what follows the local arm's; a rejected post returns the server's response
+ * alone, every effect of which is the server's.
+ */
+function serverOnlyEffects(
+  local: OrbitalEventResponse,
+  response: OrbitalEventResponse,
+): Pick<OrbitalEventResponse, 'clientEffects' | 'clientEffectsByTrait'> {
+  if (!response.success) return { clientEffects: response.clientEffects, clientEffectsByTrait: response.clientEffectsByTrait };
+  return {
+    clientEffects: (response.clientEffects ?? []).slice((local.clientEffects ?? []).length),
+    clientEffectsByTrait: response.clientEffectsByTrait?.slice((local.clientEffectsByTrait ?? []).length),
+  };
 }
 
 /**
@@ -872,11 +904,20 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
           try {
             const dispatch = await dispatchWithServerLeg(roleOpts, entry.request);
             let response = dispatch.response;
+            let localPainted = false;
             if (transport !== undefined) {
               if (entry.request.tick !== undefined) postTick(dispatch, entry.request);
-              else response = await postServerLeg(transport, orbitalFor(entry.request), dispatch, roleOpts.store, roleOpts, entry.request);
+              else {
+                const painters = entry.hooks.filter((h) => h.onLocal !== undefined);
+                response = await postServerLeg(transport, orbitalFor(entry.request), dispatch, roleOpts.store, roleOpts, entry.request, painters.length === 0 ? undefined : () => {
+                  localPainted = true;
+                  for (const h of painters) h.onLocal?.(dispatch.response);
+                });
+              }
             }
-            const outcome: ClientKernelOutcome = { response, mode: dispatch.mode };
+            const outcome: ClientKernelOutcome = localPainted
+              ? { response, mode: dispatch.mode, localPainted, serverEffects: serverOnlyEffects(dispatch.response, response) }
+              : { response, mode: dispatch.mode };
             for (const resolve of entry.resolvers) resolve(outcome);
           } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
@@ -891,7 +932,7 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
 
   return {
     store: roleOpts.store,
-    dispatch(request: OrbitalEventRequest): Promise<ClientKernelOutcome> {
+    dispatch(request: OrbitalEventRequest, hooks?: ClientDispatchHooks): Promise<ClientKernelOutcome> {
       return new Promise<ClientKernelOutcome>((resolve, reject) => {
         if (request.tick !== undefined) {
           const pending = queue.find(
@@ -903,10 +944,11 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
             pending.request = { ...pending.request, payload: request.payload };
             pending.resolvers.push(resolve);
             pending.rejecters.push(reject);
+            if (hooks !== undefined) pending.hooks.push(hooks);
             return;
           }
         }
-        queue.push({ request, resolvers: [resolve], rejecters: [reject] });
+        queue.push({ request, hooks: hooks !== undefined ? [hooks] : [], resolvers: [resolve], rejecters: [reject] });
         pump();
       });
     },

@@ -8,12 +8,13 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 - **Close by deleting.** Remove the entry in the same commit as the fix. There is no "closed" section; git history is the record.
 - **Cross-repo gaps don't go here.** If fixing it needs another repo, describe it in your report or PR body; the monorepo coordinator files it.
 
-Next code: `G-RUNTIME-055`
+Next code: `G-RUNTIME-056`
 
 ## Open gaps
 
 ### Runtime / Server tier (`@almadar/runtime`, `@almadar-io/playground-runtime`, hosted `apps/builder` server)
 
+- **G-RUNTIME-055** — Trait-ref import parity: when a consumer renames a host trait's events (`trait X = A.traits.Host { events { OPEN: OPEN_THING } }`), the compiled path (`inline/trait.rs` `event_renames_by_trait`) renames the event a pulled sibling's `Host.OPEN` listen (and `Host.OPEN` event-typed config value) names; the JS resolver (`reference-resolver.ts` sibling-pull path) renames only the trait, so the sibling listens on the pre-rename event on the interpreter path. Twin test: `orbital-compiler/tests/trait_ref_event_address.rs` `a_trait_address_follows_the_host_events_rename`. Prevention rung: 3 (a runtime/compiled parity case). `@almadar/runtime` [mechanical] — found 2026-10-01
 - **G-RUNTIME-054** — std-devops-dashboard's incident list renders empty on repeat page loads of the same playground server (first load shows rows); restarting the server restores it. Observed 2026-09-30 during role-access live checks; unrelated to gating. Reproduce with orbital_play + two loads of the incidents page, then diagnose (fetch response per trait on the second load). [mechanical] — found 2026-09-30
 - **G-RUNTIME-052** — `OrbitalServerRuntime.setLiveBroadcastSink` fans a persist-envelope success out to every other connected SSE client with no `@read` check. The enforcement (resolve the emitting trait's entity, evaluate its declared `@read` policy against the row per viewer) lives only in `@almadar-io/playground-runtime` (`src/server/events/live-broadcast.ts`), so any other host of the runtime's broadcast sink leaks rows a viewer may not read. Move that enforcement into the runtime's sink and delete the playground copy. Found 2026-09-29. Prevention rung: 1 (the sink's type accepts an unfiltered broadcast; the policy belongs to it). `@almadar/runtime` [architectural]
 - **G-RUNTIME-051** — `test/fixtures/orbital_import_stage_b/*.json` is a copy of orbital-rust's Stage B goldens (`orbital-compiler` `assert_or_write_fixture`), made 2026-09-27 so CI can run the JS↔Rust parity test standalone. When Rust regenerates them (`UPDATE_FIXTURES=1`) the copy goes stale silently and the parity test keeps comparing against old Rust output. Ship the goldens where both repos can install them (e.g. in `@almadar/orb`'s npm package) and resolve them like the behavior registries. `@almadar/runtime` + orbital-rust [architectural] — found 2026-09-27

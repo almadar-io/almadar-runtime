@@ -27,6 +27,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/server/OrbitalServerRuntime.js';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
+import { normalizeCallSiteConfigToValues } from '@almadar/core';
 import type { ClientEffectTuple, OrbitalSchema, RenderUIEffect, RuntimeValue, Trait } from '@almadar/core';
 import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
@@ -88,7 +89,7 @@ function buildSyntheticSchema(): OrbitalSchema {
     },
   };
 
-  // The InlineButtonRender7 / InlineTypographyRender22 shape: a whole-value
+  // The std-helpdesk Rate button / reply error text shape: a whole-value
   // capture AND a nested capture inside an `if`/`and`/`=` S-expression, both
   // in DECLARED config defaults (no `configByTrait` entry — an embedded
   // sub-trait never gets one).
@@ -181,7 +182,31 @@ describe('callsite-payload capture — embedded child re-render (synthetic)', ()
 
 const HELPDESK_ORB = join(IO_ROOT, 'behaviors/registry/app/organisms/std-helpdesk.orb');
 
+/**
+ * The `{ref}` entry of `ref` in `orbital` whose call-site `knob` is `value` —
+ * selected by what it declares, never by its generated `Inline<Pattern><N>`
+ * name, which renumbers on every re-emit.
+ */
+function helpdeskRefEntry(orbital: string, ref: string, knob: string, value: RuntimeValue): string {
+  const raw = JSON.parse(readFileSync(HELPDESK_ORB, 'utf-8')) as OrbitalSchema;
+  const names = (raw.orbitals.find((o) => o.name === orbital)?.traits ?? []).flatMap((t) =>
+    typeof t !== 'string' &&
+    'ref' in t &&
+    t.ref === ref &&
+    t.name !== undefined &&
+    normalizeCallSiteConfigToValues(t.config)?.[knob] === value
+      ? [t.name]
+      : [],
+  );
+  expect(names).toHaveLength(1);
+  return names[0];
+}
+
 describe('callsite-payload capture — std-helpdesk (real organism)', () => {
+  const rateButton = (): string => helpdeskRefEntry('TicketOrbital', 'Button.traits.ButtonRender', 'action', 'RATE');
+  const replyError = (): string =>
+    helpdeskRefEntry('TicketReplyOrbital', 'Typography.traits.TypographyRender', 'content', '@callsitePayload.error');
+
   async function registerHelpdesk(): Promise<OrbitalServerRuntime> {
     const raw = JSON.parse(readFileSync(HELPDESK_ORB, 'utf-8')) as OrbitalSchema;
     const result = await preprocessSchema(raw, {
@@ -196,7 +221,7 @@ describe('callsite-payload capture — std-helpdesk (real organism)', () => {
     return runtime;
   }
 
-  it('InlineButtonRender7.disabled resolves false when TicketDetailLoaded carries a resolved ticket with no CSAT score', async () => {
+  it('the Rate button\'s disabled resolves false when TicketDetailLoaded carries a resolved ticket with no CSAT score', async () => {
     const runtime = await registerHelpdesk();
     const resp = await runtime.processOrbitalEvent('TicketOrbital', {
       event: 'TicketDetailLoaded',
@@ -204,12 +229,12 @@ describe('callsite-payload capture — std-helpdesk (real organism)', () => {
       payload: { data: { id: 'tk1', status: 'resolved', csatScore: null, subject: 'Broken widget' } },
     });
     expect(resp.success).toBe(true);
-    const props = renderPatternFor(resp.clientEffectsByTrait, 'InlineButtonRender7');
+    const props = renderPatternFor(resp.clientEffectsByTrait, rateButton());
     expect(props).toBeDefined();
     expect(props?.disabled).toBe(false);
   });
 
-  it('InlineButtonRender7.disabled resolves true when the ticket is still open', async () => {
+  it('the Rate button\'s disabled resolves true when the ticket is still open', async () => {
     const runtime = await registerHelpdesk();
     const resp = await runtime.processOrbitalEvent('TicketOrbital', {
       event: 'TicketDetailLoaded',
@@ -217,12 +242,12 @@ describe('callsite-payload capture — std-helpdesk (real organism)', () => {
       payload: { data: { id: 'tk2', status: 'open', csatScore: null, subject: 'Still broken' } },
     });
     expect(resp.success).toBe(true);
-    const props = renderPatternFor(resp.clientEffectsByTrait, 'InlineButtonRender7');
+    const props = renderPatternFor(resp.clientEffectsByTrait, rateButton());
     expect(props).toBeDefined();
     expect(props?.disabled).toBe(true);
   });
 
-  it('InlineTypographyRender22.content resolves the TicketReply failure payload\'s error message', async () => {
+  it('the reply error text resolves the TicketReply failure payload\'s error message', async () => {
     const runtime = await registerHelpdesk();
     const resp = await runtime.processOrbitalEvent('TicketReplyOrbital', {
       event: 'TicketReplyLoadFailed',
@@ -230,7 +255,7 @@ describe('callsite-payload capture — std-helpdesk (real organism)', () => {
       payload: { error: 'Boom' },
     });
     expect(resp.success).toBe(true);
-    const props = renderPatternFor(resp.clientEffectsByTrait, 'InlineTypographyRender22');
+    const props = renderPatternFor(resp.clientEffectsByTrait, replyError());
     expect(props).toBeDefined();
     expect(props?.content).toBe('Boom');
   });

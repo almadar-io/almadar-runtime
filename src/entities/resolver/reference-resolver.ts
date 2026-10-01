@@ -42,6 +42,7 @@ import type {
   TraitConfigValue,
   TraitConfigObject,
   CallSiteConfig,
+  ListenSource,
   IdKind,
   IdentityLedger,
   LedgerEntry,
@@ -57,6 +58,8 @@ import {
   parseImportedTraitRef,
   parseOrbitalRef,
   isInlineTrait,
+  splitEventAddress,
+  joinEventAddress,
   configRefEventKnob,
   eventListPropsOf,
   resolveConfigRefEventName,
@@ -1961,7 +1964,15 @@ function applyEventRenames(
   // and the array itself lives on the knob. Letting `trait.config` ride
   // through the spread untouched is what left a renamed atom firing its
   // pre-rename event keys from its own action buttons.
-  const nextConfig = renameEventsInDeclaredConfig(trait.config, rename);
+  const renamedConfig = renameEventsInDeclaredConfig(trait.config, rename);
+  const nextConfig =
+    keptFinalNames === undefined
+      ? renamedConfig
+      : mapConfigEventAddresses(renamedConfig, (event, source) =>
+          source.kind !== "any" && keptFinalNames.has(source.trait) && event in renames
+            ? { event: renames[event], source }
+            : undefined,
+        );
   return {
     ...trait,
     stateMachine: sm
@@ -3185,55 +3196,84 @@ function rewriteListenSources(
   alias?: string,
   listenSourceTargets?: ReadonlyMap<string, SiblingImportInfo>,
 ): Trait {
-  const listens = trait.listens;
-  if (!listens || listens.length === 0) return trait;
+  const rewrite = (source: ListenSource): ListenSource | undefined =>
+    rewriteImportSource(source, subs, idByName, orbitalRename, alias, listenSourceTargets);
   let changed = false;
-  const nextListens = listens.map((listen) => {
-    const source = listen.source;
-    if (!source) return listen;
-    if (source.kind === "trait") {
-      const target = subs.get(source.trait);
-      if (target === undefined || target === source.trait) return listen;
-      changed = true;
-      const traitId = idByName.get(target);
+  const nextListens = (trait.listens ?? []).map((listen) => {
+    const moved = listen.source ? rewrite(listen.source) : undefined;
+    if (!moved) return listen;
+    changed = true;
+    return { ...listen, source: moved };
+  });
+  // A `listens`-addressed event value in config is the same address.
+  const nextConfig = mapConfigEventAddresses(trait.config, (event, source) => {
+    const moved = rewrite(source);
+    return moved ? { event, source: moved } : undefined;
+  });
+  if (!changed && nextConfig === trait.config) return trait;
+  return {
+    ...trait,
+    ...(trait.listens ? { listens: nextListens } : {}),
+    ...(nextConfig !== undefined ? { config: nextConfig } : {}),
+  };
+}
+
+/**
+ * The one rewrite of a `listens` address (a listen source, or the source part
+ * of an event-typed config value) when its trait is materialized by import;
+ * `undefined` when it stays as-is. Twin of `rewrite_import_source`.
+ */
+function rewriteImportSource(
+  source: ListenSource,
+  subs: ReadonlyMap<string, string>,
+  idByName: ReadonlyMap<string, TraitId | undefined>,
+  orbitalRename?: { from: string; to: string },
+  alias?: string,
+  listenSourceTargets?: ReadonlyMap<string, SiblingImportInfo>,
+): ListenSource | undefined {
+  if (source.kind === "trait") {
+    const target = subs.get(source.trait);
+    if (target === undefined || target === source.trait) return undefined;
+    const traitId = idByName.get(target);
+    return { kind: "trait", trait: target, ...(traitId ? { traitId } : {}) };
+  }
+  if (source.kind === "orbital") {
+    if (orbitalRename && source.orbital === orbitalRename.from) {
+      const targetTrait = subs.get(source.trait) ?? source.trait;
+      const traitId = idByName.get(targetTrait);
+      return { kind: "orbital", orbital: orbitalRename.to, trait: targetTrait, ...(traitId ? { traitId } : {}) };
+    }
+    const info = alias && listenSourceTargets ? listenSourceTargets.get(siblingImportKey(alias, source.orbital)) : undefined;
+    if (info) {
+      const target = info.traitSubs.get(source.trait);
       return {
-        ...listen,
-        source: { kind: "trait" as const, trait: target, ...(traitId ? { traitId } : {}) },
+        kind: "orbital",
+        orbital: info.localName,
+        trait: target?.finalName ?? source.trait,
+        ...(target?.finalId ? { traitId: target.finalId } : {}),
       };
     }
-    if (source.kind === "orbital") {
-      if (orbitalRename && source.orbital === orbitalRename.from) {
-        const targetTrait = subs.get(source.trait) ?? source.trait;
-        changed = true;
-        const traitId = idByName.get(targetTrait);
-        return {
-          ...listen,
-          source: {
-            kind: "orbital" as const,
-            orbital: orbitalRename.to,
-            trait: targetTrait,
-            ...(traitId ? { traitId } : {}),
-          },
-        };
-      }
-      const info = alias && listenSourceTargets ? listenSourceTargets.get(siblingImportKey(alias, source.orbital)) : undefined;
-      if (info) {
-        const target = info.traitSubs.get(source.trait);
-        changed = true;
-        return {
-          ...listen,
-          source: {
-            kind: "orbital" as const,
-            orbital: info.localName,
-            trait: target?.finalName ?? source.trait,
-            ...(target?.finalId ? { traitId: target.finalId } : {}),
-          },
-        };
-      }
-    }
-    return listen;
+  }
+  return undefined;
+}
+
+/**
+ * Apply `f` to every `listens`-addressed event value (`Trait.EVENT`,
+ * `Orbital.Trait.EVENT`) in a trait's declared config — scalar `event` knobs
+ * and `event`-typed struct members alike. `f` returns the replacement, or
+ * `undefined` to keep it. Twin of `map_config_event_addresses`.
+ */
+function mapConfigEventAddresses(
+  config: Trait["config"],
+  f: (event: string, source: ListenSource) => { event: string; source: ListenSource } | undefined,
+): Trait["config"] {
+  return renameEventsInDeclaredConfig(config, (value) => {
+    if (value === undefined || value.startsWith("@") || !value.includes(".")) return value;
+    const { event, source } = splitEventAddress(value);
+    if (!source || source.kind === "any") return value;
+    const next = f(event, source);
+    return next ? joinEventAddress(next.event, next.source) : value;
   });
-  return changed ? { ...trait, listens: nextListens } : trait;
 }
 
 /** `EntityRef` narrowed to the inline `Entity` shape (neither a string ref nor an `EntityCall`). */
@@ -4015,6 +4055,56 @@ function materializedTraitSubs(
     });
   }
   return out;
+}
+
+/** Each reference-form orbital by its LOCAL name → upstream trait name → materialized name + id. */
+type ImportedTraitNames = Map<string, ReadonlyMap<string, { readonly finalName: string; readonly finalId: TraitId | undefined }>>;
+
+/**
+ * A consumer addresses an imported orbital's trait by the import's local name
+ * and the trait's upstream name (`Things.ThingPersistor.SAVED`, or
+ * `ThingPersistor.SAVED` from a sibling authored in the import body); land
+ * every such `listens` source and event-typed config value on the materialized
+ * `<Local><Upstream>` trait. A trait present under the exact name is what that
+ * name means. Twin of `address_imported_traits` (`inline/mod.rs`).
+ */
+function addressImportedTraits(orbitals: OrbitalDefinition[], imported: ImportedTraitNames): void {
+  if (imported.size === 0) return;
+  const present = new Set<string>();
+  for (const o of orbitals) {
+    for (const t of o.traits ?? []) if (isInlineTrait(t) && t.name) present.add(`${o.name} ${t.name}`);
+  }
+  for (const orbital of orbitals) {
+    const resolve = (source: ListenSource): ListenSource | undefined => {
+      if (source.kind === "any") return undefined;
+      const scope = source.kind === "orbital" ? source.orbital : orbital.name;
+      if (present.has(`${scope} ${source.trait}`)) return undefined;
+      const target = imported.get(scope)?.get(source.trait);
+      if (!target) return undefined;
+      return { ...source, trait: target.finalName, ...(target.finalId ? { traitId: target.finalId } : {}) };
+    };
+    orbital.traits = (orbital.traits ?? []).map((t) => {
+      if (!isInlineTrait(t)) return t;
+      const trait = t as Trait;
+      let changed = false;
+      const listens = (trait.listens ?? []).map((l) => {
+        const moved = l.source ? resolve(l.source) : undefined;
+        if (!moved) return l;
+        changed = true;
+        return { ...l, source: moved };
+      });
+      const config = mapConfigEventAddresses(trait.config, (event, source) => {
+        const moved = resolve(source);
+        return moved ? { event, source: moved } : undefined;
+      });
+      if (!changed && config === trait.config) return t;
+      return {
+        ...trait,
+        ...(trait.listens ? { listens } : {}),
+        ...(config !== undefined ? { config } : {}),
+      };
+    });
+  }
 }
 
 /** Composite key for {@link SiblingImportInfo} maps: upstream alias + upstream orbital name. */
@@ -6571,7 +6661,8 @@ export class ReferenceResolver {
     // any reference-form orbital in `schema` resolves, so a listen source
     // naming ANY reference-form orbital of this schema resolves regardless
     // of declaration order.
-    const listenSourceTargets = await this.precomputeReferenceFormListenTargets(schema.orbitals, chain);
+    const { targets: listenSourceTargets, byLocal: importedTraitNames } =
+      await this.precomputeReferenceFormListenTargets(schema.orbitals, chain);
     const consumerRoster = identityEntitiesOf(schema.orbitals);
     for (const orbital of schema.orbitals) {
       if (!orbital.reference) {
@@ -6626,6 +6717,7 @@ export class ReferenceResolver {
       flattened.push(result.data);
     }
     if (errors.length > 0) return { success: false, errors };
+    addressImportedTraits(flattened, importedTraitNames);
     // G5 (`docs/Almadar_Compiler_Gaps.md` §82): `materializeOrbitalRef` (via
     // `applyEventRenames` above) renames every event KEY an `events {}`
     // reference touches, but it operates on one `Orbital`, not the whole
@@ -6710,8 +6802,9 @@ export class ReferenceResolver {
   private async precomputeReferenceFormListenTargets(
     orbitals: readonly OrbitalDefinition[],
     chain: ImportChainLike,
-  ): Promise<Map<string, SiblingImportInfo>> {
+  ): Promise<{ targets: Map<string, SiblingImportInfo>; byLocal: ImportedTraitNames }> {
     const out = new Map<string, SiblingImportInfo>();
+    const byLocal: ImportedTraitNames = new Map();
     for (const orbital of orbitals) {
       const ref = orbital.reference;
       if (!ref) continue;
@@ -6738,8 +6831,9 @@ export class ReferenceResolver {
       if (!resolvedUpstream.success) continue;
       const traitSubs = materializedTraitSubs(upstream.id, resolvedUpstream.data.traits, ref, orbital.name);
       out.set(siblingImportKey(parsed.alias, parsed.orbitalName), { localName: orbital.name, traitSubs });
+      byLocal.set(orbital.name, traitSubs);
     }
-    return out;
+    return { targets: out, byLocal };
   }
 
   /**
@@ -6815,7 +6909,7 @@ export class ReferenceResolver {
       // inside one of THEM resolves against THEIR OWN reference-form
       // orbitals (`candidates`, this alias's whole orbital list), never the
       // caller's `listenSourceTargets`.
-      const nestedListenSourceTargets = await this.precomputeReferenceFormListenTargets(candidates, chain);
+      const { targets: nestedListenSourceTargets } = await this.precomputeReferenceFormListenTargets(candidates, chain);
       const nested = await this.resolveOrbitalRefChain(
         upstream,
         imported.sourcePath,

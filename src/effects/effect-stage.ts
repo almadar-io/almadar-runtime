@@ -46,6 +46,7 @@ import type {
   FieldValue,
   RuntimeValue,
   FetchOptions,
+  ServiceHostPorts,
 } from '@almadar/core';
 import {
   getNestedValue,
@@ -120,6 +121,20 @@ export interface ServerEffectStageDeps {
   sigilTheme: string;
   /** Custom handlers — spread LAST over the built-ins, as before. */
   extraEffectHandlers?: Partial<EffectHandlers>;
+  /**
+   * Run `work` with the host's event queue released, re-acquiring it before
+   * returning. A `call-service` awaits its provider through this, so a slow
+   * service never stalls every other dispatch and a provider may dispatch into
+   * the same app (an agent firing a declared input) without deadlocking.
+   * Absent: the host has no shared queue.
+   */
+  outsideEventQueue?: <T>(work: () => Promise<T>) => Promise<T>;
+  /**
+   * The running app, lent to a `call-service` provider as the caller (the
+   * calling trait's position, the requesting user): its declared inputs, the
+   * input channel and a `@read`-filtered read. Absent: the host lends nothing.
+   */
+  servicePorts?: (caller: { orbital: string; trait: string }, user: UserContext | undefined) => ServiceHostPorts;
   deliverEmit?: DeliverEmit;
   /** Whether a live-broadcast sink is wired (read by the sink-call debug log). */
   liveBroadcastSinkWired?: boolean;
@@ -350,6 +365,7 @@ export async function runServerEffectStage(
   let bindingsRef: BindingContext | null = null;
   let contextRef: EffectContext | null = null;
 
+  const { callService: _delegatedCallService, ...hostOverrides } = deps.extraEffectHandlers ?? {};
   const handlers: EffectHandlers = {
     emit: (event, eventPayload, source, fromPersistSuccess) => {
       if (deps.debug) {
@@ -578,7 +594,7 @@ export async function runServerEffectStage(
               throw new Error(accessDeniedMessage('create', type));
             }
             const { id } = await deps.persistence.create(type, data || {});
-            resultData = { ...(data || {}), id };
+            resultData = (await deps.persistence.getById(type, id)) ?? { ...(data || {}), id };
             break;
           }
           case "update":
@@ -711,13 +727,18 @@ export async function runServerEffectStage(
       try {
         let result = null;
         // Custom handlers can override this
+        const awaitProvider = deps.outsideEventQueue ?? (<T,>(work: () => Promise<T>): Promise<T> => work());
+        const host = deps.servicePorts?.({ orbital: deps.orbitalName, trait: traitName }, user);
+        const callContext =
+          user !== undefined || host !== undefined
+            ? {
+                ...(user !== undefined ? { principal: user.id, role: user.role } : {}),
+                ...(host !== undefined ? { host } : {}),
+              }
+            : undefined;
         if (deps.extraEffectHandlers?.callService) {
-          result = await deps.extraEffectHandlers.callService(
-            service,
-            action,
-            params,
-            user ? { principal: user.id, role: user.role } : undefined,
-          );
+          const provider = deps.extraEffectHandlers.callService;
+          result = await awaitProvider(() => provider(service, action, params, callContext));
         } else if (deps.mockMode === true) {
           // Mock mode: return a useful default so service-atom chains
           // (e.g. std-service-stripe createPaymentIntent → PAYMENT_CREATED
@@ -745,7 +766,9 @@ export async function runServerEffectStage(
             ...paramsEcho,
           } as EntityRow;
         } else {
-          result = await defaultCallService(service, action, params, user ? { principal: user.id, role: user.role } : undefined);
+          result = await awaitProvider(() =>
+            defaultCallService(service, action, params, callContext),
+          );
         }
 
         effectResults.push({
@@ -1078,8 +1101,10 @@ export async function runServerEffectStage(
       }
     },
 
-    // Allow custom handlers to override
-    ...deps.extraEffectHandlers,
+    // Allow custom handlers to override — except `callService`, which the
+    // stage's own handler above already delegates to (recording the result and
+    // awaiting it outside the event queue).
+    ...hostOverrides,
   };
 
   const state = deps.getTraitState(traitName);
@@ -1180,6 +1205,17 @@ export async function runServerEffectStage(
   contextRef = context;
 
   const executor = new EffectExecutor({
+    // A persist refused before its handler ran was never recorded by it.
+    onPersistRefused: ({ args, error }) => {
+      const [action, entityType] = args;
+      effectResults.push({
+        effect: 'persist',
+        action: typeof action === 'string' ? action : 'persist',
+        ...(typeof entityType === 'string' && entityType !== '' ? { entityType } : {}),
+        success: false,
+        error,
+      });
+    },
     handlers,
     bindings,
     context,

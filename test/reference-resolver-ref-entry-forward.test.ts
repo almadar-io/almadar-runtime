@@ -229,24 +229,36 @@ describe('ReferenceResolver — {ref}-entry call-site config forward through the
  * orbital error.
  */
 describe('ReferenceResolver — {ref}-entry call-site config forward: real registry corpus', () => {
+  // Each case names the forward (`knob: @config.<forward>`), never a generated
+  // `Inline<Pattern><N>` trait name — those renumber on every re-emit. Every
+  // `{ref}` entry carrying that forward must resolve to the atom's literal.
   const cases: ReadonlyArray<{
     file: string;
-    trait: string;
     knob: string;
+    forward: string;
     expected: number | string;
   }> = [
-    { file: 'app/atoms/std-timeline.orb', trait: 'InlineTypographyRender4', knob: 'content', expected: 'Activity Timeline' },
-    { file: 'app/atoms/std-timeline.orb', trait: 'InlineTypographyRender16', knob: 'content', expected: 'Activity Timeline' },
-    { file: 'app/atoms/std-ledger-entry.orb', trait: 'InlineTypographyRender10', knob: 'content', expected: 'Journal Entries' },
-    { file: 'app/atoms/std-incident.orb', trait: 'InlineMeterRender23', knob: 'max', expected: 5 },
-    { file: 'app/atoms/std-prescription.orb', trait: 'InlineMeterRender33', knob: 'max', expected: 5 },
-    { file: 'app/atoms/std-recurring-charge.orb', trait: 'InlineMeterRender21', knob: 'max', expected: 4 },
+    { file: 'app/atoms/std-timeline.orb', knob: 'content', forward: 'title', expected: 'Activity Timeline' },
+    { file: 'app/atoms/std-ledger-entry.orb', knob: 'content', forward: 'title', expected: 'Journal Entries' },
+    { file: 'app/atoms/std-incident.orb', knob: 'max', forward: 'acknowledgementDeadlineMinutes', expected: 5 },
+    { file: 'app/atoms/std-prescription.orb', knob: 'max', forward: 'refillsAllowedPerYear', expected: 5 },
+    { file: 'app/atoms/std-recurring-charge.orb', knob: 'max', forward: 'maxRetries', expected: 4 },
   ];
 
-  for (const { file, trait, knob, expected } of cases) {
-    it(`resolves ${file}'s ${trait}.${knob} to the declaring atom's literal`, async () => {
+  for (const { file, knob, forward, expected } of cases) {
+    it(`resolves ${file}'s {ref} entries forwarding ${knob}: @config.${forward} to the declaring atom's literal`, async () => {
       const schemaPath = path.join(IO_ROOT, 'behaviors/registry', file);
       const schema = JSON.parse(await fs.readFile(schemaPath, 'utf8')) as OrbitalSchema;
+      const forwarding = schema.orbitals.flatMap((orbital) =>
+        orbital.traits.filter(
+          (t): t is Exclude<TraitRef, string> =>
+            typeof t !== 'string' &&
+            'ref' in t &&
+            normalizeCallSiteConfigToValues(t.config)?.[knob] === `@config.${forward}`,
+        ),
+      );
+      const names = forwarding.map((t) => t.name).filter((n): n is string => n !== undefined);
+      expect(names.length).toBeGreaterThan(0);
 
       const result = await preprocessSchema(schema, {
         basePath: IO_ROOT,
@@ -257,14 +269,16 @@ describe('ReferenceResolver — {ref}-entry call-site config forward: real regis
       expect(result.success).toBe(true);
       if (!result.success) return;
 
-      let found: Exclude<TraitRef, string> | undefined;
-      for (const orbital of result.data.schema.orbitals) {
-        found = findTraitRefByName(orbital.traits, trait);
-        if (found) break;
+      for (const trait of names) {
+        let found: Exclude<TraitRef, string> | undefined;
+        for (const orbital of result.data.schema.orbitals) {
+          found = findTraitRefByName(orbital.traits, trait);
+          if (found) break;
+        }
+        expect(found, trait).toBeDefined();
+        const values = normalizeCallSiteConfigToValues(found?.config);
+        expect(values?.[knob], trait).toBe(expected);
       }
-      expect(found).toBeDefined();
-      const values = normalizeCallSiteConfigToValues(found?.config);
-      expect(values?.[knob]).toBe(expected);
     });
   }
 });

@@ -210,6 +210,7 @@ export {
   type ClientKernel,
   type ClientKernelOpts,
   type ClientKernelOutcome,
+  type ClientDispatchHooks,
   type ClientRoleOpts,
 } from "./evaluation/client-role.js";
 

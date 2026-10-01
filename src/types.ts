@@ -10,6 +10,7 @@ import type {
     EntityRow,
     EventPayload,
     FetchResult,
+    ServiceHostPorts,
     ServiceParams,
     ResolvedPatternProps,
     AgentContext,
@@ -217,6 +218,8 @@ export interface TraitDefinition {
 export interface ServiceCallContext {
     principal?: string;
     role?: string;
+    /** The running app, lent for this call as the caller (`llm call-tools`). */
+    host?: ServiceHostPorts;
 }
 
 export interface EffectHandlers {
@@ -721,6 +724,9 @@ export interface EffectResult {
     error?: string;
     /** Execution duration in milliseconds */
     durationMs?: number;
+    /** Refused before the effect's handler ran (e.g. a `persist create` missing a
+     *  required field), so no handler recorded it — the host reports it. */
+    refusedBeforeHandler?: boolean;
 }
 
 // ============================================================================
