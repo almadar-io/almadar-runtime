@@ -186,7 +186,17 @@ describe('createHttpTransport push subscribe', () => {
     source.emit({ type: 'bus', event: 'ITEM_ADDED', payload: { qty: 2 }, source: { trait: 'Cart' } });
 
     expect(onPush).toHaveBeenCalledTimes(1);
-    expect(onPush).toHaveBeenCalledWith({ event: 'ITEM_ADDED', payload: { qty: 2 }, source: { trait: 'Cart' } });
+    expect(onPush).toHaveBeenCalledWith({ event: 'ITEM_ADDED', payload: { qty: 2 }, source: { trait: 'Cart' } }, 'peers');
+    unsubscribe();
+  });
+
+  it('an origin push (a running request\'s live message) is delivered as origin', async () => {
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const onPush = vi.fn();
+    const unsubscribe = transport.subscribe!(onPush, { clientId: 'test-origin-push' });
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    FakeEventSource.instances[0].emit({ type: 'bus', event: 'STEP', payload: { n: 1 }, source: { trait: 'Loop' }, target: 'origin' });
+    expect(onPush).toHaveBeenCalledWith({ event: 'STEP', payload: { n: 1 }, source: { trait: 'Loop' } }, 'origin');
     unsubscribe();
   });
 

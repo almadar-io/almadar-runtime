@@ -219,7 +219,7 @@ export async function evaluateOrbitalEvent(
     delete cleanPayload['_targetTrait'];
     delete cleanPayload['_awaitingInit'];
   }
-  const delegatedServerLeg = request.targetTrait !== undefined &&
+  const delegatedServerLeg = (request.targetTrait !== undefined || request.mount !== undefined) &&
     (request.traits !== undefined || request.entityByTrait !== undefined);
 
   // ------------------------------------------------------------------
@@ -272,6 +272,9 @@ export async function evaluateOrbitalEvent(
   //    server is authoritative and asks its held states).
   // ------------------------------------------------------------------
   let targets: Array<{ trait: string; from: string }>;
+  // A mount batch's seeds each run their own lifecycle event.
+  const seedEvents = new Map<string, string>();
+  const mountRejections: TransitionRejection[] = [];
   const targetEntry = targetTrait !== undefined ? traitIndex.byName.get(targetTrait) : undefined;
   // The payload `_targetTrait` sidecar is the CLIENT's page-scoped fallback
   // (its own local dispatch could not reach the trait) — it never bypasses
@@ -280,7 +283,27 @@ export async function evaluateOrbitalEvent(
   // an off-page listener must still run).
   const sidecarOutOfScope = request.targetTrait === undefined &&
     activeTraits !== undefined && targetTrait !== undefined && !activeTraits.has(targetTrait);
-  if (targetTrait !== undefined) {
+  if (request.mount !== undefined) {
+    targets = [];
+    for (const seed of request.mount) {
+      const entry = traitIndex.byName.get(seed.trait);
+      if (entry === undefined) {
+        mountRejections.push({ code: 'no-dispatchable-traits', trait: seed.trait, event: seed.event });
+        continue;
+      }
+      const declared = request.traits?.find((t) => t.trait === seed.trait);
+      const from = declared?.from ?? manager.getState(seed.trait, entityId)?.currentState ?? findInitialState(entry.traitDef);
+      targets.push({ trait: seed.trait, from });
+      seedEvents.set(seed.trait, seed.event);
+    }
+    if (request.traits !== undefined) {
+      const seeded = new Set(request.mount.map((m) => m.trait));
+      const carried = new Set(selectDispatchCandidates(request.traits.map(({ trait }) => trait), { activeTraits }));
+      for (const { trait, from: carriedFrom } of request.traits) {
+        if (carried.has(trait) || seeded.has(trait)) manager.seedState(trait, carriedFrom, carriedAddress(trait));
+      }
+    }
+  } else if (targetTrait !== undefined) {
     if (sidecarOutOfScope || targetEntry === undefined) {
       targets = [];
     } else {
@@ -371,7 +394,7 @@ export async function evaluateOrbitalEvent(
       transitioned: false,
       states: heldStates,
       emittedEvents: [],
-      rejections: [{ code: 'no-dispatchable-traits', event }],
+      rejections: request.mount !== undefined ? mountRejections : [{ code: 'no-dispatchable-traits', event }],
     };
   }
 
@@ -391,11 +414,16 @@ export async function evaluateOrbitalEvent(
   //   resolved target set — the server just ran those; everything else
   //   (a listener that didn't match the original event) runs here too,
   //   the pre-unification stateless contract.
+  // A single-target dispatch (the client's own local run) masks only (trait,
+  // event): the target already handled THIS event, but a different event its
+  // cascade sends back to it (a reply) must still reach it.
   const relayMask = deps.relayMask ?? (delegatedServerLeg
     ? undefined
     : request.traits !== undefined
       ? new Set(request.traits.map((t) => t.trait))
-      : new Set(targets.map((t) => t.trait)));
+      : targetTrait !== undefined
+        ? new Set(targets.map((t) => relayMaskKey(t.trait, normalizeEventKey(event))))
+        : new Set(targets.map((t) => t.trait)));
 
   evaluateLog.info('dispatch:targets', {
     event,
@@ -414,10 +442,11 @@ export async function evaluateOrbitalEvent(
   const validationFailures: PayloadValidationFailure[] = [];
   for (const { trait } of targets) {
     const entry = traitIndex.byName.get(trait);
-    const eventSchema = entry?.irTrait.stateMachine?.events?.find((e) => e.key === event);
+    const targetEvent = seedEvents.get(trait) ?? event;
+    const eventSchema = entry?.irTrait.stateMachine?.events?.find((e) => e.key === targetEvent);
     if (eventSchema?.payloadSchema && eventSchema.payloadSchema.length > 0) {
       validationFailures.push(
-        ...validateEventPayload(event, cleanPayload, eventSchema.payloadSchema),
+        ...validateEventPayload(targetEvent, cleanPayload, eventSchema.payloadSchema),
       );
     }
   }
@@ -444,7 +473,7 @@ export async function evaluateOrbitalEvent(
   const entityByTrait: Record<string, EntityRow> = {};
   let transitioned = false;
   let guardFailed: string | undefined;
-  const rejections: TransitionRejection[] = [];
+  const rejections: TransitionRejection[] = [...mountRejections];
   const truncatedTraits: string[] = [];
 
   const seedDelivery: DeliveryRecord = deps.seedDelivery ?? request.delivery ??
@@ -452,7 +481,7 @@ export async function evaluateOrbitalEvent(
   const queue: WorklistItem[] = targets.map(({ trait, from }) => ({
     trait,
     from,
-    event,
+    event: seedEvents.get(trait) ?? event,
     payload: cleanPayload,
     entityId: traitEntityIds.get(trait) ?? entityId,
     onPage: true,
@@ -461,8 +490,10 @@ export async function evaluateOrbitalEvent(
   // A server leg carries the client's mount: deliveries held for a trait the
   // client has since initialized go out first, ahead of this request's seeds.
   if (deps.mount !== undefined && awaitingInit !== undefined) {
-    const lifecycleTarget = isLifecycleEvent(event) ? targetTrait : undefined;
-    queue.unshift(...deps.mount.sync(awaitingInit, lifecycleTarget));
+    const lifecycleTargets = request.mount !== undefined
+      ? request.mount.map((m) => m.trait)
+      : isLifecycleEvent(event) && targetTrait !== undefined ? [targetTrait] : [];
+    queue.unshift(...deps.mount.sync(awaitingInit, lifecycleTargets));
   }
   const memory = new DispatchMemory();
   if (request.dispatchLog !== undefined && request.targetTrait !== undefined) {
@@ -742,6 +773,17 @@ export async function evaluateOrbitalEvent(
     });
   }
 
+  // A trait's row is its FINAL row: a sibling sharing its frame may have
+  // written after it stepped, and an older snapshot would clobber the fresh
+  // value in the client's fold.
+  for (const [traitName, row] of Object.entries(entityByTrait)) {
+    const frame = frames.get(traitIndex.byName.get(traitName)?.frameKey ?? traitName);
+    if (frame === undefined) continue;
+    const changed = Object.keys(frame).filter((k) => !Object.is(row[k], frame[k]));
+    if (changed.length > 0) evaluateLog.debug('row:final', { trait: traitName, changed: changed.map((k) => `${k}:${JSON.stringify(row[k])}->${JSON.stringify(frame[k])}`) });
+    entityByTrait[traitName] = { ...row, ...frame };
+  }
+
   // Echo every non-empty frame to EVERY trait bound to it, not just the
   // ones this cascade evaluated — a bound trait that never ran must still
   // converge its row, or its stale round-trip clobbers the fresh one in
@@ -765,6 +807,10 @@ export async function evaluateOrbitalEvent(
   }
   Object.assign(allStates, states);
 
+  // A mount batch reports every seed that did not fire, even when others did.
+  const reportedRejections = request.mount !== undefined
+    ? rejections.filter((r) => r.trait !== undefined && request.mount?.some((m) => m.trait === r.trait && m.event === r.event))
+    : transitioned ? [] : rejections;
   return {
     success: true,
     transitioned,
@@ -775,7 +821,7 @@ export async function evaluateOrbitalEvent(
     ...(clientEffectsByTrait.length > 0 ? { clientEffectsByTrait } : {}),
     ...(effectResults.length > 0 ? { effectResults } : {}),
     ...(guardFailed !== undefined ? { guardFailed } : {}),
-    ...(!transitioned && rejections.length > 0 ? { rejections } : {}),
+    ...(reportedRejections.length > 0 ? { rejections: reportedRejections } : {}),
     ...(truncatedTraits.length > 0 ? { cascadeTruncated: truncatedTraits } : {}),
   };
 }
@@ -848,6 +894,11 @@ export interface CollectedListenerTarget {
  * `skip` is the relay mask — traits the requesting client completes
  * itself, which the fan-out therefore never re-dispatches.
  */
+/** A relay-mask entry for one (trait, event) pair; a bare trait name masks every event. */
+export function relayMaskKey(trait: string, event: string): string {
+  return `${trait}\u0000${event}`;
+}
+
 export function collectListenerTargets(
   traitIndex: TraitIndex,
   sourceStamp: BusEventSource | undefined,
@@ -863,11 +914,12 @@ export function collectListenerTargets(
 ): CollectedListenerTarget[] {
   const targets: CollectedListenerTarget[] = [];
   for (const [listenerName, listenerEntry] of traitIndex.byName) {
-    const masked = skip?.has(listenerName) === true;
+    const traitMasked = skip?.has(listenerName) === true;
     const listeners = (listenerEntry.traitDef.listens ?? []) as TraitEventListener[];
     for (const listener of listeners) {
       const { bareEvent, matcher } = parseListenSource(listener, listenerEntry.orbitalName);
       if (bareEvent !== event || !matcher(sourceStamp)) continue;
+      const masked = traitMasked || skip?.has(relayMaskKey(listenerName, normalizeEventKey(listener.triggers ?? bareEvent))) === true;
       if (masked) {
         evaluateLog.info('fanout:masked', {
           listener: listenerName,

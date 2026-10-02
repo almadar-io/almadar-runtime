@@ -181,6 +181,7 @@ export {
   encodeJsonBody,
   COMPRESSED_BODY_MIN_BYTES,
   type EventTransport,
+  type PushTarget,
   type EventTransportRegisterResult,
   type AccessTokenProvider,
   type HttpTransportOptions,
@@ -337,3 +338,5 @@ export type {
 // Renderer-agnostic UI contract. React/Web Components/Vue renderers depend on
 // this surface and implement the framework-specific pieces on top.
 export * from "./ui/index.js";
+
+export { AwaitingRegistry } from './evaluation/awaiting.js';

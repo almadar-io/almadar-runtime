@@ -43,11 +43,11 @@ export class MountLifecycle<Delivery> {
    * still awaits when it posts. A trait the client has since initialized is
    * released here — its own INIT may never reach this host (a dispatch posts
    * only when it has server work) — except the request's own lifecycle
-   * target, which stays held until its step runs on this host.
+   * targets, which stay held until their steps run on this host.
    */
-  sync(awaiting: Iterable<string>, lifecycleTarget: string | undefined): Delivery[] {
+  sync(awaiting: Iterable<string>, lifecycleTargets: Iterable<string>): Delivery[] {
     const next = new Set(awaiting);
-    if (lifecycleTarget !== undefined && this.awaiting.has(lifecycleTarget)) next.add(lifecycleTarget);
+    for (const target of lifecycleTargets) if (this.awaiting.has(target)) next.add(target);
     const released: Delivery[] = [];
     for (const trait of this.awaiting) {
       if (next.has(trait)) continue;

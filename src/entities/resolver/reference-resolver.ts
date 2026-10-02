@@ -5544,6 +5544,8 @@ export class ReferenceResolver {
        * raw-walk + {@link resolveTraitEntry} path, unchanged).
        */
       preResolvedScope: ResolvedOrbital | undefined;
+      /** The top-level pull's own entity before its rebind (Rust `rebind_from`). */
+      rebindFrom: string | undefined;
     }
 
     const work: PullItem[] = [];
@@ -5564,6 +5566,9 @@ export class ReferenceResolver {
       // The atom-side name of the owner itself: a pulled sibling's listens name
       // their host by THAT name, and it has to resolve to this rebind.
       subsFor(owner).set(rt.source.traitName, owner);
+      const rebindFrom = rt.linkedEntity
+        ? (await this.atomOwnTrait(rt.source.alias, rt.source.traitName, imports, chain))?.linkedEntity
+        : undefined;
       for (const sibling of traitEmbedNamesOf(rt.trait)) {
         work.push({
           alias: rt.source.alias,
@@ -5575,6 +5580,7 @@ export class ReferenceResolver {
           // Top-level SEED — always starts with the raw-walk-first gate
           // (see {@link PullItem.preResolvedScope}'s own doc).
           preResolvedScope: undefined,
+          rebindFrom,
         });
       }
     }
@@ -5722,7 +5728,7 @@ export class ReferenceResolver {
     // search block just below). With that pre-resolution in place, `.pop()`
     // is correct at every level — no further asymmetry.
     for (let item = work.pop(); item !== undefined; item = work.pop()) {
-      const { alias, fallback, sibling, linkedEntity, parent, owner, preResolvedScope } = item;
+      const { alias, fallback, sibling, linkedEntity, parent, owner, preResolvedScope, rebindFrom } = item;
       // J2: keyed (and disambiguated) by ‘parent’ — the IMMEDIATE embedder —
       // not ‘owner’ (the top-level consumer trait). A TOP-LEVEL seed has
       // parent === owner (unchanged from before), so this only changes
@@ -5887,8 +5893,12 @@ export class ReferenceResolver {
       const nextFallback =
         childScope.alias === searchAlias && childScope.imports === searchImports ? undefined : childScope;
 
+      // The rebind replaces the embedder atom's own entity; a sibling bound
+      // to a different entity of the atom keeps its binding (G-ORB-042).
+      const siblingRebind =
+        atomTrait.linkedEntity && rebindFrom && atomTrait.linkedEntity !== rebindFrom ? undefined : linkedEntity;
       let copy = resolveForwardedSiblingConfigFrom(
-        applyLinkedEntityRename(atomTrait, linkedEntity, this.entityIdsInScope),
+        applyLinkedEntityRename(atomTrait, siblingRebind, this.entityIdsInScope),
         embedderChain(parent),
         orbitalConfig,
         this.schemaConfig,
@@ -5937,6 +5947,7 @@ export class ReferenceResolver {
           parent: childParent,
           owner,
           preResolvedScope: childPreResolvedScope,
+          rebindFrom,
         });
       }
 
@@ -5948,7 +5959,7 @@ export class ReferenceResolver {
       pulled.push({
         trait: copy,
         source: { type: "imported", alias, traitName: sibling },
-        ...(linkedEntity !== undefined ? { linkedEntity } : {}),
+        ...(siblingRebind !== undefined ? { linkedEntity: siblingRebind } : {}),
         ...(foundTypeArgs !== undefined ? { typeArgs: foundTypeArgs } : {}),
       });
 

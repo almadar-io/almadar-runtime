@@ -60,6 +60,13 @@ export interface EventTransportRegisterResult {
 // The port
 // ============================================================================
 
+/**
+ * Who a server push was addressed to: `peers` — another client's change
+ * (live push); `origin` — this client's own running request, live (a
+ * call-service's `emit.onMessage`).
+ */
+export type PushTarget = 'peers' | 'origin';
+
 export interface EventTransport {
   /** Register a schema with the transport's target (server, or an in-process evaluator). */
   register(schema: OrbitalSchema): Promise<EventTransportRegisterResult>;
@@ -75,7 +82,7 @@ export interface EventTransport {
    * carries no notion of "tab identity", that is a client-role concern
    * (plan P4).
    */
-  subscribe?(onPush: (emitted: EmittedEvent) => void, params?: Record<string, string>): () => void;
+  subscribe?(onPush: (emitted: EmittedEvent, target: PushTarget) => void, params?: Record<string, string>): () => void;
 }
 
 // ============================================================================
@@ -115,6 +122,7 @@ interface ServerPushEnvelope {
   event?: string;
   payload?: EmittedEvent['payload'];
   source?: EmittedEvent['source'];
+  target?: PushTarget;
 }
 
 function isBusPushEnvelope(value: ServerPushEnvelope): value is ServerPushEnvelope & { type: 'bus'; event: string } {
@@ -277,7 +285,7 @@ export function createHttpTransport(options: HttpTransportOptions): EventTranspo
         if (token) search.set('access_token', token);
         const url = `${deriveEventsUrl(serverUrl)}?${search.toString()}`;
         release = acquirePushChannel(url, (envelope) => {
-          onPush({ event: envelope.event, payload: envelope.payload, source: envelope.source });
+          onPush({ event: envelope.event, payload: envelope.payload, source: envelope.source }, envelope.target ?? 'peers');
         });
       })();
       return () => {

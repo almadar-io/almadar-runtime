@@ -222,6 +222,16 @@ export interface ServiceCallContext {
     host?: ServiceHostPorts;
 }
 
+/**
+ * Where a running `call-service`'s live messages go: the call site's
+ * `emit.onMessage` event, stamped as the calling trait. Absent when the call
+ * site declares no `onMessage`.
+ */
+export interface ServiceMessageRoute {
+    event: string;
+    source?: BusEventSource;
+}
+
 export interface EffectHandlers {
     /**
      * Emit an event to the event bus.
@@ -308,7 +318,8 @@ export interface EffectHandlers {
         service: string,
         action: string,
         params?: ServiceParams,
-        context?: ServiceCallContext
+        context?: ServiceCallContext,
+        message?: ServiceMessageRoute
     ) => Promise<EventPayload | null>;
 
     /** Fetch entity data (server only) - returns data for client-side rendering.

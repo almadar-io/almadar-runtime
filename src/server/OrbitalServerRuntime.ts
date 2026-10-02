@@ -343,8 +343,14 @@ export interface LiveBroadcastItem {
   event: string;
   payload?: EventPayload;
   source: BusEventSource;
-  /** `clientId` of the request that produced this emit; excluded from delivery by the transport. */
+  /** `clientId` of the request that produced this emit. */
   originClientId?: string;
+  /**
+   * `peers`: every OTHER client (persist envelopes, tick relay). `origin`:
+   * only the requesting client, while its request is still running (a
+   * `call-service`'s live `emit.onMessage`).
+   */
+  target: 'peers' | 'origin';
 }
 
 // `OrbitalEventResponse` — response from event processing — is owned by
@@ -1551,10 +1557,11 @@ export class OrbitalServerRuntime {
       // matching listeners, this orbital's included (the deleted bus
       // fan-out's role for tick emits).
       if (emittedEvents.length > 0) {
-        this.enqueueEvent(async () => {
+        this.enqueueEvent(async (queueHold) => {
           await this.relayEmittedEvents(orbitalName, emittedEvents, {
             includeSourceOrbital: true,
             visited: new Set<string>(),
+            queueHold,
           });
         }).catch((error: Error) => {
           effectLog.error('tick:relay-error', {
@@ -1587,7 +1594,9 @@ export class OrbitalServerRuntime {
   /** A client mounts a trait by dispatching its lifecycle event and releases it with `$UNMOUNT`. */
   private recordMount(orbitalName: string, request: OrbitalEventRequest, mounted: boolean): void {
     const client = request.clientId ?? ANONYMOUS_CLIENT;
-    const traits = request.targetTrait !== undefined ? [request.targetTrait] : (request.traits ?? []).map((t) => t.trait);
+    const traits = request.mount !== undefined
+      ? request.mount.map((m) => m.trait)
+      : request.targetTrait !== undefined ? [request.targetTrait] : (request.traits ?? []).map((t) => t.trait);
     for (const traitName of traits) {
       const key = `${orbitalName}::${traitName}`;
       const clients = this.mountedBy.get(key) ?? new Set<string>();
@@ -1904,6 +1913,7 @@ export class OrbitalServerRuntime {
       payload: request.payload,
       source: { orbital: orbitalName, trait: request.sourceTrait, tick: request.tick },
       originClientId: request.clientId,
+      target: 'peers',
     });
     if (this.tickRelayTimer === null) {
       const timer = setInterval(() => this.flushTickRelay(), this.config.tickRelayIntervalMs ?? 50);
@@ -2074,9 +2084,14 @@ export class OrbitalServerRuntime {
    * declared inputs, the input channel as `user`, and the rows `user` may read
    * (the entity's `@read` policy, the same rule a `fetch` effect applies).
    */
-  servicePorts(caller: { orbital: string; trait: string }, user: UserContext | undefined): ServiceHostPorts {
+  servicePorts(
+    caller: { orbital: string; trait: string },
+    user: UserContext | undefined,
+    message: (payload: EventPayload) => void = () => {},
+  ): ServiceHostPorts {
     return {
       caller,
+      message,
       inputs: () => this.listExternalInputs(),
       dispatchInput: (orbital, request) =>
         this.dispatchExternalInput(orbital, { ...request, ...(user !== undefined ? { user } : {}) }),
@@ -2149,12 +2164,12 @@ export class OrbitalServerRuntime {
       this.recordMount(orbitalName, request, false);
       return { success: true, transitioned: false, states: {}, emittedEvents: [] };
     }
-    if ((LIFECYCLE_EVENTS as readonly string[]).includes(request.event)) {
+    if (request.mount !== undefined || (LIFECYCLE_EVENTS as readonly string[]).includes(request.event)) {
       this.recordMount(orbitalName, request, true);
     }
 
-    const response = await this.enqueueEvent(() =>
-      this.evaluateForOrbital(registered, request, onPush),
+    const response = await this.enqueueEvent((queueHold) =>
+      this.evaluateForOrbital(registered, request, onPush, queueHold),
     );
 
     // T6: a tick-stamped dispatch is a latest-state broadcast — queue it for
@@ -2193,6 +2208,7 @@ export class OrbitalServerRuntime {
     registered: RegisteredOrbital,
     request: OrbitalEventRequest,
     onPush?: (item: PushItem) => void,
+    queueHold?: EventQueueHold,
   ): Promise<OrbitalEventResponse> {
     const orbitalName = registered.schema.name;
     // Trace every server-side event entry. If the runtime path is
@@ -2253,7 +2269,7 @@ export class OrbitalServerRuntime {
     // guesses an initial state for single-state traits (a stateless-server
     // protection), which would silently drop the multi-state scoped
     // deliveries the old stateful path served from its held states.
-    const isDelegatedLeg = request.targetTrait !== undefined &&
+    const isDelegatedLeg = (request.targetTrait !== undefined || request.mount !== undefined) &&
       (request.traits !== undefined || request.entityByTrait !== undefined);
     let serverRequest = request;
     if (!isDelegatedLeg && request.targetTrait === undefined) {
@@ -2271,7 +2287,7 @@ export class OrbitalServerRuntime {
     // composition). Leaving on-page listeners to the client left this
     // host's held state stale (G-RUNTIME-042).
     const response = await evaluateOrbitalEvent(
-      this.makeEvaluateDeps(registered, { viewer, onPush, originClientId: request.clientId }),
+      this.makeEvaluateDeps(registered, { viewer, onPush, originClientId: request.clientId, queueHold }),
       serverRequest,
     );
 
@@ -2284,7 +2300,9 @@ export class OrbitalServerRuntime {
     await this.relayEmittedEvents(orbitalName, response.emittedEvents, {
       includeSourceOrbital: false,
       visited: new Set<string>(),
+      queueHold,
       into: response,
+      ...(viewer !== undefined ? { viewer } : {}),
     });
 
     return response;
@@ -2304,6 +2322,8 @@ export class OrbitalServerRuntime {
       viewer?: UserContext;
       onPush?: (item: PushItem) => void;
       originClientId?: string;
+      /** The event-queue hold this composition runs under; absent outside the queue (ticks). */
+      queueHold?: EventQueueHold;
     },
   ): EvaluateOrbitalEventDeps {
     const runEffects: EvaluateEffectRunner = async (traitName, args) => {
@@ -2327,6 +2347,7 @@ export class OrbitalServerRuntime {
         args.now,
         args.dispatch,
         args.firing,
+        context.queueHold,
       );
       await this.rerenderCallsiteCaptureChildren(
         registered,
@@ -2343,6 +2364,9 @@ export class OrbitalServerRuntime {
         context.onPush,
         originClientId,
         args.now,
+        new Set(),
+        false,
+        context.queueHold,
       );
     };
     return {
@@ -2402,20 +2426,16 @@ export class OrbitalServerRuntime {
     return previous.then(() => release);
   }
 
-  /** Which queue hold the current async context runs under (see `outsideEventQueue`). */
-  private queueHoldAls: Promise<BracketAsyncLocalStorage<EventQueueHold>> | null = null;
-  private ensureQueueHoldAls(): Promise<BracketAsyncLocalStorage<EventQueueHold>> {
-    this.queueHoldAls ??= import('node:async_hooks').then(
-      ({ AsyncLocalStorage }) => new AsyncLocalStorage<EventQueueHold>(),
-    );
-    return this.queueHoldAls;
-  }
-
-  private async enqueueEvent<T>(run: () => Promise<T>): Promise<T> {
-    const als = await this.ensureQueueHoldAls();
+  /**
+   * Hold the queue for `run`, handing it the hold so the work it reaches can
+   * release it (`outsideEventQueue`). The hold is passed explicitly rather than
+   * carried in async context: this runtime also runs in the browser (the orb
+   * website), which has no AsyncLocalStorage.
+   */
+  private async enqueueEvent<T>(run: (hold: EventQueueHold) => Promise<T>): Promise<T> {
     const hold: EventQueueHold = { held: true, release: await this.acquireEventQueue() };
     try {
-      return await als.run(hold, run);
+      return await run(hold);
     } finally {
       if (hold.held) hold.release();
     }
@@ -2428,8 +2448,7 @@ export class OrbitalServerRuntime {
    * later commit follow server-arrival last-write-wins. Outside a hold, `work`
    * just runs.
    */
-  private async outsideEventQueue<T>(work: () => Promise<T>): Promise<T> {
-    const hold = (await this.ensureQueueHoldAls()).getStore();
+  private async outsideEventQueue<T>(hold: EventQueueHold | undefined, work: () => Promise<T>): Promise<T> {
     if (hold === undefined || !hold.held) return work();
     hold.held = false;
     hold.release();
@@ -2465,6 +2484,10 @@ export class OrbitalServerRuntime {
     opts: {
       includeSourceOrbital: boolean;
       visited: Set<string>;
+      /** The requesting viewer; ticks and external producers have none and run as the default user. */
+      viewer?: UserContext;
+      /** The event-queue hold the relay runs under (each hop's service calls may release it). */
+      queueHold?: EventQueueHold;
       /** The requesting response: each relay hop's renders, rows and states
        *  fold into it so the requester sees the work its event caused. */
       into?: OrbitalEventResponse;
@@ -2509,7 +2532,14 @@ export class OrbitalServerRuntime {
           hops += 1;
           try {
             const response = await evaluateOrbitalEvent(
-              { ...this.makeEvaluateDeps(registered, { viewer: this.config.defaultUser }), seedDelivery: delivery },
+              {
+                ...this.makeEvaluateDeps(registered, {
+                  viewer: opts.viewer ?? this.config.defaultUser,
+                  ...(opts.queueHold !== undefined ? { queueHold: opts.queueHold } : {}),
+                  ...(emitted.source?.originClientId !== undefined ? { originClientId: emitted.source.originClientId } : {}),
+                }),
+                seedDelivery: delivery,
+              },
               {
                 event: target.triggers,
                 ...(target.triggersId !== undefined ? { eventId: target.triggersId } : {}),
@@ -2543,11 +2573,11 @@ export class OrbitalServerRuntime {
    * event queue; errors are logged, never thrown at the producer.
    */
   private dispatchExternalEvent(event: string, payload?: EventPayload): void {
-    this.enqueueEvent(async () => {
+    this.enqueueEvent(async (queueHold) => {
       await this.relayEmittedEvents(
         undefined,
         [{ event, ...(payload !== undefined ? { payload } : {}) }],
-        { includeSourceOrbital: true, visited: new Set<string>() },
+        { includeSourceOrbital: true, visited: new Set<string>(), queueHold },
       );
     }).catch((error: Error) => {
       xOrbitalLog.error('dispatchExternalEvent:error', {
@@ -2592,6 +2622,8 @@ export class OrbitalServerRuntime {
     dispatch?: EffectDispatch,
     /** The firing transition's event and from-state, stamped on each client effect. */
     firing?: { event: string; fromState: string },
+    /** The event-queue hold these effects run under; absent outside the queue (ticks). */
+    queueHold?: EventQueueHold,
   ): Promise<void> {
     if (callsitePayload !== undefined) this.composedCallsitePayloads.set(traitName, callsitePayload);
     const capture = callsitePayload ?? this.composedCallsitePayloads.get(traitName);
@@ -2629,8 +2661,8 @@ export class OrbitalServerRuntime {
         sigilPages,
         sigilTheme,
         extraEffectHandlers: this.config.effectHandlers,
-        outsideEventQueue: (work) => this.outsideEventQueue(work),
-        servicePorts: (caller, user) => this.servicePorts(caller, user),
+        outsideEventQueue: (work) => this.outsideEventQueue(queueHold, work),
+        servicePorts: (caller, user, message) => this.servicePorts(caller, user, message),
         deliverEmit: (event, eventPayload, stamp, fromPersistSuccess) => {
           // Observability tap, NOT circuit routing (W4): the runtime's own
           // fan-out is the composition's in-band loop + the host's
@@ -2641,8 +2673,12 @@ export class OrbitalServerRuntime {
           // which have no response to read).
           this.eventBus.emit(event, eventPayload, stamp, eventRouteKey(event, stamp.eventId));
           if (fromPersistSuccess) {
-            this.liveBroadcastSink?.({ event, payload: eventPayload, source: stamp, originClientId });
+            this.liveBroadcastSink?.({ event, payload: eventPayload, source: stamp, originClientId, target: 'peers' });
           }
+        },
+        deliverLive: (event, eventPayload, stamp) => {
+          this.eventBus.emit(event, eventPayload, stamp, eventRouteKey(event, stamp.eventId));
+          this.liveBroadcastSink?.({ event, payload: eventPayload, source: stamp, originClientId, target: 'origin' });
         },
         liveBroadcastSinkWired: this.liveBroadcastSink !== null,
         debug: this.config.debug,
@@ -2704,6 +2740,7 @@ export class OrbitalServerRuntime {
     visited: Set<string> = new Set(),
     /** Walking through a child that was not repainted: its children keep the payload they were last composed with. */
     keepComposed = false,
+    queueHold?: EventQueueHold,
   ): Promise<void> {
     const children = this.callsiteCaptureChildrenByTrait.get(traitName);
     if (!children || children.size === 0) return;
@@ -2718,7 +2755,7 @@ export class OrbitalServerRuntime {
       if (!entry || !entry.result.executed) {
         await this.rerenderCallsiteCaptureChildren(
           registered, childName, composedWith, entityData, entityId, emittedEvents, fetchedData,
-          clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, now, visited, true,
+          clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, now, visited, true, queueHold,
         );
         continue;
       }
@@ -2745,6 +2782,9 @@ export class OrbitalServerRuntime {
         originClientId,
         composedWith,
         now,
+        undefined,
+        undefined,
+        queueHold,
       );
       await this.rerenderCallsiteCaptureChildren(
         registered,
@@ -2763,6 +2803,7 @@ export class OrbitalServerRuntime {
         now,
         visited,
         keepComposed,
+        queueHold,
       );
     }
   }
@@ -3407,4 +3448,9 @@ function foldRelayHop(into: OrbitalEventResponse, hop: OrbitalEventResponse): vo
     into.entityByTrait = { ...(into.entityByTrait ?? {}), ...hop.entityByTrait };
   }
   into.states = { ...into.states, ...hop.states };
+  // The relay delivered these to every listener this host holds; a client's
+  // client-only listeners (LOLO §7) run them on the client.
+  for (const emitted of hop.emittedEvents) {
+    into.emittedEvents.push({ ...emitted, source: { ...(emitted.source ?? {}), dispatched: true } });
+  }
 }

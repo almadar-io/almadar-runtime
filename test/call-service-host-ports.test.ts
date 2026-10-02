@@ -122,7 +122,7 @@ async function setup(turns: ScriptedTurn[]) {
         const result = await runToolLoop(client, context.host, {
           messages: [{ role: 'user', content: 'request' }],
           tools: [{ event: 'TaskPersistor.DO_CREATE' }, { read: 'Task' }],
-        });
+        }, { provider: 'scripted', model: 'scripted' });
         return { reply: result.reply, steps: result.steps.length };
       },
     },

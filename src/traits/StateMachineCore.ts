@@ -8,6 +8,7 @@
  * @packageDocumentation
  */
 
+import { LIFECYCLE_EVENTS } from '@almadar/core';
 import type {
     TraitState,
     TraitDefinition,
@@ -40,7 +41,7 @@ export type { TraitState, TraitDefinition };
  * to find "the lifecycle transition" for a trait that never advances past
  * its own INIT/LOAD/$MOUNT self-loop.
  */
-export const LIFECYCLE_EVENTS = ['INIT', 'LOAD', '$MOUNT'] as const;
+export { LIFECYCLE_EVENTS };
 
 /** Wire-only event a client sends when a trait leaves the page; the server stops counting it as mounted. */
 export const UNMOUNT_EVENT = '$UNMOUNT';

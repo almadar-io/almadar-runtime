@@ -134,8 +134,18 @@ export interface ServerEffectStageDeps {
    * calling trait's position, the requesting user): its declared inputs, the
    * input channel and a `@read`-filtered read. Absent: the host lends nothing.
    */
-  servicePorts?: (caller: { orbital: string; trait: string }, user: UserContext | undefined) => ServiceHostPorts;
+  servicePorts?: (
+    caller: { orbital: string; trait: string },
+    user: UserContext | undefined,
+    message: (payload: EventPayload) => void,
+  ) => ServiceHostPorts;
   deliverEmit?: DeliverEmit;
+  /**
+   * Deliver one live `call-service` message (`emit.onMessage`) to the
+   * requesting client only, while the call is still running. Never in-band:
+   * the client routes it through its own listens.
+   */
+  deliverLive?: (event: string, payload: EventPayload, stamp: BusEventSource) => void;
   /** Whether a live-broadcast sink is wired (read by the sink-call debug log). */
   liveBroadcastSinkWired?: boolean;
   debug?: boolean;
@@ -212,7 +222,7 @@ function findEntityDefByName(
  * registry.rs). Walks a render-ui pattern tree; for every pattern declaring
  * a `@fieldsContract` (form / form-section / inline-edit-form / wizard-step,
  * detail-panel, and the column-bearing display patterns — table-view /
- * data-list / data-grid / entity-table) whose linked entity declares
+ * data-list / data-grid / table-view) whose linked entity declares
  * relation-typed fields among the node's `fields`/`columns`, reads the
  * relation TARGET entity's rows from the persistence adapter and attaches
  * `relationsData: { <field>: [{value, label}] }`.
@@ -255,7 +265,7 @@ async function injectRelationOptions(
     const record = node as MutableRenderPattern;
     const nodeType = record['type'];
     // Column-bearing display patterns (table-view/data-list/data-grid/
-    // entity-table) wire their entity-bound field list under `columns`;
+    // table-view) wire their entity-bound field list under `columns`;
     // form/detail patterns use `fields`. Try both — never a hardcoded
     // pattern-name list, same doctrine as the `@fieldsContract` lookup below.
     const fields = record['fields'] ?? record['columns'];
@@ -723,12 +733,25 @@ export async function runServerEffectStage(
       return undefined;
     },
 
-    callService: async (service, action, params) => {
+    callService: async (service, action, params, _context, route) => {
       try {
         let result = null;
         // Custom handlers can override this
         const awaitProvider = deps.outsideEventQueue ?? (<T,>(work: () => Promise<T>): Promise<T> => work());
-        const host = deps.servicePorts?.({ orbital: deps.orbitalName, trait: traitName }, user);
+        const message = (payload: EventPayload): void => {
+          if (route === undefined) return;
+          const callingTrait = deps.irTraits.find((t) => t.name === traitName);
+          const stamp = stampEmitSource(route.source, {
+            orbitalName: deps.orbitalName,
+            traitName,
+            orbitalId: deps.orbitalId,
+            traitId: callingTrait?.id,
+            emitContractEventId: callingTrait?.emits?.find((e) => e.event === route.event)?.eventId,
+            originClientId,
+          });
+          deps.deliverLive?.(route.event, payload, stamp);
+        };
+        const host = deps.servicePorts?.({ orbital: deps.orbitalName, trait: traitName }, user, message);
         const callContext =
           user !== undefined || host !== undefined
             ? {

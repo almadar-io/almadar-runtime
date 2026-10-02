@@ -15,6 +15,7 @@
  *
  * @packageDocumentation
  */
+import { AwaitingRegistry } from './awaiting.js';
 import { StateMachineManager, type TraitDefinition } from '../traits/StateMachineCore.js';
 import type { EntityRow, EventPayload, RollbackCause, RuntimeConfig, TransitionObserver } from '../types.js';
 import { MountLifecycle } from './mount-lifecycle.js';
@@ -40,6 +41,8 @@ export interface CircuitStore {
   readonly mount: MountLifecycle<WorklistItem>;
   /** Embedded child → the payload its composer last composed it with (sticky `@callsitePayload`). */
   readonly callsitePayloads: Map<string, EventPayload>;
+  /** Traits awaiting a server round trip (per-trait subscriptions; see `AwaitingRegistry`). */
+  readonly awaiting: AwaitingRegistry;
   /**
    * Capture `trait`'s current state + its frame row, for a
    * `runtimeOptimistic` dispatch's pre-commit rollback point. `frameKey`
@@ -89,6 +92,7 @@ export function createMemoryCircuitStore(
     frames,
     mount: new MountLifecycle<WorklistItem>(),
     callsitePayloads: new Map<string, EventPayload>(),
+    awaiting: new AwaitingRegistry(),
     snapshot(trait, entityId, frameKey) {
       const key = frameKey ?? trait;
       const frame = frames.get(key);

@@ -1154,7 +1154,10 @@ export class EffectExecutor {
                     break;
                 }
                 try {
-                    const result = await this.handlers.callService(service, action, params);
+                    const route = emitCfg?.on_message !== undefined
+                        ? { event: emitCfg.on_message, source: this.sourceStamp(emitCfg.on_message) }
+                        : undefined;
+                    const result = await this.handlers.callService(service, action, params, undefined, route);
                     this.emitSuccess(emitCfg, 'success', result);
                 } catch (err) {
                     // A declared failure route IS the handling: emit it and let the

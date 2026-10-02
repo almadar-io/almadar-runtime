@@ -40,6 +40,12 @@ function isTrait(t: TraitRef): t is Trait {
   return typeof t === 'object' && 'stateMachine' in t;
 }
 
+/** The trait a preprocessed entry registers: inline, or a call-site-configured `{ref, _resolved}` wrapper. */
+function registeredTrait(t: TraitRef): Trait | undefined {
+  if (isTrait(t)) return t;
+  return typeof t === 'object' && '_resolved' in t ? t._resolved : undefined;
+}
+
 describe(
   'ReferenceResolver — real-organism JS-vs-Rust orbital-import parity (Project Friday, B4-J6)',
   () => {
@@ -74,7 +80,7 @@ describe(
         expect(rustOrbital).toBeDefined();
         if (!jsOrbital || !rustOrbital) return;
 
-        const jsNames = new Set(jsOrbital.traits.filter(isTrait).map((t) => t.name));
+        const jsNames = new Set(jsOrbital.traits.map(registeredTrait).filter((t): t is Trait => t !== undefined).map((t) => t.name));
         const rustNames = new Set(rustOrbital.traits.filter(isTrait).map((t) => t.name));
         const jsOnly = [...jsNames].filter((n) => !rustNames.has(n)).sort();
         const rustOnly = [...rustNames].filter((n) => !jsNames.has(n)).sort();

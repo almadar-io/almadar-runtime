@@ -310,13 +310,13 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
         await executor.execute([
             'render-ui',
             'main',
-            { type: 'entity-table', entity: 'Task' },
+            { type: 'table-view', entity: 'Task' },
             {},
         ]);
 
         expect(calls.renderUI).toHaveLength(1);
         expect(calls.renderUI[0][0]).toBe('main');
-        expect((calls.renderUI[0][1] as Record<string, RuntimeValue>).type).toBe('entity-table');
+        expect((calls.renderUI[0][1] as Record<string, RuntimeValue>).type).toBe('table-view');
     });
 
     it('dispatches navigate effects', async () => {

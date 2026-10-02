@@ -20,7 +20,9 @@
  */
 import { buildConfigBinding, buildEntityBinding } from '../traits/config-defaults.js';
 import type {
+  AwaitingTrait,
   DispatchMode,
+  MountSeed,
   OrbitalEventRequest,
   OrbitalEventResponse,
   UserContext,
@@ -94,9 +96,17 @@ export interface ClientRoleOpts {
  * needs them to roll back the right trait instance on failure, so they
  * travel on the value instead.
  */
+/** A delivery a client-only seed's emit owes an off-page listener (LOLO §7). */
+export interface ClientContinuation {
+  orbital: string;
+  request: OrbitalEventRequest;
+}
+
 export interface ClientDispatch {
   response: OrbitalEventResponse;
   serverLeg?: OrbitalEventRequest;
+  /** A client-only seed's off-page deliveries: posted to their listeners, never re-running the seed on a host. */
+  continuations?: readonly ClientContinuation[];
   mode: DispatchMode;
   snapshot?: TraitSnapshot;
   /** `runtimeOptimistic` only: the pre-dispatch rows of every sibling frame
@@ -108,6 +118,8 @@ export interface ClientDispatch {
   trait: string;
   entityId?: string;
   frameKey: string;
+  /** The transition each trait's local run took (seed and cascaded listeners) — keys their awaiting-server entries. */
+  firings?: ReadonlyMap<string, { event: string; fromState: string }>;
 }
 
 /**
@@ -214,10 +226,10 @@ function createClientEffectRunner(
    * something the server leg needs to know about" — a bare state-only
    * transition (no effects) can have nothing server-only to replay either.
    */
-  onExecuted?: (traitName: string) => void,
+  onExecuted?: (traitName: string, firing: { event: string; fromState: string } | undefined) => void,
 ): EvaluateEffectRunner {
   return async (traitName, args) => {
-    onExecuted?.(traitName);
+    onExecuted?.(traitName, args.firing);
     const entry = deps.traitIndex.byName.get(traitName);
     const frameKey = entry?.frameKey ?? traitName;
     let frame = deps.store.frames.get(frameKey);
@@ -386,11 +398,15 @@ export async function dispatchWithServerLeg(
   }
 
   const executedTraitNames = new Set<string>();
+  const firings = new Map<string, { event: string; fromState: string }>();
   const collector = new ServerLegCollector();
   const runEffects = createClientEffectRunner(
     { traitIndex: opts.traitIndex, store: opts.store, orbitalName: opts.orbitalName },
     collector,
-    (name) => executedTraitNames.add(name),
+    (name, firing) => {
+      executedTraitNames.add(name);
+      if (firing !== undefined && !firings.has(name)) firings.set(name, firing);
+    },
   );
 
   const response = await evaluateOrbitalEvent(
@@ -404,14 +420,31 @@ export async function dispatchWithServerLeg(
   const drained = collector.drain();
   const hybrid = mode === 'hybridClientOnly';
   const full = opts.fullTraitIndex;
-  const reachesOffPage = full !== undefined && response.emittedEvents.some((emitted) =>
+  const offPage = full === undefined ? [] : response.emittedEvents.flatMap((emitted) =>
     collectListenerTargets(full, emitted.source, emitted.event, emitted.payload)
-      .some((target) => !opts.traitIndex.byName.has(target.listenerTrait)));
+      .filter((target) => !opts.traitIndex.byName.has(target.listenerTrait))
+      .map((target) => ({ emitted, target })));
+  const reachesOffPage = offPage.length > 0;
   // A local (hybrid) seed never needs the server for ITS OWN effects — but the
   // traits its cascade reached (a persistor, a refetching list) may.
   const downstreamNeedsServer = [...collector.delegatingTraits()].some((t) => t !== traitName);
   let serverLeg: OrbitalEventRequest | undefined;
-  if (drained.length > 0 || reachesOffPage) {
+  let continuations: ClientContinuation[] | undefined;
+  if (hybrid && !downstreamNeedsServer && drained.length === 0 && reachesOffPage) {
+    // LOLO §7: a client-only seed takes no server round trip of its own; only
+    // the deliveries its emits owe off-page listeners leave the client.
+    continuations = offPage.map(({ emitted, target }) => ({
+      orbital: target.entry.orbitalName,
+      request: {
+        event: target.triggers,
+        ...(target.payload !== undefined ? { payload: target.payload } : {}),
+        ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
+        targetTrait: target.listenerTrait,
+        ...(request.clientId !== undefined ? { clientId: request.clientId } : {}),
+        delivery: deliveryOf(emitted),
+      },
+    }));
+  } else if (drained.length > 0 || reachesOffPage) {
     if (hybrid && !downstreamNeedsServer && !reachesOffPage) {
       clientRoleLog.error('hybrid-trait-produced-server-leg', {
         trait: traitName,
@@ -443,6 +476,7 @@ export async function dispatchWithServerLeg(
   return {
     response,
     serverLeg,
+    ...(continuations !== undefined ? { continuations } : {}),
     mode,
     snapshot,
     ...(siblingSnapshots !== undefined ? { siblingSnapshots } : {}),
@@ -450,6 +484,7 @@ export async function dispatchWithServerLeg(
     trait: traitName,
     entityId,
     frameKey: entry.frameKey,
+    firings,
   };
 }
 
@@ -461,6 +496,31 @@ export async function dispatchWithServerLeg(
  * what the server changed (and the row id, which addresses the frame). Rows
  * with no carried counterpart fold whole.
  */
+/**
+ * The fold's delta base. A seeded leg (a client-only trait's dispatch) CARRIES
+ * the seeding trait's pre-dispatch row, because the server re-runs that arm
+ * from it; the client already shows the arm's result. So the seeding trait's
+ * base is its frame as the leg is sent: a field the arm changed and the
+ * cascade moved back equals the carry, yet differs from what the client
+ * shows. Every other trait keeps the carry, so a stale echo can't clobber a
+ * sibling's newer write.
+ */
+function foldBase(
+  store: CircuitStore,
+  carried: Record<string, EntityRow> | undefined,
+  seeded: readonly string[],
+  traitIndex: TraitIndex,
+): Record<string, EntityRow> | undefined {
+  if (carried === undefined) return undefined;
+  const out: Record<string, EntityRow> = { ...carried };
+  for (const trait of seeded) {
+    if (!(trait in carried)) continue;
+    const frame = store.frames.get(traitIndex.byName.get(trait)?.frameKey ?? trait);
+    if (frame !== undefined) out[trait] = { ...frame };
+  }
+  return out;
+}
+
 function changedSinceCarried(
   response: OrbitalEventResponse,
   carried: Record<string, EntityRow> | undefined,
@@ -516,6 +576,31 @@ function stripCircuitState(request: OrbitalEventRequest): OrbitalEventRequest {
 }
 
 /** The response minus everything it carries for `traits` (rows, states, renders). */
+/** The page's client-only traits (LOLO §7): their state never comes from a host. */
+function clientOnlyTraits(traitIndex: TraitIndex): Set<string> {
+  const out = new Set<string>();
+  for (const [name, entry] of traitIndex.byName) if (entry.dispatchMode === 'hybridClientOnly') out.add(name);
+  return out;
+}
+
+/**
+ * Drop what a host computed for client-only traits — their states, rows and
+ * own transition renders. A capture repaint (`callsitePayload`) stays: that
+ * render is the embedder's composition, not the child's own run.
+ */
+function withoutClientOnlyRuns(response: OrbitalEventResponse, clientOnly: ReadonlySet<string>): OrbitalEventResponse {
+  if (clientOnly.size === 0) return response;
+  const keep = <T>(record: Record<string, T> | undefined): Record<string, T> | undefined =>
+    record === undefined ? undefined : Object.fromEntries(Object.entries(record).filter(([trait]) => !clientOnly.has(trait)));
+  const byTrait = response.clientEffectsByTrait?.filter((e) => !clientOnly.has(e.traitName) || e.callsitePayload !== undefined);
+  return {
+    ...response,
+    states: keep(response.states) ?? {},
+    ...(response.entityByTrait !== undefined ? { entityByTrait: keep(response.entityByTrait) } : {}),
+    ...(byTrait !== undefined ? { clientEffectsByTrait: byTrait, clientEffects: byTrait.map((e) => e.effect) } : {}),
+  };
+}
+
 function withoutTraits(response: OrbitalEventResponse, traits: ReadonlySet<string>): OrbitalEventResponse {
   const keep = <T>(record: Record<string, T> | undefined): Record<string, T> | undefined =>
     record === undefined ? undefined : Object.fromEntries(Object.entries(record).filter(([trait]) => !traits.has(trait)));
@@ -570,7 +655,10 @@ export async function applyOrbitalEventResponse(
   // before INIT. Drop that and hold the delivery here until INIT (Clause 4.1).
   const heldHere = new Set(store.mount.awaitingTraits().filter((trait) =>
     opts.traitIndex.byName.get(trait)?.dispatchMode === 'hybridClientOnly'));
-  const response = heldHere.size > 0 ? withoutTraits(serverResponse, heldHere) : serverResponse;
+  // LOLO §7: a client-only trait's state is the client's own. Whatever a host
+  // computed for it is dropped; the events that reached it run here instead.
+  const clientOnly = clientOnlyTraits(opts.traitIndex);
+  const response = withoutClientOnlyRuns(heldHere.size > 0 ? withoutTraits(serverResponse, heldHere) : serverResponse, clientOnly);
   const clientEffects: ClientEffectTuple[] = [...(response.clientEffects ?? [])];
   const clientEffectsByTrait: ClientEffectByTrait[] =
     [...(response.clientEffectsByTrait ?? [])];
@@ -619,15 +707,16 @@ export async function applyOrbitalEventResponse(
     }
     // The server's own fan-out already ran this emit's listeners (their
     // rows/renders are in this response) — re-running them here doubles
-    // every effect.
-    if (emitted.source?.dispatched === true) continue;
+    // every effect. Client-only listeners are the exception: their host run
+    // was dropped above.
+    const hostRan = emitted.source?.dispatched === true;
 
     const targets = collectListenerTargets(opts.traitIndex, emitted.source, emitted.event, emitted.payload, undefined, {
       guardBindings: freshDeliveryGuardBindings(delivery, (listener) => {
         const entry = opts.traitIndex.byName.get(listener);
         return store.manager.getState(listener)?.currentState ?? (entry !== undefined ? findInitialState(entry.traitDef) : '');
       }),
-    }).filter((target) => !heldHere.has(target.listenerTrait));
+    }).filter((target) => !heldHere.has(target.listenerTrait) && (!hostRan || clientOnly.has(target.listenerTrait)));
     for (const target of targets) {
       // A fresh, per-fan-out collector — any further server-only effect the
       // fanned listener's arm fires is not drained/posted from here,
@@ -660,6 +749,16 @@ export async function applyOrbitalEventResponse(
   return { clientEffects, clientEffectsByTrait };
 }
 
+/** The awaiting-server entries for a posted dispatch: each non-local trait its local run executed, keyed by the transition it took. */
+function awaitingEntries(dispatch: ClientDispatch, opts: ClientRoleOpts): AwaitingTrait[] {
+  const out: AwaitingTrait[] = [];
+  for (const [trait, firing] of dispatch.firings ?? []) {
+    if (opts.traitIndex.byName.get(trait)?.dispatchMode === 'hybridClientOnly') continue;
+    out.push({ trait, event: firing.event, from: firing.fromState });
+  }
+  return out;
+}
+
 /**
  * Post `dispatch.serverLeg` and fold the response — the twin of
  * `ClientKernel::dispatch`'s mode match. `hybridClientOnly` never posts;
@@ -688,7 +787,12 @@ export async function postServerLeg(
   opts: ClientRoleOpts,
   request?: OrbitalEventRequest,
   onBeforeSend?: () => void,
+  /** A progress-lane leg: never marks traits awaiting (nothing waits on it). */
+  progress = false,
 ): Promise<OrbitalEventResponse> {
+  if (dispatch.continuations !== undefined) {
+    return postContinuations(transport, dispatch, store, opts);
+  }
   if (dispatch.mode === 'hybridClientOnly' && dispatch.serverLeg === undefined) {
     return dispatch.response;
   }
@@ -715,40 +819,194 @@ export async function postServerLeg(
 
   legToSend = withMountedSet(legToSend, opts);
 
-  onBeforeSend?.();
-  let posted: OrbitalEventResponse;
+  // Awaiting-server window: from this send until the fold (or error), for every
+  // non-local trait the local run executed — tick legs never (latest-state broadcasts).
+  const awaiting = request?.tick === undefined && !progress ? awaitingEntries(dispatch, opts) : [];
+  store.awaiting.begin(awaiting);
   try {
-    posted = await transport.send(orbitalName, legToSend);
-  } catch (err) {
-    restoreDispatch(store, dispatch, 'transport-error');
-    throw err;
-  }
+    onBeforeSend?.();
+    const shownAtSend = foldBase(store, legToSend.entityByTrait, dispatch.mode === 'hybridClientOnly' ? [dispatch.trait] : [], opts.traitIndex);
+    let posted: OrbitalEventResponse;
+    try {
+      posted = await transport.send(orbitalName, legToSend);
+    } catch (err) {
+      restoreDispatch(store, dispatch, 'transport-error');
+      throw err;
+    }
 
-  if (dispatch.mode === 'runtimeOptimistic' && !posted.success) {
-    restoreDispatch(store, dispatch, 'server-rejected');
-    return posted;
-  }
+    if (dispatch.mode === 'runtimeOptimistic' && !posted.success) {
+      restoreDispatch(store, dispatch, 'server-rejected');
+      return posted;
+    }
 
-  // G-RUNTIME-029: the fold's effects render AFTER the local arm's, so the
-  // server's real data wins last.
+    // G-RUNTIME-029: the fold's effects render AFTER the local arm's, so the
+    // server's real data wins last.
+    const delivered = alreadyDeliveredFrom(dispatch);
+    const folded = await applyOrbitalEventResponse(
+      store,
+      changedSinceCarried(posted, shownAtSend, opts.traitIndex),
+      delivered,
+      opts,
+      dispatch.writtenTraits,
+    );
+    const local = dispatch.response;
+    return {
+      ...local,
+      emittedEvents: [
+        ...local.emittedEvents,
+        ...posted.emittedEvents.filter((e) => !delivered.has(alreadyDeliveredKey(e.source?.trait ?? '', e.event))),
+      ],
+      clientEffects: [...(local.clientEffects ?? []), ...folded.clientEffects],
+      clientEffectsByTrait: [...(local.clientEffectsByTrait ?? []), ...folded.clientEffectsByTrait],
+    };
+  } finally {
+    store.awaiting.end(awaiting.map((a) => a.trait));
+  }
+}
+
+/** What a client-only seed's posted continuations added on top of its local run. */
+export interface ContinuationAnswer {
+  emittedEvents: OrbitalEventResponse['emittedEvents'];
+  clientEffects: ClientEffectTuple[];
+  clientEffectsByTrait: ClientEffectByTrait[];
+}
+
+/**
+ * Post a client-only seed's off-page deliveries, each to its listener's
+ * orbital, and fold every answer: the hosts' events reach this page's
+ * client-only listeners through `applyOrbitalEventResponse`.
+ */
+export async function answerContinuations(
+  transport: EventTransport,
+  dispatch: ClientDispatch,
+  store: CircuitStore,
+  opts: ClientRoleOpts,
+): Promise<ContinuationAnswer> {
   const delivered = alreadyDeliveredFrom(dispatch);
-  const folded = await applyOrbitalEventResponse(
-    store,
-    changedSinceCarried(posted, legToSend.entityByTrait, opts.traitIndex),
-    delivered,
-    opts,
-    dispatch.writtenTraits,
-  );
+  const answer: ContinuationAnswer = { emittedEvents: [], clientEffects: [], clientEffectsByTrait: [] };
+  for (const continuation of dispatch.continuations ?? []) {
+    const posted = await transport.send(continuation.orbital, continuation.request);
+    const folded = await applyOrbitalEventResponse(store, posted, delivered, opts, dispatch.writtenTraits);
+    answer.emittedEvents.push(...posted.emittedEvents.filter((e) => !delivered.has(alreadyDeliveredKey(e.source?.trait ?? '', e.event))));
+    answer.clientEffects.push(...folded.clientEffects);
+    answer.clientEffectsByTrait.push(...folded.clientEffectsByTrait);
+  }
+  return answer;
+}
+
+async function postContinuations(
+  transport: EventTransport,
+  dispatch: ClientDispatch,
+  store: CircuitStore,
+  opts: ClientRoleOpts,
+): Promise<OrbitalEventResponse> {
   const local = dispatch.response;
+  const answer = await answerContinuations(transport, dispatch, store, opts);
   return {
     ...local,
-    emittedEvents: [
-      ...local.emittedEvents,
-      ...posted.emittedEvents.filter((e) => !delivered.has(alreadyDeliveredKey(e.source?.trait ?? '', e.event))),
-    ],
-    clientEffects: [...(local.clientEffects ?? []), ...folded.clientEffects],
-    clientEffectsByTrait: [...(local.clientEffectsByTrait ?? []), ...folded.clientEffectsByTrait],
+    emittedEvents: [...local.emittedEvents, ...answer.emittedEvents],
+    clientEffects: [...(local.clientEffects ?? []), ...answer.clientEffects],
+    clientEffectsByTrait: [...(local.clientEffectsByTrait ?? []), ...answer.clientEffectsByTrait],
   };
+}
+
+/** One seed of a mount batch with its local run. */
+export interface MountedDispatch {
+  seed: MountSeed;
+  dispatch: ClientDispatch;
+}
+
+/** What a posted mount leg added on top of the seeds' local runs. */
+export interface MountLegResult {
+  success: boolean;
+  states: Record<string, string>;
+  emittedEvents: OrbitalEventResponse['emittedEvents'];
+  clientEffects: ClientEffectTuple[];
+  clientEffectsByTrait: ClientEffectByTrait[];
+  error?: string;
+}
+
+/**
+ * Post several seeds' local runs as ONE `mount` leg and fold it once — the
+ * mount-batch form of `postServerLeg` (same leg shaping per topology, same
+ * awaiting window, same rollback). The leg's `traits`/`entityByTrait` are the
+ * union of the seeds' stateless addressing, each trait at its first
+ * (pre-batch) occurrence, since the server replays the seeds in order.
+ */
+export async function postMountLeg(
+  transport: EventTransport,
+  orbitalName: string,
+  mounted: readonly MountedDispatch[],
+  store: CircuitStore,
+  opts: ClientRoleOpts,
+  base: Pick<OrbitalEventRequest, 'payload' | 'entityId' | 'clientId'> = {},
+): Promise<MountLegResult> {
+  const traits: Array<{ trait: string; from: string }> = [];
+  const entityByTrait: Record<string, EntityRow> = {};
+  if (opts.carriesCircuitState) {
+    const seen = new Set<string>();
+    for (const { dispatch } of mounted) {
+      for (const t of dispatch.serverLeg?.traits ?? []) {
+        if (seen.has(t.trait)) continue;
+        seen.add(t.trait);
+        traits.push(t);
+      }
+      for (const [trait, row] of Object.entries(dispatch.serverLeg?.entityByTrait ?? {})) {
+        if (!(trait in entityByTrait)) entityByTrait[trait] = row;
+      }
+    }
+  }
+  const mount = mounted.map(({ seed }) => seed);
+  const request = withMountedSet({
+    event: mount[0]?.event ?? 'INIT',
+    ...(base.payload !== undefined ? { payload: base.payload } : {}),
+    ...(base.entityId !== undefined ? { entityId: base.entityId } : {}),
+    ...(base.clientId !== undefined ? { clientId: base.clientId } : {}),
+    mount,
+    ...(traits.length > 0 ? { traits } : {}),
+    ...(Object.keys(entityByTrait).length > 0 ? { entityByTrait } : {}),
+  }, opts);
+
+  const awaiting = mounted.flatMap(({ dispatch }) => awaitingEntries(dispatch, opts));
+  store.awaiting.begin(awaiting);
+  try {
+    const shownAtMountSend = foldBase(store, request.entityByTrait, mounted.filter((m) => m.dispatch.mode === 'hybridClientOnly').map((m) => m.dispatch.trait), opts.traitIndex);
+    let posted: OrbitalEventResponse;
+    try {
+      posted = await transport.send(orbitalName, request);
+    } catch (err) {
+      for (const { dispatch } of mounted) restoreDispatch(store, dispatch, 'transport-error');
+      throw err;
+    }
+    if (!posted.success) {
+      for (const { dispatch } of mounted) {
+        if (dispatch.mode === 'runtimeOptimistic') restoreDispatch(store, dispatch, 'server-rejected');
+      }
+    }
+    const delivered = new Set<string>();
+    const written = new Set<string>();
+    for (const { dispatch } of mounted) {
+      for (const key of alreadyDeliveredFrom(dispatch)) delivered.add(key);
+      for (const trait of dispatch.writtenTraits) written.add(trait);
+    }
+    const folded = await applyOrbitalEventResponse(
+      store,
+      changedSinceCarried(posted, shownAtMountSend, opts.traitIndex),
+      delivered,
+      opts,
+      written,
+    );
+    return {
+      success: posted.success,
+      states: posted.states,
+      emittedEvents: posted.emittedEvents.filter((e) => !delivered.has(alreadyDeliveredKey(e.source?.trait ?? '', e.event))),
+      clientEffects: folded.clientEffects,
+      clientEffectsByTrait: folded.clientEffectsByTrait,
+      ...(posted.error !== undefined ? { error: posted.error } : {}),
+    };
+  } finally {
+    store.awaiting.end(awaiting.map((a) => a.trait));
+  }
 }
 
 // ============================================================================
@@ -765,6 +1023,12 @@ export async function postServerLeg(
  */
 export interface ClientKernelOpts extends ClientRoleOpts {
   transport?: EventTransport;
+  /**
+   * The transport's topology while its `register()` is pending. Local arms
+   * and their paints never wait for it; every post does, and is shaped by
+   * the confirmed `carriesCircuitState` (overriding the role's own).
+   */
+  topology?: Promise<{ carriesCircuitState: boolean }>;
 }
 
 /** One `ClientKernel.dispatch()` call's settled outcome. */
@@ -783,6 +1047,24 @@ export interface ClientKernelOutcome {
 /** Per-dispatch hooks: `onLocal` sees the locally-evaluated response before its server leg is sent. */
 export interface ClientDispatchHooks {
   onLocal?: (local: OrbitalEventResponse) => void;
+}
+
+/** Mount hooks: `onLocal` sees each seed's local response before the mount leg is sent. */
+export interface ClientMountHooks {
+  onLocal?: (trait: string, local: OrbitalEventResponse) => void;
+}
+
+/** One `ClientKernel.dispatchMount()` call's settled outcome. */
+export interface ClientMountOutcome {
+  /** Each seed's local run, in seed order (already painted through `onLocal`). */
+  seeds: Array<{ trait: string; event: string; mode: DispatchMode; local: OrbitalEventResponse }>;
+  /** Whether any mount leg was posted. */
+  posted: boolean;
+  success: boolean;
+  error?: string;
+  /** What the posted legs added: the server's effects and the emits the client had not run. */
+  serverEffects: Pick<OrbitalEventResponse, 'clientEffects' | 'clientEffectsByTrait'>;
+  emittedEvents: OrbitalEventResponse['emittedEvents'];
 }
 
 export interface ClientKernel {
@@ -809,14 +1091,40 @@ export interface ClientKernel {
    * rollback, so a tick round trip never delays a command.
    */
   dispatch(request: OrbitalEventRequest, hooks?: ClientDispatchHooks): Promise<ClientKernelOutcome>;
+  /**
+   * Dispatch a server-pushed live message of THIS client's own running
+   * request (`PushTarget` `origin`). Outside the FIFO, because the request
+   * producing it is the entry the FIFO is waiting on; progress dispatches run
+   * one at a time, in push order, and never mark traits awaiting.
+   */
+  dispatchProgress(request: OrbitalEventRequest): Promise<ClientKernelOutcome>;
+  /**
+   * Mount several traits in ONE FIFO entry: every seed's local arm runs and
+   * paints, then one `mount` leg per owning orbital is posted and folded.
+   */
+  dispatchMount(
+    seeds: readonly MountSeed[],
+    hooks?: ClientMountHooks,
+    base?: Pick<OrbitalEventRequest, 'payload' | 'entityId' | 'clientId'>,
+  ): Promise<ClientMountOutcome>;
   readonly store: CircuitStore;
 }
 
 interface QueuedKernelEntry {
+  kind?: undefined;
   request: OrbitalEventRequest;
   hooks: ClientDispatchHooks[];
   resolvers: Array<(outcome: ClientKernelOutcome) => void>;
   rejecters: Array<(err: Error) => void>;
+}
+
+interface QueuedMountEntry {
+  kind: 'mount';
+  seeds: readonly MountSeed[];
+  hooks?: ClientMountHooks;
+  base: Pick<OrbitalEventRequest, 'payload' | 'entityId' | 'clientId'>;
+  resolve: (outcome: ClientMountOutcome) => void;
+  reject: (err: Error) => void;
 }
 
 /**
@@ -844,9 +1152,18 @@ function serverOnlyEffects(
  * (done inside `postServerLeg`) before the next queued entry starts.
  */
 export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
-  const { transport, ...roleOpts } = opts;
-  const queue: QueuedKernelEntry[] = [];
+  const { transport, topology, ...roleOpts } = opts;
+  const queue: Array<QueuedKernelEntry | QueuedMountEntry> = [];
   let pumping = false;
+
+  // Posts are shaped by the confirmed topology; local arms never wait for it.
+  let postRoleOpts: ClientRoleOpts | undefined = topology === undefined ? roleOpts : undefined;
+  const postRole = async (): Promise<ClientRoleOpts> => {
+    if (postRoleOpts !== undefined) return postRoleOpts;
+    const confirmed = await (topology ?? Promise.resolve({ carriesCircuitState: roleOpts.carriesCircuitState }));
+    postRoleOpts = { ...roleOpts, carriesCircuitState: confirmed.carriesCircuitState };
+    return postRoleOpts;
+  };
 
   // Multi-orbital routing: every posted dispatch goes to the orbital that
   // OWNS the seed trait (`traitIndex` stamps `orbitalName` per trait at
@@ -877,7 +1194,8 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
       return;
     }
     lane.inFlight = true;
-    void postServerLeg(transport, orbitalFor(next.request), next.dispatch, roleOpts.store, roleOpts, next.request)
+    void postRole()
+      .then((role) => postServerLeg(transport, orbitalFor(next.request), next.dispatch, roleOpts.store, role, next.request))
       .catch((err: Error) => {
         clientRoleLog.warn('tick-post-failed', { event: next.request.event, trait: next.request.targetTrait, error: String(err) });
       })
@@ -894,6 +1212,58 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
     if (!lane.inFlight) flushTickLane(key);
   };
 
+  let progressChain: Promise<void> = Promise.resolve();
+  const runProgress = async (request: OrbitalEventRequest): Promise<ClientKernelOutcome> => {
+    const dispatch = await dispatchWithServerLeg(roleOpts, request);
+    const response = transport !== undefined
+      ? await postServerLeg(transport, orbitalFor(request), dispatch, roleOpts.store, await postRole(), request, undefined, true)
+      : dispatch.response;
+    return { response, mode: dispatch.mode };
+  };
+
+  async function runMount(entry: QueuedMountEntry): Promise<void> {
+    try {
+      const mounted: MountedDispatch[] = [];
+      for (const seed of entry.seeds) {
+        const dispatch = await dispatchWithServerLeg(roleOpts, { ...entry.base, event: seed.event, targetTrait: seed.trait });
+        mounted.push({ seed, dispatch });
+      }
+      for (const { seed, dispatch } of mounted) entry.hooks?.onLocal?.(seed.trait, dispatch.response);
+      const seeds = mounted.map(({ seed, dispatch }) => ({ trait: seed.trait, event: seed.event, mode: dispatch.mode, local: dispatch.response }));
+      const outcome: ClientMountOutcome = { seeds, posted: false, success: true, serverEffects: { clientEffects: [], clientEffectsByTrait: [] }, emittedEvents: [] };
+      if (transport !== undefined) {
+        const role = await postRole();
+        const byOrbital = new Map<string, MountedDispatch[]>();
+        for (const m of mounted) {
+          const posts = m.dispatch.serverLeg !== undefined || (!role.carriesCircuitState && m.dispatch.mode !== 'hybridClientOnly');
+          if (!posts) continue;
+          const orbital = orbitalFor({ event: m.seed.event, targetTrait: m.seed.trait });
+          byOrbital.set(orbital, [...(byOrbital.get(orbital) ?? []), m]);
+        }
+        for (const [orbital, group] of byOrbital) {
+          const leg = await postMountLeg(transport, orbital, group, roleOpts.store, role, entry.base);
+          outcome.posted = true;
+          outcome.success = outcome.success && leg.success;
+          if (leg.error !== undefined) outcome.error = leg.error;
+          outcome.serverEffects.clientEffects?.push(...leg.clientEffects);
+          outcome.serverEffects.clientEffectsByTrait?.push(...leg.clientEffectsByTrait);
+          outcome.emittedEvents.push(...leg.emittedEvents);
+        }
+        for (const m of mounted) {
+          if (m.dispatch.continuations === undefined) continue;
+          const answer = await answerContinuations(transport, m.dispatch, roleOpts.store, role);
+          outcome.posted = true;
+          outcome.serverEffects.clientEffects?.push(...answer.clientEffects);
+          outcome.serverEffects.clientEffectsByTrait?.push(...answer.clientEffectsByTrait);
+          outcome.emittedEvents.push(...answer.emittedEvents);
+        }
+      }
+      entry.resolve(outcome);
+    } catch (err) {
+      entry.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
   function pump(): void {
     if (pumping) return;
     pumping = true;
@@ -901,6 +1271,10 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
       try {
         while (queue.length > 0) {
           const entry = queue.shift()!;
+          if (entry.kind === 'mount') {
+            await runMount(entry);
+            continue;
+          }
           try {
             const dispatch = await dispatchWithServerLeg(roleOpts, entry.request);
             let response = dispatch.response;
@@ -908,11 +1282,13 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
             if (transport !== undefined) {
               if (entry.request.tick !== undefined) postTick(dispatch, entry.request);
               else {
+                // Paint before waiting on the topology or the round trip.
                 const painters = entry.hooks.filter((h) => h.onLocal !== undefined);
-                response = await postServerLeg(transport, orbitalFor(entry.request), dispatch, roleOpts.store, roleOpts, entry.request, painters.length === 0 ? undefined : () => {
+                if (painters.length > 0) {
                   localPainted = true;
                   for (const h of painters) h.onLocal?.(dispatch.response);
-                });
+                }
+                response = await postServerLeg(transport, orbitalFor(entry.request), dispatch, roleOpts.store, await postRole(), entry.request);
               }
             }
             const outcome: ClientKernelOutcome = localPainted
@@ -932,11 +1308,22 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
 
   return {
     store: roleOpts.store,
+    dispatchProgress(request: OrbitalEventRequest): Promise<ClientKernelOutcome> {
+      const outcome = progressChain.then(() => runProgress(request));
+      progressChain = outcome.then(() => undefined, () => undefined);
+      return outcome;
+    },
+    dispatchMount(seeds, hooks, base = {}): Promise<ClientMountOutcome> {
+      return new Promise<ClientMountOutcome>((resolve, reject) => {
+        queue.push({ kind: 'mount', seeds, ...(hooks !== undefined ? { hooks } : {}), base, resolve, reject });
+        pump();
+      });
+    },
     dispatch(request: OrbitalEventRequest, hooks?: ClientDispatchHooks): Promise<ClientKernelOutcome> {
       return new Promise<ClientKernelOutcome>((resolve, reject) => {
         if (request.tick !== undefined) {
           const pending = queue.find(
-            (e) => e.request.tick !== undefined
+            (e): e is QueuedKernelEntry => e.kind !== 'mount' && e.request.tick !== undefined
               && e.request.event === request.event
               && e.request.targetTrait === request.targetTrait,
           );

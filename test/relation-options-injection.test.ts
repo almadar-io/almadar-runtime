@@ -3,7 +3,7 @@
  * compiled path's build-time `relationsData` generation (orbital-rust
  * registry.rs). A render-ui carrying a form-section, detail-panel, or a
  * column-bearing display pattern (table-view/data-list/data-grid/
- * entity-table, which author `columns` instead of `fields`) whose linked
+ * table-view, which author `columns` instead of `fields`) whose linked
  * entity declares a relation-typed field must ship with
  * `relationsData: { <field>: [{value, label}] }` read from the persistence
  * adapter, label contract `name || title || id`. Without this, every
