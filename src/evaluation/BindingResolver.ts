@@ -361,30 +361,6 @@ function interpolateString(value: string, ctx: EvaluationContext): RuntimeValue 
                 inFlightConfigRecursions.delete(value);
             }
         }
-        // A config DEFAULT that is itself a binding string — e.g. the atom
-        // default `navItems = @pages` / `theme = @currentTheme`, read via
-        // `@config.navItems`. The compiler's inline phase substitutes config
-        // defaults into the render-ui pattern (so `@config.X` → the default,
-        // then the binding resolves); the eager runtime path must mirror that
-        // by resolving the string binding through, instead of returning the
-        // raw `"@pages"` literal. Guards: pure binding, not client-only,
-        // and the in-flight set breaks a self-referencing config forward.
-        if (
-            value.startsWith('@config.') &&
-            typeof resolved === 'string' &&
-            resolved.startsWith('@') &&
-            isPureBinding(resolved) &&
-            !isClientOnlyBinding(resolved) &&
-            !inFlightConfigRecursions.has(value)
-        ) {
-            inFlightConfigRecursions.add(value);
-            try {
-                bindLog.debug('resolve:config-default-binding', { binding: value, resolvesTo: resolved });
-                return interpolateString(resolved, ctx);
-            } finally {
-                inFlightConfigRecursions.delete(value);
-            }
-        }
         return resolved;
     }
 
@@ -702,6 +678,8 @@ export function createContextFromBindings(
     if (bindings.now !== undefined) {
         ctx.now = bindings.now;
     }
+    if (bindings.locale !== undefined) ctx.locale = bindings.locale;
+    if (bindings.messages !== undefined) ctx.messages = bindings.messages;
     if (bindings.event !== undefined) ctx.event = bindings.event;
     if (bindings.prevEvents !== undefined) ctx.prevEvents = bindings.prevEvents;
     if (bindings.prevStates !== undefined) ctx.prevStates = bindings.prevStates;

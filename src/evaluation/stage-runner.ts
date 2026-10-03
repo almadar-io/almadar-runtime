@@ -12,7 +12,9 @@
  *
  * @packageDocumentation
  */
-import type { EntityField, EntityRow, OrbitalSchema, TraitConfig } from '@almadar/core';
+import { themeDataKey } from '@almadar/core';
+import { appNavItems, sigilThemeKey } from './render-sigils.js';
+import type { EntityField, EntityRow, MessageCatalogs, OrbitalSchema, TraitConfig } from '@almadar/core';
 import { runServerEffectStage, type DeliverEmit, type ServerEffectStageArgs } from '../effects/effect-stage.js';
 import { findEntityAmongOrbitals } from '../traits/OrbitalTraitParsing.js';
 import type { EvaluateEffectRunner } from './evaluateOrbitalEvent.js';
@@ -36,6 +38,8 @@ export interface IndexStageRunnerOptions {
   deliverEmit?: DeliverEmit;
   debug?: boolean;
   mockMode?: boolean;
+  /** The program's message catalogs (locale → qualified key → message). */
+  messages?: MessageCatalogs;
 }
 
 /**
@@ -82,14 +86,19 @@ export function createIndexStageRunner(options: IndexStageRunnerOptions): Evalua
               field.intrinsic === true && typeof field.name === 'string')
             .map((field) => field.name),
         entityFieldsFor,
-        sigilPages: [],
-        sigilTheme: 'default',
+        sigilPages: appNavItems(traitIndex.orbitals.map((o) => o.schema)),
+        sigilTheme: sigilThemeKey(
+          traitIndex.orbitals.find((o) => o.schema.name === entry.orbitalName)?.schema.theme,
+          themeDataKey(options.schema?.theme) || undefined,
+        ),
         ...(options.extraEffectHandlers !== undefined
           ? { extraEffectHandlers: options.extraEffectHandlers }
           : {}),
         ...(options.deliverEmit !== undefined ? { deliverEmit: options.deliverEmit } : {}),
         ...(options.debug !== undefined ? { debug: options.debug } : {}),
         ...(options.mockMode !== undefined ? { mockMode: options.mockMode } : {}),
+        ...(options.messages !== undefined ? { messages: options.messages } : {}),
+        ...(options.schema?.locales?.[0] !== undefined ? { defaultLocale: options.schema.locales[0] } : {}),
       },
       { ...args, traitName },
     );

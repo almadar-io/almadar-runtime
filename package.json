@@ -1,6 +1,6 @@
 {
   "name": "@almadar/runtime",
-  "version": "6.101.0",
+  "version": "6.102.0",
   "description": "Interpreted runtime for Almadar orbital applications (OrbitalServerRuntime)",
   "type": "module",
   "main": "./dist/index.js",
@@ -82,12 +82,12 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
-    "@almadar/core": "^10.115.0",
-    "@almadar/evaluator": "^2.53.0",
-    "@almadar/integrations": "^2.43.0",
+    "@almadar/core": "^10.116.0",
+    "@almadar/evaluator": "^2.54.0",
+    "@almadar/integrations": "^2.44.0",
     "@almadar/logger": "^1.15.0",
     "@almadar/server": "^2.52.0",
-    "@almadar/std": "^16.239.0"
+    "@almadar/std": "^16.241.0"
   },
   "peerDependencies": {
     "express": "^5.0.0"
@@ -98,9 +98,9 @@
     }
   },
   "devDependencies": {
-    "@almadar-io/behaviors": "^0.16.186",
+    "@almadar-io/behaviors": "^0.16.187",
     "@almadar/eslint-plugin": "^2.21.0",
-    "@almadar/orb": "^17.8.0",
+    "@almadar/orb": "^17.8.1",
     "@types/express": "^5.0.0",
     "@types/node": "^20.0.0",
     "@types/semver": "^7.7.0",
@@ -108,6 +108,7 @@
     "@typescript/native": "npm:typescript@^7.0.2",
     "eslint": "10.0.0",
     "express": "^5.0.0",
+    "fake-indexeddb": "6.2.5",
     "semver": "^7.7.2",
     "tsup": "^8.0.0",
     "turbo": "^2.8.17",

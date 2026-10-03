@@ -9,9 +9,9 @@
 
 import type { PersistenceAdapter } from '../server/OrbitalServerRuntime.js';
 import type { EntityRow } from '../types.js';
-import type { EntityField, EntityId, EntityPersistence, FieldValue, OrbitalSchema, UserContext } from '@almadar/core';
+import type { EntityField, EntityId, EntityPersistence, FieldValue, OrbitalEntity, OrbitalSchema, UserContext } from '@almadar/core';
 import { personaFromIdentityRow } from '@almadar/core';
-import { crossRelationValue, entityAccessPoliciesByStoreKey, isRelationPlaceholder, linkSelfRelationField, RESERVED_FIELD_NAMES, sampleRow, sampleRowCount } from '@almadar/core/mock';
+import { crossRelationValue, entityAccessPoliciesByStoreKey, isRelationPlaceholder, linkSelfRelationField, projectionOf, RESERVED_FIELD_NAMES, sampleRow, sampleRowCount } from '@almadar/core/mock';
 import { applyRowAccess, checkMutationAccess } from './entityAccess.js';
 import { createLogger } from '@almadar/logger';
 import {
@@ -102,6 +102,19 @@ export interface EntitySchema {
    *  disagree with the declared-default layer in the `@entity` merge and boot a
    *  machine into the wrong state. */
   persistence?: EntityPersistence;
+}
+
+/** The mock seeder's view of a schema entity: named fields only, its instances as seed data. */
+export function entitySchemaOf(entity: OrbitalEntity): EntitySchema {
+  return {
+    name: entity.name,
+    id: entity.id,
+    collection: entity.collection,
+    fields: entity.fields.filter((f): f is NamedEntityField => typeof f.name === 'string' && f.name.length > 0),
+    seedData: entity.instances,
+    identity: entity.identity,
+    persistence: entity.persistence,
+  };
 }
 
 export interface MockPersistenceConfig {
@@ -486,6 +499,7 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
     // a global pass after each registration is cheap (O(rows × fields)) and
     // keeps relation arrays in sync with whichever stores currently exist.
     this.linkRelationFields();
+    this.linkProjectedFields();
   }
 
   /**
@@ -590,6 +604,38 @@ export class MockPersistenceAdapter implements PersistenceAdapter {
           }
           const value = crossRelationValue(eligible, i, cardinality);
           if (value !== undefined) row[field.name] = value;
+        });
+      }
+    }
+  }
+
+  /**
+   * Fill each `T.f` placeholder (`projectedFrom`) from `T`'s seeded rows: row *i* takes row
+   * *i* mod n's `f` (wrapped in an array for an array field). Only placeholder cells are
+   * filled, as for relations, so relinking after every registration never rewrites data.
+   * Twin of `orbital-core/src/runtime/seed.rs` `link_projections`.
+   */
+  linkProjectedFields(): void {
+    const stampedCellKeys = new Set(
+      this.ownerStampedCells.map((cell) => stampedCellKey(cell.entity, cell.id, cell.column)),
+    );
+    const done = new Set<string>();
+    for (const [normalizedName, schema] of this.schemas) {
+      const storeKey = this.storeKeyByEntity.get(normalizedName) ?? normalizedName;
+      const store = this.stores.get(storeKey);
+      if (!store) continue;
+      for (const field of schema.fields) {
+        const projection = projectionOf(field);
+        if (projection === undefined || done.has(`${storeKey}\u0000${field.name}`)) continue;
+        done.add(`${storeKey}\u0000${field.name}`);
+        const target = this.stores.get(this.resolveStoreKey(projection.type));
+        if (!target || target.size === 0) continue;
+        const targetRows = [...target.values()];
+        [...store.values()].forEach((row, i) => {
+          if (!isRelationPlaceholder(row[field.name])) return;
+          if (stampedCellKeys.has(stampedCellKey(storeKey, row['id'] as string, field.name))) return;
+          const picked = targetRows[i % targetRows.length]![projection.field] ?? null;
+          row[field.name] = field.type === 'array' ? [picked] : picked;
         });
       }
     }

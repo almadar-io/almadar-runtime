@@ -36,6 +36,9 @@ export type {
   LoadedSchema as FSLoadedSchema,
 } from "./external-loader.js";
 
+// Lazy pages (`uses lazy`)
+export { loadLazyPage } from "./lazy-page.js";
+
 // HTTP Loader (Browser)
 export {
   HttpLoader,

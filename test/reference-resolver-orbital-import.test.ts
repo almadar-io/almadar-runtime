@@ -588,7 +588,7 @@ describe('ReferenceResolver — orbital import materialization (W3-J)', () => {
     expect(withoutId.id).not.toBe(NOTE_ORBITAL_ID);
   });
 
-  it('(D) rewrites a config-default string that EXACTLY matches an upstream page path; leaves a containing string alone', async () => {
+  it('(D) leaves a config-default string equal to an upstream page path verbatim: config is data, not a page reference', async () => {
     const resolver = new ReferenceResolver({ basePath: '.', loader: makeLoader() });
     const schema: OrbitalSchema = {
       name: 'S',
@@ -603,11 +603,9 @@ describe('ReferenceResolver — orbital import materialization (W3-J)', () => {
 
     const layout = findTrait(result.data[0], 'NotesANoteAppLayout');
     const navItems = layout.config!.navItems.default as { href: string; label: string }[];
-    expect(navItems[0].href).toBe('/local-things');
+    expect(navItems[0].href).toBe('/things');
     expect(navItems[0].label).toBe('Things');
-    expect(navItems[1].href).toBe('/local-things/:id');
-    // Contains `/things` but is not an EXACT match of any upstream page path
-    // — must survive untouched (no prefix/substring matching).
+    expect(navItems[1].href).toBe('/things/:id');
     expect(navItems[1].label).toBe('See /things for details');
   });
 
@@ -2199,8 +2197,8 @@ describe('ReferenceResolver — orbital import Stage B: pages {} / mounts {} unk
   });
 });
 
-describe('ReferenceResolver — orbital import Stage B: config-held page paths rewrite AFTER the forward', () => {
-  it('a forwarded `navItems` knob\'s href is remapped once the forward resolves it to a literal', async () => {
+describe('ReferenceResolver — orbital import Stage B: forwarded config page paths stay verbatim', () => {
+  it('a forwarded `navItems` knob\'s href is not rewritten by the pages remap', async () => {
     const resolver = new ReferenceResolver({ basePath: '.', loader: makeOrgLoader() });
     const schema: OrbitalSchema = {
       name: 'S',
@@ -2216,7 +2214,7 @@ describe('ReferenceResolver — orbital import Stage B: config-held page paths r
 
     const layout = findTeamTrait(result.data[1], 'TeamsTeamAppLayout');
     const navItems = layout.config!.navItems.default as { href: string; label: string }[];
-    expect(navItems[0].href).toBe('/org-teams');
+    expect(navItems[0].href).toBe('/teams');
   });
 });
 

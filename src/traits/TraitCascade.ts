@@ -98,6 +98,9 @@ export interface RunTraitCascadeOptions<TEffectResult> {
         step: { fromState: string; toState: string; event: string; payload?: EventPayload; dispatch: EffectDispatch },
     ) => Promise<CascadeStepEffectsResult<TEffectResult>>;
     maxSteps?: number;
+    /** `false`: run only the requested step and leave the trait's own emits
+     *  to the client that relays them (the compiled wire). Default `true`. */
+    selfCascade?: boolean;
     /** Named identifiers for the cap-hit warning log only — e.g. the
      *  behavior/orbital name, so a runaway cascade is diagnosable without
      *  reproducing it. */
@@ -232,6 +235,7 @@ export async function runTraitCascade<TEffectResult>(
             // table has an arm for, from the state it just landed in — not
             // just the first.
             for (const e of stepOutcome.emitted) {
+                if (options.selfCascade === false) break;
                 if (findMatchingTransitions(trait, result.newState, e.event).length === 0) continue;
                 // Mark consumed so the caller's response doesn't hand the
                 // client an event that was actually already fully processed

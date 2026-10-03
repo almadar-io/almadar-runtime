@@ -187,6 +187,7 @@ import { collectDeclaredConfigDefaults } from "../traits/config-defaults.js";
 export { collectDeclaredConfigDefaults };
 import type {
   OrbitalSchema,
+  MessageCatalogs,
   OrbitalDefinition,
   Entity,
   EntityField,
@@ -219,7 +220,8 @@ export type {
   ClientNavigateBackTuple,
   TransitionRejection,
 } from "@almadar/core";
-import { themeDataKey } from "@almadar/core";
+import { themeDataKey, traitsEmbeddedByEffects } from "@almadar/core";
+import { appNavItems, sigilThemeKey } from "../evaluation/render-sigils.js";
 import type {
   OrbitalEventRequest,
   OrbitalEventResponse,
@@ -234,6 +236,7 @@ import { dispatchVisitKey, isEntityCall, buildResolvedTraitConfigs, collectCalls
 import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf } from "@almadar/core/mock";
 import { runServerEffectStage } from "../effects/effect-stage.js";
 import { installPolicyOwnerGates, MockPersistenceAdapter } from "../entities/MockPersistenceAdapter.js";
+import { seedBrowserStore } from "../entities/seedBrowserStore.js";
 import {
   preprocessSchema,
   type PreprocessedSchema,
@@ -519,37 +522,7 @@ function needsPreprocessing(schema: OrbitalSchema): boolean {
   return false;
 }
 
-/**
- * Map the host orbital's inline pages to the `NavItem[]` the `@pages` render
- * sigil yields (`href = page.path`, `label = page.name`). Mirrors the Rust
- * resolver's `get_page_from_ref` filter — only inline `Page` definitions
- * contribute; string and `{ ref }` page references are skipped (they have no
- * resolvable path/name at this layer).
- */
-export function inlineNavItems(pages: readonly PageRef[]): NavItem[] {
-  const items: NavItem[] = [];
-  for (const page of pages) {
-    if (isPageReference(page)) continue;
-    const p = page as Page;
-    if (typeof p.path !== 'string' || typeof p.name !== 'string') continue;
-    // Root pages only: detail/param pages (paths with a `:` segment) are not
-    // nav entries. Mirrors the compiler's `p.path.contains(':')` filter.
-    if (p.path.includes(':')) continue;
-    const item: NavItem = {
-      href: p.path,
-      // The declared `@label`, else the page name as written (never derived).
-      label: p.label ?? p.name,
-    };
-    if (typeof p.icon === 'string') item.icon = p.icon;
-    items.push(item);
-  }
-  return items;
-}
-
-/** The baseline theme `@currentTheme` falls back to when an orbital declares
- * no `theme`. Keeps standalone renders (no rabit) styled; rabit overrides
- * globally via `Orbital.theme`. Mirrors the compiler's `DEFAULT_THEME_KEY`. */
-const DEFAULT_THEME_KEY = 'minimalist-light';
+export { inlineNavItems } from '../evaluation/render-sigils.js';
 
 /**
  * Internal tick binding for tracking active ticks
@@ -597,6 +570,10 @@ export class OrbitalServerRuntime {
    *  `DEFAULT_THEME_KEY`. Set at registration, before the orbital loops
    *  (`resolvedSchema` is assigned only after them). */
   private appThemeKey: string | undefined;
+  /** The program's declared `locales`, in declared order; the first is the default. */
+  private appLocales: readonly string[] = [];
+  /** Merged message catalogs of every registered program (keys are behavior-qualified). */
+  private messages: MessageCatalogs = {};
   /** Wired by the hosting server (e.g. the playground SSE endpoint) via `setLiveBroadcastSink`. */
   private liveBroadcastSink: ((item: LiveBroadcastItem) => void) | null = null;
   /**
@@ -846,30 +823,34 @@ export class OrbitalServerRuntime {
    */
   private registrationMutationDepth = 0;
 
-  async register(schema: OrbitalSchema): Promise<void> {
+  async register(schema: OrbitalSchema, options: { messages?: MessageCatalogs } = {}): Promise<void> {
     if (this.registrationMutationDepth > 0) {
       // Inside a withRegistrationMutation bracket — ordering is guaranteed
       // by the callback's awaits; chaining onto the bracket epoch would
       // deadlock. See registrationMutationDepth.
-      await this.doRegister(schema);
+      await this.doRegister(schema, options);
       return;
     }
     const previous = this.registrationEpoch ?? Promise.resolve();
     // Chain on BOTH fulfillment and rejection: a failed previous mutation
     // must not wedge the queue for the next schema.
     const epoch = previous.then(
-      () => this.doRegister(schema),
-      () => this.doRegister(schema),
+      () => this.doRegister(schema, options),
+      () => this.doRegister(schema, options),
     );
     this.registrationEpoch = epoch;
     await epoch;
   }
 
-  private async doRegister(schema: OrbitalSchema): Promise<void> {
+  private async doRegister(schema: OrbitalSchema, options: { messages?: MessageCatalogs }): Promise<void> {
     if (this.config.debug) {
       registerLog.debug('register:schema', { name: schema.name });
     }
     this.appThemeKey = themeDataKey(schema.theme) || undefined;
+    this.appLocales = schema.locales ?? [];
+    for (const [locale, catalog] of Object.entries(options.messages ?? {})) {
+      this.messages[locale] = { ...this.messages[locale], ...catalog };
+    }
 
     // Auto-preprocess if the schema has unresolved imports and we have (or
     // can construct) a loader. This replaces the old autoPreprocess flag,
@@ -1037,6 +1018,11 @@ export class OrbitalServerRuntime {
     return this.resolvedSchema;
   }
 
+  /** The registered program's message catalogs (locale → qualified key → message), for a host's client. */
+  getMessages(): MessageCatalogs {
+    return this.messages;
+  }
+
   /**
    * One-call entry point: read an `.orb` file from disk, parse it, preprocess
    * cross-orbital imports, and register the result. Callers never touch raw
@@ -1060,7 +1046,21 @@ export class OrbitalServerRuntime {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`registerFromFile: ${path} is not valid JSON: ${msg}`);
     }
-    await this.register(schema);
+    // `orb resolve` writes each declared locale's merged catalog beside the `.orb` as `<stem>.<locale>.json`.
+    const messages: MessageCatalogs = {};
+    const stem = path.replace(/\.orb$/, '');
+    for (const locale of schema.locales ?? []) {
+      const catalogPath = `${stem}.${locale}.json`;
+      let catalogRaw: string;
+      try {
+        catalogRaw = await readFile(catalogPath, 'utf-8');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`registerFromFile: ${path} declares locale "${locale}" but its catalog ${catalogPath} could not be read: ${msg}`);
+      }
+      messages[locale] = JSON.parse(catalogRaw) as Record<string, string>;
+    }
+    await this.register(schema, { messages });
   }
 
   /**
@@ -1239,8 +1239,11 @@ export class OrbitalServerRuntime {
       other.traitIndex = undefined;
     }
 
-    // Seed entity instances from schema if they exist
-    if (entity?.name && entity.instances && Array.isArray(entity.instances)) {
+    // A browser-stored entity seeds by the browser store's own rule: its
+    // `instances`, else mock rows only when it declares `mock`.
+    if (entity?.local === true && !(this.config.mode === 'mock' && this.persistence instanceof MockPersistenceAdapter)) {
+      await seedBrowserStore(this.persistence, [entity]);
+    } else if (entity?.name && entity.instances && Array.isArray(entity.instances)) {
       const instances = entity.instances;
       if (instances.length > 0) {
         persistLog.debug('seed:start', { entity: entity.name, count: instances.length });
@@ -1266,7 +1269,7 @@ export class OrbitalServerRuntime {
         const successCount = results.filter(r => r !== null).length;
         persistLog.debug('seed:done', { entity: entity.name, success: successCount, total: instances.length });
       }
-    } else if (this.config.mode === 'mock' && this.persistence instanceof MockPersistenceAdapter) {
+    } else if (this.config.mode === 'mock' && this.persistence instanceof MockPersistenceAdapter && (entity?.local !== true || entity.seedMock === true)) {
       // Fall back to mock data generation if no instances defined
       if (this.config.debug) {
         persistLog.debug('mock:generate', { entity: entity?.name });
@@ -1300,6 +1303,10 @@ export class OrbitalServerRuntime {
     // empty, breaking the entity-as-UI-state contract those slim atoms rely
     // on. Mock-mode seeding mirrors the primary entity branch above.
     const auxiliaryEntities = orbital.auxiliaryEntities;
+    if (auxiliaryEntities !== undefined && !(this.config.mode === 'mock' && this.persistence instanceof MockPersistenceAdapter)) {
+      const localAux = auxiliaryEntities.filter((ref): ref is Entity => typeof ref !== 'string' && !isEntityCall(ref) && ref.local === true);
+      await seedBrowserStore(this.persistence, localAux);
+    }
     if (
       auxiliaryEntities !== undefined &&
       auxiliaryEntities.length > 0 &&
@@ -1315,6 +1322,7 @@ export class OrbitalServerRuntime {
         if (typeof auxRef === 'string' || isEntityCall(auxRef)) continue;
         const auxEntity: Entity = auxRef;
         if (!auxEntity.name || !auxEntity.fields) continue;
+        if (auxEntity.local === true && auxEntity.seedMock !== true) continue;
         const auxFields = auxEntity.fields
           .filter((f): f is typeof f & { name: string } =>
             typeof f.name === 'string' && f.name.length > 0,
@@ -1627,6 +1635,8 @@ export class OrbitalServerRuntime {
 
     this.orbitals.clear();
     this.eventBus.clear();
+    this.messages = {};
+    this.appLocales = [];
 
     // Clear mock persistence so the next registerFromFile re-seeds from
     // the schema instead of inheriting rows the previous walk created.
@@ -2257,6 +2267,9 @@ export class OrbitalServerRuntime {
     // user always wins; `defaultUser` only fills the gap for a dev host
     // that has no auth (see the config field's doc).
     const viewer = normalizeUserContext(request.user) ?? this.config.defaultUser;
+    if (request.locale !== undefined && this.appLocales.length > 0 && !this.appLocales.includes(request.locale)) {
+      throw new Error(`locale "${request.locale}" is not one of the program's declared locales [${this.appLocales.join(', ')}]`);
+    }
 
     // A TARGETED request carrying circuit state is the client role's
     // delegated server leg — the composition's own delegated-leg semantics
@@ -2287,7 +2300,7 @@ export class OrbitalServerRuntime {
     // composition). Leaving on-page listeners to the client left this
     // host's held state stale (G-RUNTIME-042).
     const response = await evaluateOrbitalEvent(
-      this.makeEvaluateDeps(registered, { viewer, onPush, originClientId: request.clientId, queueHold }),
+      this.makeEvaluateDeps(registered, { viewer, onPush, originClientId: request.clientId, queueHold, ...(request.locale !== undefined ? { locale: request.locale } : {}) }),
       serverRequest,
     );
 
@@ -2324,6 +2337,8 @@ export class OrbitalServerRuntime {
       originClientId?: string;
       /** The event-queue hold this composition runs under; absent outside the queue (ticks). */
       queueHold?: EventQueueHold;
+      /** The requesting viewer's locale (`OrbitalEventRequest.locale`). */
+      locale?: string;
     },
   ): EvaluateOrbitalEventDeps {
     const runEffects: EvaluateEffectRunner = async (traitName, args) => {
@@ -2348,6 +2363,7 @@ export class OrbitalServerRuntime {
         args.dispatch,
         args.firing,
         context.queueHold,
+        args.locale,
       );
       await this.rerenderCallsiteCaptureChildren(
         registered,
@@ -2367,6 +2383,8 @@ export class OrbitalServerRuntime {
         new Set(),
         false,
         context.queueHold,
+        args.locale,
+        this.composedByEffects(registered, traitName, args.effects),
       );
     };
     return {
@@ -2381,6 +2399,7 @@ export class OrbitalServerRuntime {
       // a host that holds no state) never silences a target's own listens.
       relayMask: new Set<string>(),
       ...(context.viewer !== undefined ? { user: context.viewer } : {}),
+      ...(context.locale !== undefined ? { locale: context.locale } : {}),
       ...(context.originClientId !== undefined ? { originClientId: context.originClientId } : {}),
       ...(this.config.contextExtensions !== undefined ? { contextExtensions: this.config.contextExtensions } : {}),
       ...(this.config.debug !== undefined ? { debug: this.config.debug } : {}),
@@ -2624,20 +2643,14 @@ export class OrbitalServerRuntime {
     firing?: { event: string; fromState: string },
     /** The event-queue hold these effects run under; absent outside the queue (ticks). */
     queueHold?: EventQueueHold,
+    /** The requesting viewer's locale; absent (ticks, a request without one) → the stage's `defaultLocale`. */
+    locale?: string,
   ): Promise<void> {
     if (callsitePayload !== undefined) this.composedCallsitePayloads.set(traitName, callsitePayload);
     const capture = callsitePayload ?? this.composedCallsitePayloads.get(traitName);
     const framesBefore = clientEffectsByTrait?.length ?? 0;
-    const sigilPages: NavItem[] = [];
-    const seenPaths = new Set<string>();
-    for (const reg of this.orbitals.values()) {
-      for (const item of inlineNavItems(reg.schema.pages ?? [])) {
-        if (seenPaths.has(item.href)) continue;
-        seenPaths.add(item.href);
-        sigilPages.push(item);
-      }
-    }
-    const sigilTheme = themeDataKey(registered.schema.theme) || this.appThemeKey || DEFAULT_THEME_KEY;
+    const sigilPages = appNavItems([...this.orbitals.values()].map((reg) => reg.schema));
+    const sigilTheme = sigilThemeKey(registered.schema.theme, this.appThemeKey);
 
     await runServerEffectStage(
       {
@@ -2684,8 +2697,10 @@ export class OrbitalServerRuntime {
         debug: this.config.debug,
         mockMode: this.config.mode === 'mock',
         contextExtensions: this.config.contextExtensions,
+        messages: this.messages,
+        ...(this.appLocales[0] !== undefined ? { defaultLocale: this.appLocales[0] } : {}),
       },
-      { traitName, effects, payload, entityData, entityId, emittedEvents, fetchedData, clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, callsitePayload: capture, ...(now !== undefined ? { now } : {}), ...(dispatch !== undefined ? { dispatch } : {}), ...(firing !== undefined ? { firing } : {}) },
+      { traitName, effects, payload, entityData, entityId, emittedEvents, fetchedData, clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, callsitePayload: capture, ...(locale !== undefined ? { locale } : {}), ...(now !== undefined ? { now } : {}), ...(dispatch !== undefined ? { dispatch } : {}), ...(firing !== undefined ? { firing } : {}) },
     );
     if (capture !== undefined && clientEffectsByTrait !== undefined) {
       for (const frame of clientEffectsByTrait.slice(framesBefore)) {
@@ -2722,6 +2737,12 @@ export class OrbitalServerRuntime {
    * calls this internal executor directly, exactly like every other
    * transition's effects.
    */
+  /** The callsite-capture children some fired effects of `traitName` compose (core `traitsEmbeddedByEffects`). */
+  private composedByEffects(registered: RegisteredOrbital, traitName: string, effects: RuntimeValue[]): ReadonlySet<string> | undefined {
+    const irTrait = this.traitIndexFor(registered).byName.get(traitName)?.irTrait;
+    return irTrait === undefined ? undefined : traitsEmbeddedByEffects(irTrait, effects);
+  }
+
   private async rerenderCallsiteCaptureChildren(
     registered: RegisteredOrbital,
     traitName: string,
@@ -2741,10 +2762,14 @@ export class OrbitalServerRuntime {
     /** Walking through a child that was not repainted: its children keep the payload they were last composed with. */
     keepComposed = false,
     queueHold?: EventQueueHold,
+    locale?: string,
+    /** The children the firing transition composes; the others keep their last payload. Top level only. */
+    composedBy?: ReadonlySet<string>,
   ): Promise<void> {
     const children = this.callsiteCaptureChildrenByTrait.get(traitName);
     if (!children || children.size === 0) return;
     for (const childName of children) {
+      if (composedBy !== undefined && !composedBy.has(childName)) continue;
       if (visited.has(childName)) continue;
       visited.add(childName);
       const composedWith = keepComposed ? this.composedCallsitePayloads.get(childName) ?? callsitePayload : callsitePayload;
@@ -2755,7 +2780,7 @@ export class OrbitalServerRuntime {
       if (!entry || !entry.result.executed) {
         await this.rerenderCallsiteCaptureChildren(
           registered, childName, composedWith, entityData, entityId, emittedEvents, fetchedData,
-          clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, now, visited, true, queueHold,
+          clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, now, visited, true, queueHold, locale,
         );
         continue;
       }
@@ -2785,6 +2810,7 @@ export class OrbitalServerRuntime {
         undefined,
         undefined,
         queueHold,
+        locale,
       );
       await this.rerenderCallsiteCaptureChildren(
         registered,
@@ -2804,6 +2830,9 @@ export class OrbitalServerRuntime {
         visited,
         keepComposed,
         queueHold,
+        locale,
+        // Below a repainted child, only what its repainted transition composes.
+        this.composedByEffects(registered, childName, entry.result.effects),
       );
     }
   }

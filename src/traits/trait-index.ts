@@ -24,6 +24,7 @@ import {
   computeTraitDispatchMode,
   isStaticallyFalse,
   orbitalInlineEntities,
+  storesRowsInBrowser as storesRowsInBrowserEntity,
   type BusEventSource,
   type DispatchMode,
   type Entity,
@@ -35,7 +36,7 @@ import {
   type TraitConfigValue,
 } from '@almadar/core';
 import { createLogger } from '@almadar/logger';
-import { getOperatorRunsOn } from '@almadar/std/registry';
+import { effectSiteFor, getOperatorRunsOn } from '@almadar/std/registry';
 import { collectDeclaredConfigDefaults } from './config-defaults.js';
 import { findEntityAmongOrbitals, parseOrbitalTraits } from './OrbitalTraitParsing.js';
 import type { TraitDefinition } from '../types.js';
@@ -130,61 +131,115 @@ function containsConfigForward(value: TraitConfigValue): boolean {
  */
 type BindingResolver = (binding: string) => SExprAtom | undefined;
 
-/**
- * True when `expr` calls an effect whose registry site is `server`, at any
- * depth. Fold-aware (twin of orbital-core `sexpr_runs_server_effect`): an
- * `if`/`when` branch whose condition is statically false never runs.
- */
-export function runsServerEffect(expr: SExpr, resolve?: BindingResolver): boolean {
+/** Whether `expr` calls an effect `matches` selects, at any depth; an
+ *  `if`/`when` branch whose condition is statically false never runs. */
+function callsEffect(
+  expr: SExpr,
+  resolve: BindingResolver | undefined,
+  matches: (operator: string, args: SExpr[]) => boolean,
+): boolean {
+  const walk = (e: SExpr): boolean => callsEffect(e, resolve, matches);
   if (Array.isArray(expr)) {
     const head = expr[0];
     if ((head === 'if' || head === 'when') && expr.length >= 3) {
       const thenLive = !isStaticallyFalse(expr[1], resolve);
       if (head === 'if') {
-        return (thenLive && runsServerEffect(expr[2], resolve)) || (expr[3] !== undefined && runsServerEffect(expr[3], resolve));
+        return (thenLive && walk(expr[2])) || (expr[3] !== undefined && walk(expr[3]));
       }
-      return thenLive && expr.slice(2).some((e) => runsServerEffect(e, resolve));
+      return thenLive && expr.slice(2).some(walk);
     }
     // Binding positions name values: a `let` pair's name and a
     // `fn`/`lambda` param list are never calls.
     if (head === 'let' && expr.length >= 2) {
       const bindings = expr[1];
       const boundLive = Array.isArray(bindings)
-        ? bindings.some((pair) => (Array.isArray(pair) ? pair.slice(1).some((e) => runsServerEffect(e, resolve)) : runsServerEffect(pair, resolve)))
-        : runsServerEffect(bindings, resolve);
-      return boundLive || expr.slice(2).some((e) => runsServerEffect(e, resolve));
+        ? bindings.some((pair) => (Array.isArray(pair) ? pair.slice(1).some(walk) : walk(pair)))
+        : walk(bindings);
+      return boundLive || expr.slice(2).some(walk);
     }
     if ((head === 'fn' || head === 'lambda') && expr.length >= 3) {
-      return expr.slice(2).some((e) => runsServerEffect(e, resolve));
+      return expr.slice(2).some(walk);
     }
-    if (typeof head === 'string' && getOperatorRunsOn(head) === 'server') return true;
-    return expr.some((e) => runsServerEffect(e, resolve));
+    if (typeof head === 'string' && matches(head, expr.slice(1))) return true;
+    return expr.some(walk);
   }
-  if (expr !== null && typeof expr === 'object') return Object.values(expr).some((e) => runsServerEffect(e, resolve));
+  if (expr !== null && typeof expr === 'object') return Object.values(expr).some(walk);
   return false;
+}
+
+/**
+ * True when `expr` calls an effect whose registry site is `server`, at any
+ * depth. Fold-aware (twin of orbital-core `sexpr_runs_server_effect`): an
+ * `if`/`when` branch whose condition is statically false never runs.
+ */
+export function runsServerEffect(
+  expr: SExpr,
+  resolve?: BindingResolver,
+  storesRowsInBrowser: (entityType: string) => boolean = () => false,
+): boolean {
+  return callsEffect(expr, resolve, (op, args) => effectSiteFor(op, args, storesRowsInBrowser) === 'server');
+}
+
+/**
+ * True when `expr` runs a data effect that browser storage moves off the
+ * server (a `fetch`/`persist` on a `[persistent: x, local]` entity). Twin of
+ * orbital-core `OirExpr::runs_browser_data_effect`.
+ */
+export function runsBrowserDataEffect(
+  expr: SExpr,
+  storesRowsInBrowser: (entityType: string) => boolean,
+  resolve?: BindingResolver,
+): boolean {
+  return callsEffect(expr, resolve, (op, args) =>
+    getOperatorRunsOn(op) === 'server' && effectSiteFor(op, args, storesRowsInBrowser) === 'client');
+}
+
+function configResolver(config?: Readonly<Record<string, TraitConfigValue>>): BindingResolver {
+  // Config stays a binding in JS guards (Rust inlines it): a scalar knob is a
+  // known literal here, anything else stays undecidable.
+  return (binding) => {
+    if (!binding.startsWith('@config.')) return undefined;
+    const value = config?.[binding.slice('@config.'.length)];
+    return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null ? value : undefined;
+  };
 }
 
 /**
  * Whether a trait's own effects reach the server: any transition, or any
  * client tick (a `[background]` tick runs on the host, not a dispatch). The
  * `touchesServer` fact of the dispatch rule (`computeTraitDispatchMode`).
+ * With `event`, only that event's transitions count (one dispatch leg).
  */
 export function touchesServer(
   traitDef: TraitDefinition,
   irTrait: Pick<Trait, 'ticks'>,
   config?: Readonly<Record<string, TraitConfigValue>>,
+  storesRowsInBrowser: (entityType: string) => boolean = () => false,
+  event?: string,
 ): boolean {
-  // Config stays a binding in JS guards (Rust inlines it): a scalar knob is a
-  // known literal here, anything else stays undecidable.
-  const resolve: BindingResolver = (binding) => {
-    if (!binding.startsWith('@config.')) return undefined;
-    const value = config?.[binding.slice('@config.'.length)];
-    return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null ? value : undefined;
-  };
+  const resolve = configResolver(config);
   return traitDef.transitions.some((t) =>
+    (event === undefined || t.event === event) &&
     !(t.guard !== undefined && isStaticallyFalse(t.guard, resolve)) &&
-    (t.effects ?? []).some((e) => runsServerEffect(e, resolve))) ||
-    (irTrait.ticks ?? []).some((tick) => tick.runsInBackground !== true && (tick.effects as SExpr[]).some((e) => runsServerEffect(e, resolve)));
+    (t.effects ?? []).some((e) => runsServerEffect(e, resolve, storesRowsInBrowser))) ||
+    (event === undefined && (irTrait.ticks ?? []).some((tick) => tick.runsInBackground !== true && (tick.effects as SExpr[]).some((e) => runsServerEffect(e, resolve, storesRowsInBrowser))));
+}
+
+/**
+ * The events whose live transitions run a data effect on a browser-stored
+ * entity: their leg goes to the browser store. Twin of orbital-core
+ * `OirTrait::browser_leg_events`.
+ */
+export function browserLegEvents(
+  traitDef: TraitDefinition,
+  storesRowsInBrowser: (entityType: string) => boolean,
+  config?: Readonly<Record<string, TraitConfigValue>>,
+): Set<string> {
+  const resolve = configResolver(config);
+  return new Set(traitDef.transitions
+    .filter((t) => !(t.guard !== undefined && isStaticallyFalse(t.guard, resolve)))
+    .filter((t) => (t.effects ?? []).some((e) => runsBrowserDataEffect(e, storesRowsInBrowser, resolve)))
+    .map((t) => t.event));
 }
 
 export function buildTraitIndex(
@@ -195,6 +250,8 @@ export function buildTraitIndex(
   const allEntities = orbitals.map((orbital) => parseOrbitalCached(orbital).entities).flat();
   const orbitalsView = parsed.map(({ orbital, parsed: p }) => ({ schema: orbital, entity: p.entity }));
   const byName = new Map<string, IndexedTrait>();
+  const browserStored = new Set(allEntities.filter(storesRowsInBrowserEntity).map((e) => e.name));
+  const storesRowsInBrowser = (entityType: string) => browserStored.has(entityType);
 
   for (const { orbital, parsed: p } of parsed) {
     const { traits, inlineTraits, configByTrait, entity } = p;
@@ -243,7 +300,7 @@ export function buildTraitIndex(
         ...(orbital.id !== undefined ? { orbitalId: orbital.id as BusEventSource['orbitalId'] } : {}),
         frameKey: isShared ? `$shared::${traitEntity.name}` : traitDef.name,
         isSharedEntity: isShared,
-        dispatchMode: computeTraitDispatchMode(irTrait, traitEntity, touchesServer(traitDef, irTrait as Trait, config)),
+        dispatchMode: computeTraitDispatchMode(irTrait, traitEntity, touchesServer(traitDef, irTrait as Trait, config, storesRowsInBrowser)),
       });
     }
   }

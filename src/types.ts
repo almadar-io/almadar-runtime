@@ -605,6 +605,10 @@ export interface BindingContext {
     user?: UserContext;
     /** The dispatch's one `now` stamp (ms epoch) — every guard, effect and time operator in it reads this. */
     now?: number;
+    /** `@locale`: the viewer's locale (`OrbitalEventRequest.locale`, else the program's first declared locale). */
+    locale?: string;
+    /** That locale's catalog — `i18n/t` reads it. */
+    messages?: Readonly<Record<string, string>>;
     /** `@event`: the delivery being processed (`deliveryRecordValue`, Runtime Spec Clause 5.5). */
     event?: EventPayload;
     /** `@prevEvents`: deliveries this trait already received this dispatch. */

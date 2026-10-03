@@ -1254,14 +1254,7 @@ function callSiteRungValue(rungConfig: CallSiteConfig, knob: string): TraitConfi
  * whose value came ONLY from the outermost `schemaConfig` rung — the
  * CONSUMER's single app-level `config {}`, shared by every orbital import
  * in the schema, as opposed to `parentChain`/`orbitalConfig`/`upstream*`,
- * each scoped to the one import/trait doing the resolving. Used by the
- * orbital-import splice (`rewriteTraitConfigPagePaths`, Gap (D)) to tell
- * "this trait's own literal page-path data, safe to remap onto this
- * import's local paths" (any other rung) apart from "the consumer's own
- * unrelated, possibly multi-orbital data that happened to reach this trait
- * via a bare `@config.<knob>` forward" (schemaConfig) — rewriting the
- * latter by literal string match risks stomping an unrelated sibling's
- * href that coincidentally equals this import's upstream path. JS twin of
+ * each scoped to the one import/trait doing the resolving. JS twin of
  * Rust's `forwarded_sibling_config_from_tracked`.
  */
 /** Return shape for {@link walkConfigForwardChain}: the resolved value (if
@@ -2374,9 +2367,7 @@ function rewriteBareFieldNameConfigDefault(
  * Almadar_Compiler_Gaps.md` §82: a JSX-hoisted `InlineTableViewRender`'s
  * `columns: @config.columns` forward pulled in its embedder's declared
  * `[{ field: hourlyRate, key: hourlyRate, … }]` verbatim, AFTER
- * `InlineTableViewRender` itself had already been field-rewritten — the
- * same ordering `rewriteTraitConfigPagePaths` was already moved past the
- * forward to fix for page paths; this is that same fix for field renames).
+ * `InlineTableViewRender` itself had already been field-rewritten).
  * Idempotent — re-running it on already-correct config is a no-op.
  */
 function rewriteEntityFieldsInConfig(
@@ -4280,65 +4271,6 @@ function rewriteTraitNavigateTargets(trait: Trait, pathMap: ReadonlyMap<string, 
     next.initialEffects = rewrite(trait.initialEffects);
   }
   return next;
-}
-
-/**
- * Gap (D): rewrite a config-default STRING that EXACTLY equals an upstream
- * page path to its local remapped path — the config-held twin of
- * {@link rewriteNavigateTargets}'s literal-page-path rewrite, for values
- * like an `AppLayout`'s `navItems[].href` that hold a bare upstream path
- * OUTSIDE any `(navigate …)` s-expression. Exact-match only — a string that
- * merely CONTAINS a path (e.g. a sentence mentioning "/notes" in prose) is
- * left alone; recurses through arrays/objects only, since a bare page path
- * never appears anywhere else in a config-default tree. JS twin of Rust's
- * `rewrite_config_page_paths`.
- */
-function rewriteConfigPagePaths<T extends RuntimeValue>(node: T, pathMap: ReadonlyMap<string, string>): T {
-  if (typeof node === "string") return (pathMap.get(node) ?? node) as T;
-  if (Array.isArray(node)) {
-    return (node as ReadonlyArray<RuntimeValue>).map((item) => rewriteConfigPagePaths(item, pathMap)) as T;
-  }
-  if (node !== null && typeof node === "object") {
-    const next: Record<string, RuntimeValue> = {};
-    for (const [key, value] of Object.entries(node as Record<string, RuntimeValue>)) {
-      next[key] = rewriteConfigPagePaths(value, pathMap);
-    }
-    return next as T;
-  }
-  return node;
-}
-
-/**
- * Apply {@link rewriteConfigPagePaths} across every declared config field's
- * default on one trait — but skip a field named in `schemaOnlyKeys`: its
- * value didn't come from anywhere scoped to THIS import (an embedder, the
- * imported orbital's own `config {}`, or a §B4-R5 upstream rung), it fell
- * all the way through to the consumer's own schema-level `config {}` —
- * shared by every orbital import in the schema. `std-notes.lolo`'s own
- * literal `navItems` (the case this rewrite exists for) resolves from the
- * orbital's own config and is never in this set, so it's still rewritten
- * as before. Without the exclusion, e.g. `project-friday.lolo`'s single
- * shared `navItems` reaching every AppLayout via `navItems: @config.navItems`
- * got its WHOLE shared structure walked and exact-string-matched against
- * just this one import's upstream path, so an unrelated sibling nav entry
- * whose href happened to equal it (two different imports each naming a
- * page `/pipeline`) silently got stomped too — a page-path collision, not
- * a rename. JS twin of Rust's `rewrite_trait_config_page_paths`.
- */
-function rewriteTraitConfigPagePaths(
-  trait: Trait,
-  pathMap: ReadonlyMap<string, string>,
-  schemaOnlyKeys: ReadonlySet<string>,
-): Trait {
-  if (pathMap.size === 0 || !trait.config) return trait;
-  const nextConfig: { [k: string]: ConfigFieldDeclaration } = {};
-  for (const [key, field] of Object.entries(trait.config)) {
-    nextConfig[key] =
-      field.default === undefined || schemaOnlyKeys.has(key)
-        ? field
-        : { ...field, default: rewriteConfigPagePaths(field.default, pathMap) };
-  }
-  return { ...trait, config: nextConfig };
 }
 
 /**
@@ -7497,14 +7429,6 @@ export class ReferenceResolver {
       // doc.
       if (fieldSubs.size > 0 && next.config) {
         next = { ...next, config: rewriteEntityFieldsInConfig(next.config, fieldSubs) };
-      }
-      // AFTER the config forward (planning find i): a page-path-shaped
-      // config default (`navItems[].href`) is often ITSELF a `@config.`
-      // forward (an app-level `navItems` knob) — rewriting page paths before
-      // the forward resolves leaves every href pointing at the raw string
-      // `"@config.navItems"`, missing the rewrite entirely.
-      if (pathMap.size > 0) {
-        next = rewriteTraitConfigPagePaths(next, pathMap, schemaOnlyKeys);
       }
       next = applyEventRenames(next, ref.events, keptFinalNames);
       return next;

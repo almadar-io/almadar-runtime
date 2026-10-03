@@ -47,6 +47,7 @@ import type {
   RuntimeValue,
   FetchOptions,
   ServiceHostPorts,
+  MessageCatalogs,
 } from '@almadar/core';
 import {
   getNestedValue,
@@ -151,6 +152,10 @@ export interface ServerEffectStageDeps {
   debug?: boolean;
   mockMode?: boolean;
   contextExtensions?: EvaluationContextExtensions;
+  /** The program's message catalogs (locale → qualified key → message). */
+  messages?: MessageCatalogs;
+  /** The program's first declared locale — a request without `locale` (and a tick) renders in it. */
+  defaultLocale?: string;
 }
 
 /** What was `executeEffects`' per-call parameter list. */
@@ -172,6 +177,8 @@ export interface ServerEffectStageArgs {
   user?: UserContext;
   /** The dispatch's `now` stamp. */
   now?: number;
+  /** The viewer's locale, already resolved against the program's declared locales. */
+  locale?: string;
   clientEffectsByTrait?: ClientEffectByTrait[];
   /** The transition whose effects these are; tags each client effect with its provenance. */
   firing?: { event: string; fromState: string };
@@ -322,6 +329,10 @@ async function injectRelationOptions(
 /**
  * Execute effects from a transition
  */
+function viewerI18n(locale: string | undefined, messages: MessageCatalogs | undefined): Pick<BindingContext, 'locale' | 'messages'> {
+  return locale !== undefined ? { locale, messages: messages?.[locale] ?? {} } : {};
+}
+
 export async function runServerEffectStage(
   deps: ServerEffectStageDeps,
   args: ServerEffectStageArgs,
@@ -338,6 +349,7 @@ export async function runServerEffectStage(
     effectResults,
     user,
     now,
+    locale,
     clientEffectsByTrait,
     firing,
     onPush,
@@ -1147,6 +1159,7 @@ export async function runServerEffectStage(
     state: dispatch?.toState ?? (state?.currentState || "unknown"),
     user,
     ...(now !== undefined ? { now } : {}),
+    ...viewerI18n(locale ?? deps.defaultLocale, deps.messages),
     ...(dispatch !== undefined ? dispatch : {}),
   };
   // Surface the composing effect's triggering payload for a JSX-hoisted

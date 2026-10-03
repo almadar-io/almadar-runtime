@@ -121,8 +121,16 @@ export interface EvaluateOrbitalEventDeps {
    * server-side — G-RUNTIME-031.
    */
   relayMask?: ReadonlySet<string>;
+  /**
+   * The client relays every emitted event itself (the compiled wire): run only
+   * the requested transitions, with no same-trait cascade and no listens
+   * fan-out. Default `false`.
+   */
+  clientRelays?: boolean;
   /** Normalized viewer (hosts normalize `request.user` claims). */
   user?: UserContext;
+  /** The viewer's locale (`request.locale`); the stage applies the program's default when absent. */
+  locale?: string;
   /** Override for the dispatch's `now` stamp (tests); otherwise stamped once at entry. */
   now?: number;
   /** Default directly-addressed row id (request.entityId wins). */
@@ -417,7 +425,9 @@ export async function evaluateOrbitalEvent(
   // A single-target dispatch (the client's own local run) masks only (trait,
   // event): the target already handled THIS event, but a different event its
   // cascade sends back to it (a reply) must still reach it.
-  const relayMask = deps.relayMask ?? (delegatedServerLeg
+  const relayMask = deps.relayMask ?? (deps.clientRelays === true
+    ? new Set(traitIndex.byName.keys())
+    : delegatedServerLeg
     ? undefined
     : request.traits !== undefined
       ? new Set(request.traits.map((t) => t.trait))
@@ -593,6 +603,7 @@ export async function evaluateOrbitalEvent(
       ...(deps.strictBindings !== undefined ? { strictBindings: deps.strictBindings } : {}),
       ...(deps.contextExtensions !== undefined ? { contextExtensions: deps.contextExtensions } : {}),
       getEntityData: readFrame,
+      ...(deps.clientRelays === true ? { selfCascade: false } : {}),
       runEffects: async (stepEffects, step) => {
         const emittedStart = emittedEvents.length;
         const effectStart = effectResults.length;
@@ -614,6 +625,7 @@ export async function evaluateOrbitalEvent(
           clientEffects: itemClientEffects,
           effectResults,
           ...(deps.user !== undefined ? { user: deps.user } : {}),
+          ...(deps.locale !== undefined ? { locale: deps.locale } : {}),
           now,
           clientEffectsByTrait: itemClientEffectsByTrait,
           firing: { event: step.event, fromState: step.fromState },

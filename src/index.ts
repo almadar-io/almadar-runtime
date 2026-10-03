@@ -214,6 +214,7 @@ export {
   type ClientDispatchHooks,
   type ClientRoleOpts,
 } from "./evaluation/client-role.js";
+export { TraitMountError } from "./evaluation/trait-mount-error.js";
 
 // Re-export types for server modules (for type-only imports in client code)
 export type {
@@ -245,6 +246,17 @@ export type { AccessBindings } from "./entities/entityAccess.js";
 // so browser-side mock runtimes can use the same adapter interface.
 export type { PersistenceAdapter } from "./entities/PersistenceAdapter.js";
 export { InMemoryPersistence } from "./entities/PersistenceAdapter.js";
+// `[persistent: x, local]` entities: the browser store, its seed rule, and the
+// transports that run their data in-process.
+export { IndexedDbPersistence, CHANGE_LOG } from "./entities/IndexedDbPersistence.js";
+export type { ChangeRecord, IndexedDbPersistenceOptions } from "./entities/IndexedDbPersistence.js";
+export { seedBrowserStore } from "./entities/seedBrowserStore.js";
+export { createLocalStoreTransport } from "./evaluation/local-store-transport.js";
+export type { LocalStoreTransportOptions } from "./evaluation/local-store-transport.js";
+export { createResidenceTransport } from "./evaluation/residence-transport.js";
+export type { ResidenceTransportOptions } from "./evaluation/residence-transport.js";
+export { browserStoreName, openBrowserStore, openBrowserStoreTransport, openBundledBrowserStore } from "./evaluation/browser-store-transport.js";
+export type { BrowserStoreTransportOptions } from "./evaluation/browser-store-transport.js";
 
 // Mock-data persistence adapter (faker-seeded) — browser-safe, for use in
 // offline previews (`OrbPreview autoMock`) or dev harnesses.
@@ -308,6 +320,8 @@ export {
 // on-disk layout).
 export {
   createUnifiedLoader,
+  createHttpLoader,
+  loadLazyPage,
   isBrowser,
   isElectron,
   isNode,
