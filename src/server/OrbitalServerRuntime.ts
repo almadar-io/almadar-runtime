@@ -230,7 +230,8 @@ import type {
   ExternalInput,
   ExternalInputRequest,
 } from "@almadar/core";
-import { externalInputsOf, findExternalInput } from "@almadar/core";
+import { externalInputsOf, readableEntitiesOf } from "@almadar/core";
+import { dispatchDeclaredInput } from "../evaluation/declared-input-dispatch.js";
 import { dispatchVisitKey, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, resolveDefaultViewer, DEFAULT_VIEWER, isPageReference, type NavItem, type Page, type PageRef,
 } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf } from "@almadar/core/mock";
@@ -534,6 +535,34 @@ interface TickBinding {
   handle: TickHandle;
 }
 
+/** What `register` takes beside the schema: the program's catalogs and the `uses lazy` behaviors the server runs alongside it. */
+export interface RegisterOptions {
+  messages?: MessageCatalogs;
+  lazy?: readonly OrbitalSchema[];
+}
+
+/** `orb resolve` writes each declared locale's merged catalog beside a `.orb` as `<stem>.<locale>.json`. */
+async function readSidecarCatalogs(
+  readFile: (path: string, encoding: 'utf-8') => Promise<string>,
+  orbPath: string,
+  locales: readonly string[],
+): Promise<MessageCatalogs> {
+  const messages: MessageCatalogs = {};
+  const stem = orbPath.replace(/\.orb$/, '');
+  for (const locale of locales) {
+    const catalogPath = `${stem}.${locale}.json`;
+    let catalogRaw: string;
+    try {
+      catalogRaw = await readFile(catalogPath, 'utf-8');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`registerFromFile: ${orbPath} declares locale "${locale}" but its catalog ${catalogPath} could not be read: ${msg}`);
+    }
+    messages[locale] = JSON.parse(catalogRaw) as Record<string, string>;
+  }
+  return messages;
+}
+
 export class OrbitalServerRuntime {
   protected orbitals = new Map<string, RegisteredOrbital>();
   private eventBus: EventBus;
@@ -823,7 +852,7 @@ export class OrbitalServerRuntime {
    */
   private registrationMutationDepth = 0;
 
-  async register(schema: OrbitalSchema, options: { messages?: MessageCatalogs } = {}): Promise<void> {
+  async register(schema: OrbitalSchema, options: RegisterOptions = {}): Promise<void> {
     if (this.registrationMutationDepth > 0) {
       // Inside a withRegistrationMutation bracket — ordering is guaranteed
       // by the callback's awaits; chaining onto the bracket epoch would
@@ -842,7 +871,7 @@ export class OrbitalServerRuntime {
     await epoch;
   }
 
-  private async doRegister(schema: OrbitalSchema, options: { messages?: MessageCatalogs }): Promise<void> {
+  private async doRegister(schema: OrbitalSchema, options: RegisterOptions): Promise<void> {
     if (this.config.debug) {
       registerLog.debug('register:schema', { name: schema.name });
     }
@@ -894,7 +923,10 @@ export class OrbitalServerRuntime {
     this.prepareMockSeeding(schema);
 
     // Register all orbitals (await to ensure instance seeding completes)
-    for (const orbital of schema.orbitals) {
+    // Lazy pages' orbitals run here too; only the served schema keeps them lazy for the client.
+    const lazyOrbitals = (options.lazy ?? []).flatMap((lazy) => lazy.orbitals);
+    const executed: OrbitalSchema = lazyOrbitals.length > 0 ? { ...schema, orbitals: [...schema.orbitals, ...lazyOrbitals] } : schema;
+    for (const orbital of executed.orbitals) {
       await this.registerOrbitalAsync(orbital);
     }
 
@@ -905,8 +937,8 @@ export class OrbitalServerRuntime {
     // server's /api/schema handler) can serve the fully-resolved copy instead
     // of re-reading the raw .orb from disk. See getResolvedSchema().
     this.resolvedSchema = schema;
-    this.resolvedTraitConfigs = buildResolvedTraitConfigs(schema);
-    this.callsiteCaptureChildrenByTrait = this.buildCallsiteCaptureChildrenByTrait(schema);
+    this.resolvedTraitConfigs = buildResolvedTraitConfigs(executed);
+    this.callsiteCaptureChildrenByTrait = this.buildCallsiteCaptureChildrenByTrait(executed);
     this.flushPendingOwnerRestamp();
   }
 
@@ -1046,21 +1078,30 @@ export class OrbitalServerRuntime {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`registerFromFile: ${path} is not valid JSON: ${msg}`);
     }
-    // `orb resolve` writes each declared locale's merged catalog beside the `.orb` as `<stem>.<locale>.json`.
-    const messages: MessageCatalogs = {};
-    const stem = path.replace(/\.orb$/, '');
-    for (const locale of schema.locales ?? []) {
-      const catalogPath = `${stem}.${locale}.json`;
-      let catalogRaw: string;
+    const locales = schema.locales ?? [];
+    const messages = await readSidecarCatalogs(readFile, path, locales);
+    // `orb resolve` writes each `uses lazy` behavior (and its catalogs) at the page's `orbRef`, relative to the program.
+    const { dirname, join } = await import('node:path');
+    const lazy: OrbitalSchema[] = [];
+    for (const page of schema.lazyPages ?? []) {
+      const lazyPath = join(dirname(path), page.orbRef);
+      let lazyRaw: string;
       try {
-        catalogRaw = await readFile(catalogPath, 'utf-8');
+        lazyRaw = await readFile(lazyPath, 'utf-8');
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(`registerFromFile: ${path} declares locale "${locale}" but its catalog ${catalogPath} could not be read: ${msg}`);
+        throw new Error(`registerFromFile: ${path} declares lazy page ${page.path} but its behavior ${page.orbRef} could not be read: ${msg}`);
       }
-      messages[locale] = JSON.parse(catalogRaw) as Record<string, string>;
+      const lazySchema = JSON.parse(lazyRaw) as OrbitalSchema;
+      if (!lazySchema.orbitals.some((o) => o.name === page.orbital)) {
+        throw new Error(`registerFromFile: lazy page ${page.path} expects orbital "${page.orbital}" in ${page.orbRef}, found: ${lazySchema.orbitals.map((o) => o.name).join(', ')}`);
+      }
+      lazy.push(lazySchema);
+      for (const [locale, catalog] of Object.entries(await readSidecarCatalogs(readFile, lazyPath, locales))) {
+        messages[locale] = { ...messages[locale], ...catalog };
+      }
     }
-    await this.register(schema, { messages });
+    await this.register(schema, { messages, lazy });
   }
 
   /**
@@ -2103,6 +2144,7 @@ export class OrbitalServerRuntime {
       caller,
       message,
       inputs: () => this.listExternalInputs(),
+      readableEntities: () => (this.resolvedSchema ? readableEntitiesOf(this.resolvedSchema) : []),
       dispatchInput: (orbital, request) =>
         this.dispatchExternalInput(orbital, { ...request, ...(user !== undefined ? { user } : {}) }),
       read: async (entity) => {
@@ -2117,30 +2159,7 @@ export class OrbitalServerRuntime {
     request: ExternalInputRequest,
     onPush?: (item: PushItem) => void,
   ): Promise<OrbitalEventResponse> {
-    const declared = this.resolvedSchema
-      ? findExternalInput(this.resolvedSchema, orbitalName, request.targetTrait, request.event)
-      : undefined;
-    if (!declared) {
-      return {
-        success: false,
-        transitioned: false,
-        states: {},
-        emittedEvents: [],
-        error: `'${request.event}' is not an external input of ${orbitalName}.${request.targetTrait}`,
-        rejections: [{ code: 'not-an-external-input', trait: request.targetTrait, event: request.event }],
-      };
-    }
-    return this.processOrbitalEvent(
-      orbitalName,
-      {
-        event: request.event,
-        payload: request.payload ?? {},
-        targetTrait: request.targetTrait,
-        ...(request.user !== undefined ? { user: request.user } : {}),
-        ...(request.entityId !== undefined ? { entityId: request.entityId } : {}),
-      },
-      onPush,
-    );
+    return dispatchDeclaredInput(this.resolvedSchema, orbitalName, request, (orbital, req) => this.processOrbitalEvent(orbital, req, onPush));
   }
 
   async processOrbitalEvent(

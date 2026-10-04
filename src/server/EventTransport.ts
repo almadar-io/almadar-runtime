@@ -83,7 +83,20 @@ export interface EventTransport {
    * (plan P4).
    */
   subscribe?(onPush: (emitted: EmittedEvent, target: PushTarget) => void, params?: Record<string, string>): () => void;
+  /**
+   * The host runs the whole program, browser-stored entities included (an extension's worker): a
+   * view of it keeps no browser store of its own and sends every leg to the host.
+   */
+  readonly hostsBrowserStore?: boolean;
+  /**
+   * Hear the results of dispatches the host ran without any view asking (a declared input), so an
+   * open view shows them. The view applies the result; it never runs the dispatch again.
+   */
+  subscribeHostDispatches?(onDispatch: HostDispatchListener): () => void;
 }
+
+/** A dispatch the host ran on its own, with its result. */
+export type HostDispatchListener = (orbitalName: string, request: OrbitalEventRequest, response: OrbitalEventResponse) => void;
 
 // ============================================================================
 // HTTP transport

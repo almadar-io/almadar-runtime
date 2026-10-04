@@ -242,9 +242,18 @@ export function browserLegEvents(
     .map((t) => t.event));
 }
 
+export interface TraitIndexOptions {
+  /**
+   * The index is for a view whose host runs the whole program (`EventTransport.hostsBrowserStore`):
+   * no trait is client-only there, so every trait dispatches host-first and its host result is shown.
+   */
+  hostRunsProgram?: boolean;
+}
+
 export function buildTraitIndex(
   orbitals: readonly OrbitalDefinition[],
   configOverridesByTrait?: Readonly<Record<string, TraitConfig>>,
+  options: TraitIndexOptions = {},
 ): TraitIndex {
   const parsed = orbitals.map((orbital) => ({ orbital, parsed: parseOrbitalCached(orbital).traits }));
   const allEntities = orbitals.map((orbital) => parseOrbitalCached(orbital).entities).flat();
@@ -300,7 +309,9 @@ export function buildTraitIndex(
         ...(orbital.id !== undefined ? { orbitalId: orbital.id as BusEventSource['orbitalId'] } : {}),
         frameKey: isShared ? `$shared::${traitEntity.name}` : traitDef.name,
         isSharedEntity: isShared,
-        dispatchMode: computeTraitDispatchMode(irTrait, traitEntity, touchesServer(traitDef, irTrait as Trait, config, storesRowsInBrowser)),
+        dispatchMode: options.hostRunsProgram === true
+          ? 'persistedAwaited'
+          : computeTraitDispatchMode(irTrait, traitEntity, touchesServer(traitDef, irTrait as Trait, config, storesRowsInBrowser)),
       });
     }
   }

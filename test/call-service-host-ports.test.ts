@@ -161,6 +161,12 @@ describe('call-service host ports', () => {
     expect(client.requests[1].messages.at(-1)?.content).toBe('{"rows":[{"id":"t1","title":"Mine","ownerId":"alice"}]}');
   });
 
+  it('lists the persisted entities the read port serves', async () => {
+    const { runtime, seen } = await setup([reply('Hi.')]);
+    await ask(runtime, ALICE, 'hi');
+    expect(seen.host?.readableEntities()).toEqual(['Task']);
+  });
+
   it('control: the inputs listed are the declared ones only', async () => {
     const { runtime, seen } = await setup([reply('Hi.')]);
     await ask(runtime, ALICE, 'hi');

@@ -1,0 +1,188 @@
+{
+  "description": "A watcher whose event knob addresses its own trait.",
+  "ledger": {
+    "entries": {
+      "ent_01M432AA7FMM4X91F7FNTGFNAY": {
+        "bakedName": "Watched",
+        "curName": "Watched",
+        "id": "ent_01M432AA7FMM4X91F7FNTGFNAY",
+        "kind": "entity",
+        "owner": "workspace",
+        "renames": []
+      },
+      "evt_01M432AA7FV6PS4PA6KMRZ1GQM": {
+        "bakedName": "ITEM_FOUND",
+        "curName": "ITEM_FOUND",
+        "id": "evt_01M432AA7FV6PS4PA6KMRZ1GQM",
+        "kind": "event",
+        "owner": "workspace",
+        "parent": "trt_01M432AA7F8WWYVMH955KEN2A2",
+        "renames": []
+      },
+      "evt_01M432AA7FVQ5PP5CZ2SNRPT9D": {
+        "bakedName": "INIT",
+        "curName": "INIT",
+        "id": "evt_01M432AA7FVQ5PP5CZ2SNRPT9D",
+        "kind": "event",
+        "owner": "workspace",
+        "parent": "trt_01M432AA7F8WWYVMH955KEN2A2",
+        "renames": []
+      },
+      "orb_01M432AA7FHQGBJP8JHHKV1NNQ": {
+        "bakedName": "PageWatchOrbital",
+        "curName": "PageWatchOrbital",
+        "id": "orb_01M432AA7FHQGBJP8JHHKV1NNQ",
+        "kind": "orbital",
+        "owner": "workspace",
+        "renames": []
+      },
+      "pag_01M432AA7FZPE88JYV2G64FGGD": {
+        "bakedName": "WatchPage",
+        "curName": "WatchPage",
+        "id": "pag_01M432AA7FZPE88JYV2G64FGGD",
+        "kind": "page",
+        "owner": "workspace",
+        "renames": []
+      },
+      "trt_01M432AA7F8WWYVMH955KEN2A2": {
+        "bakedName": "PageWatch",
+        "curName": "PageWatch",
+        "id": "trt_01M432AA7F8WWYVMH955KEN2A2",
+        "kind": "trait",
+        "owner": "workspace",
+        "renames": []
+      }
+    },
+    "schemaVersion": 1
+  },
+  "name": "page-watch",
+  "orbitals": [
+    {
+      "entity": {
+        "fields": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "id": "ent_01M432AA7FMM4X91F7FNTGFNAY",
+        "name": "Watched",
+        "persistence": "runtime"
+      },
+      "id": "orb_01M432AA7FHQGBJP8JHHKV1NNQ",
+      "name": "PageWatchOrbital",
+      "pages": [
+        {
+          "id": "pag_01M432AA7FZPE88JYV2G64FGGD",
+          "name": "WatchPage",
+          "path": "/watch",
+          "traits": [
+            {
+              "ref": "PageWatch",
+              "refId": "trt_01M432AA7F8WWYVMH955KEN2A2"
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "category": "lifecycle",
+          "config": {
+            "itemEvent": {
+              "default": "PageWatch.ITEM_FOUND",
+              "label": "Item event",
+              "type": "event"
+            }
+          },
+          "effectRow": [
+            {
+              "kind": "call-service",
+              "resource": "page.watch"
+            }
+          ],
+          "entityRefIds": {
+            "Watched": "ent_01M432AA7FMM4X91F7FNTGFNAY"
+          },
+          "id": "trt_01M432AA7F8WWYVMH955KEN2A2",
+          "linkedEntity": "Watched",
+          "linkedEntityId": "ent_01M432AA7FMM4X91F7FNTGFNAY",
+          "name": "PageWatch",
+          "scope": "instance",
+          "stateMachine": {
+            "events": [
+              {
+                "id": "evt_01M432AA7FVQ5PP5CZ2SNRPT9D",
+                "key": "INIT",
+                "name": "Initialize"
+              },
+              {
+                "description": "A watched item was found.",
+                "external": true,
+                "id": "evt_01M432AA7FV6PS4PA6KMRZ1GQM",
+                "key": "ITEM_FOUND",
+                "name": "Item Found",
+                "payloadSchema": [
+                  {
+                    "name": "tab",
+                    "required": true,
+                    "type": "number"
+                  },
+                  {
+                    "name": "elementId",
+                    "required": true,
+                    "type": "string"
+                  },
+                  {
+                    "name": "url",
+                    "required": true,
+                    "type": "string"
+                  },
+                  {
+                    "name": "fields",
+                    "type": "Map<string,string>"
+                  }
+                ]
+              }
+            ],
+            "states": [
+              {
+                "isInitial": true,
+                "name": "idle"
+              }
+            ],
+            "transitions": [
+              {
+                "effects": [
+                  [
+                    "call-service",
+                    "page",
+                    "watch",
+                    {
+                      "event": "@config.itemEvent",
+                      "fields": {},
+                      "match": "https://example.com/*",
+                      "selector": "article"
+                    }
+                  ]
+                ],
+                "event": "INIT",
+                "eventId": "evt_01M432AA7FVQ5PP5CZ2SNRPT9D",
+                "from": "idle",
+                "to": "idle"
+              },
+              {
+                "event": "ITEM_FOUND",
+                "eventId": "evt_01M432AA7FV6PS4PA6KMRZ1GQM",
+                "from": "idle",
+                "to": "idle"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 1,
+  "version": "1.0.0"
+}

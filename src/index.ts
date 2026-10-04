@@ -118,6 +118,7 @@ export {
   buildTraitIndex,
   buildTraitIndexForOrbital,
   type IndexedTrait,
+  type TraitIndexOptions,
   type TraitIndex,
 } from "./traits/trait-index.js";
 
@@ -182,6 +183,7 @@ export {
   COMPRESSED_BODY_MIN_BYTES,
   type EventTransport,
   type PushTarget,
+  type HostDispatchListener,
   type EventTransportRegisterResult,
   type AccessTokenProvider,
   type HttpTransportOptions,
@@ -252,11 +254,13 @@ export { IndexedDbPersistence, CHANGE_LOG } from "./entities/IndexedDbPersistenc
 export type { ChangeRecord, IndexedDbPersistenceOptions } from "./entities/IndexedDbPersistence.js";
 export { seedBrowserStore } from "./entities/seedBrowserStore.js";
 export { createLocalStoreTransport } from "./evaluation/local-store-transport.js";
+export { dispatchDeclaredInput } from "./evaluation/declared-input-dispatch.js";
+export { createChannelTransport, serveChannel, type ChannelMessage, type ChannelTransportOptions, type ServedChannel, type TransportChannel } from "./server/channel-transport.js";
 export type { LocalStoreTransportOptions } from "./evaluation/local-store-transport.js";
 export { createResidenceTransport } from "./evaluation/residence-transport.js";
 export type { ResidenceTransportOptions } from "./evaluation/residence-transport.js";
-export { browserStoreName, openBrowserStore, openBrowserStoreTransport, openBundledBrowserStore } from "./evaluation/browser-store-transport.js";
-export type { BrowserStoreTransportOptions } from "./evaluation/browser-store-transport.js";
+export { browserStoreName, openBrowserHost, openBrowserStore, openBrowserStoreTransport, openBundledBrowserStore } from "./evaluation/browser-store-transport.js";
+export type { BrowserHost, BrowserHostOptions, BrowserStoreTransportOptions, InputDispatchListener } from "./evaluation/browser-store-transport.js";
 
 // Mock-data persistence adapter (faker-seeded) — browser-safe, for use in
 // offline previews (`OrbPreview autoMock`) or dev harnesses.

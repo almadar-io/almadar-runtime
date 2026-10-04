@@ -15,7 +15,7 @@
 import { themeDataKey } from '@almadar/core';
 import { appNavItems, sigilThemeKey } from './render-sigils.js';
 import type { EntityField, EntityRow, MessageCatalogs, OrbitalSchema, TraitConfig } from '@almadar/core';
-import { runServerEffectStage, type DeliverEmit, type ServerEffectStageArgs } from '../effects/effect-stage.js';
+import { runServerEffectStage, type DeliverEmit, type ServerEffectStageArgs, type ServerEffectStageDeps } from '../effects/effect-stage.js';
 import { findEntityAmongOrbitals } from '../traits/OrbitalTraitParsing.js';
 import type { EvaluateEffectRunner } from './evaluateOrbitalEvent.js';
 import type { EffectHandlers } from '../types.js';
@@ -40,6 +40,8 @@ export interface IndexStageRunnerOptions {
   mockMode?: boolean;
   /** The program's message catalogs (locale → qualified key → message). */
   messages?: MessageCatalogs;
+  /** The running app lent to `call-service` providers as the caller (declared inputs, dispatch, read). */
+  servicePorts?: ServerEffectStageDeps['servicePorts'];
 }
 
 /**
@@ -98,6 +100,7 @@ export function createIndexStageRunner(options: IndexStageRunnerOptions): Evalua
         ...(options.debug !== undefined ? { debug: options.debug } : {}),
         ...(options.mockMode !== undefined ? { mockMode: options.mockMode } : {}),
         ...(options.messages !== undefined ? { messages: options.messages } : {}),
+        ...(options.servicePorts !== undefined ? { servicePorts: options.servicePorts } : {}),
         ...(options.schema?.locales?.[0] !== undefined ? { defaultLocale: options.schema.locales[0] } : {}),
       },
       { ...args, traitName },

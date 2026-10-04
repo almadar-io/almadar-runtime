@@ -1163,6 +1163,12 @@ export interface ClientKernel {
    */
   dispatchProgress(request: OrbitalEventRequest): Promise<ClientKernelOutcome>;
   /**
+   * Show the result of a dispatch the host ran on its own (`EventTransport.subscribeHostDispatches`):
+   * the host's states, rows and render land in this view. Nothing runs here and nothing is posted,
+   * so the dispatch's effects happen once, on the host. Host dispatches fold one at a time, in order.
+   */
+  foldHostDispatch(request: OrbitalEventRequest, response: OrbitalEventResponse): Promise<ClientKernelOutcome>;
+  /**
    * Mount several traits in ONE FIFO entry: every seed's local arm runs and
    * paints, then one `mount` leg per owning orbital is posted and folded.
    */
@@ -1277,6 +1283,15 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
   };
 
   let progressChain: Promise<void> = Promise.resolve();
+  let hostDispatchChain: Promise<void> = Promise.resolve();
+  const runHostDispatch = async (request: OrbitalEventRequest, response: OrbitalEventResponse): Promise<ClientKernelOutcome> => {
+    const mode = (request.targetTrait !== undefined ? roleOpts.traitIndex.byName.get(request.targetTrait)?.dispatchMode : undefined) ?? 'persistedAwaited';
+    if (!response.success) return { response: { ...response, clientEffects: [], clientEffectsByTrait: [] }, mode };
+    const folded = await applyOrbitalEventResponse(roleOpts.store, response, new Set(), roleOpts);
+    roleOpts.store.notify();
+    return { response: { ...response, clientEffects: folded.clientEffects, clientEffectsByTrait: folded.clientEffectsByTrait }, mode };
+  };
+
   const runProgress = async (request: OrbitalEventRequest): Promise<ClientKernelOutcome> => {
     const dispatch = await dispatchWithServerLeg(roleOpts, request);
     const response = transport !== undefined
@@ -1377,6 +1392,11 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
     dispatchProgress(request: OrbitalEventRequest): Promise<ClientKernelOutcome> {
       const outcome = progressChain.then(() => runProgress(request));
       progressChain = outcome.then(() => undefined, () => undefined);
+      return outcome;
+    },
+    foldHostDispatch(request: OrbitalEventRequest, response: OrbitalEventResponse): Promise<ClientKernelOutcome> {
+      const outcome = hostDispatchChain.then(() => runHostDispatch(request, response));
+      hostDispatchChain = outcome.then(() => undefined, () => undefined);
       return outcome;
     },
     dispatchMount(seeds, hooks, base = {}): Promise<ClientMountOutcome> {

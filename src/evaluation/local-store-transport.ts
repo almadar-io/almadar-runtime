@@ -6,6 +6,7 @@
  */
 import type { OrbitalEventRequest, OrbitalSchema, UserContext } from '@almadar/core';
 import type { EffectHandlers } from '../types.js';
+import type { ServerEffectStageDeps } from '../effects/effect-stage.js';
 import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
 import { createInProcessTransport, type EventTransport } from '../server/EventTransport.js';
 import type { TraitIndex } from '../traits/trait-index.js';
@@ -20,6 +21,8 @@ export interface LocalStoreTransportOptions {
   /** The resolved schema, so declared access policies apply in-process. */
   schema?: OrbitalSchema | null;
   callService?: EffectHandlers['callService'];
+  /** The running app lent to `call-service` providers as the caller. */
+  servicePorts?: ServerEffectStageDeps['servicePorts'];
   user?: UserContext;
   guardMode?: EvaluateOrbitalEventDeps['guardMode'];
   strictBindings?: EvaluateOrbitalEventDeps['strictBindings'];
@@ -41,6 +44,7 @@ export function createLocalStoreTransport(options: LocalStoreTransportOptions): 
         manager: store.manager,
         ...(options.schema !== undefined ? { schema: options.schema } : {}),
         ...(options.callService !== undefined ? { extraEffectHandlers: { callService: options.callService } } : {}),
+        ...(options.servicePorts !== undefined ? { servicePorts: options.servicePorts } : {}),
         ...(options.debug !== undefined ? { debug: options.debug } : {}),
       });
       return evaluateOrbitalEvent(

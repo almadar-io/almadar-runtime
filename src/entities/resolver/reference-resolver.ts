@@ -1958,14 +1958,15 @@ function applyEventRenames(
   // through the spread untouched is what left a renamed atom firing its
   // pre-rename event keys from its own action buttons.
   const renamedConfig = renameEventsInDeclaredConfig(trait.config, rename);
-  const nextConfig =
-    keptFinalNames === undefined
-      ? renamedConfig
-      : mapConfigEventAddresses(renamedConfig, (event, source) =>
-          source.kind !== "any" && keptFinalNames.has(source.trait) && event in renames
-            ? { event: renames[event], source }
-            : undefined,
-        );
+  // An address naming THIS trait is its own vocabulary, so its event follows
+  // the rename too; one naming another trait follows only within an import.
+  const nextConfig = mapConfigEventAddresses(renamedConfig, (event, source) =>
+    source.kind !== "any" &&
+    (source.trait === trait.name || keptFinalNames?.has(source.trait) === true) &&
+    event in renames
+      ? { event: renames[event], source }
+      : undefined,
+  );
   return {
     ...trait,
     stateMachine: sm
@@ -6195,8 +6196,22 @@ export class ReferenceResolver {
         );
         if (nested) resolvedConfig = nested as TraitConfig;
       }
-      const baseTrait: Trait = overrideName
-        ? { ...trait, name: overrideName }
+      // An `event` knob addressing the atom's OWN trait follows the rename
+      // (Rust twin: `apply_overrides_to_trait`, before `@config` reaches effects).
+      const baseTrait: Trait = overrideName && overrideName !== trait.name
+        ? {
+            ...trait,
+            name: overrideName,
+            ...(trait.config
+              ? {
+                  config: mapConfigEventAddresses(trait.config, (event, source) =>
+                    source.kind === "trait" && source.trait === trait.name
+                      ? { event, source: { kind: "trait", trait: overrideName } }
+                      : undefined,
+                  ),
+                }
+              : {}),
+          }
         : trait;
       // Emit-name config refs resolve BEFORE event renames so a call-site
       // `events={...}` rename map targets the RESOLVED event names.
