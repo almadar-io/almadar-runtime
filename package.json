@@ -100,7 +100,7 @@
   "devDependencies": {
     "@almadar-io/behaviors": "^0.16.189",
     "@almadar/eslint-plugin": "^2.21.0",
-    "@almadar/orb": "^17.9.0",
+    "@almadar/orb": "^17.10.0",
     "@types/express": "^5.0.0",
     "@types/node": "^20.0.0",
     "@types/semver": "^7.7.0",

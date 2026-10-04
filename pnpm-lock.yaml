@@ -34,8 +34,8 @@ importers:
         specifier: ^2.21.0
         version: 2.21.0(eslint@10.0.0)
       '@almadar/orb':
-        specifier: ^17.9.0
-        version: 17.9.0
+        specifier: ^17.10.0
+        version: 17.10.0
       '@types/express':
         specifier: ^5.0.0
         version: 5.0.6
@@ -105,33 +105,33 @@ packages:
   '@almadar/logger@1.16.0':
     resolution: {integrity: sha512-ymcRQLxEqhTi0O1jKJ71N8axKR1YXdl//YTB20UZOdVmKlKYEPLv9aKPiYbxvIDUqUvtR/7TU47GdUTxy8oTvQ==}
 
-  '@almadar/orb-darwin-arm64@17.9.0':
-    resolution: {integrity: sha512-NoWD5ZyT0xRZb/r6LnejLQzz1WrxRPQ1D7GhiJu3x05HBq/YfCaJCjlrygTNYAymebG201gtziifx3KLt6/lsQ==}
+  '@almadar/orb-darwin-arm64@17.10.0':
+    resolution: {integrity: sha512-zDtFUPsbNZ47x8Ux3Zbg1BD7fqWSMty8OJeHKfoYqwQAaXpZQJ8QAK150l3oE6ElTHKuvrYLw0St19nQbliAUw==}
     cpu: [arm64]
     os: [darwin]
 
-  '@almadar/orb-darwin-x64@17.9.0':
-    resolution: {integrity: sha512-/gWTtH3jarr8TCWdUwpIxey54pa7Y5jttDjMQBkE0wfHm9KpUeA1+xVPMTb8j9t3SJhbMIdpOE/R+inSu6Dbfg==}
+  '@almadar/orb-darwin-x64@17.10.0':
+    resolution: {integrity: sha512-0cRY6UMG0aqI5GzZ5JH5gje4uqoMmYcpQxob+kKPYatfzUV/kS8XEIIH+UKM895dBCOp31qkeL3+e/46wP+MIA==}
     cpu: [x64]
     os: [darwin]
 
-  '@almadar/orb-linux-arm64@17.9.0':
-    resolution: {integrity: sha512-Y86Uv+eCP7x3KGdOcuJas6b1vWd15qqK56Rx0hY/Q9qZm4hAafuvITv85DQkQV2TyvhT4KAlFHhBwy+3AmhsPA==}
+  '@almadar/orb-linux-arm64@17.10.0':
+    resolution: {integrity: sha512-Zl85+8PJIHTDl1Oj+34beZ297Dl/r18Aod1cDt5Gx1IWvncdDj27hRj0TEO6dqG3xQIRkM4SzsCu5bySkahB3g==}
     cpu: [arm64]
     os: [linux]
 
-  '@almadar/orb-linux-x64@17.9.0':
-    resolution: {integrity: sha512-Ms7os+Pfi0Z3lH28brzW5fw7rWhfjXoRKt5r2uEL63UfAB9wZNB4j2dBj6fAyeJBChkl9fN4MGHhUL0FzgVuMw==}
+  '@almadar/orb-linux-x64@17.10.0':
+    resolution: {integrity: sha512-kKAfsjtnqz7K+2ofPSAKoj/IlHx3fMHixIo/Fuiau+ItoAp4INfT6cEz46KqEgmWuqM8quC8/TbWGyWfIrJiUQ==}
     cpu: [x64]
     os: [linux]
 
-  '@almadar/orb-windows-x64@17.9.0':
-    resolution: {integrity: sha512-1YNQfnkm4iZkDVycoD8qVNVx40rYCtdsZgxDtJwXdeQ2FxDLBcxRfnRNk7W2mj4ecP+2TKlKfTzPdc1m96udoA==}
+  '@almadar/orb-windows-x64@17.10.0':
+    resolution: {integrity: sha512-7RO238GznZ4vXfJjDE4Ol4XCPjAc1IHaE2f4Os0uvhAW0BGc6Lu7XXX6EIRe19AEOMvr0muFlXgdpRzKn6Yybg==}
     cpu: [x64]
     os: [win32]
 
-  '@almadar/orb@17.9.0':
-    resolution: {integrity: sha512-cSuyffPfc8K1NnGys9gSwi3ui+5L7A8UW3HSfc+x/6+CkxATAURZdlc2fduHhDS8mB8TmjDql3mM2wZ1d3wYCA==}
+  '@almadar/orb@17.10.0':
+    resolution: {integrity: sha512-V2wH94sxPPC6y8JSDV96EmGhIYb9jkWBzzSh65vH8goP69+zHx7lsHQojhvd90VXAPzpXMs74lM1EWt4I1/MXg==}
     engines: {node: '>=16.0.0'}
     cpu: [x64, arm64]
     os: [darwin, linux, win32]
@@ -3468,28 +3468,28 @@ snapshots:
     dependencies:
       '@almadar/core': 10.117.0
 
-  '@almadar/orb-darwin-arm64@17.9.0':
+  '@almadar/orb-darwin-arm64@17.10.0':
     optional: true
 
-  '@almadar/orb-darwin-x64@17.9.0':
+  '@almadar/orb-darwin-x64@17.10.0':
     optional: true
 
-  '@almadar/orb-linux-arm64@17.9.0':
+  '@almadar/orb-linux-arm64@17.10.0':
     optional: true
 
-  '@almadar/orb-linux-x64@17.9.0':
+  '@almadar/orb-linux-x64@17.10.0':
     optional: true
 
-  '@almadar/orb-windows-x64@17.9.0':
+  '@almadar/orb-windows-x64@17.10.0':
     optional: true
 
-  '@almadar/orb@17.9.0':
+  '@almadar/orb@17.10.0':
     optionalDependencies:
-      '@almadar/orb-darwin-arm64': 17.9.0
-      '@almadar/orb-darwin-x64': 17.9.0
-      '@almadar/orb-linux-arm64': 17.9.0
-      '@almadar/orb-linux-x64': 17.9.0
-      '@almadar/orb-windows-x64': 17.9.0
+      '@almadar/orb-darwin-arm64': 17.10.0
+      '@almadar/orb-darwin-x64': 17.10.0
+      '@almadar/orb-linux-arm64': 17.10.0
+      '@almadar/orb-linux-x64': 17.10.0
+      '@almadar/orb-windows-x64': 17.10.0
 
   '@almadar/runtime@6.102.0(@aws-sdk/credential-provider-node@3.972.84)(@opentelemetry/api@1.9.1)(@smithy/signature-v4@5.7.3)(express@5.2.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(ws@8.21.0)':
     dependencies:
