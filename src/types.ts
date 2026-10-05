@@ -220,6 +220,8 @@ export interface ServiceCallContext {
     role?: string;
     /** The running app, lent for this call as the caller (`llm call-tools`). */
     host?: ServiceHostPorts;
+    /** Aborted when `cancel-call` cancels this call; a provider stops its work on it. */
+    signal?: AbortSignal;
 }
 
 /**

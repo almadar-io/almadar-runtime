@@ -3,7 +3,7 @@
 // serves any EventTransport (here an in-process one) on the channel.
 import { describe, it, expect } from 'vitest';
 import type { EmittedEvent, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
-import { createChannelTransport, serveChannel, type ChannelMessage, type TransportChannel } from '../src/server/channel-transport.js';
+import { createChannelTransport, holdUntilServed, serveChannel, type ChannelMessage, type TransportChannel } from '../src/server/channel-transport.js';
 import { createInProcessTransport, type PushTarget } from '../src/server/EventTransport.js';
 
 function pair(): [TransportChannel, TransportChannel] {
@@ -102,5 +102,62 @@ describe('channel transport: a host that runs the whole program', () => {
     const [viewEnd] = pair();
     expect(createChannelTransport(viewEnd, { hostsBrowserStore: true }).hostsBrowserStore).toBe(true);
     expect(createChannelTransport(viewEnd).hostsBrowserStore).toBe(false);
+  });
+});
+
+describe('channel transport: the host goes away', () => {
+  function closable() {
+    const closeListeners: Array<() => void> = [];
+    const posted: ChannelMessage[] = [];
+    const channel: TransportChannel = {
+      post: (m) => { posted.push(m); },
+      onMessage: () => () => undefined,
+      onClose: (l) => {
+        closeListeners.push(l);
+        return () => closeListeners.splice(closeListeners.indexOf(l), 1);
+      },
+    };
+    return { channel, posted, close: () => closeListeners.forEach((l) => l()) };
+  }
+
+  it('a send in flight when the channel closes fails, instead of waiting for a reply that cannot come', async () => {
+    const { channel, close } = closable();
+    const view = createChannelTransport(channel);
+    const reply = view.send('O', { event: 'A', payload: {} });
+    close();
+    expect(await reply).toMatchObject({ success: false, transitioned: false, error: 'The host closed the channel before answering' });
+  });
+
+  it('a send after the channel closed fails at once, without posting', async () => {
+    const { channel, posted, close } = closable();
+    const view = createChannelTransport(channel);
+    close();
+    expect(await view.send('O', { event: 'B', payload: {} })).toMatchObject({ success: false, error: 'The host closed the channel before answering' });
+    expect(posted).toEqual([]);
+  });
+
+  it('control: a channel that never reports closing behaves as before', async () => {
+    const { view } = host(async (_o, req) => ok(req.event));
+    expect((await view.send('O', { event: 'C', payload: {} })).states).toEqual({ T: 'C' });
+  });
+});
+
+describe('channel transport: a host that is still starting', () => {
+  it('messages that arrive before the host serves the channel are kept and served once it does, in order', async () => {
+    const [viewEnd, hostEnd] = pair();
+    const held = holdUntilServed(hostEnd);
+    const view = createChannelTransport(viewEnd);
+    const registered = view.register(schema);
+    const sent = view.send('O', { event: 'EARLY', payload: {} });
+    await new Promise((r) => setTimeout(r, 20));
+    serveChannel(held, createInProcessTransport(async (_o, req) => ok(req.event)), { schemaName: 'app' });
+    expect((await registered).success).toBe(true);
+    expect((await sent).states).toEqual({ T: 'EARLY' });
+  });
+
+  it('control: once served, later messages pass straight through', async () => {
+    const [viewEnd, hostEnd] = pair();
+    serveChannel(holdUntilServed(hostEnd), createInProcessTransport(async (_o, req) => ok(req.event)), { schemaName: 'app' });
+    expect((await createChannelTransport(viewEnd).send('O', { event: 'LATE', payload: {} })).states).toEqual({ T: 'LATE' });
   });
 });

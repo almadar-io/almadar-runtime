@@ -42,6 +42,7 @@ import type {
   ServiceCallContext,
 } from "../types.js";
 import { EffectExecutor } from "./EffectExecutor.js";
+import type { InFlightCalls } from "./in-flight-calls.js";
 import { createContextFromBindings } from "../evaluation/BindingResolver.js";
 import { evaluate } from "@almadar/evaluator";
 import { defaultCallService } from './defaultCallService.js';
@@ -127,6 +128,8 @@ export interface CreateServerEffectHandlersOptions {
    * policies compiled in.
    */
   entityAccess?: ReadonlyMap<string, EntityAccessPolicies>;
+  /** The running app's in-flight call registry (`cancel-call`). */
+  inFlightCalls?: InFlightCalls;
   /** Verbose logging. */
   debug?: boolean;
 }
@@ -493,27 +496,22 @@ export function createServerEffectHandlers(
       return undefined;
     },
 
-    callService: async (service, action, params) => {
+    callService: async (service, action, params, callerContext) => {
       try {
         let result: EventPayload | null = null;
-        if (consumerCallService) {
+        const signal = callerContext?.signal;
+        const identity = (): ServiceCallContext | undefined => {
           const viewer = bindings?.user;
-          result = await consumerCallService(
-            service,
-            action,
-            params,
-            viewer ? { principal: viewer.id, role: viewer.role } : undefined,
-          );
+          return viewer || signal
+            ? { ...(viewer ? { principal: viewer.id, role: viewer.role } : {}), ...(signal ? { signal } : {}) }
+            : undefined;
+        };
+        if (consumerCallService) {
+          result = await consumerCallService(service, action, params, identity());
         } else {
           // No host handler: the same @almadar/integrations provider compiled
           // apps use, configured from the env (a missing key is a named failure).
-          const viewer = bindings?.user;
-          result = await defaultCallService(
-            service,
-            action,
-            params,
-            viewer ? { principal: viewer.id, role: viewer.role } : undefined,
-          );
+          result = await defaultCallService(service, action, params, identity());
         }
         record({
           effect: "call-service",
@@ -734,6 +732,7 @@ export function createServerEffectHandlers(
             state: "unknown",
             transition: "unknown",
           } as EffectContext),
+        inFlightCalls: opts.inFlightCalls,
       });
       try {
         await atomicExecutor.executeAll(atomicEffects as RuntimeValue[]);

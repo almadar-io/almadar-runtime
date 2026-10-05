@@ -9,7 +9,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runTraitCascade } from '../src/traits/TraitCascade.js';
 import type { TraitDefinition } from '../src/types.js';
-import type { EventPayload } from '@almadar/core';
+import type { EntityRow, EventPayload } from '@almadar/core';
 
 /** A trait shaped exactly like the real-world bug: INIT fetches, and a
  *  SEPARATE arm (same state, "idle -> idle") applies the fetched data when
@@ -32,7 +32,7 @@ describe('runTraitCascade', () => {
       return { effectResults: ['applied-set'], emitted: [] };
     });
 
-    const result = await runTraitCascade({
+    const result = await runTraitCascade({ maxSteps: 2000,
       trait: aggregatorTrait,
       fromState: 'idle',
       eventKey: 'INIT',
@@ -54,7 +54,7 @@ describe('runTraitCascade', () => {
       return { effectResults: [], emitted: [] };
     });
 
-    const result = await runTraitCascade({
+    const result = await runTraitCascade({ maxSteps: 2000,
       trait: aggregatorTrait,
       fromState: 'idle',
       eventKey: 'INIT',
@@ -72,7 +72,7 @@ describe('runTraitCascade', () => {
       emitted: [{ event: 'UnrelatedEvent', payload: {} }],
     }));
 
-    const result = await runTraitCascade({
+    const result = await runTraitCascade({ maxSteps: 2000,
       trait: aggregatorTrait,
       fromState: 'idle',
       eventKey: 'INIT',
@@ -170,7 +170,7 @@ describe('runTraitCascade', () => {
       return { effectResults: [], emitted: [] };
     });
 
-    await runTraitCascade({
+    await runTraitCascade({ maxSteps: 2000,
       trait: aggregatorTrait,
       fromState: 'idle',
       eventKey: 'INIT',
@@ -193,7 +193,7 @@ describe('runTraitCascade', () => {
       return { effectResults: [], emitted: [] };
     });
 
-    await runTraitCascade({
+    await runTraitCascade({ maxSteps: 2000,
       trait: aggregatorTrait,
       fromState: 'idle',
       eventKey: 'INIT',
@@ -241,7 +241,7 @@ describe('runTraitCascade', () => {
       return { effectResults: [], emitted: [] };
     });
 
-    const result = await runTraitCascade({
+    const result = await runTraitCascade({ maxSteps: 2000,
       trait: fanOutTrait,
       fromState: 'idle',
       eventKey: 'SEARCH',
@@ -259,7 +259,7 @@ describe('runTraitCascade', () => {
 
   it('returns executed: false when the initial event has no matching arm', async () => {
     const runEffects = vi.fn();
-    const result = await runTraitCascade({
+    const result = await runTraitCascade({ maxSteps: 2000,
       trait: aggregatorTrait,
       fromState: 'idle',
       eventKey: 'NO_SUCH_EVENT',
@@ -270,5 +270,83 @@ describe('runTraitCascade', () => {
     expect(result.executed).toBe(false);
     expect(result.steps).toBe(0);
     expect(runEffects).not.toHaveBeenCalled();
+  });
+});
+
+describe('runTraitCascade: the trait frame is part of a step identity (G-CROSS-057)', () => {
+  const loopTrait: TraitDefinition = {
+    name: 'Batches',
+    states: [{ name: 'saving', isInitial: true }],
+    transitions: [
+      { from: 'saving', to: 'saving', event: 'GO', effects: [['set', '@entity.step', 'go']] },
+      { from: 'saving', to: 'saving', event: 'SAVED', effects: [['set', '@entity.step', 'saved']] },
+    ],
+  };
+
+  it('the same event and payload twice, with the frame moved on in between, runs both times', async () => {
+    let frame: EntityRow = { batch: 1 };
+    const runEffects = vi.fn(async (_effects, step) => {
+      if (step.event === 'GO') return { effectResults: [], emitted: [{ event: 'SAVED', payload: { totalCount: 12 } }] };
+      if (frame.batch === 1) {
+        frame = { batch: 2 };
+        return { effectResults: [], emitted: [{ event: 'SAVED', payload: { totalCount: 12 } }] };
+      }
+      return { effectResults: [], emitted: [] };
+    });
+    const result = await runTraitCascade({ maxSteps: 2000, trait: loopTrait, fromState: 'saving', eventKey: 'GO', getEntityData: () => frame, runEffects });
+    expect(runEffects.mock.calls.map(([, step]) => step.event)).toEqual(['GO', 'SAVED', 'SAVED']);
+    expect(result.steps).toBe(3);
+  });
+
+  it('control: an exact repeat against an unchanged frame is still dropped as a cycle', async () => {
+    const runEffects = vi.fn(async (_effects, step) =>
+      step.event === 'GO'
+        ? { effectResults: [], emitted: [{ event: 'SAVED', payload: { totalCount: 12 } }] }
+        : { effectResults: [], emitted: [{ event: 'SAVED', payload: { totalCount: 12 } }] });
+    const result = await runTraitCascade({ maxSteps: 2000, trait: loopTrait, fromState: 'saving', eventKey: 'GO', getEntityData: () => ({ batch: 1 }), runEffects });
+    expect(runEffects.mock.calls.map(([, step]) => step.event)).toEqual(['GO', 'SAVED']);
+    expect(result.steps).toBe(2);
+  });
+});
+
+describe('runTraitCascade: a step reads the committed state, not the cascade’s stale copy', () => {
+  // A keyed call's result arrives after its step waited outside the event queue; meanwhile another
+  // turn moved the trait (judging → idle). The result must be handled from where the trait is now.
+  const judge: TraitDefinition = {
+    name: 'Judge',
+    states: [{ name: 'judging', isInitial: true }, { name: 'idle' }],
+    transitions: [
+      { from: 'judging', to: 'judging', event: 'ASK', effects: [['set', '@entity.step', 'asked']] },
+      { from: 'judging', to: 'judging', event: 'CANCELLED', effects: [['set', '@entity.step', 'stale']] },
+      { from: 'idle', to: 'idle', event: 'CANCELLED', effects: [['set', '@entity.step', 'fresh']] },
+    ],
+  };
+  const askThenCancelled = () => vi.fn(async (_effects, step) =>
+    step.event === 'ASK' ? { effectResults: [], emitted: [{ event: 'CANCELLED', payload: { key: 'b1' } }] } : { effectResults: [], emitted: [] });
+
+  it('a later step runs from the state another turn committed meanwhile', async () => {
+    let committed = 'judging';
+    const runEffects = vi.fn(async (_effects, step) => {
+      if (step.event === 'ASK') {
+        committed = 'idle';
+        return { effectResults: [], emitted: [{ event: 'CANCELLED', payload: { key: 'b1' } }] };
+      }
+      return { effectResults: [], emitted: [] };
+    });
+    const result = await runTraitCascade({ maxSteps: 2000, trait: judge, fromState: 'judging', eventKey: 'ASK', getEntityData: () => ({}), runEffects, readState: () => committed });
+    expect(runEffects.mock.calls.map(([, step]) => `${step.fromState}:${step.event}`)).toEqual(['judging:ASK', 'idle:CANCELLED']);
+    expect(result.finalState).toBe('idle');
+  });
+
+  it('control: when nothing else moved the trait, the cascade continues from its own step', async () => {
+    const runEffects = askThenCancelled();
+    await runTraitCascade({ maxSteps: 2000, trait: judge, fromState: 'judging', eventKey: 'ASK', getEntityData: () => ({}), runEffects, readState: () => 'judging' });
+    expect(runEffects.mock.calls.map(([, step]) => `${step.fromState}:${step.event}`)).toEqual(['judging:ASK', 'judging:CANCELLED']);
+  });
+
+  it('edge: the first step runs from the requested state, and no committed state means the cascade’s own', async () => {
+    const runEffects = askThenCancelled();
+    await runTraitCascade({ maxSteps: 2000, trait: judge, fromState: 'judging', eventKey: 'ASK', getEntityData: () => ({}), runEffects, readState: () => undefined });
+    expect(runEffects.mock.calls.map(([, step]) => `${step.fromState}:${step.event}`)).toEqual(['judging:ASK', 'judging:CANCELLED']);
   });
 });

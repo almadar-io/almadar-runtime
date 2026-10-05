@@ -10,6 +10,7 @@ import type { ServerEffectStageDeps } from '../effects/effect-stage.js';
 import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
 import { createInProcessTransport, type EventTransport } from '../server/EventTransport.js';
 import type { TraitIndex } from '../traits/trait-index.js';
+import { InFlightCalls } from '../effects/in-flight-calls.js';
 import type { CircuitStore } from './circuit-store.js';
 import { createIndexStageRunner } from './stage-runner.js';
 import { evaluateOrbitalEvent, type EvaluateOrbitalEventDeps } from './evaluateOrbitalEvent.js';
@@ -23,6 +24,8 @@ export interface LocalStoreTransportOptions {
   callService?: EffectHandlers['callService'];
   /** The running app lent to `call-service` providers as the caller. */
   servicePorts?: ServerEffectStageDeps['servicePorts'];
+  /** Releases the host's request queue while a `call-service` awaits its provider. */
+  outsideEventQueue?: ServerEffectStageDeps['outsideEventQueue'];
   user?: UserContext;
   guardMode?: EvaluateOrbitalEventDeps['guardMode'];
   strictBindings?: EvaluateOrbitalEventDeps['strictBindings'];
@@ -35,6 +38,7 @@ export interface LocalStoreTransportOptions {
 
 export function createLocalStoreTransport(options: LocalStoreTransportOptions): EventTransport {
   const { traitIndex, persistence, store } = options;
+  const inFlightCalls = new InFlightCalls();
   return createInProcessTransport(
     async (_orbitalName: string, request: OrbitalEventRequest) => {
       const runEffects = createIndexStageRunner({
@@ -45,6 +49,8 @@ export function createLocalStoreTransport(options: LocalStoreTransportOptions): 
         ...(options.schema !== undefined ? { schema: options.schema } : {}),
         ...(options.callService !== undefined ? { extraEffectHandlers: { callService: options.callService } } : {}),
         ...(options.servicePorts !== undefined ? { servicePorts: options.servicePorts } : {}),
+        ...(options.outsideEventQueue !== undefined ? { outsideEventQueue: options.outsideEventQueue } : {}),
+        inFlightCalls,
         ...(options.debug !== undefined ? { debug: options.debug } : {}),
       });
       return evaluateOrbitalEvent(

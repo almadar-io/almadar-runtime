@@ -18,7 +18,11 @@ export type ChannelMessage =
 export interface TransportChannel {
   post(message: ChannelMessage): void;
   onMessage(listener: (message: ChannelMessage) => void): () => void;
+  /** The other end went away for good (a stopped extension worker's port); absent for channels that cannot close. */
+  onClose?(listener: () => void): () => void;
 }
+
+const CLOSED = 'The host closed the channel before answering';
 
 export interface ChannelTransportOptions {
   /** The host on the other end keeps the program's browser-stored entities (see `EventTransport.hostsBrowserStore`). */
@@ -37,9 +41,25 @@ export function createChannelTransport(channel: TransportChannel, options: Chann
     settle(message);
   });
 
+  let closed = false;
+  const closedReply = (id: number): ChannelMessage => ({
+    almadarChannel: 'reply',
+    id,
+    response: { success: false, transitioned: false, states: {}, emittedEvents: [], error: CLOSED },
+  });
+  channel.onClose?.(() => {
+    closed = true;
+    for (const [id, settle] of pending) settle(closedReply(id));
+    pending.clear();
+  });
+
   const request = (build: (id: number) => ChannelMessage) =>
     new Promise<ChannelMessage>((resolve) => {
       const id = next++;
+      if (closed) {
+        resolve(closedReply(id));
+        return;
+      }
       pending.set(id, resolve);
       channel.post(build(id));
     });
@@ -104,5 +124,35 @@ export function serveChannel(channel: TransportChannel, transport: EventTranspor
     push: (emitted, target) => channel.post({ almadarChannel: 'push', emitted, target }),
     pushDispatch: (orbitalName, request, response) => channel.post({ almadarChannel: 'dispatched', orbitalName, request, response }),
     stop,
+  };
+}
+
+/**
+ * A channel that listens from the moment it is wrapped and keeps what arrives until something
+ * subscribes, then hands it over in order: a host that is still starting (an extension worker
+ * waking up) serves the channel late without losing the view's first messages.
+ */
+export function holdUntilServed(channel: TransportChannel): TransportChannel {
+  let held: ChannelMessage[] | undefined = [];
+  const listeners: Array<(message: ChannelMessage) => void> = [];
+  channel.onMessage((message) => {
+    if (held !== undefined) held.push(message);
+    else listeners.forEach((l) => l(message));
+  });
+  return {
+    post: (message) => channel.post(message),
+    onMessage(listener) {
+      listeners.push(listener);
+      if (held !== undefined) {
+        const early = held;
+        held = undefined;
+        early.forEach((m) => listeners.forEach((l) => l(m)));
+      }
+      return () => {
+        const i = listeners.indexOf(listener);
+        if (i >= 0) listeners.splice(i, 1);
+      };
+    },
+    ...(channel.onClose !== undefined ? { onClose: channel.onClose.bind(channel) } : {}),
   };
 }

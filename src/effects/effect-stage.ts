@@ -25,6 +25,7 @@ import type {
   RuntimeRenderPattern,
   RuntimePatternValue,
   TraitState,
+  PersistBatchSummary,
 } from '../types.js';
 import { isEffectTuple } from '../types.js';
 import type {
@@ -59,6 +60,7 @@ import { entityAccessPolicies } from '@almadar/core/mock';
 import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from '../entities/entityAccess.js';
 import { findEntityAmongOrbitals } from '../traits/OrbitalTraitParsing.js';
 import { defaultCallService } from './defaultCallService.js';
+import type { InFlightCalls } from './in-flight-calls.js';
 import { getPatternFieldsContract } from '@almadar/core/patterns';
 
 const effectLog = createLogger("almadar:runtime:effects");
@@ -130,6 +132,8 @@ export interface ServerEffectStageDeps {
    * Absent: the host has no shared queue.
    */
   outsideEventQueue?: <T>(work: () => Promise<T>) => Promise<T>;
+  /** The running app's in-flight call registry, shared by every transition (`cancel-call`). */
+  inFlightCalls?: InFlightCalls;
   /**
    * The running app, lent to a `call-service` provider as the caller (the
    * calling trait's position, the requesting user): its declared inputs, the
@@ -561,18 +565,20 @@ export async function runServerEffectStage(
           if (batchFailed) break;
         }
 
+        const batchSummary: PersistBatchSummary = {
+          operations: batchResults,
+          completedCount: completed.length,
+          totalCount: operations.length,
+        };
         effectResults.push({
           effect: 'persist',
           action: 'batch',
-          data: {
-            operations: batchResults,
-            completedCount: completed.length,
-            totalCount: operations.length,
-          },
+          data: batchSummary,
           success: !batchFailed,
           ...(batchFailed ? { error: batchError } : {}),
         });
-        return;
+        // What was written, as the server handler reports it (the declared success payload).
+        return batchSummary;
       }
 
       // ----------------------------------------------------------------
@@ -745,11 +751,14 @@ export async function runServerEffectStage(
       return undefined;
     },
 
-    callService: async (service, action, params, _context, route) => {
+    callService: async (service, action, params, context, route) => {
       try {
         let result = null;
         // Custom handlers can override this
-        const awaitProvider = deps.outsideEventQueue ?? (<T,>(work: () => Promise<T>): Promise<T> => work());
+        // A keyed call (it carries a signal) is already waiting outside the queue — the executor released it.
+        const awaitProvider = context?.signal === undefined && deps.outsideEventQueue !== undefined
+          ? deps.outsideEventQueue
+          : <T,>(work: () => Promise<T>): Promise<T> => work();
         const message = (payload: EventPayload): void => {
           if (route === undefined) return;
           const callingTrait = deps.irTraits.find((t) => t.name === traitName);
@@ -764,11 +773,13 @@ export async function runServerEffectStage(
           deps.deliverLive?.(route.event, payload, stamp);
         };
         const host = deps.servicePorts?.({ orbital: deps.orbitalName, trait: traitName }, user, message);
+        const signal = context?.signal;
         const callContext =
-          user !== undefined || host !== undefined
+          user !== undefined || host !== undefined || signal !== undefined
             ? {
                 ...(user !== undefined ? { principal: user.id, role: user.role } : {}),
                 ...(host !== undefined ? { host } : {}),
+                ...(signal !== undefined ? { signal } : {}),
               }
             : undefined;
         if (deps.extraEffectHandlers?.callService) {
@@ -1055,6 +1066,9 @@ export async function runServerEffectStage(
         deferRenderBindings: clientResolvesRenderBindings(deps.entity),
         resolveIntrinsicFields: (type) => deps.intrinsicFieldNames(type),
         resolveEntityFields: (type) => deps.entityFieldsFor(type),
+        inFlightCalls: deps.inFlightCalls,
+    ...(deps.outsideEventQueue !== undefined ? { outsideEventQueue: deps.outsideEventQueue } : {}),
+        ...(deps.outsideEventQueue !== undefined ? { outsideEventQueue: deps.outsideEventQueue } : {}),
       });
 
       for (const innerEffect of atomicEffects) {
@@ -1271,6 +1285,8 @@ export async function runServerEffectStage(
     deferRenderBindings: clientResolvesRenderBindings(deps.entity),
     resolveIntrinsicFields: (type) => deps.intrinsicFieldNames(type),
     resolveEntityFields: (type) => deps.entityFieldsFor(type),
+    inFlightCalls: deps.inFlightCalls,
+    ...(deps.outsideEventQueue !== undefined ? { outsideEventQueue: deps.outsideEventQueue } : {}),
   });
 
   await executor.executeAll(effects);

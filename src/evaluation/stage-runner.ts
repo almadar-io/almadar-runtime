@@ -22,6 +22,7 @@ import type { EffectHandlers } from '../types.js';
 import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
 import type { TraitIndex } from '../traits/trait-index.js';
 import type { StateMachineManager } from '../traits/StateMachineCore.js';
+import type { InFlightCalls } from '../effects/in-flight-calls.js';
 
 export interface IndexStageRunnerOptions {
   traitIndex: TraitIndex;
@@ -42,6 +43,10 @@ export interface IndexStageRunnerOptions {
   messages?: MessageCatalogs;
   /** The running app lent to `call-service` providers as the caller (declared inputs, dispatch, read). */
   servicePorts?: ServerEffectStageDeps['servicePorts'];
+  /** The running app's in-flight call registry, shared by every request the host runs (`cancel-call`). */
+  inFlightCalls?: InFlightCalls;
+  /** Releases the host's request queue while a `call-service` awaits its provider. */
+  outsideEventQueue?: ServerEffectStageDeps['outsideEventQueue'];
 }
 
 /**
@@ -101,6 +106,8 @@ export function createIndexStageRunner(options: IndexStageRunnerOptions): Evalua
         ...(options.mockMode !== undefined ? { mockMode: options.mockMode } : {}),
         ...(options.messages !== undefined ? { messages: options.messages } : {}),
         ...(options.servicePorts !== undefined ? { servicePorts: options.servicePorts } : {}),
+        ...(options.inFlightCalls !== undefined ? { inFlightCalls: options.inFlightCalls } : {}),
+        ...(options.outsideEventQueue !== undefined ? { outsideEventQueue: options.outsideEventQueue } : {}),
         ...(options.schema?.locales?.[0] !== undefined ? { defaultLocale: options.schema.locales[0] } : {}),
       },
       { ...args, traitName },

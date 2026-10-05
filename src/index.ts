@@ -157,6 +157,8 @@ export {
   type ServerEffectStageArgs,
 } from "./effects/effect-stage.js";
 
+export { InFlightCalls, type KeyedCallOutcome } from "./effects/in-flight-calls.js";
+
 // EffectExecutor
 export {
   EffectExecutor,
@@ -255,7 +257,7 @@ export type { ChangeRecord, IndexedDbPersistenceOptions } from "./entities/Index
 export { seedBrowserStore } from "./entities/seedBrowserStore.js";
 export { createLocalStoreTransport } from "./evaluation/local-store-transport.js";
 export { dispatchDeclaredInput } from "./evaluation/declared-input-dispatch.js";
-export { createChannelTransport, serveChannel, type ChannelMessage, type ChannelTransportOptions, type ServedChannel, type TransportChannel } from "./server/channel-transport.js";
+export { createChannelTransport, holdUntilServed, serveChannel, type ChannelMessage, type ChannelTransportOptions, type ServedChannel, type TransportChannel } from "./server/channel-transport.js";
 export type { LocalStoreTransportOptions } from "./evaluation/local-store-transport.js";
 export { createResidenceTransport } from "./evaluation/residence-transport.js";
 export type { ResidenceTransportOptions } from "./evaluation/residence-transport.js";

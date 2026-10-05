@@ -40,10 +40,6 @@ import { DispatchMemory, type EffectDispatch } from '../evaluation/dispatch-memo
 
 const cascadeLog = createLogger('almadar:runtime:trait-cascade');
 
-/** Generous safety cap — real cascades are 1-3 hops. Never silently
- *  truncate: hitting this logs loudly and stops, keeping whatever the
- *  cascade already accumulated. */
-const DEFAULT_MAX_STEPS = 20;
 
 /** One step's own emitted events, as the caller's effect-runner reports them. */
 export interface CascadeEmittedEvent {
@@ -97,7 +93,14 @@ export interface RunTraitCascadeOptions<TEffectResult> {
         effects: TransitionResult['effects'],
         step: { fromState: string; toState: string; event: string; payload?: EventPayload; dispatch: EffectDispatch },
     ) => Promise<CascadeStepEffectsResult<TEffectResult>>;
-    maxSteps?: number;
+    /** The steps this cascade may take: what is left of the enclosing dispatch's one budget
+     *  (`CROSS_TRAIT_CASCADE_CAP`), so a trait's own follow-ups count like every other step —
+     *  the Rust kernel's single worklist. Hitting it logs and stops, reported as `cappedAt`. */
+    maxSteps: number;
+    /** The trait's committed state, read before every step after the first: another turn may
+     *  have moved the trait while a step's effects waited outside the event queue (a keyed call).
+     *  `undefined` keeps the cascade's own state. */
+    readState?: () => string | undefined;
     /** `false`: run only the requested step and leave the trait's own emits
      *  to the client that relays them (the compiled wire). Default `true`. */
     selfCascade?: boolean;
@@ -141,7 +144,7 @@ export async function runTraitCascade<TEffectResult>(
     const {
         trait, fromState, eventKey, payload, getEntityData, config, user, now,
         guardMode, strictBindings, contextExtensions, runEffects,
-        maxSteps = DEFAULT_MAX_STEPS, logContext,
+        maxSteps, logContext,
     } = options;
     const memory = options.memory ?? new DispatchMemory();
 
@@ -180,7 +183,7 @@ export async function runTraitCascade<TEffectResult>(
 
     while (queue.length > 0 && steps < maxSteps) {
         const item = queue.shift() as QueuedEvent;
-        const stepFromState = currentState;
+        const stepFromState = (steps > 0 ? options.readState?.() : undefined) ?? currentState;
         // Payload is part of the identity, not just event+state — a
         // decrementing fan-out counter (`FAN_OUT_STEP {remaining: 2}` ->
         // `FAN_OUT_STEP {remaining: 1}`, both `searching -> searching`
@@ -191,11 +194,13 @@ export async function runTraitCascade<TEffectResult>(
         // A TRUE cycle (no payload change either) still gets caught, same
         // as before; anything that genuinely never converges still hits
         // the numeric `maxSteps` cap below.
-        const stepKey = dispatchVisitKey(trait.name, item.event, stepFromState, item.payload);
+        // The trait frame is part of the identity too: a loop whose effects persisted progress
+        // (another batch saved) sees a new frame even when the event and payload repeat.
+        const entityData = await getEntityData();
+        const stepKey = dispatchVisitKey(trait.name, item.event, stepFromState, item.payload, entityData ?? null);
         if (visited.has(stepKey)) continue; // this branch cycles — drop it, keep draining the rest of the queue
         visited.add(stepKey);
 
-        const entityData = await getEntityData();
         const view = memory.view(trait.name, item.delivery);
         const result = processEvent({
             traitState: { traitName: trait.name, currentState: stepFromState, previousState: null, lastEvent: null, context: {} },

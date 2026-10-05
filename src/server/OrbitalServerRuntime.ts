@@ -59,6 +59,7 @@ import type { EffectDispatch } from "../evaluation/dispatch-memory.js";
 import { eventRouteKey } from "../events/identity/routing.js";
 import {
   evaluateOrbitalEvent,
+  readTraitFrame,
   collectListenerTargets,
   deliveryOf,
   freshDeliveryGuardBindings,
@@ -236,6 +237,7 @@ import { dispatchVisitKey, isEntityCall, buildResolvedTraitConfigs, collectCalls
 } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf } from "@almadar/core/mock";
 import { runServerEffectStage } from "../effects/effect-stage.js";
+import { InFlightCalls } from "../effects/in-flight-calls.js";
 import { installPolicyOwnerGates, MockPersistenceAdapter } from "../entities/MockPersistenceAdapter.js";
 import { seedBrowserStore } from "../entities/seedBrowserStore.js";
 import {
@@ -1046,6 +1048,11 @@ export class OrbitalServerRuntime {
    *
    * Returns `null` if `register()` hasn't run yet.
    */
+  /** The registered program's name, or null when nothing is registered (none yet, or after `unregisterAll`). */
+  registeredSchemaName(): string | null {
+    return this.orbitals.size > 0 ? (this.resolvedSchema?.name ?? null) : null;
+  }
+
   getResolvedSchema(): OrbitalSchema | null {
     return this.resolvedSchema;
   }
@@ -2453,6 +2460,9 @@ export class OrbitalServerRuntime {
    */
   private eventQueue: Promise<void> = Promise.resolve();
 
+  /** This app's in-flight keyed `call-service`s, shared by every transition it runs (`cancel-call`). */
+  private readonly inFlightCalls = new InFlightCalls();
+
   /** Wait for the queue, then hold it until the returned release is called. FIFO. */
   private acquireEventQueue(): Promise<() => void> {
     const previous = this.eventQueue;
@@ -2560,7 +2570,8 @@ export class OrbitalServerRuntime {
         )) {
           const from = registered.manager.getState(target.listenerTrait, target.entityId)?.currentState ??
             findInitialState(target.entry.traitDef);
-          const key = `${orbitalName}\u0000${dispatchVisitKey(target.listenerTrait, target.triggers, from, target.payload)}`;
+          const frame = await readTraitFrame(this.persistence, registered.traitFieldStates, target.entry, target.entityId);
+          const key = `${orbitalName}\u0000${dispatchVisitKey(target.listenerTrait, target.triggers, from, target.payload, frame)}`;
           if (opts.visited.has(key)) continue;
           if (hops >= CROSS_ORBITAL_RELAY_CAP) {
             xOrbitalLog.warn('relay:truncated', { event: emitted.event, hops });
@@ -2694,6 +2705,7 @@ export class OrbitalServerRuntime {
         sigilTheme,
         extraEffectHandlers: this.config.effectHandlers,
         outsideEventQueue: (work) => this.outsideEventQueue(queueHold, work),
+        inFlightCalls: this.inFlightCalls,
         servicePorts: (caller, user, message) => this.servicePorts(caller, user, message),
         deliverEmit: (event, eventPayload, stamp, fromPersistSuccess) => {
           // Observability tap, NOT circuit routing (W4): the runtime's own

@@ -142,7 +142,7 @@ describe('openBrowserHost', () => {
     expect(reported).toHaveLength(1);
   });
 
-  it('runs one request at a time: a request that arrives mid-request waits for it', async () => {
+  it('a request that arrives while another awaits its service runs in the meantime, and sees the state the first transition entered', async () => {
     const slow: OrbitalSchema = {
       name: 'Feed',
       orbitals: [{
@@ -176,9 +176,10 @@ describe('openBrowserHost', () => {
       },
     });
     const [a, b] = await Promise.all([host.send('Feed', { event: 'GO', payload: { label: 'a' } }), host.send('Feed', { event: 'GO', payload: { label: 'b' } })]);
-    expect(log).toEqual(['start a (1 running)', 'start b (1 running)']);
+    // b runs while a's call is out of the queue, but Work is already `busy`, where GO does nothing.
+    expect(log).toEqual(['start a (1 running)']);
     expect(a.states).toEqual({ Work: 'idle' });
-    expect(b.states).toEqual({ Work: 'idle' });
+    expect(b.transitioned).toBe(false);
   });
 
   it('control: a service that dispatches an input while its own request runs is not made to wait for itself', async () => {

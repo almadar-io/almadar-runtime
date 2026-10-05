@@ -191,6 +191,21 @@ export interface WorklistItem {
   fromAtDelivery?: boolean;
 }
 
+/** A trait's frame as a step reads it: declared defaults, then its persisted row, then its in-memory frame. */
+export async function readTraitFrame(
+  persistence: PersistenceAdapter,
+  frames: Map<string, EntityRow>,
+  entry: IndexedTrait,
+  rowId: string | undefined,
+): Promise<EntityRow> {
+  const persisted = rowId ? ((await persistence.getById(entry.entity.name, rowId)) ?? {}) : {};
+  return {
+    ...(collectDeclaredEntityDefaults(entry.entity) ?? {}),
+    ...persisted,
+    ...(frames.get(entry.frameKey) ?? {}),
+  };
+}
+
 /**
  * Play one event against the resolved schema and return the wire response
  * every path speaks (`@almadar/core`'s `OrbitalEventResponse`).
@@ -553,7 +568,19 @@ export async function evaluateOrbitalEvent(
       deps.mount.hold(item.trait, item);
       continue;
     }
-    const visitKey = dispatchVisitKey(item.trait, item.event, item.from, item.payload);
+    const entry = traitIndex.byName.get(item.trait);
+    if (!entry) {
+      // A client-declared name that isn't in the schema is garbage input
+      // — skip it loudly rather than failing the whole request.
+      evaluateLog.warn('dispatch:unknown-trait', { trait: item.trait, event: item.event });
+      continue;
+    }
+
+    const currentEntityId = stepEntityId(item.trait, entry, item.entityId);
+    let rowId = rowByTrait.get(item.trait) ?? currentEntityId;
+    const readFrame = (): Promise<EntityRow> => readTraitFrame(persistence, frames, entry, rowId);
+
+    const visitKey = dispatchVisitKey(item.trait, item.event, item.from, item.payload, await readFrame());
     if (visited.has(visitKey)) continue;
     if (item.listenGuard !== undefined && !listenGuardPasses(item.listenGuard, {
       payload: item.delivery.payload,
@@ -565,35 +592,17 @@ export async function evaluateOrbitalEvent(
       continue;
     }
     visited.add(visitKey);
-    steps += 1;
-
-    const entry = traitIndex.byName.get(item.trait);
-    if (!entry) {
-      // A client-declared name that isn't in the schema is garbage input
-      // — skip it loudly rather than failing the whole request.
-      evaluateLog.warn('dispatch:unknown-trait', { trait: item.trait, event: item.event });
-      continue;
-    }
-
-    const currentEntityId = stepEntityId(item.trait, entry, item.entityId);
-    let rowId = rowByTrait.get(item.trait) ?? currentEntityId;
-
-    const readFrame = async (): Promise<EntityRow> => {
-      const persisted = rowId
-        ? ((await persistence.getById(entry.entity.name, rowId)) ?? {})
-        : {};
-      return {
-        ...(collectDeclaredEntityDefaults(entry.entity) ?? {}),
-        ...persisted,
-        ...(frames.get(entry.frameKey) ?? {}),
-      };
-    };
+    // The requested (seed) steps are not counted, as in the Rust kernel's seed loop; every follow-up is.
+    if (item.fromAtDelivery === true) steps += 1;
 
     const cascade = await runTraitCascade<StepOutcome>({
       trait: entry.traitDef,
       delivery: item.delivery,
       memory,
       fromState: item.from,
+      readState: () => manager.getState(item.trait, currentEntityId)?.currentState,
+      // The item's own first step plus what is left of the dispatch's budget for its follow-ups.
+      maxSteps: CROSS_TRAIT_CASCADE_CAP - steps + 1,
       eventKey: item.event,
       payload: item.payload,
       config: entry.config,
@@ -605,6 +614,9 @@ export async function evaluateOrbitalEvent(
       getEntityData: readFrame,
       ...(deps.clientRelays === true ? { selfCascade: false } : {}),
       runEffects: async (stepEffects, step) => {
+        // Transition, then effects: the state this step enters is the trait's state while its effects
+        // run, so a request served while an effect waits outside the host queue sees it.
+        manager.commitState(item.trait, step.toState, currentEntityId, step.event);
         const emittedStart = emittedEvents.length;
         const effectStart = effectResults.length;
         const itemClientEffects: ClientEffectTuple[] = [];
@@ -666,6 +678,9 @@ export async function evaluateOrbitalEvent(
       },
       ...(deps.logContext !== undefined ? { logContext: deps.logContext } : {}),
     });
+
+    steps += Math.max(cascade.steps - 1, 0);
+    if (cascade.cappedAt !== undefined && !truncatedTraits.includes(item.trait)) truncatedTraits.push(item.trait);
 
     // Commit the cascade's final state (+ observer trace per hop — the
     // same contract `sendEvent` fulfills for the verification registry).

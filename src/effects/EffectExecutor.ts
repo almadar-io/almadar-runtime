@@ -19,6 +19,7 @@ import type {
 import { getOperatorRunsOn } from '@almadar/std/registry';
 import { HANDLER_MANIFEST } from '../types.js';
 import type { EffectDelegate } from './server-leg.js';
+import { untilAborted, type InFlightCalls } from './in-flight-calls.js';
 import { interpolateValue, createContextFromBindings, deferEntityBindings } from '../evaluation/BindingResolver.js';
 import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from '../types.js';
 import { omitFrameFields,
@@ -118,6 +119,13 @@ export interface EffectExecutorOptions {
      * `ServerLegCollector` (`./server-leg.js`).
      */
     delegate?: EffectDelegate;
+    /**
+     * The running app's in-flight call registry, shared by every transition of the app.
+     * A keyed `call-service` and `cancel-call` need it; absent, they fail.
+     */
+    inFlightCalls?: InFlightCalls;
+    /** Run `work` with the host's event queue released (a keyed call's wait); absent: the host has no shared queue. */
+    outsideEventQueue?: <T>(work: () => Promise<T>) => Promise<T>;
 }
 
 // ============================================================================
@@ -262,6 +270,8 @@ export class EffectExecutor {
     private resolveEntityFields?: (entityType: string) => readonly EntityField[];
     private environment: 'client' | 'server';
     private delegate?: EffectDelegate;
+    private inFlightCalls?: InFlightCalls;
+    private readonly outsideEventQueue: <T>(work: () => Promise<T>) => Promise<T>;
 
     constructor(options: EffectExecutorOptions) {
         this.handlers = options.handlers;
@@ -277,6 +287,8 @@ export class EffectExecutor {
         this.resolveEntityFields = options.resolveEntityFields;
         this.environment = options.environment ?? 'server';
         this.delegate = options.delegate;
+        this.inFlightCalls = options.inFlightCalls;
+        this.outsideEventQueue = options.outsideEventQueue ?? (<T,>(work: () => Promise<T>): Promise<T> => work());
     }
 
     /**
@@ -700,6 +712,7 @@ export class EffectExecutor {
         const block = emitBlock as {
             success?: RuntimeValue;
             failure?: RuntimeValue;
+            cancelled?: RuntimeValue;
             on_change?: RuntimeValue;
             onChange?: RuntimeValue;
             on_message?: RuntimeValue;
@@ -710,9 +723,27 @@ export class EffectExecutor {
         return {
             success: asStr(block.success),
             failure: asStr(block.failure),
+            cancelled: asStr(block.cancelled),
             on_change: asStr(block.on_change) ?? asStr(block.onChange),
             on_message: asStr(block.on_message) ?? asStr(block.onMessage),
         };
+    }
+
+    private requireInFlightCalls(use: string): InFlightCalls {
+        if (this.inFlightCalls === undefined) {
+            throw new Error(`${use}: no running app registered an in-flight call registry on this executor`);
+        }
+        return this.inFlightCalls;
+    }
+
+    /** The call's declared `key`, already evaluated with the effect's args; undefined when the call declares none. */
+    private resolveCallKey(options: RuntimeValue, use: string): string | undefined {
+        if (!options || typeof options !== 'object' || Array.isArray(options) || !('key' in options)) return undefined;
+        const key = options.key;
+        if (typeof key !== 'string' || key === '') {
+            throw new Error(`${use}: key resolved to ${String(key)}`);
+        }
+        return key;
     }
 
     /** Build the source metadata stamp for an emit fired from this trait. */
@@ -747,6 +778,11 @@ export class EffectExecutor {
         if (eventName) {
             this.handlers.emit(eventName, payload as EventPayload | undefined, this.sourceStamp(eventName), fromPersistSuccess);
         }
+    }
+
+    private emitCancelled(emit: EmitConfig | undefined, key: string): void {
+        if (!emit?.cancelled) return;
+        this.handlers.emit(emit.cancelled, { key }, this.sourceStamp(emit.cancelled));
     }
 
     private emitFailure(
@@ -1157,8 +1193,22 @@ export class EffectExecutor {
                     const route = emitCfg?.on_message !== undefined
                         ? { event: emitCfg.on_message, source: this.sourceStamp(emitCfg.on_message) }
                         : undefined;
-                    const result = await this.handlers.callService(service, action, params, undefined, route);
-                    this.emitSuccess(emitCfg, 'success', result);
+                    const callKey = this.resolveCallKey(args[3], 'call-service key');
+                    if (callKey === undefined) {
+                        const result = await this.handlers.callService(service, action, params, undefined, route);
+                        this.emitSuccess(emitCfg, 'success', result);
+                        break;
+                    }
+                    const registry = this.requireInFlightCalls('call-service key');
+                    // The host's queue is released around the race, so a cancelled call takes its turn
+                    // back before this transition continues.
+                    const outcome = await registry.run(callKey, (signal) =>
+                        this.outsideEventQueue(() => untilAborted(signal, this.handlers.callService(service, action, params, { signal }, route))));
+                    if (outcome.cancelled) {
+                        this.emitCancelled(emitCfg, callKey);
+                    } else {
+                        this.emitSuccess(emitCfg, 'success', outcome.value);
+                    }
                 } catch (err) {
                     // A declared failure route IS the handling: emit it and let the
                     // transition complete, as `persist` does. Rethrowing aborted the
@@ -1167,6 +1217,15 @@ export class EffectExecutor {
                     this.emitFailure(emitCfg, err as RuntimeValue);
                     return { failed: true, error: failureMessage(err as RuntimeValue) };
                 }
+                break;
+            }
+
+            case 'cancel-call': {
+                const callKey = args[0];
+                if (typeof callKey !== 'string' || callKey === '') {
+                    throw new Error(`cancel-call: key resolved to ${String(callKey)}`);
+                }
+                this.requireInFlightCalls('cancel-call').cancel(callKey);
                 break;
             }
 
@@ -1554,6 +1613,8 @@ export class EffectExecutor {
                     strictBindings: this.strictBindings,
                     contextExtensions: this.contextExtensions,
                     deferRenderBindings: this.deferRenderBindings,
+                    inFlightCalls: this.inFlightCalls,
+                    outsideEventQueue: this.outsideEventQueue,
                 });
                 await bodyExecutor.execute(body);
                 break;

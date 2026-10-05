@@ -58,7 +58,8 @@ function fetchArg(trait: Trait): string | undefined {
 function persistEntity(trait: Trait): string | undefined {
   const effects = trait.stateMachine?.transitions[0].effects ?? [];
   const persistEffect = effects.find((e): e is PersistEffect => e[0] === 'persist');
-  return persistEffect?.[2];
+  const entity = persistEffect?.[2];
+  return typeof entity === 'string' ? entity : undefined;
 }
 function renderUiEntity(trait: Trait): RuntimeValue {
   const effects = trait.stateMachine?.transitions[0].effects ?? [];
