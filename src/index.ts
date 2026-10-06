@@ -246,14 +246,8 @@ export { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults, normalize
 export { applyRowAccess, checkMutationAccess } from "./entities/entityAccess.js";
 export type { AccessBindings } from "./entities/entityAccess.js";
 
-// Storage contract + in-memory default — extracted from OrbitalServerRuntime
-// so browser-side mock runtimes can use the same adapter interface.
-export type { PersistenceAdapter } from "./entities/PersistenceAdapter.js";
-export { InMemoryPersistence } from "./entities/PersistenceAdapter.js";
-// `[persistent: x, local]` entities: the browser store, its seed rule, and the
-// transports that run their data in-process.
-export { IndexedDbPersistence, CHANGE_LOG } from "./entities/IndexedDbPersistence.js";
-export type { ChangeRecord, IndexedDbPersistenceOptions } from "./entities/IndexedDbPersistence.js";
+// `[persistent: x, local]` entities: the browser store seed rule and the
+// transports that run their data in-process (the adapters live in `@almadar/db`).
 export { seedBrowserStore } from "./entities/seedBrowserStore.js";
 export { createLocalStoreTransport } from "./evaluation/local-store-transport.js";
 export { dispatchDeclaredInput } from "./evaluation/declared-input-dispatch.js";
@@ -263,10 +257,6 @@ export { createResidenceTransport } from "./evaluation/residence-transport.js";
 export type { ResidenceTransportOptions } from "./evaluation/residence-transport.js";
 export { browserStoreName, openBrowserHost, openBrowserStore, openBrowserStoreTransport, openBundledBrowserStore } from "./evaluation/browser-store-transport.js";
 export type { BrowserHost, BrowserHostOptions, BrowserStoreTransportOptions, InputDispatchListener } from "./evaluation/browser-store-transport.js";
-
-// Mock-data persistence adapter (faker-seeded) — browser-safe, for use in
-// offline previews (`OrbPreview autoMock`) or dev harnesses.
-export { MockPersistenceAdapter, createMockPersistence } from "./entities/MockPersistenceAdapter.js";
 
 // Server-side effect handlers factory — the `fetch`/`persist`/`set`/`ref`/
 // `deref`/`swap`/`atomic`/`callService` layer. Mirrors the handlers built
@@ -290,12 +280,6 @@ export {
 export type { ServerBridgeConfig, ServerBridgeState } from "./server/ServerBridge.js";
 
 export type { OsHandlerContext, OsHandlerResult } from "./effects/createOsHandlers.js";
-
-export type {
-  EntityField,
-  EntitySchema,
-  MockPersistenceConfig,
-} from "./entities/MockPersistenceAdapter.js";
 
 // Payload Validation (RCG-10)
 export {

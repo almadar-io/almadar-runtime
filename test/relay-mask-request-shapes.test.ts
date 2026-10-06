@@ -1,7 +1,8 @@
 // Runtime Spec Clause 5.4: a stateless host derives the relay mask from the request's shape — delegated leg masks nothing, declared dispatch masks its declared set, discovery masks its resolved targets.
 import { describe, it, expect } from 'vitest';
 import type { EntityRow, OrbitalSchema, Trait, Transition } from '@almadar/core';
-import { buildTraitIndex, createIndexStageRunner, evaluateOrbitalEvent, InMemoryPersistence, StateMachineManager, type EvaluateOrbitalEventDeps, type OrbitalEventRequest } from '../src/index.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
+import { buildTraitIndex, createIndexStageRunner, evaluateOrbitalEvent, StateMachineManager, type EvaluateOrbitalEventDeps, type OrbitalEventRequest } from '../src/index.js';
 
 const listener = (name: string, extra: Transition[] = []): Trait => ({
   name,

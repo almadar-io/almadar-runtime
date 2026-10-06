@@ -7,7 +7,8 @@
 import { describe, it, expect } from 'vitest';
 import type { EntityRow, OrbitalSchema, TypedEffect } from '@almadar/core';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { buildTraitIndex, createIndexStageRunner, evaluateOrbitalEvent, InMemoryPersistence, StateMachineManager, type EvaluateOrbitalEventDeps } from '../src/index.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
+import { buildTraitIndex, createIndexStageRunner, evaluateOrbitalEvent, StateMachineManager, type EvaluateOrbitalEventDeps } from '../src/index.js';
 
 function schema(): OrbitalSchema {
   const render = (label: string): TypedEffect => ['render-ui', 'main', { type: 'typography', content: label }];

@@ -18,12 +18,12 @@ import {
   createMemoryCircuitStore,
   dispatchWithServerLeg,
   evaluateOrbitalEvent,
-  InMemoryPersistence,
   postServerLeg,
   StateMachineManager,
   type ClientDispatch,
   type ClientRoleOpts,
 } from '../src/index.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { EntityRow } from '../src/index.js';
 import type { OrbitalEventResponse } from '@almadar/core';
 

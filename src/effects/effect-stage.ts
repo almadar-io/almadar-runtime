@@ -9,7 +9,7 @@
 import { createLogger } from '@almadar/logger';
 import { EffectExecutor, clientResolvesRenderBindings } from './EffectExecutor.js';
 import type { ServerEffectResult } from './ServerEffectHandlers.js';
-import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
+import type { PersistenceAdapter } from '@almadar/core';
 import { stampEmitSource } from '../events/emit-stamp.js';
 import type { EffectDispatch } from '../evaluation/dispatch-memory.js';
 import { buildConfigBinding, buildEntityBinding } from '../traits/config-defaults.js';

@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('node:async_hooks', () => ({}));
 
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { EventPayload, OrbitalSchema, UserContext } from '@almadar/core';
 
 const ALICE: UserContext = { id: 'alice', role: 'member' };

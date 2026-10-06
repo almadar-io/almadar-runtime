@@ -9,7 +9,7 @@
  * will be stuck in loading / empty / non-persistent respectively.
  */
 import { describe, it, expect } from 'vitest';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import { createServerEffectHandlers } from '../src/effects/ServerEffectHandlers.js';
 import { EffectExecutor } from '../src/effects/EffectExecutor.js';
 import type { Effect, BindingContext, EffectContext } from '../src/types.js';

@@ -14,9 +14,9 @@ import {
   createInProcessTransport,
   createMemoryCircuitStore,
   evaluateOrbitalEvent,
-  InMemoryPersistence,
   StateMachineManager,
 } from '../src/index.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 
 const schema = {
   name: 'fold-hold',

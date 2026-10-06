@@ -7,7 +7,7 @@
 import type { OrbitalEventRequest, OrbitalSchema, UserContext } from '@almadar/core';
 import type { EffectHandlers } from '../types.js';
 import type { ServerEffectStageDeps } from '../effects/effect-stage.js';
-import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
+import type { PersistenceAdapter } from '@almadar/core';
 import { createInProcessTransport, type EventTransport } from '../server/EventTransport.js';
 import type { TraitIndex } from '../traits/trait-index.js';
 import { InFlightCalls } from '../effects/in-flight-calls.js';

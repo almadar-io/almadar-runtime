@@ -4,7 +4,7 @@
 // scripted model.
 import { describe, it, expect } from 'vitest';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import { runToolLoop } from '@almadar/integrations';
 import type { EventPayload, OrbitalSchema, ServiceHostPorts, SExpr, UserContext } from '@almadar/core';
 

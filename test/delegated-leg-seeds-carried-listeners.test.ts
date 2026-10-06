@@ -11,9 +11,9 @@ import {
   buildTraitIndex,
   createIndexStageRunner,
   evaluateOrbitalEvent,
-  InMemoryPersistence,
   StateMachineManager,
 } from '../src/index.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 
 const schema: OrbitalSchema = {
   name: 'delegated-leg',

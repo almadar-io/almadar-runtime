@@ -8,7 +8,7 @@
  * same-instance `persist update` by that id, against the real store.
  */
 import { describe, it, expect } from 'vitest';
-import { MockPersistenceAdapter } from '../src/entities/MockPersistenceAdapter.js';
+import { MockPersistenceAdapter } from '@almadar/db/mock';
 import { createServerEffectHandlers, type ServerEffectResult } from '../src/effects/ServerEffectHandlers.js';
 import { EffectExecutor } from '../src/effects/EffectExecutor.js';
 import type { BindingContext, EffectContext } from '../src/types.js';

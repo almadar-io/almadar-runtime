@@ -11,7 +11,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { OrbitalEventRequest, OrbitalId, OrbitalSchema } from '@almadar/core';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import {
   buildTraitIndex,
   createClientKernel,

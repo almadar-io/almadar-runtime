@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { MessageCatalogs, OrbitalDefinition, OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
 
 function pageOrbital(name: string, path: string, key: string): OrbitalDefinition {

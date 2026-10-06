@@ -1,7 +1,7 @@
 // One `now` stamp per dispatch through the live interpreter; Date.now jumps on every call so a second wall-clock read is visible.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
 
 function schema(): OrbitalSchema {

@@ -6,8 +6,8 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect } from 'vitest';
 import type { OrbitalEntity } from '@almadar/core';
-import { IndexedDbPersistence } from '../src/entities/IndexedDbPersistence';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter';
+import { IndexedDbPersistence } from '@almadar/db/browser';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import { seedBrowserStore } from '../src/entities/seedBrowserStore';
 
 const fields = [

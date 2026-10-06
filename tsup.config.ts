@@ -24,8 +24,8 @@ export default defineConfig({
     // MockPersistenceAdapter and the whole @almadar/std chain into a Node
     // process that needs two pure functions.
     entityAccess: 'src/entities/entityAccess.ts',
-    // The one mock store, shared with `@almadar/server`'s MockDataService (the compiled apps' mock).
-    mockPersistence: 'src/entities/MockPersistenceAdapter.ts',
+    // The owner-gate installer shared with `@almadar/server`'s MockDataService (the compiled apps' mock).
+    mockPersistence: 'src/entities/policyOwnerGates.ts',
   },
   format: ['esm'],
   dts: true,

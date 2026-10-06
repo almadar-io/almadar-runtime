@@ -19,7 +19,7 @@ import { runServerEffectStage, type DeliverEmit, type ServerEffectStageArgs, typ
 import { findEntityAmongOrbitals } from '../traits/OrbitalTraitParsing.js';
 import type { EvaluateEffectRunner } from './evaluateOrbitalEvent.js';
 import type { EffectHandlers } from '../types.js';
-import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
+import type { PersistenceAdapter } from '@almadar/core';
 import type { TraitIndex } from '../traits/trait-index.js';
 import type { StateMachineManager } from '../traits/StateMachineCore.js';
 import type { InFlightCalls } from '../effects/in-flight-calls.js';

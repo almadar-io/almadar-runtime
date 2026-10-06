@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
 
 async function sine(): Promise<OrbitalSchema> {

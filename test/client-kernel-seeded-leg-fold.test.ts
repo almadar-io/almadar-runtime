@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 import type { OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
 import { buildTraitIndex, createClientKernel, createMemoryCircuitStore, createInProcessTransport } from '../src/index.js';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 
 function schema(answers: boolean, storeTouchesServer = true): OrbitalSchema {
   return {

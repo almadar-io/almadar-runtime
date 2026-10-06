@@ -5,7 +5,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import express from 'express';
 import http from 'node:http';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { OrbitalSchema } from '@almadar/core';
 
 const schema: OrbitalSchema = {
@@ -59,7 +59,7 @@ async function serve(authUser?: { uid: string; role: string }) {
   app.use(express.json());
   if (authUser) {
     app.use((req, _res, next) => {
-      (req as express.Request & { firebaseUser?: { uid: string; role: string } }).firebaseUser = authUser;
+      req.authUser = { uid: authUser.uid, provider: 'firebase', claims: { role: authUser.role } };
       next();
     });
   }

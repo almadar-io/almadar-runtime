@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import type { EntityRow, OrbitalSchema, RuntimeValue } from '@almadar/core';
 import { DEFAULT_VIEWER } from '@almadar/core';
-import { MockPersistenceAdapter } from '../src/entities/MockPersistenceAdapter.js';
+import { MockPersistenceAdapter } from '@almadar/db/mock';
 import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/server/OrbitalServerRuntime.js';
 import { buildTraitIndex, createClientKernel, createIndexStageRunner, createInProcessTransport, createMemoryCircuitStore, evaluateOrbitalEvent, StateMachineManager } from '../src/index.js';
 

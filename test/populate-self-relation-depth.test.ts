@@ -4,7 +4,7 @@
 // payload stays serializable.
 import { describe, it, expect } from 'vitest';
 import type { EntityRow, FieldValue, OrbitalSchema } from '@almadar/core';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 
 function schema(): OrbitalSchema {

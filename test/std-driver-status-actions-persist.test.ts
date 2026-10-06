@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import type { EntityRow, OrbitalSchema } from '@almadar/core';
 import { DEFAULT_VIEWER } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
-import { MockPersistenceAdapter } from '../src/entities/MockPersistenceAdapter.js';
+import { MockPersistenceAdapter } from '@almadar/db/mock';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import {
   buildTraitIndex,

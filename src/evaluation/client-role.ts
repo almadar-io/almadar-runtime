@@ -48,7 +48,8 @@ import type { EntityRow, SExpr } from '@almadar/core';
 import { EffectExecutor, clientResolvesRenderBindings } from '../effects/EffectExecutor.js';
 import { createClientEffectHandlers } from '../effects/ClientEffectHandlers.js';
 import { ServerLegCollector } from '../effects/server-leg.js';
-import { InMemoryPersistence, type PersistenceAdapter } from '../entities/PersistenceAdapter.js';
+import type { PersistenceAdapter } from '@almadar/core';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { EventTransport } from '../server/EventTransport.js';
 import type { EvaluationContextExtensions, RollbackCause } from '../types.js';
 

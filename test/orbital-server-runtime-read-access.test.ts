@@ -1,7 +1,7 @@
 // Declared `@read` on the live interpreter fetch path; twin of orbital-server/tests/read_access.rs.
 import { describe, it, expect } from 'vitest';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { EntityRow, EventPayload, OrbitalEventResponse, OrbitalSchema, SExpr, UserContext } from '@almadar/core';
 
 const OWNER_ONLY: SExpr = ['=', ['object/get', '@entity', 'ownerId'], '@user.id'];

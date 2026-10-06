@@ -1,7 +1,7 @@
 // Fetch id/limit/offset are expressions evaluated at execution; twin of orbital-core executor `fetch_option_evaluation`.
 import { describe, it, expect } from 'vitest';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { EntityRow, EventPayload, OrbitalSchema, SExpr } from '@almadar/core';
 
 type FetchOptions = Record<string, SExpr>;

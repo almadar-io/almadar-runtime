@@ -10,9 +10,9 @@ import {
   buildTraitIndex,
   createIndexStageRunner,
   evaluateOrbitalEvent,
-  InMemoryPersistence,
   StateMachineManager,
 } from '../src/index.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 
 function schema(persistedQuery = false): OrbitalSchema {
   return {

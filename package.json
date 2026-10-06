@@ -82,7 +82,9 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
+    "@almadar/auth": "^0.1.0",
     "@almadar/core": "^10.119.0",
+    "@almadar/db": "^0.1.0",
     "@almadar/evaluator": "^2.55.0",
     "@almadar/integrations": "^2.48.0",
     "@almadar/logger": "^1.16.0",

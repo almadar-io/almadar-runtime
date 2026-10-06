@@ -12,7 +12,7 @@
  * unrestricted behavior, which is what `@almadar/ui`'s OrbPreview does today.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import { createServerEffectHandlers, type ServerEffectResult } from '../src/effects/ServerEffectHandlers.js';
 import { accessDeniedMessage } from '../src/entities/entityAccess.js';
 import type { EntityAccessPolicies, SExpr } from '@almadar/core';

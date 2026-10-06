@@ -2,7 +2,7 @@
 // through the same dispatch a click uses (guards, policies). The app's own event channel is unchanged.
 import { describe, it, expect } from 'vitest';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { OrbitalSchema, SExpr, UserContext } from '@almadar/core';
 
 const MEMBERS_ONLY: SExpr = ['=', '@user.role', 'member'];

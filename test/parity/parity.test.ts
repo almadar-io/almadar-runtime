@@ -42,12 +42,12 @@ import {
   buildTraitIndex,
   createIndexStageRunner,
   evaluateOrbitalEvent,
-  InMemoryPersistence,
   StateMachineManager,
   type DeliverEmit,
   type EvaluateOrbitalEventDeps,
   type TraitIndex,
 } from '../../src/index.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 
 // ---------------------------------------------------------------------------
 // Fixture — the chat SEND → SAVE → persistor → MESSAGE_SAVED circuit, plus a

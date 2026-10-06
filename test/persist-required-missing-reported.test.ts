@@ -4,7 +4,7 @@
 // firing a declared input) reads effectResults to know whether its write landed.
 import { describe, it, expect } from 'vitest';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { OrbitalSchema } from '@almadar/core';
 
 function schema(): OrbitalSchema {

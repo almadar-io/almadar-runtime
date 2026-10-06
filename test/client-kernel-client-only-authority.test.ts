@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import type { EventPayload, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
 import { buildTraitIndex, collectListenerTargets, createClientKernel, createMemoryCircuitStore, createInProcessTransport } from '../src/index.js';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 
 function schema(emit: Record<string, string>): OrbitalSchema {
   return {

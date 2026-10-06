@@ -4,7 +4,7 @@
 // relations up across every module entity; the interpreter must too.
 import { describe, it, expect } from 'vitest';
 import type { EntityRow, OrbitalSchema, Entity } from '@almadar/core';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 
 const note: Entity = {

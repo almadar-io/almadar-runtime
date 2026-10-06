@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import type { OrbitalSchema } from '@almadar/core';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 
 function schema(): OrbitalSchema {
   return {

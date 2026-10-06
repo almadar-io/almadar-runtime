@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { EntityRow, OrbitalId, OrbitalSchema } from '@almadar/core';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import {
   buildTraitIndex,
   createIndexStageRunner,

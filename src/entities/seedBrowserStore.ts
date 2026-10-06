@@ -9,8 +9,8 @@
 import type { OrbitalEntity } from '@almadar/core';
 import { instancesForLocale } from '@almadar/core';
 import type { EntityRow } from '../types.js';
-import type { PersistenceAdapter } from './PersistenceAdapter.js';
-import { MockPersistenceAdapter, entitySchemaOf } from './MockPersistenceAdapter.js';
+import type { PersistenceAdapter } from '@almadar/core';
+import { MockPersistenceAdapter, entitySchemaOf } from '@almadar/db/mock';
 
 function seedRows(entity: OrbitalEntity, locale: string | undefined): EntityRow[] {
   const written = instancesForLocale(entity, locale);

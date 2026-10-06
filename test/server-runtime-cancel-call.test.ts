@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import type { EventPayload, OrbitalSchema } from '@almadar/core';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { ServiceCallContext } from '../src/types.js';
 
 const schema: OrbitalSchema = {

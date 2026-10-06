@@ -54,6 +54,7 @@ interface EventQueueHold {
   held: boolean;
   release: () => void;
 }
+import { identitySourceOf, resolveViewer, type VerifiedUser } from "@almadar/auth";
 import { EventBus } from "../events/EventBus.js";
 import type { EffectDispatch } from "../evaluation/dispatch-memory.js";
 import { eventRouteKey } from "../events/identity/routing.js";
@@ -238,7 +239,8 @@ import { dispatchVisitKey, isEntityCall, buildResolvedTraitConfigs, collectCalls
 import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf } from "@almadar/core/mock";
 import { runServerEffectStage } from "../effects/effect-stage.js";
 import { InFlightCalls } from "../effects/in-flight-calls.js";
-import { installPolicyOwnerGates, MockPersistenceAdapter } from "../entities/MockPersistenceAdapter.js";
+import { installPolicyOwnerGates } from "../entities/policyOwnerGates.js";
+import { MockPersistenceAdapter } from "@almadar/db/mock";
 import { seedBrowserStore } from "../entities/seedBrowserStore.js";
 import {
   preprocessSchema,
@@ -431,19 +433,24 @@ export interface OrbitalServerRuntimeConfig {
    */
   substrateServices?: SubstrateServices;
   /**
-   * Viewer identity used when a request carries no authenticated user — the
-   * persona a preview or verification run is looking at the app AS.
+   * The persona a preview or verification run is looking at the app AS.
    *
    * `@user.id` / `@user.role` are what an app's ownership scoping and role
    * gates resolve against, so with no user every predicate takes its negative
-   * branch and every owner filter matches nothing. A host that has real auth
-   * leaves this unset and the request's own user always wins; a dev host
-   * (playground, runtime-verify) sets it to make both branches reachable.
+   * branch and every owner filter matches nothing. A dev host (playground,
+   * runtime-verify) sets it to make both branches reachable.
    *
-   * Never a fallback for production auth: an authenticated request is not
-   * overridden, and a host that sets this is declaring itself a dev host.
+   * Never an HTTP request's identity: `router()` resolves every request from
+   * its verified token (or anonymous). It is the viewer for in-process calls,
+   * ticks and the mock seeder's owner stamps.
    */
   defaultUser?: UserContext;
+  /**
+   * A host TOOL's runtime (not an app's) acting as one declared principal for
+   * every HTTP request, e.g. the playground's integrations console acting as
+   * the machine's operator. App runtimes leave it unset.
+   */
+  principal?: UserContext;
   /**
    * Seeded columns that hold a user id, as `Entity.field` pairs (e.g.
    * `RosterEntry.memberId`). In mock mode the `defaultUser` is assigned to
@@ -457,15 +464,8 @@ export interface OrbitalServerRuntimeConfig {
 /**
  * Adapter for persisting entity data
  */
-// `PersistenceAdapter` + `InMemoryPersistence` live in their own browser-safe
-// module so the in-browser mock runtime can reuse the same storage contract
-// without pulling in this server-only module's express dependency. Re-exported
-// here so existing `import { PersistenceAdapter } from './OrbitalServerRuntime'`
-// call sites keep working.
-export type { PersistenceAdapter } from "../entities/PersistenceAdapter.js";
-export { InMemoryPersistence } from "../entities/PersistenceAdapter.js";
-import type { PersistenceAdapter } from "../entities/PersistenceAdapter.js";
-import { InMemoryPersistence } from "../entities/PersistenceAdapter.js";
+import type { PersistenceAdapter } from '@almadar/core';
+import { InMemoryPersistence } from '@almadar/db/mock';
 
 // ============================================================================
 // OrbitalServerRuntime
@@ -2002,6 +2002,17 @@ export class OrbitalServerRuntime {
    * schema is registered or the app declares no `[identity]` entity — there is
    * no global fallback roster by design.
    */
+  /**
+   * `@user` for an HTTP request: the user the host's auth middleware verified (`req.authUser`),
+   * resolved against the program's `[identity]` entity, or the anonymous viewer; a tool runtime's
+   * declared `principal` instead. A request never borrows `config.defaultUser`.
+   */
+  async viewerOf(verified: VerifiedUser | undefined): Promise<UserContext> {
+    if (this.config.principal !== undefined) return this.config.principal;
+    const source = this.resolvedSchema ? identitySourceOf(this.resolvedSchema) : { kind: 'none' as const };
+    return resolveViewer(verified ?? null, source, this.persistence);
+  }
+
   async getIdentityRoster(): Promise<UserContext[]> {
     const schema = this.resolvedSchema;
     if (!schema) return [];
@@ -3247,14 +3258,14 @@ export class OrbitalServerRuntime {
     router.post("/:orbital/inputs", async (req: Request, res: Response, next: NextFunction) => {
       try {
         const orbitalName = req.params.orbital as string;
-        const firebaseUser = (req as Request & { firebaseUser?: OrbitalEventRequest["user"] }).firebaseUser;
+        const user = await this.viewerOf(req.authUser);
         const body = req.body as Partial<ExternalInputRequest>;
         const result = await this.dispatchExternalInput(orbitalName, {
           targetTrait: String(body.targetTrait ?? ""),
           event: String(body.event ?? ""),
           ...(body.payload !== undefined ? { payload: body.payload } : {}),
           ...(body.entityId !== undefined ? { entityId: body.entityId } : {}),
-          ...(firebaseUser !== undefined ? { user: firebaseUser } : {}),
+          user,
         });
         const refused = result.rejections?.some((r) => r.code === "not-an-external-input") === true;
         res.status(refused ? 403 : 200).json(result);
@@ -3335,11 +3346,7 @@ export class OrbitalServerRuntime {
         if (!wantsStream) {
           try {
             const orbitalName = req.params.orbital as string;
-            const firebaseUser = (req as Request & { firebaseUser?: OrbitalEventRequest["user"] }).firebaseUser;
-            const user = firebaseUser ? {
-              ...firebaseUser,
-              displayName: (firebaseUser.name as string | undefined) ?? firebaseUser.displayName,
-            } : undefined;
+            const user = await this.viewerOf(req.authUser);
             const result = await this.processOrbitalEvent(orbitalName, { ...req.body, user });
             res.json(result);
           } catch (error) {
@@ -3362,11 +3369,7 @@ export class OrbitalServerRuntime {
         setupSSE(res);
         try {
           const orbitalName = req.params.orbital as string;
-          const firebaseUser = (req as Request & { firebaseUser?: OrbitalEventRequest["user"] }).firebaseUser;
-          const user = firebaseUser ? {
-            ...firebaseUser,
-            displayName: (firebaseUser.name as string | undefined) ?? firebaseUser.displayName,
-          } : undefined;
+          const user = await this.viewerOf(req.authUser);
 
           const result = await this.processOrbitalEvent(orbitalName, { ...req.body, user }, (item) => {
             sendSSEEvent(res, { type: item.type, data: item.data, timestamp: Date.now() });
@@ -3512,5 +3515,13 @@ function foldRelayHop(into: OrbitalEventResponse, hop: OrbitalEventResponse): vo
   // client-only listeners (LOLO §7) run them on the client.
   for (const emitted of hop.emittedEvents) {
     into.emittedEvents.push({ ...emitted, source: { ...(emitted.source ?? {}), dispatched: true } });
+  }
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      authUser?: VerifiedUser;
+    }
   }
 }

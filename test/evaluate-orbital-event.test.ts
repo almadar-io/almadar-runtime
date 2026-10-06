@@ -13,10 +13,10 @@ import {
   buildTraitIndex,
   createIndexStageRunner,
   evaluateOrbitalEvent,
-  InMemoryPersistence,
   StateMachineManager,
   type EvaluateOrbitalEventDeps,
 } from '../src/index.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 
 function chatSchema(listenerSource?: TraitEventListener[]): OrbitalSchema {
   return {

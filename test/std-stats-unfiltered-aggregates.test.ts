@@ -7,7 +7,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EntityRow, OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
-import { buildTraitIndex, createIndexStageRunner, evaluateOrbitalEvent, InMemoryPersistence, StateMachineManager } from '../src/index.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
+import { buildTraitIndex, createIndexStageRunner, evaluateOrbitalEvent, StateMachineManager } from '../src/index.js';
 import { STD_ROOT } from './helpers/behavior-packages.js';
 
 async function cardsFor(metrics: ReadonlyArray<Record<string, string | ReadonlyArray<string | boolean>>>) {

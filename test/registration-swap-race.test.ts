@@ -31,7 +31,7 @@
 import { describe, it, expect } from 'vitest';
 import type { OrbitalSchema, Trait } from '@almadar/core';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 
 /** InMemoryPersistence with a real-time delay on `create` — models the
  *  seconds a big organism's per-orbital instance seeding spends awaiting the

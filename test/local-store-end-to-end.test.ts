@@ -9,7 +9,7 @@ import type { OrbitalDefinition, OrbitalEntity } from '@almadar/core';
 import { buildTraitIndex } from '../src/traits/trait-index';
 import { createMemoryCircuitStore } from '../src/evaluation/circuit-store';
 import { createLocalStoreTransport } from '../src/evaluation/local-store-transport';
-import { IndexedDbPersistence } from '../src/entities/IndexedDbPersistence';
+import { IndexedDbPersistence } from '@almadar/db/browser';
 import { seedBrowserStore } from '../src/entities/seedBrowserStore';
 
 const invoice: OrbitalEntity = {

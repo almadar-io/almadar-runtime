@@ -3,7 +3,7 @@
 // declared event stamped as the calling trait — never in-band.
 import { describe, it, expect } from 'vitest';
 import { OrbitalServerRuntime, type LiveBroadcastItem } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import type { OrbitalSchema, UserContext } from '@almadar/core';
 
 const ALICE: UserContext = { id: 'alice', role: 'member' };

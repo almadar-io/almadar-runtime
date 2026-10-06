@@ -9,7 +9,7 @@
  * effect pipeline.
  */
 import { describe, it, expect } from 'vitest';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import { createServerEffectHandlers, type ServerEffectEventBus } from '../src/effects/ServerEffectHandlers.js';
 import { EffectExecutor } from '../src/effects/EffectExecutor.js';
 import type { BindingContext, EffectContext } from '../src/types.js';

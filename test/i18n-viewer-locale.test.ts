@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
 import { buildTraitIndex, createMemoryCircuitStore, dispatchWithServerLeg, type ClientRoleOpts } from '../src/index.js';
 import type { MessageCatalogs, OrbitalEventResponse, OrbitalSchema, Trait, TypedEffect } from '@almadar/core';
 

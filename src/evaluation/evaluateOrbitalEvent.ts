@@ -74,7 +74,7 @@ import {
 } from '../traits/PayloadValidator.js';
 import type { IndexedTrait, TraitIndex } from '../traits/trait-index.js';
 import type { BindingContext, EvaluationContextExtensions } from '../types.js';
-import type { PersistenceAdapter } from '../entities/PersistenceAdapter.js';
+import type { PersistenceAdapter } from '@almadar/core';
 import { dispatchVisitKey, type DeliveryRecord, type SExpr } from '@almadar/core';
 import { isLifecycleEvent, type MountLifecycle } from './mount-lifecycle.js';
 import { DispatchMemory } from './dispatch-memory.js';

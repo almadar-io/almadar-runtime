@@ -21,7 +21,7 @@ import { isPersistBatchOperation } from "@almadar/core";
 // Re-exported here so every existing importer keeps working unchanged.
 import type { ClientEffectByTrait, ServerBatchSummary, ServerEffectResult } from "@almadar/core";
 export type { ServerBatchSummary, ServerEffectResult } from "@almadar/core";
-import type { PersistenceAdapter } from "../entities/PersistenceAdapter.js";
+import type { PersistenceAdapter } from '@almadar/core';
 // Type-only — erased before runtime (isolatedModules), so this does not pull
 // OrbitalServerRuntime's Express/Node code into this browser-safe module.
 // Mirrors the identical reverse edge OrbitalServerRuntime.ts already has

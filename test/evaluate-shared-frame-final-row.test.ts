@@ -6,7 +6,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { EntityRow, OrbitalSchema } from '@almadar/core';
-import { buildTraitIndex, createIndexStageRunner, evaluateOrbitalEvent, InMemoryPersistence, StateMachineManager, type EvaluateOrbitalEventDeps } from '../src/index.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
+import { buildTraitIndex, createIndexStageRunner, evaluateOrbitalEvent, StateMachineManager, type EvaluateOrbitalEventDeps } from '../src/index.js';
 
 function schema(shared: boolean): OrbitalSchema {
   return {

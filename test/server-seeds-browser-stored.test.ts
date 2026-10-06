@@ -6,8 +6,8 @@
 import { describe, it, expect } from 'vitest';
 import type { OrbitalEntity, OrbitalSchema } from '@almadar/core';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { InMemoryPersistence } from '../src/entities/PersistenceAdapter.js';
-import { MockPersistenceAdapter } from '../src/entities/MockPersistenceAdapter.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
+import { MockPersistenceAdapter } from '@almadar/db/mock';
 
 function app(entity: OrbitalEntity): OrbitalSchema {
   return { name: 'seed', version: '1.0.0', orbitals: [{ name: 'Books', entity, traits: [], pages: [] }] };

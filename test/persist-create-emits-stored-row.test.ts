@@ -3,7 +3,7 @@
 // does, never just the submitted fields plus an id.
 import { describe, it, expect } from 'vitest';
 import type { OrbitalSchema } from '@almadar/core';
-import { MockPersistenceAdapter } from '../src/entities/MockPersistenceAdapter.js';
+import { MockPersistenceAdapter } from '@almadar/db/mock';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 
 function schema(): OrbitalSchema {
