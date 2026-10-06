@@ -34,8 +34,8 @@ class FakeEventSource {
   close(): void {
     this.closed = true;
   }
-  emit<T>(data: T): void {
-    this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
+  emit<T>(data: T, lastEventId = ''): void {
+    this.onmessage?.({ data: JSON.stringify(data), lastEventId } as MessageEvent);
   }
 }
 
@@ -197,6 +197,81 @@ describe('createHttpTransport push subscribe', () => {
     await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
     FakeEventSource.instances[0].emit({ type: 'bus', event: 'STEP', payload: { n: 1 }, source: { trait: 'Loop' }, target: 'origin' });
     expect(onPush).toHaveBeenCalledWith({ event: 'STEP', payload: { n: 1 }, source: { trait: 'Loop' } }, 'origin');
+    unsubscribe();
+  });
+
+  it('a host dispatch (a follow-on call\'s outcome the server ran) reaches subscribeHostDispatches on the same channel', async () => {
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const onPush = vi.fn();
+    const onDispatch = vi.fn();
+    const unsubscribeBus = transport.subscribe!(onPush, { clientId: 'test-host-dispatch' });
+    const unsubscribeDispatch = transport.subscribeHostDispatches!(onDispatch, { clientId: 'test-host-dispatch' });
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    const request = { event: 'ANSWERED', targetTrait: 'Helper', clientId: 'test-host-dispatch' };
+    const response = { success: true, transitioned: true, states: { Helper: 'done' }, emittedEvents: [] };
+    FakeEventSource.instances[0].emit({ type: 'dispatch', orbitalName: 'App', request, response });
+    expect(onDispatch).toHaveBeenCalledWith('App', request, response);
+    expect(onPush).not.toHaveBeenCalled();
+    unsubscribeBus();
+    unsubscribeDispatch();
+  });
+
+  it('control: a bus push never reaches a host-dispatch subscriber', async () => {
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const onDispatch = vi.fn();
+    const unsubscribe = transport.subscribeHostDispatches!(onDispatch, { clientId: 'test-host-dispatch-control' });
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    FakeEventSource.instances[0].emit({ type: 'bus', event: 'STEP', source: { trait: 'Loop' }, target: 'origin' });
+    expect(onDispatch).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('a reopened channel asks for the numbered frames after the last one this tab saw', async () => {
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const first = transport.subscribeHostDispatches!(vi.fn(), { clientId: 'test-resume' });
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    FakeEventSource.instances[0].emit({ type: 'dispatch', orbitalName: 'App', request: { event: 'A' }, response: { success: true, transitioned: false, states: {}, emittedEvents: [] } }, 'boot1-7');
+    first();
+    const onDispatch = vi.fn();
+    const second = transport.subscribeHostDispatches!(onDispatch, { clientId: 'test-resume' });
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
+    expect(new URL(FakeEventSource.instances[1].url).searchParams.get('since')).toBe('boot1-7');
+    second();
+  });
+
+  it('a replayed frame this tab already applied is dropped', async () => {
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const onDispatch = vi.fn();
+    const unsubscribe = transport.subscribeHostDispatches!(onDispatch, { clientId: 'test-dedupe' });
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    const frame = { type: 'dispatch', orbitalName: 'App', request: { event: 'A' }, response: { success: true, transitioned: false, states: {}, emittedEvents: [] } };
+    FakeEventSource.instances[0].emit(frame, 'boot1-3');
+    FakeEventSource.instances[0].emit(frame, 'boot1-3');
+    FakeEventSource.instances[0].emit(frame, 'boot1-2');
+    expect(onDispatch).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it('edge: a frame from a restarted server (new boot id) is applied even with a lower number', async () => {
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const onDispatch = vi.fn();
+    const unsubscribe = transport.subscribeHostDispatches!(onDispatch, { clientId: 'test-reboot' });
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    const frame = { type: 'dispatch', orbitalName: 'App', request: { event: 'A' }, response: { success: true, transitioned: false, states: {}, emittedEvents: [] } };
+    FakeEventSource.instances[0].emit(frame, 'boot1-9');
+    FakeEventSource.instances[0].emit(frame, 'boot2-1');
+    expect(onDispatch).toHaveBeenCalledTimes(2);
+    unsubscribe();
+  });
+
+  it('control: unnumbered frames (peer pushes) are always delivered', async () => {
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const onPush = vi.fn();
+    const unsubscribe = transport.subscribe!(onPush, { clientId: 'test-unnumbered' });
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    FakeEventSource.instances[0].emit({ type: 'bus', event: 'SAVED', source: { trait: 'T' } });
+    FakeEventSource.instances[0].emit({ type: 'bus', event: 'SAVED', source: { trait: 'T' } });
+    expect(onPush).toHaveBeenCalledTimes(2);
     unsubscribe();
   });
 

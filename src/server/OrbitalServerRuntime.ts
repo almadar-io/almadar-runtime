@@ -361,6 +361,18 @@ export interface LiveBroadcastItem {
   target: 'peers' | 'origin';
 }
 
+/**
+ * The result of a dispatch the host ran on its own — a follow-on step's `call-service`
+ * outcome, run after the request that started the call had answered — for the tab that
+ * asked (`originClientId`). Handed to the host-dispatch sink (`setHostDispatchSink`).
+ */
+export interface HostDispatchItem {
+  orbitalName: string;
+  request: OrbitalEventRequest;
+  response: OrbitalEventResponse;
+  originClientId?: string;
+}
+
 // `OrbitalEventResponse` — response from event processing — is owned by
 // `@almadar/core` (re-exported above).
 
@@ -607,6 +619,7 @@ export class OrbitalServerRuntime {
   private messages: MessageCatalogs = {};
   /** Wired by the hosting server (e.g. the playground SSE endpoint) via `setLiveBroadcastSink`. */
   private liveBroadcastSink: ((item: LiveBroadcastItem) => void) | null = null;
+  private hostDispatchSink: ((item: HostDispatchItem) => void) | null = null;
   /**
    * Tick-broadcast relay (T6): newest pending item per
    * (originClientId, orbital, event), flushed to the live-broadcast sink on
@@ -1876,6 +1889,19 @@ export class OrbitalServerRuntime {
     this.liveBroadcastSink = sink;
   }
 
+  /** Wire where a host-run dispatch's result goes (see `HostDispatchItem`); a fresh call replaces the previous sink. */
+  setHostDispatchSink(sink: (item: HostDispatchItem) => void): void {
+    this.hostDispatchSink = sink;
+  }
+
+  /** Run a follow-on step's call outcome as its own dispatch, and hand its result to the host-dispatch sink. */
+  private runDeferredOutcome(orbitalName: string, request: OrbitalEventRequest): void {
+    void this.processOrbitalEvent(orbitalName, request).then(
+      (response) => this.hostDispatchSink?.({ orbitalName, request, response, ...(request.clientId !== undefined ? { originClientId: request.clientId } : {}) }),
+      (error: Error) => effectLog.error('deferred-outcome:failed', { orbitalName, event: request.event, trait: request.targetTrait, error: error.message }),
+    );
+  }
+
   /**
    * Switch the viewer a dev host presents the app as — see
    * `OrbitalServerRuntimeConfig.defaultUser`. Pass `undefined` for an
@@ -2401,6 +2427,7 @@ export class OrbitalServerRuntime {
         args.firing,
         context.queueHold,
         args.locale,
+        args.followOn,
       );
       await this.rerenderCallsiteCaptureChildren(
         registered,
@@ -2686,6 +2713,8 @@ export class OrbitalServerRuntime {
     queueHold?: EventQueueHold,
     /** The requesting viewer's locale; absent (ticks, a request without one) → the stage's `defaultLocale`. */
     locale?: string,
+    /** A follow-on step of the dispatch: its calls do not hold the request (`ServerEffectStageArgs.followOn`). */
+    followOn?: boolean,
   ): Promise<void> {
     if (callsitePayload !== undefined) this.composedCallsitePayloads.set(traitName, callsitePayload);
     const capture = callsitePayload ?? this.composedCallsitePayloads.get(traitName);
@@ -2736,13 +2765,23 @@ export class OrbitalServerRuntime {
           this.liveBroadcastSink?.({ event, payload: eventPayload, source: stamp, originClientId, target: 'origin' });
         },
         liveBroadcastSinkWired: this.liveBroadcastSink !== null,
+        // Only a host that can deliver a host-run dispatch to the tab defers; otherwise the call holds the request.
+        ...(this.hostDispatchSink !== null ? { deferCallOutcome: (call: { traitName: string; event: string; payload: EventPayload | undefined; entityId: string | undefined; originClientId: string | undefined }) => this.runDeferredOutcome(registered.schema.name, {
+          event: call.event,
+          ...(call.payload !== undefined ? { payload: call.payload } : {}),
+          targetTrait: call.traitName,
+          ...(call.entityId !== undefined ? { entityId: call.entityId } : {}),
+          ...(call.originClientId !== undefined ? { clientId: call.originClientId } : {}),
+          ...(user !== undefined ? { user } : {}),
+          ...(locale !== undefined ? { locale } : {}),
+        }) } : {}),
         debug: this.config.debug,
         mockMode: this.config.mode === 'mock',
         contextExtensions: this.config.contextExtensions,
         messages: this.messages,
         ...(this.appLocales[0] !== undefined ? { defaultLocale: this.appLocales[0] } : {}),
       },
-      { traitName, effects, payload, entityData, entityId, emittedEvents, fetchedData, clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, callsitePayload: capture, ...(locale !== undefined ? { locale } : {}), ...(now !== undefined ? { now } : {}), ...(dispatch !== undefined ? { dispatch } : {}), ...(firing !== undefined ? { firing } : {}) },
+      { traitName, effects, payload, entityData, entityId, emittedEvents, fetchedData, clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, callsitePayload: capture, ...(locale !== undefined ? { locale } : {}), ...(now !== undefined ? { now } : {}), ...(dispatch !== undefined ? { dispatch } : {}), ...(firing !== undefined ? { firing } : {}), ...(followOn === true ? { followOn } : {}) },
     );
     if (capture !== undefined && clientEffectsByTrait !== undefined) {
       for (const frame of clientEffectsByTrait.slice(framesBefore)) {

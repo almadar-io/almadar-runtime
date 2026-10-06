@@ -8,7 +8,10 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 - **Close by deleting.** Remove the entry in the same commit as the fix. There is no "closed" section; git history is the record.
 - **Cross-repo gaps don't go here.** If fixing it needs another repo, describe it in your report or PR body; the monorepo coordinator files it.
 
-Next code: `G-RUNTIME-066`
+Next code: `G-RUNTIME-067`
+
+- **G-RUNTIME-066** — Every emit's `source.transition` arrives as the literal string `"unknown"` (seen on the learning transport's LEARN_UPDATED from INIT and from TOGGLE_RUN alike, 2026-10-06), though `@event.source.transition` is documented as the emitter's transition. A listener therefore cannot tell which arm emitted (the orb.almadar.io demo diagrams cannot animate Run/Pause for that reason). Stamp the real transition (from → to on event) in `EffectExecutor.sourceStamp`'s context on every path (kernel dispatch, ticks, server). Prevention rung: 3 (a runtime test asserting the stamp). `@almadar/runtime` [mechanical] — found 2026-10-06
+
 
 ## Open gaps
 

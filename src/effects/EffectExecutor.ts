@@ -126,6 +126,12 @@ export interface EffectExecutorOptions {
     inFlightCalls?: InFlightCalls;
     /** Run `work` with the host's event queue released (a keyed call's wait); absent: the host has no shared queue. */
     outsideEventQueue?: <T>(work: () => Promise<T>) => Promise<T>;
+    /**
+     * Set for a follow-on step (a listener's arm, a trait's own next step): a `call-service`
+     * here does not hold the request — it starts, and its outcome event goes to this callback
+     * when the call ends, for the host to run as its own dispatch. Absent: the call is awaited.
+     */
+    deferCallOutcome?: (event: string, payload: EventPayload | undefined) => void;
 }
 
 // ============================================================================
@@ -272,6 +278,7 @@ export class EffectExecutor {
     private delegate?: EffectDelegate;
     private inFlightCalls?: InFlightCalls;
     private readonly outsideEventQueue: <T>(work: () => Promise<T>) => Promise<T>;
+    private readonly deferCallOutcome?: (event: string, payload: EventPayload | undefined) => void;
 
     constructor(options: EffectExecutorOptions) {
         this.handlers = options.handlers;
@@ -289,6 +296,7 @@ export class EffectExecutor {
         this.delegate = options.delegate;
         this.inFlightCalls = options.inFlightCalls;
         this.outsideEventQueue = options.outsideEventQueue ?? (<T,>(work: () => Promise<T>): Promise<T> => work());
+        this.deferCallOutcome = options.deferCallOutcome;
     }
 
     /**
@@ -780,6 +788,37 @@ export class EffectExecutor {
         }
     }
 
+    /** A follow-on step's call: started, not awaited; its outcome event goes to `deliver`. */
+    private startDeferredCall(
+        service: string,
+        action: string,
+        params: ServiceParams | undefined,
+        options: RuntimeValue,
+        emitCfg: EmitConfig | undefined,
+        deliver: (event: string, payload: EventPayload | undefined) => void,
+    ): void {
+        const route = emitCfg?.on_message !== undefined
+            ? { event: emitCfg.on_message, source: this.sourceStamp(emitCfg.on_message) }
+            : undefined;
+        const callKey = this.resolveCallKey(options, 'call-service key');
+        const outcome = callKey === undefined
+            ? this.handlers.callService(service, action, params, { outsideRequest: true }, route).then((value) => ({ cancelled: false as const, value }))
+            : this.requireInFlightCalls('call-service key').run(callKey, (signal) => untilAborted(signal, this.handlers.callService(service, action, params, { signal, outsideRequest: true }, route)));
+        void outcome.then(
+            (settled) => {
+                if (settled.cancelled) {
+                    if (emitCfg?.cancelled && callKey !== undefined) deliver(emitCfg.cancelled, { key: callKey });
+                } else if (emitCfg?.success) {
+                    deliver(emitCfg.success, settled.value as EventPayload | undefined);
+                }
+            },
+            (err: RuntimeValue) => {
+                if (emitCfg?.failure) deliver(emitCfg.failure, { error: failureMessage(err) });
+                else effectLog.error('call-service:deferred-failed', { service, action, error: failureMessage(err) });
+            },
+        );
+    }
+
     private emitCancelled(emit: EmitConfig | undefined, key: string): void {
         if (!emit?.cancelled) return;
         this.handlers.emit(emit.cancelled, { key }, this.sourceStamp(emit.cancelled));
@@ -1187,6 +1226,10 @@ export class EffectExecutor {
                 // result — no local call, no local emit (mirrors `persistDelegated`).
                 if (this.handlers.callServiceDelegated === true) {
                     effectLog.debug('call-service:delegated', { service, action, traitName: this.context.traitName, transition: this.context.transition });
+                    break;
+                }
+                if (this.deferCallOutcome !== undefined) {
+                    this.startDeferredCall(service, action, params, args[3], emitCfg, this.deferCallOutcome);
                     break;
                 }
                 try {

@@ -89,10 +89,11 @@ export interface EventTransport {
    */
   readonly hostsBrowserStore?: boolean;
   /**
-   * Hear the results of dispatches the host ran without any view asking (a declared input), so an
-   * open view shows them. The view applies the result; it never runs the dispatch again.
+   * Hear the results of dispatches the host ran without any view asking (a declared input, a
+   * follow-on call's outcome), so an open view shows them. The view applies the result; it never
+   * runs the dispatch again. `params` addresses this view on a push channel, as for `subscribe`.
    */
-  subscribeHostDispatches?(onDispatch: HostDispatchListener): () => void;
+  subscribeHostDispatches?(onDispatch: HostDispatchListener, params?: Record<string, string>): () => void;
 }
 
 /** A dispatch the host ran on its own, with its result. */
@@ -129,24 +130,29 @@ function deriveEventsUrl(serverUrl: string): string {
   return `${apiRoot}/events`;
 }
 
-/** Push message shape on the `/api/events` SSE channel. Only `type: 'bus'` entries are cascade events. */
+/** Push message shape on the `/api/events` SSE channel: `bus` entries are cascade events, `dispatch` entries a host-run dispatch's result. */
 interface ServerPushEnvelope {
   type: string;
   event?: string;
   payload?: EmittedEvent['payload'];
   source?: EmittedEvent['source'];
   target?: PushTarget;
+  orbitalName?: string;
+  request?: OrbitalEventRequest;
+  response?: OrbitalEventResponse;
 }
 
 function isBusPushEnvelope(value: ServerPushEnvelope): value is ServerPushEnvelope & { type: 'bus'; event: string } {
   return value.type === 'bus' && typeof value.event === 'string';
 }
 
-type BusPushEnvelope = ServerPushEnvelope & { type: 'bus'; event: string };
+function isDispatchPushEnvelope(value: ServerPushEnvelope): value is ServerPushEnvelope & { type: 'dispatch'; orbitalName: string; request: OrbitalEventRequest; response: OrbitalEventResponse } {
+  return value.type === 'dispatch' && typeof value.orbitalName === 'string' && value.request !== undefined && value.response !== undefined;
+}
 
 interface SharedPushChannel {
   source: EventSource;
-  subscribers: Set<(envelope: BusPushEnvelope) => void>;
+  subscribers: Set<(envelope: ServerPushEnvelope) => void>;
 }
 
 /**
@@ -160,7 +166,20 @@ interface SharedPushChannel {
  */
 const pushChannels = new Map<string, SharedPushChannel>();
 
-function acquirePushChannel(url: string, subscriber: (envelope: BusPushEnvelope) => void): () => void {
+/** A numbered frame's id: `<server boot>-<n>`, numbered per tab; a frame without one is never resumed. */
+interface FrameNumber { boot: string; n: number }
+
+function parseFrameNumber(id: string): FrameNumber | undefined {
+  const dash = id.lastIndexOf('-');
+  if (dash <= 0) return undefined;
+  const n = Number(id.slice(dash + 1));
+  return Number.isInteger(n) ? { boot: id.slice(0, dash), n } : undefined;
+}
+
+/** The last numbered frame each tab applied, per push endpoint (`<events url>|<clientId>`): a reopened channel resumes after it and drops replays. */
+const lastFrameByClient = new Map<string, FrameNumber>();
+
+function acquirePushChannel(url: string, resumeKey: string | undefined, subscriber: (envelope: ServerPushEnvelope) => void): () => void {
   let channel = pushChannels.get(url);
   if (channel === undefined) {
     const source = new EventSource(url);
@@ -173,7 +192,12 @@ function acquirePushChannel(url: string, subscriber: (envelope: BusPushEnvelope)
         log.warn('push:parse-failed', { error: err instanceof Error ? err.message : String(err) });
         return;
       }
-      if (!isBusPushEnvelope(parsed)) return;
+      const number = ev.lastEventId ? parseFrameNumber(ev.lastEventId) : undefined;
+      if (number !== undefined && resumeKey !== undefined) {
+        const seen = lastFrameByClient.get(resumeKey);
+        if (seen !== undefined && seen.boot === number.boot && number.n <= seen.n) return;
+        lastFrameByClient.set(resumeKey, number);
+      }
       for (const sub of created.subscribers) sub(parsed);
     };
     source.onerror = () => {
@@ -240,6 +264,28 @@ export function createHttpTransport(options: HttpTransportOptions): EventTranspo
   // behavior — orbital names alone are not unique across a catalog.
   let behavior: string | undefined;
 
+  /** One subscriber on this server's shared push channel, addressed by `params` (plus the access token). */
+  const openPushChannel = (params: Record<string, string>, subscriber: (envelope: ServerPushEnvelope) => void): (() => void) => {
+    if (typeof EventSource === 'undefined') return () => {};
+    let release: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      const token = getAccessToken ? await getAccessToken() : undefined;
+      if (cancelled) return;
+      const search = new URLSearchParams(params);
+      if (token) search.set('access_token', token);
+      const eventsUrl = deriveEventsUrl(serverUrl);
+      const resumeKey = params['clientId'] !== undefined ? `${eventsUrl}|${params['clientId']}` : undefined;
+      const seen = resumeKey !== undefined ? lastFrameByClient.get(resumeKey) : undefined;
+      if (seen !== undefined) search.set('since', `${seen.boot}-${seen.n}`);
+      release = acquirePushChannel(`${eventsUrl}?${search.toString()}`, resumeKey, subscriber);
+    })();
+    return () => {
+      cancelled = true;
+      release?.();
+    };
+  };
+
   return {
     async register(schema) {
       behavior = schema.name;
@@ -287,24 +333,15 @@ export function createHttpTransport(options: HttpTransportOptions): EventTranspo
     },
 
     subscribe(onPush, params = {}) {
-      if (typeof EventSource === 'undefined') return () => {};
+      return openPushChannel(params, (envelope) => {
+        if (isBusPushEnvelope(envelope)) onPush({ event: envelope.event, payload: envelope.payload, source: envelope.source }, envelope.target ?? 'peers');
+      });
+    },
 
-      let release: (() => void) | undefined;
-      let cancelled = false;
-      void (async () => {
-        const token = getAccessToken ? await getAccessToken() : undefined;
-        if (cancelled) return;
-        const search = new URLSearchParams(params);
-        if (token) search.set('access_token', token);
-        const url = `${deriveEventsUrl(serverUrl)}?${search.toString()}`;
-        release = acquirePushChannel(url, (envelope) => {
-          onPush({ event: envelope.event, payload: envelope.payload, source: envelope.source }, envelope.target ?? 'peers');
-        });
-      })();
-      return () => {
-        cancelled = true;
-        release?.();
-      };
+    subscribeHostDispatches(onDispatch, params = {}) {
+      return openPushChannel(params, (envelope) => {
+        if (isDispatchPushEnvelope(envelope)) onDispatch(envelope.orbitalName, envelope.request, envelope.response);
+      });
     },
   };
 }

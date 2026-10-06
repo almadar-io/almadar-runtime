@@ -91,7 +91,7 @@ export interface RunTraitCascadeOptions<TEffectResult> {
      *  must read `@payload.X` off it, not the original top-level request's. */
     runEffects: (
         effects: TransitionResult['effects'],
-        step: { fromState: string; toState: string; event: string; payload?: EventPayload; dispatch: EffectDispatch },
+        step: { fromState: string; toState: string; event: string; payload?: EventPayload; dispatch: EffectDispatch; /** 0 for the requested event, then 1, 2… for the trait's own follow-ups. */ index: number },
     ) => Promise<CascadeStepEffectsResult<TEffectResult>>;
     /** The steps this cascade may take: what is left of the enclosing dispatch's one budget
      *  (`CROSS_TRAIT_CASCADE_CAP`), so a trait's own follow-ups count like every other step —
@@ -232,6 +232,7 @@ export async function runTraitCascade<TEffectResult>(
                 event: item.event,
                 payload: item.payload,
                 dispatch: { ...view, fromState: stepFromState, toState: result.newState },
+                index: steps - 1,
             });
             effectResults.push(...stepOutcome.effectResults);
             emitted.push(...stepOutcome.emitted);

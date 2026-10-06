@@ -643,6 +643,7 @@ export async function evaluateOrbitalEvent(
           firing: { event: step.event, fromState: step.fromState },
           ...(deps.originClientId !== undefined ? { originClientId: deps.originClientId } : {}),
           dispatch: step.dispatch,
+          followOn: item.fromAtDelivery === true || step.index > 0,
         });
         // Render-facing effects are delivered only for traits the
         // requesting page hosts (an off-page listener's effects ran, but

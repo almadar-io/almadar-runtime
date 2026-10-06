@@ -145,6 +145,8 @@ export interface ServerEffectStageDeps {
     message: (payload: EventPayload) => void,
   ) => ServiceHostPorts;
   deliverEmit?: DeliverEmit;
+  /** Run a follow-on step's call outcome later, as its own dispatch on `traitName` (see `ServerEffectStageArgs.followOn`). */
+  deferCallOutcome?: (call: { traitName: string; event: string; payload: EventPayload | undefined; entityId: string | undefined; originClientId: string | undefined }) => void;
   /**
    * Deliver one live `call-service` message (`emit.onMessage`) to the
    * requesting client only, while the call is still running. Never in-band:
@@ -199,6 +201,8 @@ export interface ServerEffectStageArgs {
   callsitePayload?: EventPayload;
   /** The transition being run: `state`/`@toState` read its target, `@fromState` its source (Runtime Spec Clause 3.3). Absent for ticks. */
   dispatch?: EffectDispatch;
+  /** A follow-on step of the dispatch (a listener's arm, a trait's own next step): its calls do not hold the request. */
+  followOn?: boolean;
 }
 
 /**
@@ -358,6 +362,7 @@ export async function runServerEffectStage(
     firing,
     onPush,
     originClientId,
+    followOn,
     callsitePayload,
     dispatch,
   } = args;
@@ -756,7 +761,7 @@ export async function runServerEffectStage(
         let result = null;
         // Custom handlers can override this
         // A keyed call (it carries a signal) is already waiting outside the queue — the executor released it.
-        const awaitProvider = context?.signal === undefined && deps.outsideEventQueue !== undefined
+        const awaitProvider = context?.signal === undefined && context?.outsideRequest !== true && deps.outsideEventQueue !== undefined
           ? deps.outsideEventQueue
           : <T,>(work: () => Promise<T>): Promise<T> => work();
         const message = (payload: EventPayload): void => {
@@ -1287,6 +1292,9 @@ export async function runServerEffectStage(
     resolveEntityFields: (type) => deps.entityFieldsFor(type),
     inFlightCalls: deps.inFlightCalls,
     ...(deps.outsideEventQueue !== undefined ? { outsideEventQueue: deps.outsideEventQueue } : {}),
+    ...(followOn === true && deps.deferCallOutcome !== undefined
+      ? { deferCallOutcome: (event: string, eventPayload: EventPayload | undefined) => deps.deferCallOutcome?.({ traitName, event, payload: eventPayload, entityId, originClientId }) }
+      : {}),
   });
 
   await executor.executeAll(effects);

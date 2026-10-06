@@ -1189,6 +1189,15 @@ interface QueuedKernelEntry {
   rejecters: Array<(err: Error) => void>;
 }
 
+/** A dispatch the host ran on its own: applied in queue order, after whatever request was in flight when it arrived. */
+interface QueuedHostEntry {
+  kind: 'host';
+  request: OrbitalEventRequest;
+  response: OrbitalEventResponse;
+  resolve: (outcome: ClientKernelOutcome) => void;
+  reject: (err: Error) => void;
+}
+
 interface QueuedMountEntry {
   kind: 'mount';
   seeds: readonly MountSeed[];
@@ -1224,7 +1233,7 @@ function serverOnlyEffects(
  */
 export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
   const { transport, topology, ...roleOpts } = opts;
-  const queue: Array<QueuedKernelEntry | QueuedMountEntry> = [];
+  const queue: Array<QueuedKernelEntry | QueuedMountEntry | QueuedHostEntry> = [];
   let pumping = false;
 
   // Posts are shaped by the confirmed topology; local arms never wait for it.
@@ -1284,7 +1293,6 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
   };
 
   let progressChain: Promise<void> = Promise.resolve();
-  let hostDispatchChain: Promise<void> = Promise.resolve();
   const runHostDispatch = async (request: OrbitalEventRequest, response: OrbitalEventResponse): Promise<ClientKernelOutcome> => {
     const mode = (request.targetTrait !== undefined ? roleOpts.traitIndex.byName.get(request.targetTrait)?.dispatchMode : undefined) ?? 'persistedAwaited';
     if (!response.success) return { response: { ...response, clientEffects: [], clientEffectsByTrait: [] }, mode };
@@ -1295,7 +1303,10 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
 
   const runProgress = async (request: OrbitalEventRequest): Promise<ClientKernelOutcome> => {
     const dispatch = await dispatchWithServerLeg(roleOpts, request);
-    const response = transport !== undefined
+    // A live message is for this tab only, never in-band (LOLO §call-service onMessage): only the
+    // arm's own server work is sent, never the message itself.
+    const hasServerWork = dispatch.serverLeg !== undefined || dispatch.continuations !== undefined;
+    const response = transport !== undefined && hasServerWork
       ? await postServerLeg(transport, orbitalFor(request), dispatch, roleOpts.store, await postRole(), request, undefined, true)
       : dispatch.response;
     return { response, mode: dispatch.mode };
@@ -1357,6 +1368,10 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
             await runMount(entry);
             continue;
           }
+          if (entry.kind === 'host') {
+            await runHostDispatch(entry.request, entry.response).then(entry.resolve, entry.reject);
+            continue;
+          }
           try {
             const dispatch = await dispatchWithServerLeg(roleOpts, entry.request);
             let response = dispatch.response;
@@ -1396,9 +1411,10 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
       return outcome;
     },
     foldHostDispatch(request: OrbitalEventRequest, response: OrbitalEventResponse): Promise<ClientKernelOutcome> {
-      const outcome = hostDispatchChain.then(() => runHostDispatch(request, response));
-      hostDispatchChain = outcome.then(() => undefined, () => undefined);
-      return outcome;
+      return new Promise<ClientKernelOutcome>((resolve, reject) => {
+        queue.push({ kind: 'host', request, response, resolve, reject });
+        pump();
+      });
     },
     dispatchMount(seeds, hooks, base = {}): Promise<ClientMountOutcome> {
       return new Promise<ClientMountOutcome>((resolve, reject) => {
@@ -1410,7 +1426,7 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
       return new Promise<ClientKernelOutcome>((resolve, reject) => {
         if (request.tick !== undefined) {
           const pending = queue.find(
-            (e): e is QueuedKernelEntry => e.kind !== 'mount' && e.request.tick !== undefined
+            (e): e is QueuedKernelEntry => e.kind === undefined && e.request.tick !== undefined
               && e.request.event === request.event
               && e.request.targetTrait === request.targetTrait,
           );

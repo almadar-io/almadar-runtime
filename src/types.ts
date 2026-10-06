@@ -222,6 +222,8 @@ export interface ServiceCallContext {
     host?: ServiceHostPorts;
     /** Aborted when `cancel-call` cancels this call; a provider stops its work on it. */
     signal?: AbortSignal;
+    /** No request awaits this call (a follow-on step's call): the host holds no request's event queue around it. */
+    outsideRequest?: true;
 }
 
 /**

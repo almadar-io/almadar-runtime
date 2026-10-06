@@ -54,6 +54,39 @@ function schema(): OrbitalSchema {
         ],
         pages: [],
       },
+      {
+        name: 'LessonOrbital',
+        entity: { name: 'Lesson', persistence: 'persistent', fields: [{ name: 'id', type: 'string' }, { name: 'text', type: 'string' }] },
+        traits: [
+          {
+            name: 'LessonWriter',
+            scope: 'instance',
+            linkedEntity: 'Lesson',
+            stateMachine: {
+              states: [{ name: 'idle', isInitial: true }],
+              events: [
+                { key: 'DELTA', name: 'Delta', payloadSchema: [{ name: 'text', type: 'string', required: true }] },
+                { key: 'NOTE', name: 'Note', payloadSchema: [{ name: 'text', type: 'string', required: true }] },
+              ],
+              transitions: [
+                {
+                  from: 'idle',
+                  to: 'idle',
+                  event: 'DELTA',
+                  effects: [['set', '@entity.text', ['str/concat', '@entity.text', '@payload.text']], ['render-ui', 'main', { type: 'typography', content: '@entity.text' }]],
+                },
+                {
+                  from: 'idle',
+                  to: 'idle',
+                  event: 'NOTE',
+                  effects: [['persist', 'create', 'Lesson', { text: '@payload.text' }]],
+                },
+              ],
+            },
+          },
+        ],
+        pages: [],
+      },
     ],
   };
 }
@@ -116,4 +149,47 @@ describe('createClientKernel — progress lane', () => {
     expect(order).toEqual(['a', 'b', 'c']);
     release();
   });
+
+  it('a live message to a trait over a persisted entity runs in the tab only: nothing is posted', async () => {
+    const { kernel, release, posted } = await setup();
+    void kernel.dispatch({ event: 'SLOW', targetTrait: 'ItemBrowse' });
+    await tick();
+    const outcome = await kernel.dispatchProgress({ event: 'DELTA', targetTrait: 'LessonWriter', payload: { text: 'Hello' } });
+    expect(outcome.response.clientEffects?.some((e) => e[0] === 'render-ui')).toBe(true);
+    expect(posted).toEqual(['SLOW']);
+    release();
+  });
+
+  it('control: an arm with server work still sends that work', async () => {
+    const { kernel, release, posted } = await setup();
+    void kernel.dispatch({ event: 'SLOW', targetTrait: 'ItemBrowse' });
+    await tick();
+    const note = kernel.dispatchProgress({ event: 'NOTE', targetTrait: 'LessonWriter', payload: { text: 'kept' } });
+    await tick();
+    expect(posted).toContain('NOTE');
+    release();
+    await note;
+  });
+
+  it('a host-run dispatch waits for the request in flight, so that request\'s older response cannot overwrite it', async () => {
+    const { kernel, release } = await setup();
+    const slow = kernel.dispatch({ event: 'SLOW', targetTrait: 'ItemBrowse' });
+    await tick();
+    let folded = false;
+    const host = kernel.foldHostDispatch({ event: 'STEP', targetTrait: 'LiveFeed' }, { success: true, transitioned: true, states: { LiveFeed: 'idle' }, emittedEvents: [] }).then(() => { folded = true; });
+    await tick();
+    expect(folded).toBe(false);
+    release();
+    await slow;
+    await host;
+    expect(folded).toBe(true);
+  });
+
+  it('control: with nothing in flight a host-run dispatch applies at once', async () => {
+    const { kernel } = await setup();
+    let folded = false;
+    await kernel.foldHostDispatch({ event: 'STEP', targetTrait: 'LiveFeed' }, { success: true, transitioned: true, states: { LiveFeed: 'idle' }, emittedEvents: [] }).then(() => { folded = true; });
+    expect(folded).toBe(true);
+  });
 });
+
