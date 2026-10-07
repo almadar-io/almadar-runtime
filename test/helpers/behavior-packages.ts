@@ -16,8 +16,8 @@ export const IO_ROOT = dirname(require.resolve('@almadar-io/behaviors/package.js
 /** This package's root: the cwd an `orb` spawn resolves `@almadar/std` / `@almadar-io/behaviors` from. */
 export const PACKAGE_ROOT = join(import.meta.dirname, '..', '..');
 
-/** The installed `@almadar/orb` CLI — the compiled path a parity test compares against. */
-export const ORB_BIN = join(dirname(require.resolve('@almadar/orb/package.json')), 'bin', 'orb');
+/** Explicit dev compiler, otherwise the installed CLI used by standalone CI. */
+export const ORB_BIN = process.env.ORB_BIN ?? join(dirname(require.resolve('@almadar/orb/package.json')), 'bin', 'orb');
 
 /** Spawn options for `orb`: behaviors from this package's `node_modules`, no dev-registry override. */
 export function orbSpawnEnv(): NodeJS.ProcessEnv {

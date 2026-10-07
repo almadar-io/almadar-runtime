@@ -251,6 +251,21 @@ function knobTrait(): Trait {
         },
         default: [{ event: 'EDIT' }],
       },
+      tools: {
+        type: '[Tool]',
+        items: {
+          type: 'union',
+          properties: {
+            Input: { name: 'Input', type: 'object', properties: { target: { name: 'target', type: 'event' } } },
+            Read: { name: 'Read', type: 'object', properties: { read: { name: 'read', type: 'string' } } },
+          },
+        },
+        default: [
+          { target: 'EDIT' },
+          { read: 'EDIT' },
+          { target: '@config.dynamicInput' },
+        ],
+      },
     },
     stateMachine: {
       states: [{ name: 'idle', isInitial: true }],
@@ -325,6 +340,15 @@ async function resolveKnobRenamed(callSiteConfig?: CallSiteConfig): Promise<{
 }
 
 describe('applyEventRenames — config knob defaults (runtime twin of the knob-level fold)', () => {
+  it('renames union event members by their declared type, preserving reads and bindings', async () => {
+    const { trait } = await resolveKnobRenamed();
+    expect(trait.config?.tools.default).toEqual([
+      { target: 'PDF_EXPORT_REQUESTED' },
+      { read: 'EDIT' },
+      { target: '@config.dynamicInput' },
+    ]);
+  });
+
   it('folds the rename into event-typed members of a DECLARED knob default', async () => {
     const { trait } = await resolveKnobRenamed();
     const actions = asConfigObjectArray(trait.config!.actions.default, 'config.actions.default');

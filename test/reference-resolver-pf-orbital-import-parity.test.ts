@@ -26,8 +26,11 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { InMemoryPersistence } from '@almadar/db/mock';
+import { runToolLoop } from '@almadar/integrations';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
-import type { OrbitalSchema, Orbital, Trait, TraitRef } from '@almadar/core';
+import type { OrbitalSchema, Trait, TraitRef } from '@almadar/core';
 import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, STD_ROOT, orbSpawnEnv } from './helpers/behavior-packages.js';
 
 const PF_LOLO = join(IO_ROOT, 'behaviors/lolo/project-friday/organisms/project-friday.lolo');
@@ -57,7 +60,7 @@ describe(
       maxBuffer: 64 * 1024 * 1024,
     });
     const pfSchema = JSON.parse(readFileSync(pfOrbPath, 'utf-8')) as OrbitalSchema;
-    const rustSchema = JSON.parse(readFileSync(pfResolvedPath, 'utf-8')) as { orbitals: Orbital[] };
+    const rustSchema = JSON.parse(readFileSync(pfResolvedPath, 'utf-8')) as OrbitalSchema;
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {
@@ -122,6 +125,76 @@ describe(
         const declaredNav = pfSchema.config?.['navItems']?.default;
         expect(Array.isArray(navItems) ? navItems.length : navItems).toBe(Array.isArray(declaredNav) ? declaredNav.length : -1);
         expect(appLayout.config.navItems?.forwardedFrom).toBe('@config.navItems');
+      }
+    });
+
+    it('creates a task through the approved tools after permitted project/workspace reads', async () => {
+      const runtime = new OrbitalServerRuntime({ persistence: new InMemoryPersistence(), debug: false });
+      await runtime.register(rustSchema);
+      await runtime.persistence.create('Workspace', { id: 'workspace-tools', name: 'Tool test workspace' });
+      await runtime.persistence.create('Project', { id: 'project-tools', name: 'Tool test project', workspaceId: 'workspace-tools' });
+      const host = runtime.servicePorts({ orbital: 'AssistantOrbital', trait: 'AssistantOrbitalAssistantLoop' }, { id: 'owner-tools', role: 'owner' });
+      const tools = [
+        ...['Task', 'Lead', 'TimeEntry', 'Project', 'Workspace', 'KnowledgeEntry'].map((read) => ({ read })),
+        ...[
+          'TaskOrbital.TaskOrbitalTaskPersistor.DO_CREATE',
+          'TaskOrbital.TaskOrbitalTaskPersistor.DO_UPDATE',
+          'LeadOrbital.LeadOrbitalDealPersistor.DO_CREATE',
+          'LeadOrbital.LeadOrbitalDealPersistor.DO_UPDATE',
+        ].map((event) => ({ event })),
+      ];
+      let turn = 0;
+      const client: Parameters<typeof runToolLoop>[0] = {
+        async callWithTools(options) {
+          expect(options.tools?.map((tool) => tool.function.name).sort()).toEqual([
+            ...tools.flatMap((tool) => 'read' in tool ? [`read__${tool.read}`] : [tool.event.split('.').join('__')]),
+          ].sort());
+          const current = turn++;
+          if (current === 1) {
+            expect(options.messages.filter((message) => message.role === 'tool').map((message) => message.content).join('\n'))
+              .toContain('project-tools');
+          }
+          const calls = current === 0
+            ? ['read__Project', 'read__Workspace'].map((name) => ({ id: name, type: 'function' as const, function: { name, arguments: '{}' } }))
+            : current === 1 ? [{ id: 'create', type: 'function' as const, function: {
+              name: 'TaskOrbital__TaskOrbitalTaskPersistor__DO_CREATE',
+              arguments: JSON.stringify({ data: { title: 'Assistant created task', projectId: 'project-tools', workspaceId: 'workspace-tools' } }),
+            } }] : undefined;
+          return { message: { role: 'assistant', content: calls ? null : 'Created.', ...(calls ? { tool_calls: calls } : {}) }, finishReason: 'stop', usage: null };
+        },
+      };
+      await runToolLoop(client, host, { messages: [{ role: 'user', content: 'Create a task in my project' }], tools }, { provider: 'scripted', model: 'scripted' });
+      expect(await runtime.persistence.list('Task')).toEqual(expect.arrayContaining([
+        expect.objectContaining({ title: 'Assistant created task', projectId: 'project-tools', workspaceId: 'workspace-tools' }),
+      ]));
+      await runtime.persistence.create('Task', { id: 'private-task', title: 'Private task', assignee: 'someone-else' });
+      const contractor = runtime.servicePorts(host.caller, { id: 'contractor-tools', role: 'external_contractor' });
+      expect(await contractor.read('Task')).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: 'private-task' })]));
+    });
+
+    it('preserves the assistant allowlist and resolved input identities on both paths', async () => {
+      const result = await preprocessSchema(pfSchema, {
+        basePath: IO_ROOT,
+        stdLibPath: STD_ROOT,
+        allowOutsideBasePath: true,
+      });
+      expect(result.success, result.success ? undefined : JSON.stringify(result)).toBe(true);
+      if (!result.success) return;
+
+      const expected = [
+        ...['Task', 'Lead', 'TimeEntry', 'Project', 'Workspace', 'KnowledgeEntry'].map((read) => ({ read })),
+        ...[
+          'TaskOrbital.TaskOrbitalTaskPersistor.DO_CREATE',
+          'TaskOrbital.TaskOrbitalTaskPersistor.DO_UPDATE',
+          'LeadOrbital.LeadOrbitalDealPersistor.DO_CREATE',
+          'LeadOrbital.LeadOrbitalDealPersistor.DO_UPDATE',
+        ].map((event) => ({ event })),
+      ];
+      for (const schema of [result.data.schema, rustSchema]) {
+        const orbital = schema.orbitals.find((entry) => entry.name === 'AssistantOrbital');
+        const loop = orbital?.traits.map(registeredTrait)
+          .find((trait) => trait?.name === 'AssistantOrbitalAssistantLoop');
+        expect(loop?.config?.tools?.default).toEqual(expected);
       }
     });
   },

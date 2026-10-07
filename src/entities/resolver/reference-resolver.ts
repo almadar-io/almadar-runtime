@@ -532,14 +532,18 @@ function renameEventTypedMembers(
     return value.map((entry) => renameEventTypedMembers(entry, items, rename) as TraitConfigValue);
   }
   if (typeof value !== "object") return value;
-  const properties = items.properties;
+  const properties = items.type === "union"
+    ? Object.fromEntries(Object.values(items.properties ?? {}).flatMap((variant) =>
+        Object.entries(variant.properties ?? {}).filter(([, member]) => member.type === "event" || member.type === "EventAddress"),
+      ))
+    : items.properties;
   if (properties === undefined) return value;
   const entry = value as TraitConfigObject;
   const next: { [k: string]: TraitConfigValue } = { ...entry };
   let touched = false;
   for (const [member, decl] of Object.entries(properties)) {
     const current = entry[member];
-    if (decl.type === "event") {
+    if (decl.type === "event" || decl.type === "EventAddress") {
       // `@`-bindings resolve elsewhere; "" is the default-off outlet.
       if (typeof current === "string" && current !== "" && !current.startsWith("@")) {
         const renamed = rename(current);
@@ -583,7 +587,7 @@ function renameEventsInDeclaredConfig(
     // A knob declared `: event` is itself a reference (the scalar case);
     // otherwise descend into its item schema for `event`-typed members.
     const renamedDefault =
-      field.type === "event"
+      (field.type === "event" || field.type === "EventAddress")
         ? (typeof field.default === "string" && field.default !== "" && !field.default.startsWith("@")
             ? (rename(field.default) ?? field.default)
             : field.default)
@@ -6962,6 +6966,34 @@ export class ReferenceResolver {
     alias: string,
     listenSourceTargets: ReadonlyMap<string, SiblingImportInfo>,
   ): Promise<ResolveResult<OrbitalDefinition>> {
+    const errors: string[] = [];
+    // config: upstream's DECLARED knobs folded with the call-site override —
+    // an override of an undeclared knob is the JS twin of ORB_O_CONFIG_UNKNOWN_KEY.
+    const declaredConfig = upstream.config;
+    if (ref.config) {
+      for (const key of Object.keys(ref.config)) {
+        if (!declaredConfig || !(key in declaredConfig)) {
+          errors.push(
+            `Orbital "${localName}" overrides config "${key}" but upstream orbital "${upstream.name}" does not ` +
+              `declare that knob (ORB_O_CONFIG_UNKNOWN_KEY)`,
+          );
+        }
+      }
+      if (errors.length > 0) return { success: false, errors };
+    }
+    // Fold via the single owner shared with the factory-runtime overlay
+    // (`applyParamsToOrb`'s `params.config` handling) — same operation, two
+    // call sites. `ref.config` carries full `ConfigFieldDeclaration`s (only
+    // `.default` is ever meaningful at an override call site); flatten to
+    // the plain value map `overrideDeclaredKnobs` takes.
+    const configOverrideValues: Record<string, TraitConfigValue> = {};
+    for (const [key, field] of Object.entries(ref.config ?? {})) {
+      if (field.default !== undefined) configOverrideValues[key] = field.default;
+    }
+    const foldedConfig: DeclaredTraitConfig | undefined = declaredConfig
+      ? overrideDeclaredKnobs(declaredConfig, configOverrideValues)
+      : undefined;
+
     // Upstream traits must be inline first: resolve the upstream's OWN trait
     // refs, sibling pulls, and config-forward chain in ITS OWN import scope
     // (REUSED — the ordinary `resolve()` pass) before this orbital's
@@ -6988,7 +7020,7 @@ export class ReferenceResolver {
     this.schemaConfig = importedSchemaConfig;
     let resolvedUpstream: ResolveResult<ResolvedOrbital>;
     try {
-      resolvedUpstream = await this.resolve(upstream, sourcePath, chain);
+      resolvedUpstream = await this.resolve({ ...upstream, config: foldedConfig }, sourcePath, chain);
     } finally {
       this.schemaConfig = savedSchemaConfig;
     }
@@ -7023,7 +7055,6 @@ export class ReferenceResolver {
       upstreamTraits.map((rt) => rt.trait.name).filter((n) => !keptNames.has(n)),
     );
 
-    const errors: string[] = [];
     for (const rt of keptTraits) {
       for (const embed of traitEmbedNamesOf(rt.trait)) {
         if (removedNames.has(embed)) {
@@ -7242,33 +7273,6 @@ export class ReferenceResolver {
       }
     }
     if (errors.length > 0) return { success: false, errors };
-
-    // config: upstream's DECLARED knobs folded with the call-site override —
-    // an override of an undeclared knob is the JS twin of ORB_O_CONFIG_UNKNOWN_KEY.
-    const declaredConfig = upstream.config;
-    if (ref.config) {
-      for (const key of Object.keys(ref.config)) {
-        if (!declaredConfig || !(key in declaredConfig)) {
-          errors.push(
-            `Orbital "${localName}" overrides config "${key}" but upstream orbital "${upstream.name}" does not ` +
-              `declare that knob (ORB_O_CONFIG_UNKNOWN_KEY)`,
-          );
-        }
-      }
-      if (errors.length > 0) return { success: false, errors };
-    }
-    // Fold via the single owner shared with the factory-runtime overlay
-    // (`applyParamsToOrb`'s `params.config` handling) — same operation, two
-    // call sites. `ref.config` carries full `ConfigFieldDeclaration`s (only
-    // `.default` is ever meaningful at an override call site); flatten to
-    // the plain value map `overrideDeclaredKnobs` takes.
-    const configOverrideValues: Record<string, TraitConfigValue> = {};
-    for (const [key, field] of Object.entries(ref.config ?? {})) {
-      if (field.default !== undefined) configOverrideValues[key] = field.default;
-    }
-    const foldedConfig: DeclaredTraitConfig | undefined = declaredConfig
-      ? overrideDeclaredKnobs(declaredConfig, configOverrideValues)
-      : undefined;
 
     // Ids: every cloned node (trait AND entity — two imports of one upstream
     // must be pairwise disjoint, not just pairwise renamed) gets a FRESH

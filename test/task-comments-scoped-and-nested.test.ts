@@ -44,7 +44,7 @@ async function comment(send: Awaited<ReturnType<typeof taskRuntime>>['send'], ta
 }
 
 async function createTask(send: Awaited<ReturnType<typeof taskRuntime>>['send'], title: string): Promise<string> {
-  const response = await send('ListPersistor', 'DO_CREATE', { data: { title } });
+  const response = await send('ListTaskRules', 'DO_CREATE', { data: { title } });
   const created = response.emittedEvents.find((e) => e.event === 'TASK_CREATED');
   const id = created?.payload?.['id'];
   if (typeof id !== 'string') throw new Error(`task "${title}" was not created: ${JSON.stringify(response.effectResults)}`);
