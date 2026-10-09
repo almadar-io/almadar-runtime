@@ -15,6 +15,7 @@ import { InMemoryPersistence } from '@almadar/db/mock';
 import {
   buildTraitIndex,
   createClientKernel,
+  createResidenceTransport,
   createInProcessTransport,
   createMemoryCircuitStore,
   dispatchWithServerLeg,
@@ -22,7 +23,7 @@ import {
   type ClientRoleOpts,
 } from '../src/index.js';
 
-function schema(): OrbitalSchema {
+function schema(browserStored = false): OrbitalSchema {
   return {
     name: 'local-seed',
     version: '1.0.0',
@@ -30,7 +31,7 @@ function schema(): OrbitalSchema {
       name: 'ChatOrbital',
       id: 'orb_chat' as OrbitalId,
       pages: [],
-      entity: { name: 'Message', persistence: 'persistent', fields: [{ name: 'id', type: 'string' }, { name: 'content', type: 'string' }] },
+      entity: { name: 'Message', persistence: 'persistent', ...(browserStored ? { collection: 'messages', local: true } : {}), fields: [{ name: 'id', type: 'string' }, { name: 'content', type: 'string' }] },
       traits: [
         {
           name: 'Composer',
@@ -100,5 +101,43 @@ describe('local seed whose cascade reaches server-bound work', () => {
     await kernel.dispatch({ event: 'SEND', targetTrait: 'Composer' });
     const rows = await persistence.list('Message');
     expect(rows.map((r) => r['content'])).toEqual(['typed']);
+  });
+
+  it('the leg names the event each trait fired on', async () => {
+    const traitIndex = buildTraitIndex(schema().orbitals);
+    const store = createMemoryCircuitStore([...traitIndex.byName.values()].map((e) => e.traitDef));
+    const opts: ClientRoleOpts = { orbitalName: 'ChatOrbital', traitIndex, store, carriesCircuitState: true };
+    await dispatchWithServerLeg(opts, { event: 'DRAFT', targetTrait: 'Composer', payload: { value: 'hi' } });
+    const dispatch = await dispatchWithServerLeg(opts, { event: 'SEND', targetTrait: 'Composer' });
+    expect(dispatch.serverLeg?.traits).toEqual(expect.arrayContaining([
+      { trait: 'Composer', from: 'ready', event: 'SEND' },
+      { trait: 'Persistor', from: 'idle', event: 'DO_CREATE' },
+    ]));
+  });
+
+  it('a browser-stored write reached through a client-only seed lands in the browser store, not the server', async () => {
+    const s = schema(true);
+    const browser = new InMemoryPersistence();
+    const runtime = new OrbitalServerRuntime({ debug: false, persistence: browser });
+    await runtime.register(s);
+    const traitIndex = buildTraitIndex(s.orbitals);
+    const store = createMemoryCircuitStore([...traitIndex.byName.values()].map((e) => e.traitDef));
+    const server = vi.fn(async () => ({ success: true, transitioned: true, states: {}, emittedEvents: [] }));
+    const kernel = createClientKernel({
+      orbitalName: 'ChatOrbital',
+      traitIndex,
+      store,
+      carriesCircuitState: false,
+      transport: createResidenceTransport({
+        local: createInProcessTransport((orbital, request) => runtime.processOrbitalEvent(orbital, request)),
+        remote: createInProcessTransport(server),
+        traitIndex,
+      }),
+    });
+    await kernel.dispatch({ event: 'DRAFT', targetTrait: 'Composer', payload: { value: 'typed' } });
+    await kernel.dispatch({ event: 'SEND', targetTrait: 'Composer' });
+    const rows = await browser.list('Message');
+    expect(rows.map((r) => r['content'])).toEqual(['typed']);
+    expect(server).not.toHaveBeenCalled();
   });
 });

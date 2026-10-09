@@ -194,6 +194,10 @@
         "type": "trait"
       },
       {
+        "name": "orbitalField",
+        "type": "orbital"
+      },
+      {
         "name": "moneyField",
         "type": "money",
         "required": true
@@ -263,7 +267,9 @@
         "url": "https://example.com/files/filefield/1.pdf",
         "mimeType": "application/pdf",
         "sizeBytes": 1024
-      }
+      },
+      "traitField": null,
+      "orbitalField": null
     },
     {
       "plainString": "Plain String 2",
@@ -321,7 +327,9 @@
         "url": "https://example.com/files/filefield/2.pdf",
         "mimeType": "application/pdf",
         "sizeBytes": 2048
-      }
+      },
+      "traitField": null,
+      "orbitalField": null
     },
     {
       "plainString": "Plain String 3",
@@ -379,7 +387,9 @@
         "url": "https://example.com/files/filefield/3.pdf",
         "mimeType": "application/pdf",
         "sizeBytes": 3072
-      }
+      },
+      "traitField": null,
+      "orbitalField": null
     },
     {
       "plainString": "Plain String 4",
@@ -437,7 +447,9 @@
         "url": "https://example.com/files/filefield/4.pdf",
         "mimeType": "application/pdf",
         "sizeBytes": 4096
-      }
+      },
+      "traitField": null,
+      "orbitalField": null
     },
     {
       "plainString": "Plain String 5",
@@ -495,7 +507,9 @@
         "url": "https://example.com/files/filefield/5.pdf",
         "mimeType": "application/pdf",
         "sizeBytes": 5120
-      }
+      },
+      "traitField": null,
+      "orbitalField": null
     },
     {
       "plainString": "Plain String 6",
@@ -553,7 +567,9 @@
         "url": "https://example.com/files/filefield/6.pdf",
         "mimeType": "application/pdf",
         "sizeBytes": 6144
-      }
+      },
+      "traitField": null,
+      "orbitalField": null
     },
     {
       "plainString": "Plain String 7",
@@ -611,7 +627,9 @@
         "url": "https://example.com/files/filefield/7.pdf",
         "mimeType": "application/pdf",
         "sizeBytes": 7168
-      }
+      },
+      "traitField": null,
+      "orbitalField": null
     }
   ]
 }

@@ -74,6 +74,10 @@ export function collectTraitRefsFromResolvedTrait(trait: ResolvedTrait): Set<str
   for (const tick of trait.ticks ?? []) {
     collectTraitRefsFromEffects(tick.effects, out);
   }
+  // Composition places embeds in the trait's own config (`children: [@trait.X]`).
+  for (const field of Object.values(trait.config ?? {})) {
+    if (field.default !== undefined) collectTraitRefsFromValue(field.default, out);
+  }
   return out;
 }
 

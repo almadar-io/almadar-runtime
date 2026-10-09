@@ -6,6 +6,7 @@
  *
  * @packageDocumentation
  */
+import { orderFetchedRows } from './fetch-order.js';
 import { createLogger } from '@almadar/logger';
 import { EffectExecutor, clientResolvesRenderBindings } from './EffectExecutor.js';
 import type { ServerEffectResult } from './ServerEffectHandlers.js';
@@ -892,6 +893,7 @@ export async function runServerEffectStage(
           // consumers need the count of rows matching the filter, not
           // just the slice length.
           total = entities.length;
+          entities = orderFetchedRows(entities, options?.orderBy);
 
           // Apply pagination
           if (options?.offset && options.offset > 0) {

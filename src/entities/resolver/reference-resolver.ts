@@ -22,6 +22,7 @@ import type {
   EntityField,
   Event,
   Page,
+  PageModifiers,
   PageTraitRef,
   Trait,
   TraitRef,
@@ -65,6 +66,7 @@ import {
   resolveConfigRefEventName,
   normalizeCallSiteConfigToValues,
   isCallSiteConfigDeclaration,
+  isConfigRedeclaration,
   isReferenceConfigType,
   overrideDeclaredKnobs,
   deriveId,
@@ -263,6 +265,16 @@ export interface ResolvedImport {
  */
 function importedOrbitals(imported: ResolvedImport): Orbital[] {
   return imported.orbitals?.length ? imported.orbitals : [imported.orbital];
+}
+
+/** The alias's orbitals with each reference-form one's resolved entities, as an import of a sibling sees them. */
+function resolvedAliasView(imported: ResolvedImport): Orbital[] {
+  return importedOrbitals(imported).map((o) => {
+    const resolved = o.reference ? imported.resolvedOrbitals?.find((r) => r.name === o.name) : undefined;
+    if (!resolved) return o;
+    const aux = [...(resolved.original.auxiliaryEntities ?? []), ...(resolved.auxiliaryEntities ?? [])].filter(isInlineEntity);
+    return { ...o, entity: resolved.entity, auxiliaryEntities: aux };
+  });
 }
 
 /**
@@ -2402,6 +2414,47 @@ function rewriteEntityFieldsInConfig(
  * defaults. No existing helper covers field-level (as opposed to whole-name)
  * entity rewrites; this is new (§Report: fields rename).
  */
+/** The §8 trait-reference override surface, as a call site or an import's `traits { T { … } }` entry states it. */
+interface TraitCallSiteOverrides {
+  readonly config?: TraitConfig;
+  readonly linkedEntity?: string;
+  readonly events?: { [oldKey: string]: string };
+  readonly listens?: readonly TraitEventListener[];
+  readonly fields?: { [upstream: string]: string };
+  readonly emitsScope?: "internal" | "external";
+}
+
+/**
+ * Apply the §8 call-site overrides to one trait — the ONE JS twin of Rust's
+ * `apply_overrides_to_trait` + `apply_post_subst_overrides_to_trait`, shared by
+ * an imported and a local `trait X = A.traits.Y { … }` reference and by an
+ * orbital import's per-trait `traits {}` entry. `aliasSubs` is the imported
+ * branch's sibling-pull rebind (C1-J6); `config` comes back event-renamed for
+ * the `ResolvedTrait.config` side-record.
+ */
+function applyTraitCallSiteOverrides(
+  base: Trait,
+  o: TraitCallSiteOverrides,
+  entityIds: ReadonlyMap<string, EntityId>,
+  aliasSubs?: ReadonlyMap<string, string>,
+): { ok: true; trait: Trait; config: TraitConfig | undefined } | { ok: false; errors: string[] } {
+  const { trait: configResolved, errors, resolvedKnobs } = resolveConfigRefEmitNames(base, o.config);
+  if (errors.length > 0) return { ok: false, errors };
+  const rebound = applyLinkedEntityRename(configResolved, o.linkedEntity, entityIds);
+  const aliasRebound = aliasSubs ? applyAliasEntityRenames(rebound, aliasSubs, entityIds) : rebound;
+  const renamed = applyEventRenames(aliasRebound, o.events);
+  const folded = foldEventRenameOntoDeclaredKnobs(renamed, resolvedKnobValues(base, configResolved, resolvedKnobs), o.events);
+  const config = applyEventRenamesToCallSiteConfig(o.config, rebound.config, o.events);
+  let next = foldCallSiteConfigOntoTrait(folded, config);
+  if (o.fields !== undefined) next = rewriteEntityFieldsInTrait(next, new Map(Object.entries(o.fields)));
+  if (o.listens !== undefined) next = { ...next, listens: [...o.listens] };
+  if (o.emitsScope !== undefined && next.emits) {
+    const scope = o.emitsScope;
+    next = { ...next, emits: next.emits.map((e) => ({ ...e, scope, scopeOverridden: true })) };
+  }
+  return { ok: true, trait: next, config };
+}
+
 function rewriteEntityFieldsInTrait(trait: Trait, fieldSubs: ReadonlyMap<string, string>): Trait {
   if (fieldSubs.size === 0) return trait;
   const rewrite = <T extends RuntimeValue>(v: T): T => rewriteEntityFieldTokensInValue(v, fieldSubs);
@@ -4161,6 +4214,138 @@ function applyExtendFields(
 }
 
 /**
+ * `retype { … }` + the `entity [persistent: tbl, …]` bracket on the primary
+ * entity, after `fields {}` renames and `extend {}` — JS twin of the compiled
+ * path's retype / persistence block in `resolve_orbital_reference`. A retyped
+ * field keeps its docs, mock, key marks and provenance when the new declaration
+ * sets none; persistence/collection override only a `persistent` upstream (the
+ * factory-runtime rule); entity flags only switch on.
+ */
+function applyRetypeAndPersistence(
+  entity: Entity,
+  ref: OrbitalRefObject,
+  consumerEntityIds: ReadonlyMap<string, EntityId>,
+  localName: string,
+): ExtendFieldsResult {
+  const errors: string[] = [];
+  let fields = [...entity.fields];
+  const extended = new Set((ref.extend ?? []).map((f) => f.name));
+  const seen = new Set<string>();
+  for (const rf of ref.retype ?? []) {
+    const name = rf.name;
+    if (!name) continue;
+    if (extended.has(name) || seen.has(name)) {
+      errors.push(
+        `Orbital "${localName}" retypes field "${name}", which is ${extended.has(name) ? 'also added by `extend {}`' : 'retyped more than once'} (ORB_O_RETYPE_FIELD_CONFLICT)`,
+      );
+      continue;
+    }
+    seen.add(name);
+    const index = fields.findIndex((f) => f.name === name);
+    if (index < 0) {
+      errors.push(`Orbital "${localName}" retypes field "${name}", which the upstream primary entity does not have after "fields {}" renames (ORB_O_RETYPE_UNKNOWN_FIELD)`);
+      continue;
+    }
+    const old = fields[index];
+    const relation = rf.type === 'relation' && !rf.relation.entityId ? consumerEntityIds.get(rf.relation.entity) : undefined;
+    const retyped: EntityField = {
+      ...rf,
+      ...(relation !== undefined && rf.type === 'relation' ? { relation: { ...rf.relation, entityId: relation } } : {}),
+      ...(rf.description === undefined && old.description !== undefined ? { description: old.description } : {}),
+      ...(rf.synonyms === undefined && old.synonyms !== undefined ? { synonyms: old.synonyms } : {}),
+      ...(rf.mock === undefined && old.mock !== undefined ? { mock: old.mock } : {}),
+      ...(rf.primaryKey === undefined && old.primaryKey !== undefined ? { primaryKey: old.primaryKey } : {}),
+      ...(rf.intrinsic === undefined && old.intrinsic !== undefined ? { intrinsic: old.intrinsic } : {}),
+      ...(old.mergedFrom !== undefined ? { mergedFrom: old.mergedFrom } : {}),
+    };
+    fields = fields.map((f, i) => (i === index ? retyped : f));
+  }
+  let next: Entity = { ...entity, fields };
+  if (ref.persistence !== undefined || ref.collection !== undefined) {
+    if (entity.persistence === undefined || entity.persistence === 'persistent') {
+      next = {
+        ...next,
+        ...(ref.persistence !== undefined ? { persistence: ref.persistence } : {}),
+        ...(ref.collection !== undefined ? { collection: ref.collection } : {}),
+      };
+    } else {
+      errors.push(
+        `Orbital "${localName}" overrides the persistence of upstream entity "${entity.name}", declared ` +
+          `\`${entity.persistence}\` — only a persistent entity takes an override (ORB_O_ENTITY_PERSISTENCE_LOCKED)`,
+      );
+    }
+  }
+  if (ref.shared) next = { ...next, shared: true };
+  if (ref.identity) next = { ...next, identity: true };
+  if (ref.local) next = { ...next, local: true };
+  if (ref.seedMock) next = { ...next, seedMock: true };
+  return { entity: next, errors };
+}
+
+/**
+ * `traits { T { … } }` — the §8 call-site overrides on one imported trait, by
+ * its UPSTREAM name, before the unconditional prefix (JS twin of the compiled
+ * path's `obj.traits` pass). Unknown or omitted trait names and config keys the
+ * trait never declares are refused.
+ */
+function applyImportTraitOverrides(
+  kept: readonly Trait[],
+  upstreamNames: ReadonlySet<string>,
+  removedNames: ReadonlySet<string>,
+  ref: OrbitalRefObject,
+  consumerEntityIds: ReadonlyMap<string, EntityId>,
+  localName: string,
+): { overridden: ReadonlyMap<string, Trait>; errors: string[] } {
+  const overridden = new Map<string, Trait>();
+  const errors: string[] = [];
+  const entries = ref.traits ?? {};
+  for (const name of Object.keys(entries).sort()) {
+    const ov = entries[name];
+    if (!upstreamNames.has(name)) {
+      errors.push(`Orbital "${localName}" overrides trait "${name}", which is not a trait of the imported orbital (ORB_O_TRAITS_UNKNOWN_TRAIT)`);
+      continue;
+    }
+    if (removedNames.has(name)) {
+      errors.push(`Orbital "${localName}" overrides trait "${name}", which omit {}/only {} dropped (ORB_O_TRAITS_OMITTED_TRAIT)`);
+      continue;
+    }
+    const trait = kept.find((t) => t.name === name);
+    if (!trait || !ov) continue;
+    for (const key of Object.keys(ov.config ?? {}).sort()) {
+      const value = ov.config?.[key];
+      if (!(key in (trait.config ?? {})) && !(value !== undefined && isConfigRedeclaration(value))) {
+        errors.push(`Orbital "${localName}" sets traits(${name}).config(${key}), a knob trait "${name}" does not declare (ORB_O_CONFIG_UNKNOWN_KEY)`);
+      }
+    }
+    const applied = applyTraitCallSiteOverrides(trait, ov, ov.linkedEntity !== undefined ? consumerEntityIds : new Map());
+    if (!applied.ok) {
+      errors.push(...applied.errors);
+      continue;
+    }
+    overridden.set(name, applied.trait);
+  }
+  return { overridden, errors };
+}
+
+/** True when `mods` would lower an upstream `authenticated` page to `public` (ORB_O_PAGE_ACCESS_WEAKENED). */
+function weakensPageAccess(page: Page, mods: PageModifiers | undefined): boolean {
+  return mods?.access === "public" && page.access === "authenticated";
+}
+
+/** `page` with an import's explicit page modifiers over its own; absent ones inherit (twin of orbital-compiler `apply_page_modifiers`). */
+function withPageModifiers(page: Page, mods: PageModifiers | undefined): Page {
+  if (!mods) return page;
+  return {
+    ...page,
+    ...(mods.access !== undefined ? { access: mods.access } : {}),
+    ...(mods.indexing !== undefined ? { indexing: mods.indexing } : {}),
+    ...(mods.title !== undefined ? { title: mods.title } : {}),
+    ...(mods.description !== undefined ? { description: mods.description } : {}),
+    ...(mods.translationOf !== undefined ? { translationOf: mods.translationOf } : {}),
+  };
+}
+
+/**
  * Deterministic id for a materialised node, rooted in the source node's own
  * id when it has one (`deriveId` then keeps that id's kind — trait stays
  * trait, entity stays entity). When the source has no id yet (pre-Phase-7,
@@ -4342,7 +4527,16 @@ function forwardConsumerAppKnobs(
 /**
  * ReferenceResolver - Resolves all references in an orbital.
  */
+interface PendingEntityTarget {
+  readonly localName: string;
+  readonly upstreamKey: string;
+  readonly consumerName: string;
+}
+
 export class ReferenceResolver {
+  /** `entities {}` targets awaiting the flattened program, keyed by the flattening call's consumer-entity map. */
+  private readonly pendingEntityTargets = new Map<ReadonlyMap<string, EntityId>, PendingEntityTarget[]>();
+
   private loader: SchemaLoader;
   private options: ResolveOptions;
   private localTraits: Map<string, Trait>;
@@ -5248,17 +5442,23 @@ export class ReferenceResolver {
   private async importsOfSource(
     imported: ResolvedImport,
     chain: ImportChainLike,
+    entry?: Exclude<TraitRef, string> | Page | PageRefObject,
   ): Promise<ResolvedImports | null> {
-    const key = imported.sourcePath ?? `${imported.alias}:${imported.from}`;
+    // The scope of the orbital that declares `entry` — each orbital of a multi-orbital file
+    // has its own `uses`, so two orbitals may name one atom under different aliases.
+    const declares = (o: Orbital): boolean =>
+      entry !== undefined && (o.traits.some((t) => t === entry) || (o.pages ?? []).some((p) => p === entry));
+    const declaring = importedOrbitals(imported).find(declares) ?? imported.orbital;
+    const key = `${imported.sourcePath ?? `${imported.alias}:${imported.from}`}#${declaring.name}`;
     const cached = this.sourceImportsCache.get(key);
     if (cached) return cached;
     const result = await this.resolveImports(
-      imported.orbital.uses ?? [],
+      declaring.uses ?? [],
       imported.sourcePath,
       chain,
     );
     if (!result.success) return null;
-    result.data.idIndex = buildIdIndex(imported.orbital, result.data.orbitals);
+    result.data.idIndex = buildIdIndex(declaring, result.data.orbitals);
     this.sourceImportsCache.set(key, result.data);
     return result.data;
   }
@@ -5323,8 +5523,10 @@ export class ReferenceResolver {
       events?: { [oldKey: string]: string };
       listens?: TraitEventListener[];
       typeArgs?: Record<string, string>;
+      fields?: { [upstream: string]: string };
+      emitsScope?: "internal" | "external";
     };
-    const srcImports = await this.importsOfSource(imported, chain);
+    const srcImports = await this.importsOfSource(imported, chain, entry);
     if (!srcImports) {
       return {
         success: false,
@@ -5344,6 +5546,10 @@ export class ReferenceResolver {
       refObj.listens,
       refObj.refId,
       refObj.typeArgs,
+      undefined,
+      undefined,
+      refObj.fields,
+      refObj.emitsScope,
     );
     if (!nested.success) return nested;
     // `nested.data.embedScope` is set whenever `resolveTraitRefString`
@@ -5375,7 +5581,7 @@ export class ReferenceResolver {
     chain: ImportChainLike,
   ): Promise<ResolveResult<{ page: Page }>> {
     if (!("ref" in entry)) return { success: true, data: { page: entry }, warnings: [] };
-    const srcImports = await this.importsOfSource(imported, chain);
+    const srcImports = await this.importsOfSource(imported, chain, entry);
     if (!srcImports) {
       return {
         success: false,
@@ -6011,6 +6217,8 @@ export class ReferenceResolver {
         events?: { [oldKey: string]: string };
         listens?: TraitEventListener[];
         typeArgs?: Record<string, string>;
+        fields?: { [upstream: string]: string };
+        emitsScope?: "internal" | "external";
       };
       return withCallSiteTraitId(refObj.id, await this.resolveTraitRefString(
         refObj.ref,
@@ -6025,6 +6233,8 @@ export class ReferenceResolver {
         refObj.typeArgs,
         embedCtx,
         aliasEntityRenames,
+        refObj.fields,
+        refObj.emitsScope,
       ));
     }
 
@@ -6068,6 +6278,8 @@ export class ReferenceResolver {
     typeArgs?: Record<string, string>,
     embedCtx?: OrbitalEmbedContext,
     aliasEntityRenames?: ReadonlyMap<string, ReadonlyMap<string, string>>,
+    fieldRenames?: { [upstream: string]: string },
+    emitsScope?: "internal" | "external",
   ): Promise<ResolveResult<ResolvedTrait>> {
     // Check if it's an imported trait reference: "Alias.traits.TraitName"
     const parsed = parseImportedTraitRef(ref);
@@ -6217,41 +6429,18 @@ export class ReferenceResolver {
               : {}),
           }
         : trait;
-      // Emit-name config refs resolve BEFORE event renames so a call-site
-      // `events={...}` rename map targets the RESOLVED event names.
-      const { trait: configResolvedTrait, errors: configRefErrors, resolvedKnobs } =
-        resolveConfigRefEmitNames(baseTrait, resolvedConfig);
-      if (configRefErrors.length > 0) {
-        return { success: false, errors: configRefErrors };
-      }
-      const reboundTrait = applyLinkedEntityRename(configResolvedTrait, linkedEntity, this.entityIdsInScope);
-      // C1-J6: a SIBLING pull from this SAME alias may already have
-      // established a rebind (see {@link ReferenceResolver.
-      // buildAliasEntityRenames}) that THIS trait's own rebind (or lack of
-      // one) never touches — apply it as an extra, narrower pass.
-      const aliasSubs = aliasEntityRenames?.get(parsed.alias);
-      const aliasReboundTrait = aliasSubs
-        ? applyAliasEntityRenames(reboundTrait, aliasSubs, this.entityIdsInScope)
-        : reboundTrait;
-      const renamedTrait = applyEventRenames(aliasReboundTrait, eventRenames);
-      // Declared half of the config-ref/events-rename fold (ledger (j)) — the
-      // call-site half is `renamedConfig` below.
-      const foldedTrait = foldEventRenameOntoDeclaredKnobs(
-        renamedTrait,
-        resolvedKnobValues(baseTrait, configResolvedTrait, resolvedKnobs),
-        eventRenames,
+      // Emit-name config refs resolve BEFORE event renames; a SIBLING pull from
+      // this SAME alias may already have established a rebind (C1-J6, {@link
+      // ReferenceResolver.buildAliasEntityRenames}) applied as a narrower pass.
+      const applied = applyTraitCallSiteOverrides(
+        baseTrait,
+        { config: resolvedConfig, linkedEntity, events: eventRenames, listens: listensOverride, fields: fieldRenames, emitsScope },
+        this.entityIdsInScope,
+        aliasEntityRenames?.get(parsed.alias),
       );
-      const renamedConfig = applyEventRenamesToCallSiteConfig(resolvedConfig, reboundTrait.config, eventRenames);
-      // GAP-AG-VALUE-DRIFT twin (Rust `trait.rs` step 6): land the resolved
-      // call-site config onto the trait's OWN declared config, not just the
-      // `ResolvedTrait.config` side-record below — a downstream reader of
-      // `trait.config[<knob>].default` (render, factory bake, a dead-knob
-      // check) must see the override, exactly like every other consumer of
-      // `overrideDeclaredKnobs`.
-      const configFoldedTrait = foldCallSiteConfigOntoTrait(foldedTrait, renamedConfig);
-      const finalTrait: Trait = listensOverride !== undefined
-        ? { ...configFoldedTrait, listens: listensOverride }
-        : configFoldedTrait;
+      if (!applied.ok) return { success: false, errors: applied.errors };
+      const finalTrait: Trait = applied.trait;
+      const renamedConfig = applied.config;
       if (listensOverride !== undefined) {
         refResolverLog.info("listens-override:imported", {
           trait: finalTrait.name,
@@ -6292,26 +6481,14 @@ export class ReferenceResolver {
       const baseLocal: Trait = overrideName
         ? { ...localTrait, name: overrideName }
         : localTrait;
-      const { trait: configResolvedLocal, errors: localConfigRefErrors, resolvedKnobs: localResolvedKnobs } =
-        resolveConfigRefEmitNames(baseLocal, resolvedConfig);
-      if (localConfigRefErrors.length > 0) {
-        return { success: false, errors: localConfigRefErrors };
-      }
-      const reboundLocal = applyLinkedEntityRename(configResolvedLocal, linkedEntity, this.entityIdsInScope);
-      const renamedLocalTrait = applyEventRenames(reboundLocal, eventRenames);
-      const foldedLocalTrait = foldEventRenameOntoDeclaredKnobs(
-        renamedLocalTrait,
-        resolvedKnobValues(baseLocal, configResolvedLocal, localResolvedKnobs),
-        eventRenames,
+      const appliedLocal = applyTraitCallSiteOverrides(
+        baseLocal,
+        { config: resolvedConfig, linkedEntity, events: eventRenames, listens: listensOverride, fields: fieldRenames, emitsScope },
+        this.entityIdsInScope,
       );
-      const renamedLocalConfig = applyEventRenamesToCallSiteConfig(resolvedConfig, reboundLocal.config, eventRenames);
-      // Same GAP-AG-VALUE-DRIFT fold as the imported branch above — a local
-      // trait ref's call-site config must land on its OWN declared config
-      // too, not just the `ResolvedTrait.config` side-record.
-      const configFoldedLocalTrait = foldCallSiteConfigOntoTrait(foldedLocalTrait, renamedLocalConfig);
-      const finalLocalTrait: Trait = listensOverride !== undefined
-        ? { ...configFoldedLocalTrait, listens: listensOverride }
-        : configFoldedLocalTrait;
+      if (!appliedLocal.ok) return { success: false, errors: appliedLocal.errors };
+      const finalLocalTrait: Trait = appliedLocal.trait;
+      const renamedLocalConfig = appliedLocal.config;
       if (listensOverride !== undefined) {
         refResolverLog.info("listens-override:local", {
           trait: finalLocalTrait.name,
@@ -6478,6 +6655,8 @@ export class ReferenceResolver {
       };
     }
 
+    const sourcePage = page.sourcePage ?? page.id;
+    if (sourcePage !== undefined) page = { ...page, sourcePage };
     return {
       success: true,
       data: {
@@ -6511,6 +6690,24 @@ export class ReferenceResolver {
     }
 
     const resolved = baseResult.data!;
+
+    const mods: PageModifiers = {
+      ...(refObj.access !== undefined ? { access: refObj.access } : {}),
+      ...(refObj.indexing !== undefined ? { indexing: refObj.indexing } : {}),
+      ...(refObj.title !== undefined ? { title: refObj.title } : {}),
+      ...(refObj.description !== undefined ? { description: refObj.description } : {}),
+      ...(refObj.translationOf !== undefined ? { translationOf: refObj.translationOf } : {}),
+    };
+    if (weakensPageAccess(resolved.page, mods)) {
+      return {
+        success: false,
+        errors: [
+          `Page reference '${refObj.ref}' at ${refObj.path ?? resolved.page.path} sets \`access: public\` on an upstream page declared ` +
+            "`access: authenticated` — an import cannot weaken inherited protection (ORB_O_PAGE_ACCESS_WEAKENED)",
+        ],
+      };
+    }
+    resolved.page = withPageModifiers(resolved.page, mods);
 
     if (refObj.path) {
       const originalPath = resolved.page.path;
@@ -6606,6 +6803,8 @@ export class ReferenceResolver {
     // / roster declared inline elsewhere in the same schema, independent of
     // import-flattening order (§ Stage B `entities {}`/`roles {}`).
     const consumerEntityIds = consumerEntityIdsOf(schema.orbitals);
+    const pendingTargets: PendingEntityTarget[] = [];
+    this.pendingEntityTargets.set(consumerEntityIds, pendingTargets);
     // (B) fix: `consumerEntityIdsOf` above excludes reference-form orbitals
     // BY CONSTRUCTION (their real primary entity doesn't exist until THEY
     // resolve) — which made the approved two-import Project Friday shape
@@ -6615,7 +6814,7 @@ export class ReferenceResolver {
     // derived id too, so `entities {}` targeting works ORDER-FREE across
     // sibling imports in the same schema — mirrors the compiled path's
     // `precompute_reference_form_primary_ids`.
-    for (const [name, id] of await this.precomputeReferenceFormPrimaryIds(schema, chain)) {
+    for (const [name, id] of await this.precomputeReferenceFormPrimaryIds(schema.orbitals, chain)) {
       if (!consumerEntityIds.has(name)) consumerEntityIds.set(name, id);
     }
     // G1 (`docs/Almadar_Compiler_Gaps.md` §82): same order-free precompute,
@@ -6678,6 +6877,15 @@ export class ReferenceResolver {
       }
       flattened.push(result.data);
     }
+    this.pendingEntityTargets.delete(consumerEntityIds);
+    const declared = new Set(flattened.flatMap((o) => [o.entity, ...(o.auxiliaryEntities ?? [])].filter(isInlineEntity).map((e) => e.name)));
+    for (const t of pendingTargets) {
+      if (declared.has(t.consumerName)) continue;
+      errors.push(
+        `Orbital "${t.localName}" entities { ${t.upstreamKey}: ${t.consumerName} } targets "${t.consumerName}", which ` +
+          `the consumer schema does not declare (ORB_O_ENTITY_TARGET_UNKNOWN)`,
+      );
+    }
     if (errors.length > 0) return { success: false, errors };
     addressImportedTraits(flattened, importedTraitNames);
     // G5 (`docs/Almadar_Compiler_Gaps.md` §82): `materializeOrbitalRef` (via
@@ -6715,16 +6923,17 @@ export class ReferenceResolver {
    * moments later still surfaces the actual error for it.
    */
   private async precomputeReferenceFormPrimaryIds(
-    schema: OrbitalSchema,
+    orbitals: readonly OrbitalDefinition[],
     chain: ImportChainLike,
+    sourcePath?: string,
   ): Promise<Map<string, EntityId>> {
     const out = new Map<string, EntityId>();
-    for (const orbital of schema.orbitals) {
+    for (const orbital of orbitals) {
       const ref = orbital.reference;
       if (!ref) continue;
       const parsed = parseOrbitalRef(ref.ref);
       if (!parsed) continue;
-      const importsResult = await this.resolveImports(orbital.uses ?? [], undefined, chain);
+      const importsResult = await this.resolveImports(orbital.uses ?? [], sourcePath, chain);
       if (!importsResult.success) continue;
       const imported = importsResult.data.orbitals.get(parsed.alias);
       if (!imported) continue;
@@ -6872,12 +7081,17 @@ export class ReferenceResolver {
       // orbitals (`candidates`, this alias's whole orbital list), never the
       // caller's `listenSourceTargets`.
       const { targets: nestedListenSourceTargets } = await this.precomputeReferenceFormListenTargets(candidates, chain);
+      // The imported program's own `entities {}` targets name ITS entities, never the importer's.
+      const nestedEntityIds = consumerEntityIdsOf(candidates);
+      for (const [name, id] of await this.precomputeReferenceFormPrimaryIds(candidates, chain, imported.sourcePath)) {
+        if (!nestedEntityIds.has(name)) nestedEntityIds.set(name, id);
+      }
       const nested = await this.resolveOrbitalRefChain(
         upstream,
         imported.sourcePath,
         chain,
         visiting,
-        consumerEntityIds,
+        nestedEntityIds,
         consumerRoster,
         nestedListenSourceTargets,
       );
@@ -6896,7 +7110,7 @@ export class ReferenceResolver {
       orbital.id,
       imported.sourcePath,
       chain,
-      candidates,
+      resolvedAliasView(imported),
       consumerEntityIds,
       consumerRoster,
       imported.schemaConfig,
@@ -7067,8 +7281,24 @@ export class ReferenceResolver {
     }
     if (errors.length > 0) return { success: false, errors };
 
+    const traitOverrides = applyImportTraitOverrides(
+      keptTraits.map((rt) => rt.trait),
+      new Set(upstreamTraits.map((rt) => rt.trait.name)),
+      removedNames,
+      ref,
+      consumerEntityIds,
+      localName,
+    );
+    if (traitOverrides.errors.length > 0) return { success: false, errors: traitOverrides.errors };
+
     // Unconditional prefix (§4.3) — traits + entities, one combined subs map.
-    let auxEntities = upstreamAuxiliaryEntities ?? [];
+    // An auxiliary copy of a name another orbital of the alias owns as its primary is that
+    // orbital's entity (one name is one entity in a program): out-of-orbital, mapped through
+    // `entities {}`, never cloned into the import.
+    const siblingPrimaries = new Set(
+      aliasOrbitals.filter((o) => o.name !== upstream.name && isInlineEntity(o.entity)).flatMap((o) => (isInlineEntity(o.entity) ? [o.entity.name] : [])),
+    );
+    let auxEntities = (upstreamAuxiliaryEntities ?? []).filter((e) => !siblingPrimaries.has(e.name));
     const subs = new Map<string, string>();
     for (const rt of keptTraits) subs.set(rt.trait.name, `${localName}${rt.trait.name}`);
     // G5 (`docs/Almadar_Compiler_Gaps.md` §82): every FINAL name this import
@@ -7126,10 +7356,18 @@ export class ReferenceResolver {
         }
         const consumerId = consumerEntityIds.get(consumerName);
         if (consumerId === undefined) {
-          errors.push(
-            `Orbital "${localName}" entities { ${upstreamKey}: ${consumerName} } targets "${consumerName}", which ` +
-              `the consumer schema does not declare (ORB_O_ENTITY_TARGET_UNKNOWN)`,
-          );
+          // Another import's materialized entity (e.g. its aux) exists only once every import has
+          // flattened; the flattening program checks it then, as the compiled path does.
+          const pending = this.pendingEntityTargets.get(consumerEntityIds);
+          if (pending === undefined) {
+            errors.push(
+              `Orbital "${localName}" entities { ${upstreamKey}: ${consumerName} } targets "${consumerName}", which ` +
+                `the consumer schema does not declare (ORB_O_ENTITY_TARGET_UNKNOWN)`,
+            );
+            continue;
+          }
+          pending.push({ localName, upstreamKey, consumerName });
+          subs.set(upstreamKey, consumerName);
           continue;
         }
         subs.set(upstreamKey, consumerName);
@@ -7284,7 +7522,7 @@ export class ReferenceResolver {
       const finalName = subs.get(rt.trait.name)!;
       const finalId = asTraitId(deriveMaterializedId(rt.trait.id, upstream.id, rt.trait.name, localName, "trait"));
       idByName.set(finalName, finalId);
-      return { ...rt.trait, name: finalName, id: finalId };
+      return { ...(traitOverrides.overridden.get(rt.trait.name) ?? rt.trait), name: finalName, id: finalId };
     });
 
     // Embedder index: for a cloned trait's final name, the final names of the
@@ -7361,11 +7599,19 @@ export class ReferenceResolver {
     // `pages {}`/`mounts {}` keys must each name a real upstream page path —
     // a typo'd key was previously silently ignored (planning find ii).
     const upstreamPathSet = new Set(upstreamPages.map((rp) => rp.page.path));
-    for (const path of [...Object.keys(ref.pages ?? {}), ...Object.keys(ref.mounts ?? {})]) {
+    for (const path of [...Object.keys(ref.pages ?? {}), ...Object.keys(ref.mounts ?? {}), ...Object.keys(ref.pageModifiers ?? {})]) {
       if (!upstreamPathSet.has(path)) {
         errors.push(
           `Orbital "${localName}" names page path "${path}" but upstream orbital "${upstream.name}" has no page ` +
             `at that path (ORB_O_PAGE_UNKNOWN_PATH)`,
+        );
+      }
+    }
+    for (const rp of upstreamPages) {
+      if (weakensPageAccess(rp.page, ref.pageModifiers?.[rp.page.path])) {
+        errors.push(
+          `Orbital "${localName}" sets \`access: public\` on upstream page "${rp.page.path}", declared ` +
+            "`access: authenticated` — an import cannot weaken inherited protection (ORB_O_PAGE_ACCESS_WEAKENED)",
         );
       }
     }
@@ -7507,7 +7753,9 @@ export class ReferenceResolver {
       localName,
     );
     if (extendResult.errors.length > 0) return { success: false, errors: extendResult.errors };
-    const primaryEntity = extendResult.entity;
+    const retypeResult = applyRetypeAndPersistence(extendResult.entity, ref, consumerEntityIds, localName);
+    if (retypeResult.errors.length > 0) return { success: false, errors: retypeResult.errors };
+    const primaryEntity = retypeResult.entity;
     const finalAuxEntities: Entity[] = auxEntities.map((e) => {
       const finalName = subs.get(e.name)!;
       return rewriteRoleLiteralsInEntity(
@@ -7553,8 +7801,11 @@ export class ReferenceResolver {
           }),
         ...mountNames.map((name) => ({ ref: name })),
       ];
+      // Which upstream page this is, kept through nested imports: the per-locale
+      // imports of one page share it (twin of orbital-compiler inline/orbital.rs).
+      const sourcePage = original.sourcePage ?? original.id;
       return {
-        ...original,
+        ...withPageModifiers(original, ref.pageModifiers?.[original.path]),
         // Gap (E) — unconditionally prefixed, same as traits/entities (§4.3):
         // two imports of the same upstream orbital with distinct `pages {}`
         // path maps must not collide on page NAME (`Duplicate page name`).
@@ -7564,6 +7815,7 @@ export class ReferenceResolver {
         name: `${localName}${original.name}`,
         id: asPageId(deriveMaterializedId(original.id, upstream.id, original.name, localName, "page")),
         path: pathMap.get(original.path) ?? original.path,
+        ...(sourcePage !== undefined ? { sourcePage } : {}),
         ...(original.primaryEntity !== undefined
           ? { primaryEntity: subs.get(original.primaryEntity) ?? original.primaryEntity }
           : {}),

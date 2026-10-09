@@ -27,8 +27,8 @@ import type {
     MemoryContext,
     TraceContext,
     IntegrationContext,
-    Orbital,
-    ServiceCallResult,
+    JsonValue,
+    OrbitalSchema,
     EventId,
     TraitId,
     OrbitalId,
@@ -38,6 +38,7 @@ import type {
     RuntimeValue,
     OrbitalDefinition,
 } from '@almadar/core';
+import type { ProgramEffectName, ProgramEffectOutcome } from '@almadar/integrations/program';
 import type {
     ComposeBehaviorsInput,
     ComposeBehaviorsResult,
@@ -341,6 +342,8 @@ export interface EffectHandlers {
             filter?: SExpr | Record<string, RuntimeValue>;
             limit?: number;
             offset?: number;
+            /** `"field"` or `"field:asc|desc"` — ordered before offset/limit */
+            orderBy?: string;
             /** Relation fields to include (populate) in the response */
             include?: string[];
         }
@@ -497,22 +500,12 @@ export interface EffectHandlers {
     /** browser/push-subscribe — resolves with the flat Web Push subscription credentials inside `result` */
     browserPushSubscribe?: () => Promise<{ endpoint: string; p256dh: string; auth: string }>;
 
-    // === Agent substrate handlers (server-side only) ===
-    // These back the effect-position substrate operators that fire events
-    // and return typed ServiceCallResult members.
-
-    /** compose/compose-all — compose multiple orbitals into one schema */
-    substrateComposeAll?: (config: { appName: string; orbitals: Orbital[]; layoutStrategy?: string }) => Promise<ServiceCallResult | null>;
-    /** compose/compose-children — compose children under a parent */
-    substrateComposeChildren?: (parentName: string, children: Orbital[]) => Promise<ServiceCallResult | null>;
-    /** behavior/instantiate — instantiate a behavior at runtime (meta `uses`) */
-    substrateInstantiate?: (parentName: string, behavior: string, params?: TraitConfig) => Promise<ServiceCallResult | null>;
-    /** behavior/call — call a method on an instantiated behavior */
-    substrateCall?: (behavior: string, method: string, params?: TraitConfig) => Promise<ServiceCallResult | null>;
-    /** validate/validate — validate an orbital, fires VALIDATED_OK/ERROR */
-    substrateValidate?: (orbitalName: string) => Promise<ServiceCallResult | null>;
-    /** lolo/emit-body — emit lolo source for an orbital */
-    substrateEmitBody?: (orbitalName: string, loloSource: string) => Promise<ServiceCallResult | null>;
+    // === Program host handler (server-side only) ===
+    // Backs the language trio's effects (behavior/catalog|describe|source,
+    // program/read|print|eval). `@almadar/integrations/program`'s
+    // `runProgramEffect` owns argument parsing and the `orb` call; an absent
+    // handler makes the effect fail explicitly.
+    programEffect?: (op: ProgramEffectName, args: readonly JsonValue[]) => Promise<ProgramEffectOutcome>;
 }
 
 /**

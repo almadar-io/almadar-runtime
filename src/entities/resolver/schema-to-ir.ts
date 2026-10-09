@@ -42,6 +42,7 @@ import {
   isPageReferenceString,
   isPageReferenceObject,
   inferTsType,
+  pageModifiers,
 } from '@almadar/core';
 import { createLogger } from '@almadar/logger';
 
@@ -450,6 +451,7 @@ function resolvePages(
         entityBindings: [],
         navigation: [],
         singletonEntities: [],
+        ...(typeof pageRef === 'object' ? pageModifiers(pageRef) : {}),
       });
     }
   }

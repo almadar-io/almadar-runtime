@@ -36,6 +36,11 @@ const orbital: OrbitalDefinition = {
     trait('LedgerList', 'Ledger', [['fetch', 'Ledger', {}]]),
     trait('Banner', 'Invoice', [['render-ui', 'main', { type: 'typography', content: 'hi' }]]),
     {
+      name: 'Clock', linkedEntity: 'Invoice', category: 'interaction', scope: 'collection',
+      stateMachine: { states: [{ name: 'idle', isInitial: true }], events: [{ key: 'TICK', name: 'TICK' }],
+        transitions: [{ from: 'idle', to: 'idle', event: 'TICK', effects: [['emit', 'TICKED', {}]] }] },
+    },
+    {
       name: 'Books', linkedEntity: 'Invoice', category: 'interaction', scope: 'collection',
       stateMachine: { states: [{ name: 'idle', isInitial: true }], events: [{ key: 'GO', name: 'GO' }, { key: 'SYNC', name: 'SYNC' }],
         transitions: [
@@ -96,5 +101,81 @@ describe('createResidenceTransport', () => {
     await transport.send('Books', { event: 'SYNC', targetTrait: 'Books' });
     expect(local.sent).toEqual(['Books']);
     expect(remote.sent).toEqual(['Books']);
+  });
+
+  describe('a cascade leg routes each trait by the event it fired on', () => {
+    it('a client-only seed whose cascade writes browser-stored data runs in-process', async () => {
+      const local = recorder(); const remote = recorder();
+      const cascade: OrbitalEventRequest = { event: 'TICK', targetTrait: 'Clock', sourceTrait: 'Clock',
+        traits: [{ trait: 'Clock', from: 'idle', event: 'TICK' }, { trait: 'InvoiceList', from: 'idle', event: 'GO' }] };
+      await createResidenceTransport({ local, remote, traitIndex }).send('Books', cascade);
+      expect(local.sent).toEqual(['Clock']);
+      expect(remote.sent).toEqual([]);
+    });
+
+    it('a cascade that reaches server data goes to the server', async () => {
+      const local = recorder(); const remote = recorder();
+      const cascade: OrbitalEventRequest = { event: 'TICK', targetTrait: 'Clock',
+        traits: [{ trait: 'Clock', from: 'idle', event: 'TICK' }, { trait: 'LedgerList', from: 'idle', event: 'GO' }] };
+      await createResidenceTransport({ local, remote, traitIndex }).send('Books', cascade);
+      expect(remote.sent).toEqual(['Clock']);
+      expect(local.sent).toEqual([]);
+    });
+
+    it('a cascade reaching both browser-stored and server data is refused', async () => {
+      const local = recorder(); const remote = recorder();
+      const cascade: OrbitalEventRequest = { event: 'TICK', targetTrait: 'Clock',
+        traits: [{ trait: 'InvoiceList', from: 'idle', event: 'GO' }, { trait: 'LedgerList', from: 'idle', event: 'GO' }] };
+      await expect(createResidenceTransport({ local, remote, traitIndex }).send('Books', cascade)).rejects.toThrow(/browser-stored.*server/);
+    });
+
+    it('control: a trait entry without its event is judged by the request event', async () => {
+      const local = recorder(); const remote = recorder();
+      const cascade: OrbitalEventRequest = { event: 'TICK', targetTrait: 'Clock', traits: [{ trait: 'InvoiceList', from: 'idle' }] };
+      await createResidenceTransport({ local, remote, traitIndex }).send('Books', cascade);
+      expect(remote.sent).toEqual(['Clock']);
+    });
+  });
+
+  describe('a mount batch', () => {
+    function mounter(): EventTransport & { mounts: string[][] } {
+      const mounts: string[][] = [];
+      return {
+        mounts,
+        async register() { return { success: true, carriesCircuitState: false }; },
+        async unregister() {},
+        async send(_o: string, r: OrbitalEventRequest): Promise<OrbitalEventResponse> {
+          const names = (r.mount ?? []).map((m) => m.trait);
+          mounts.push(names);
+          return { success: true, transitioned: true, states: Object.fromEntries(names.map((n) => [n, 'idle'])),
+            emittedEvents: names.map((n) => ({ event: 'LOADED', source: { orbital: 'Books', trait: n } })),
+            clientEffects: names.map((n) => ['render-ui', 'main', { type: 'typography', content: n }] as const) };
+        },
+      };
+    }
+    const mount = (...traits: string[]): OrbitalEventRequest => ({ event: 'GO', mount: traits.map((trait) => ({ trait, event: 'INIT' })) });
+
+    it('runs each trait at its own residence: browser-stored mounts in-process, server mounts on the server', async () => {
+      const local = mounter(); const remote = mounter();
+      const response = await createResidenceTransport({ local, remote, traitIndex }).send('Books', mount('InvoiceList', 'LedgerList'));
+      expect(local.mounts).toEqual([['InvoiceList']]);
+      expect(remote.mounts).toEqual([['LedgerList']]);
+      expect(response.success).toBe(true);
+      expect(response.states).toEqual({ InvoiceList: 'idle', LedgerList: 'idle' });
+      expect(response.emittedEvents.map((e) => e.source?.trait)).toEqual(['InvoiceList', 'LedgerList']);
+      expect(response.clientEffects).toHaveLength(2);
+    });
+
+    it('control: a batch of one residence goes out whole, unsplit', async () => {
+      const local = mounter(); const remote = mounter();
+      await createResidenceTransport({ local, remote, traitIndex }).send('Books', mount('LedgerList', 'Banner'));
+      expect(remote.mounts).toEqual([['LedgerList', 'Banner']]);
+      expect(local.mounts).toEqual([]);
+    });
+
+    it('control: a static host still refuses a mounted trait that needs server data', async () => {
+      const local = mounter();
+      await expect(createResidenceTransport({ local, traitIndex }).send('Books', mount('InvoiceList', 'LedgerList'))).rejects.toThrow(/LedgerList.*server/);
+    });
   });
 });

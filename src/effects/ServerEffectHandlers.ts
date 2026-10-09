@@ -13,6 +13,7 @@
  * @packageDocumentation
  */
 
+import { orderFetchedRows } from './fetch-order.js';
 import type { EntityAccessPolicies, EventPayload, SExpr, ServiceParams, RuntimeValue } from "@almadar/core";
 import { isPersistBatchOperation } from "@almadar/core";
 // Single upstream owner (`@almadar/core`'s `types/effect-result.ts`) —
@@ -568,6 +569,7 @@ export function createServerEffectHandlers(
           // Capture total AFTER filter, BEFORE offset/limit so paginating
           // consumers receive the count of rows matching the filter.
           total = entities.length;
+          entities = orderFetchedRows(entities, options?.orderBy);
           if (options?.offset && options.offset > 0) {
             entities = entities.slice(options.offset);
           }

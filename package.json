@@ -11,6 +11,8 @@
     "module": false,
     "@almadar/server": false,
     "./dist/createOsHandlers.js": false,
+    "./dist/createProgramHandlers.js": false,
+    "@almadar/integrations/program": false,
     "@almadar/integrations": false,
     "@almadar/integrations/runtime": false,
     "async_hooks": false,
@@ -42,6 +44,11 @@
       "types": "./dist/createOsHandlers.d.ts",
       "import": "./dist/createOsHandlers.js",
       "require": "./dist/createOsHandlers.js"
+    },
+    "./createProgramHandlers": {
+      "types": "./dist/createProgramHandlers.d.ts",
+      "import": "./dist/createProgramHandlers.js",
+      "require": "./dist/createProgramHandlers.js"
     },
     "./entityAccess": {
       "types": "./dist/entityAccess.d.ts",

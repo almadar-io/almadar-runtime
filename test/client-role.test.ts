@@ -175,7 +175,7 @@ describe('dispatchWithServerLeg — runtimeOptimistic', () => {
     expect(dispatch.response.states['Move']).toBe('moved');
     expect(o.store.frames.get('Move')).toMatchObject({ x: 5 });
     expect(dispatch.serverLeg).toBeDefined();
-    expect(dispatch.serverLeg?.traits).toEqual([{ trait: 'Move', from: 'idle' }]);
+    expect(dispatch.serverLeg?.traits).toEqual([{ trait: 'Move', from: 'idle', event: 'MOVE' }]);
     expect(dispatch.snapshot).toEqual({ state: 'idle', frame: undefined });
   });
 
@@ -229,7 +229,7 @@ describe('dispatchWithServerLeg — persistedAwaited', () => {
     // after a REAL persist.
     expect(dispatch.mode).toBe('persistedAwaited');
     expect(dispatch.response.emittedEvents).toHaveLength(0);
-    expect(dispatch.serverLeg?.traits).toEqual([{ trait: 'Persistor', from: 'idle' }]);
+    expect(dispatch.serverLeg?.traits).toEqual([{ trait: 'Persistor', from: 'idle', event: 'DO_CREATE' }]);
 
     const serverResponse: OrbitalEventResponse = {
       success: true,

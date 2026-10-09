@@ -92,7 +92,7 @@ describe.each([true, false])('composer that clears its draft on SEND (local=%s)'
     await dispatchWithServerLeg(opts, { event: 'DRAFT', targetTrait: 'Composer', payload: { value: 'hi' } });
     const dispatch = await dispatchWithServerLeg(opts, { event: 'SEND', targetTrait: 'Composer' });
     expect(dispatch.serverLeg?.entityByTrait?.['Composer']?.['content']).toBe('hi');
-    expect(dispatch.serverLeg?.traits).toContainEqual({ trait: 'Composer', from: 'ready' });
+    expect(dispatch.serverLeg?.traits).toContainEqual({ trait: 'Composer', from: 'ready', event: 'SEND' });
   });
 
   it.each(['stateful', 'stateless'] as const)('%s: the sent draft is persisted', async (topology) => {

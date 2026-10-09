@@ -91,11 +91,7 @@ import type {
   createOsHandlers as CreateOsHandlersFn,
   OsHandlerResult,
 } from "../effects/createOsHandlers.js";
-import type {
-  createAgentSubstrateHandlers as CreateAgentSubstrateHandlersFn,
-  AgentSubstrateHandlerResult,
-  SubstrateServices,
-} from "../effects/createAgentSubstrateHandlers.js";
+import type { createProgramHandlers as CreateProgramHandlersFn } from "../effects/createProgramHandlers.js";
 
 /**
  * Synchronous Node-only require, hidden from bundler static analysis.
@@ -439,11 +435,11 @@ export interface OrbitalServerRuntimeConfig {
    */
   contextExtensions?: EvaluationContextExtensions;
   /**
-   * Substrate service implementations for effect-position operators
-   * (compose/compose-all, behavior/instantiate, validate/validate, etc.).
-   * @almadar-io/rabit injects these at runtime; tests can inject mocks.
+   * The program host behind behavior/catalog|describe|source and
+   * program/read|print|eval: the project root `orb` runs from. Absent means
+   * those effects fail explicitly ("no program host configured").
    */
-  substrateServices?: SubstrateServices;
+  programHost?: { cwd: string; orbBin?: string };
   /**
    * The persona a preview or verification run is looking at the app AS.
    *
@@ -604,8 +600,7 @@ export class OrbitalServerRuntime {
   private eventNamespaceMap: EventNamespaceMap = {};
   private osHandlers: OsHandlerResult | null = null;
   private osHandlersPromise: Promise<void> | null = null;
-  private substrateHandlers: AgentSubstrateHandlerResult | null = null;
-  private substrateHandlersPromise: Promise<void> | null = null;
+  private programHandlersPromise: Promise<void> | null = null;
   private resolvedSchema: OrbitalSchema | null = null;
 
   /** App-level theme key from the schema's `theme "<key>"` header — the
@@ -744,28 +739,26 @@ export class OrbitalServerRuntime {
   }
 
   /**
-   * Lazily wire the agent substrate effect handlers (compose/behavior/
-   * validate/lolo), merging them UNDER any user-provided handlers.
-   * Same deferred-import pattern as ensureOsHandlers.
+   * Lazily wire the program host handlers (behavior/* and program/* effects),
+   * merging them UNDER any user-provided handlers. Only when `programHost`
+   * is configured; otherwise the effects fail explicitly.
    */
-  private async ensureAgentSubstrateHandlers(): Promise<void> {
+  private async ensureProgramHandlers(): Promise<void> {
     if (!isNodeEnv()) return;
-    if (!this.substrateHandlersPromise) {
-      this.substrateHandlersPromise = (async () => {
-        const { createAgentSubstrateHandlers } = (await import('../effects/createAgentSubstrateHandlers.js')) as {
-          createAgentSubstrateHandlers: typeof CreateAgentSubstrateHandlersFn;
+    const host = this.config.programHost;
+    if (host === undefined) return;
+    if (!this.programHandlersPromise) {
+      this.programHandlersPromise = (async () => {
+        const { createProgramHandlers } = (await import('../effects/createProgramHandlers.js')) as {
+          createProgramHandlers: typeof CreateProgramHandlersFn;
         };
-        this.substrateHandlers = createAgentSubstrateHandlers({
-          emitEvent: (type, payload) => this.dispatchExternalEvent(type, payload),
-          services: this.config.substrateServices ?? {},
-        });
         this.config.effectHandlers = {
-          ...this.substrateHandlers.handlers,
+          ...createProgramHandlers(host),
           ...this.config.effectHandlers,
         };
       })();
     }
-    return this.substrateHandlersPromise;
+    return this.programHandlersPromise;
   }
 
   /**
@@ -1715,10 +1708,7 @@ export class OrbitalServerRuntime {
       this.osHandlers = null;
     }
 
-    if (this.substrateHandlers) {
-      this.substrateHandlers.cleanup();
-      this.substrateHandlers = null;
-    }
+    this.programHandlersPromise = null;
 
     // Stamp the mutation epoch AFTER the clear completes: a concurrent
     // processOrbitalEvent that finds an orbital missing consults
@@ -2220,7 +2210,7 @@ export class OrbitalServerRuntime {
     try {
     // Wire OS-level + substrate effect handlers before any effect runs.
     await this.ensureOsHandlers();
-    await this.ensureAgentSubstrateHandlers();
+    await this.ensureProgramHandlers();
 
     const registered = await this.resolveRegisteredOrbital(orbitalName);
     if (!registered) {

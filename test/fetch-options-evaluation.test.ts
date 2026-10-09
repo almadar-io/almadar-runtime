@@ -104,4 +104,18 @@ describe('fetch option evaluation', () => {
   it('fails an unresolved id binding instead of widening to the collection', async () => {
     expect(await run({ id: '@payload.nope' })).toEqual({ ok: false });
   });
+
+  it('orders by a declared "field:dir" before paging (sorted then limited)', async () => {
+    expect(await run({ orderBy: 'n:desc' })).toEqual({ ok: true, ids: ['r4', 'r3', 'r2', 'r1', 'r0'] });
+    expect(await run({ orderBy: 'n:desc', limit: 2 })).toEqual({ ok: true, ids: ['r4', 'r3'] });
+  });
+
+  it('a bare field orders ascending, and a payload-bound spec is evaluated', async () => {
+    expect(await run({ orderBy: '@payload.order', limit: 2 }, { order: 'n:desc' })).toEqual({ ok: true, ids: ['r4', 'r3'] });
+    expect(await run({ orderBy: 'n', offset: 3 })).toEqual({ ok: true, ids: ['r3', 'r4'] });
+  });
+
+  it('control: without orderBy the store order is kept', async () => {
+    expect(await run({ limit: 2 })).toEqual({ ok: true, ids: ['r0', 'r1'] });
+  });
 });

@@ -27,7 +27,9 @@ import { omitFrameFields,
     isRuntimeEntity,
 } from '@almadar/core';
 import { RESERVED_FIELD_NAMES } from '@almadar/core/mock';
-import type { FieldValue, SExpr, Orbital, OrbitalDefinition, TraitConfig, RuntimeValue, EntityField, Entity } from '@almadar/core';
+import { JsonValueSchema } from '@almadar/core';
+import type { ProgramEffectName } from '@almadar/integrations/program';
+import type { FieldValue, SExpr, Orbital, OrbitalDefinition, OrbitalSchema, ProgramValidationIssue, TraitConfig, RuntimeValue, EntityField, Entity, JsonValue } from '@almadar/core';
 import type { ComposeBehaviorsInput, EventWiringEntry } from './composition/index.js';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';
 import type { SExpressionEvaluator } from '@almadar/evaluator';
@@ -149,6 +151,14 @@ function failureMessage(err: RuntimeValue): string {
     if (err instanceof Error) return err.message;
     if (typeof err === 'object' && err !== null && 'message' in err && typeof err.message === 'string') return err.message;
     return String(err);
+}
+
+function issuePayload(issue: ProgramValidationIssue): EventPayload {
+    const payload: EventPayload = { code: issue.code, message: issue.message };
+    if (issue.path !== undefined) payload.path = issue.path;
+    if (issue.line !== undefined) payload.line = issue.line;
+    if (issue.column !== undefined) payload.column = issue.column;
+    return payload;
 }
 
 function parseEffect(effect: RuntimeValue): { operator: string; args: RuntimeValue[] } | null {
@@ -562,6 +572,7 @@ export class EffectExecutor {
                 ...(opts.filter !== undefined && { filter: interpolateFilterTraitRefs(opts.filter as SExpr, ctx) }),
                 ...(opts.limit !== undefined && { limit: interpolateValue(opts.limit, ctx) as number }),
                 ...(opts.offset !== undefined && { offset: interpolateValue(opts.offset, ctx) as number }),
+                ...(opts.orderBy !== undefined && { orderBy: interpolateValue(opts.orderBy, ctx) as string }),
                 ...(opts.include !== undefined && { include: interpolateValue(opts.include, ctx) as string[] }),
                 ...(opts.emit !== undefined && { emit: interpolateValue(opts.emit, ctx) as FetchOptions['emit'] }),
             };
@@ -874,6 +885,31 @@ export class EffectExecutor {
         } catch (err) {
             this.emitFailure(emitCfg, err as RuntimeValue);
         }
+    }
+
+    /**
+     * One language-trio effect: hand its JSON args to the program host
+     * (`runProgramEffect` parses them) and dispatch `{ result }` on success,
+     * `{ error }` (+ `errors` for eval's validator issues) on failure. A
+     * missing host or non-JSON args fail explicitly; without an emit config a
+     * failure throws.
+     */
+    private async runProgramEffectArm(op: ProgramEffectName, positional: RuntimeValue[], emitCfg: EmitConfig | undefined): Promise<void> {
+        const fail = (message: string, extra?: EventPayload): void => {
+            if (!emitCfg) throw new Error(message);
+            this.emitFailure(emitCfg, new Error(message), extra);
+        };
+        const handler = this.handlers.programEffect;
+        if (handler === undefined) return fail(`no program host configured for ${op}`);
+        const json: JsonValue[] = [];
+        for (const arg of positional) {
+            const parsed = JsonValueSchema.safeParse(arg);
+            if (!parsed.success) return fail(`${op}: arguments must be JSON data`);
+            json.push(parsed.data);
+        }
+        const outcome = await handler(op, json);
+        if (!outcome.ok) return fail(outcome.error, outcome.errors ? { errors: outcome.errors.map(issuePayload) } : undefined);
+        if (emitCfg) this.emitSuccess(emitCfg, 'success', { result: outcome.result });
     }
 
     /**
@@ -1285,6 +1321,7 @@ export class EffectExecutor {
                             filter?: SExpr | Record<string, RuntimeValue>;
                             limit?: number;
                             offset?: number;
+                            orderBy?: string;
                             include?: string[];
                         } | undefined;
                     const emitCfg = this.extractEmitConfig(rawOpt);
@@ -1808,96 +1845,23 @@ export class EffectExecutor {
                 break;
             }
 
-            // === Agent substrate operators (server-side, effect-position) ===
+            // === Language trio (server-side, effect-position) ===
             //
-            // Each honours a trailing `{ emit: { success, failure } }` options
-            // object (mirrors fetch/persist/call-service): on success the
-            // author's `emit.success` event fires with a uniform `{ result }`
-            // payload so `?result` captures the return value; on failure the
-            // `emit.failure` event fires with `{ error }`. Without an emit
-            // config the call is fire-and-forget (legacy).
+            // behavior/catalog|describe|source and program/read|print|eval honour
+            // a trailing `{ emit: { success, failure } }`: success fires with
+            // `{ result }`, failure with `{ error }`. A missing program host is an
+            // explicit failure, never a silent no-op. Without an emit config the
+            // call is fire-and-forget and errors propagate.
 
-            case 'compose/compose-all': {
+            case 'behavior/catalog':
+            case 'behavior/describe':
+            case 'behavior/source':
+            case 'program/read':
+            case 'program/print':
+            case 'program/eval':
+            case 'program/compose': {
                 const [positional, emitCfg] = this.splitSubstrateEmit(args);
-                const config = positional[0] as { appName: string; orbitals: Orbital[]; layoutStrategy?: string };
-                await this.runSubstrate(async () => {
-                    if (!this.handlers.substrateComposeAll) {
-                        this.logUnsupported('compose/compose-all');
-                        return null;
-                    }
-                    return this.handlers.substrateComposeAll(config);
-                }, emitCfg);
-                break;
-            }
-
-            case 'compose/compose-children': {
-                const [positional, emitCfg] = this.splitSubstrateEmit(args);
-                const parentName = positional[0] as string;
-                const children = positional[1] as Orbital[];
-                await this.runSubstrate(async () => {
-                    if (!this.handlers.substrateComposeChildren) {
-                        this.logUnsupported('compose/compose-children');
-                        return null;
-                    }
-                    return this.handlers.substrateComposeChildren(parentName, children);
-                }, emitCfg);
-                break;
-            }
-
-            case 'behavior/instantiate': {
-                const [positional, emitCfg] = this.splitSubstrateEmit(args);
-                const parentName = positional[0] as string;
-                const behavior = positional[1] as string;
-                const params = positional.length > 2 ? positional[2] as TraitConfig : undefined;
-                await this.runSubstrate(async () => {
-                    if (!this.handlers.substrateInstantiate) {
-                        this.logUnsupported('behavior/instantiate');
-                        return null;
-                    }
-                    return this.handlers.substrateInstantiate(parentName, behavior, params);
-                }, emitCfg);
-                break;
-            }
-
-            case 'behavior/call': {
-                const [positional, emitCfg] = this.splitSubstrateEmit(args);
-                const behavior = positional[0] as string;
-                const method = positional[1] as string;
-                const params = positional.length > 2 ? positional[2] as TraitConfig : undefined;
-                await this.runSubstrate(async () => {
-                    if (!this.handlers.substrateCall) {
-                        this.logUnsupported('behavior/call');
-                        return null;
-                    }
-                    return this.handlers.substrateCall(behavior, method, params);
-                }, emitCfg);
-                break;
-            }
-
-            case 'validate/validate': {
-                const [positional, emitCfg] = this.splitSubstrateEmit(args);
-                const orbitalName = positional[0] as string;
-                await this.runSubstrate(async () => {
-                    if (!this.handlers.substrateValidate) {
-                        this.logUnsupported('validate/validate');
-                        return null;
-                    }
-                    return this.handlers.substrateValidate(orbitalName);
-                }, emitCfg);
-                break;
-            }
-
-            case 'lolo/emit-body': {
-                const [positional, emitCfg] = this.splitSubstrateEmit(args);
-                const orbitalName = positional[0] as string;
-                const loloSource = positional[1] as string;
-                await this.runSubstrate(async () => {
-                    if (!this.handlers.substrateEmitBody) {
-                        this.logUnsupported('lolo/emit-body');
-                        return null;
-                    }
-                    return this.handlers.substrateEmitBody(orbitalName, loloSource);
-                }, emitCfg);
+                await this.runProgramEffectArm(operator, positional, emitCfg);
                 break;
             }
 

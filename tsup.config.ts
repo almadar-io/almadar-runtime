@@ -16,6 +16,8 @@ export default defineConfig({
     // field path mapping; the import is never invoked in browsers (gated
     // by `isNodeEnv()`).
     createOsHandlers: 'src/effects/createOsHandlers.ts',
+    // Node-only for the same reason: it spawns `orb` through @almadar/integrations/program.
+    createProgramHandlers: 'src/effects/createProgramHandlers.ts',
     // Lightweight seeded PRNG exposed for downstream tooling that needs
     // deterministic mock values without pulling in @faker-js/faker.
     mockRandom: 'src/entities/mockRandom.ts',

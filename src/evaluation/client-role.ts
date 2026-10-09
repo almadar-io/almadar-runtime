@@ -25,6 +25,7 @@ import type {
   AwaitingTrait,
   MessageCatalogs,
   DispatchMode,
+  EventPayload,
   MountSeed,
   OrbitalEventRequest,
   OrbitalEventResponse,
@@ -38,11 +39,13 @@ import {
   deliveryOf,
   evaluateOrbitalEvent,
   freshDeliveryGuardBindings,
+  type CollectedListenerTarget,
   type EvaluateEffectRunner,
   type EvaluateOrbitalEventDeps,
 } from './evaluateOrbitalEvent.js';
 import { findInitialState, findMatchingTransitions } from '../traits/StateMachineCore.js';
-import { browserLegEvents, type TraitIndex } from '../traits/trait-index.js';
+import { browserLegEvents, type IndexedTrait, type TraitIndex } from '../traits/trait-index.js';
+import { parseListenSource } from '../events/identity/routing.js';
 import type { CircuitStore, TraitSnapshot } from './circuit-store.js';
 import type { EntityRow, SExpr } from '@almadar/core';
 import { EffectExecutor, clientResolvesRenderBindings } from '../effects/EffectExecutor.js';
@@ -241,10 +244,10 @@ function createClientEffectRunner(
    * something the server leg needs to know about" — a bare state-only
    * transition (no effects) can have nothing server-only to replay either.
    */
-  onExecuted?: (traitName: string, firing: { event: string; fromState: string } | undefined) => void,
+  onExecuted?: (traitName: string, firing: { event: string; fromState: string } | undefined, received: { payload?: EventPayload; entityId?: string }) => void,
 ): EvaluateEffectRunner {
   return async (traitName, args) => {
-    onExecuted?.(traitName, args.firing);
+    onExecuted?.(traitName, args.firing, { ...(args.payload !== undefined ? { payload: args.payload } : {}), ...(args.entityId !== undefined ? { entityId: args.entityId } : {}) });
     const entry = deps.traitIndex.byName.get(traitName);
     const frameKey = entry?.frameKey ?? traitName;
     let frame = deps.store.frames.get(frameKey);
@@ -417,13 +420,18 @@ export async function dispatchWithServerLeg(
 
   const executedTraitNames = new Set<string>();
   const firings = new Map<string, { event: string; fromState: string }>();
+  const received = new Map<string, { payload?: EventPayload; entityId?: string; row?: EntityRow }>();
   const collector = new ServerLegCollector();
   const runEffects = createClientEffectRunner(
     { traitIndex: opts.traitIndex, ...(opts.fullTraitIndex !== undefined ? { fullTraitIndex: opts.fullTraitIndex } : {}), store: opts.store, orbitalName: opts.orbitalName, ...i18nOpts(opts) },
     collector,
-    (name, firing) => {
+    (name, firing, got) => {
       executedTraitNames.add(name);
-      if (firing !== undefined && !firings.has(name)) firings.set(name, firing);
+      if (firing === undefined || firings.has(name)) return;
+      firings.set(name, firing);
+      const frameKey = opts.traitIndex.byName.get(name)?.frameKey ?? name;
+      const row = opts.store.frames.get(frameKey);
+      received.set(name, { ...got, ...(row !== undefined ? { row: { ...row } } : {}) });
     },
   );
 
@@ -446,26 +454,30 @@ export async function dispatchWithServerLeg(
   // A local (hybrid) seed never needs the server for ITS OWN effects — but the
   // traits its cascade reached (a persistor, a refetching list) may.
   const downstreamNeedsServer = [...collector.delegatingTraits()].some((t) => t !== traitName);
+  const browserStored = new Set(opts.traitIndex.allEntities.filter(storesRowsInBrowser).map((e) => e.name));
+  // A trait the seed's cascade reached on a browser-leg event writes the browser
+  // store; that store relays nothing, so the write goes as the trait's own request.
+  const browserWrites = new Map<string, IndexedTrait>();
+  for (const [name, firing] of firings) {
+    const indexed = opts.traitIndex.byName.get(name);
+    if (name === traitName || indexed === undefined) continue;
+    if (browserLegEvents(indexed.traitDef, (t) => browserStored.has(t), indexed.config).has(firing.event)) browserWrites.set(name, indexed);
+  }
+  const delegating = [...collector.delegatingTraits()];
   let serverLeg: OrbitalEventRequest | undefined;
   let continuations: ClientContinuation[] | undefined;
-  if (hybrid && !downstreamNeedsServer && drained.length === 0 && reachesOffPage) {
+  if (hybrid && delegating.length > 0 && delegating.every((t) => browserWrites.has(t))) {
+    continuations = [
+      ...offPage.map(({ emitted, target }) => offPageContinuation(emitted, target, request)),
+      ...[...browserWrites].map(([name, indexed]) => browserWriteContinuation(name, indexed, firings, received, response, request)),
+    ];
+  } else if (hybrid && !downstreamNeedsServer && drained.length === 0 && reachesOffPage) {
     // LOLO §7: a client-only seed takes no server round trip of its own; only
     // the deliveries its emits owe off-page listeners leave the client.
-    continuations = offPage.map(({ emitted, target }) => ({
-      orbital: target.entry.orbitalName,
-      request: {
-        event: target.triggers,
-        ...(target.payload !== undefined ? { payload: target.payload } : {}),
-        ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
-        targetTrait: target.listenerTrait,
-        ...(request.clientId !== undefined ? { clientId: request.clientId } : {}),
-        delivery: deliveryOf(emitted),
-      },
-    }));
+    continuations = offPage.map(({ emitted, target }) => offPageContinuation(emitted, target, request));
   } else if (drained.length > 0 || reachesOffPage) {
     // A browser-stored entity's data effects run in the browser store, so a
     // client-only seed's browser-leg event owes that leg.
-    const browserStored = new Set(opts.traitIndex.allEntities.filter(storesRowsInBrowser).map((e) => e.name));
     const seedBrowserLeg = browserLegEvents(entry.traitDef, (t) => browserStored.has(t), entry.config).has(request.event);
     if (hybrid && !downstreamNeedsServer && !reachesOffPage && !seedBrowserLeg) {
       clientRoleLog.error('hybrid-trait-produced-server-leg', {
@@ -474,11 +486,12 @@ export async function dispatchWithServerLeg(
         drained: drained.length,
       });
     } else {
-      const executedTraits: Array<{ trait: string; from: string }> = [];
+      const executedTraits: Array<{ trait: string; from: string; event?: string }> = [];
       for (const name of executedTraitNames) {
         const indexed = opts.traitIndex.byName.get(name);
         const from = beforeStates.get(name) ?? (indexed !== undefined ? findInitialState(indexed.traitDef) : '');
-        executedTraits.push({ trait: name, from });
+        const event = firings.get(name)?.event;
+        executedTraits.push({ trait: name, from, ...(event !== undefined ? { event } : {}) });
       }
       serverLeg = {
         event: request.event,
@@ -508,6 +521,55 @@ export async function dispatchWithServerLeg(
     entityId,
     frameKey: entry.frameKey,
     firings,
+  };
+}
+
+type Emitted = OrbitalEventResponse['emittedEvents'][number];
+
+function offPageContinuation(emitted: Emitted, target: CollectedListenerTarget, request: OrbitalEventRequest): ClientContinuation {
+  return {
+    orbital: target.entry.orbitalName,
+    request: {
+      event: target.triggers,
+      ...(target.payload !== undefined ? { payload: target.payload } : {}),
+      ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
+      targetTrait: target.listenerTrait,
+      ...(request.clientId !== undefined ? { clientId: request.clientId } : {}),
+      delivery: deliveryOf(emitted),
+    },
+  };
+}
+
+/** The browser store's request for one cascaded trait's write: that trait's own event, payload and pre-dispatch state. */
+function browserWriteContinuation(
+  name: string,
+  indexed: IndexedTrait,
+  firings: ReadonlyMap<string, { event: string; fromState: string }>,
+  received: ReadonlyMap<string, { payload?: EventPayload; entityId?: string; row?: EntityRow }>,
+  response: OrbitalEventResponse,
+  request: OrbitalEventRequest,
+): ClientContinuation {
+  const firing = firings.get(name);
+  if (firing === undefined) throw new Error(`browser write for "${name}" has no firing`);
+  const got = received.get(name) ?? {};
+  const emitted = response.emittedEvents.find((e) => (indexed.traitDef.listens ?? []).some((l) => {
+    const { bareEvent, matcher } = parseListenSource(l, indexed.orbitalName);
+    return l.triggers === firing.event && bareEvent === e.event && matcher(e.source);
+  }));
+  return {
+    orbital: indexed.orbitalName,
+    request: {
+      event: firing.event,
+      ...(got.payload !== undefined ? { payload: got.payload } : {}),
+      ...(got.entityId !== undefined ? { entityId: got.entityId } : {}),
+      targetTrait: name,
+      sourceTrait: name,
+      traits: [{ trait: name, from: firing.fromState, event: firing.event }],
+      ...(got.row !== undefined ? { entityByTrait: { [name]: got.row } } : {}),
+      ...(request.clientId !== undefined ? { clientId: request.clientId } : {}),
+      ...(request.locale !== undefined ? { locale: request.locale } : {}),
+      ...(emitted !== undefined ? { delivery: deliveryOf(emitted) } : {}),
+    },
   };
 }
 
