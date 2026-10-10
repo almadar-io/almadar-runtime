@@ -4342,6 +4342,9 @@ function withPageModifiers(page: Page, mods: PageModifiers | undefined): Page {
     ...(mods.title !== undefined ? { title: mods.title } : {}),
     ...(mods.description !== undefined ? { description: mods.description } : {}),
     ...(mods.translationOf !== undefined ? { translationOf: mods.translationOf } : {}),
+    ...(mods.label !== undefined ? { label: mods.label } : {}),
+    ...(mods.icon !== undefined ? { icon: mods.icon } : {}),
+    ...(mods.roles !== undefined ? { roles: [...mods.roles] } : {}),
   };
 }
 
@@ -6697,6 +6700,9 @@ export class ReferenceResolver {
       ...(refObj.title !== undefined ? { title: refObj.title } : {}),
       ...(refObj.description !== undefined ? { description: refObj.description } : {}),
       ...(refObj.translationOf !== undefined ? { translationOf: refObj.translationOf } : {}),
+      ...(refObj.label !== undefined ? { label: refObj.label } : {}),
+      ...(refObj.icon !== undefined ? { icon: refObj.icon } : {}),
+      ...(refObj.roles !== undefined ? { roles: [...refObj.roles] } : {}),
     };
     if (weakensPageAccess(resolved.page, mods)) {
       return {
@@ -7345,9 +7351,14 @@ export class ReferenceResolver {
     // entity's own already-materialized id — folded into the SAME `subs`/
     // `entityIds` maps every other rewrite below reads from.
     const entityIds = new Map<string, EntityId>();
+    // An identity the upstream EXPECTS (`expects identity Person`) is a valid key too: its relations
+    // retarget onto the consumer's roster (twin of orbital-compiler's expected-identity retarget).
+    const expectedIdentities = new Set(
+      (upstream.expects ?? []).flatMap((e) => (e.kind === 'identity' && e.name !== undefined ? [e.name] : [])),
+    );
     if (ref.entities) {
       for (const [upstreamKey, consumerName] of Object.entries(ref.entities)) {
-        if (!upstreamUniverse.has(upstreamKey)) {
+        if (!upstreamUniverse.has(upstreamKey) && !expectedIdentities.has(upstreamKey)) {
           errors.push(
             `Orbital "${localName}" declares entities { ${upstreamKey}: ${consumerName} } but "${upstreamKey}" is ` +
               `not an out-of-orbital entity of upstream alias "${upstream.name}" (ORB_O_ENTITY_UNKNOWN_KEY)`,
@@ -7455,6 +7466,18 @@ export class ReferenceResolver {
         if (!field.name) continue;
         const vocab = roleVocabularyOf(entity, field.name);
         if (vocab) roleFields.set(field.name, vocab);
+      }
+    }
+    // No roster upstream: the viewer is declared by `expects identity`, whose role values are the vocabulary.
+    if (roleFields.size === 0) {
+      for (const expect of upstream.expects ?? []) {
+        if (expect.kind !== 'identity') continue;
+        const declared: Entity = { name: expect.name ?? 'Viewer', fields: expect.shape ?? [] };
+        for (const field of declared.fields) {
+          if (!field.name) continue;
+          const vocab = roleVocabularyOf(declared, field.name);
+          if (vocab) roleFields.set(field.name, vocab);
+        }
       }
     }
     // Per-field CONSUMER vocabulary (Rust B4-R4 twin —

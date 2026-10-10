@@ -4,7 +4,7 @@
  * client against `persistence`. The offline preview and the browser-stored
  * side of a residence-routed host both use it.
  */
-import type { OrbitalEventRequest, OrbitalSchema, UserContext } from '@almadar/core';
+import type { MessageCatalogs, OrbitalEventRequest, OrbitalSchema, UserContext } from '@almadar/core';
 import type { EffectHandlers } from '../types.js';
 import type { ServerEffectStageDeps } from '../effects/effect-stage.js';
 import type { PersistenceAdapter } from '@almadar/core';
@@ -34,6 +34,8 @@ export interface LocalStoreTransportOptions {
   logContext?: EvaluateOrbitalEventDeps['logContext'];
   /** The requesting client relays every emit itself (a compiled client). */
   clientRelays?: boolean;
+  /** The program's message catalogs, so `i18n/t` resolves for the request's locale. */
+  messages?: MessageCatalogs;
 }
 
 export function createLocalStoreTransport(options: LocalStoreTransportOptions): EventTransport {
@@ -52,6 +54,7 @@ export function createLocalStoreTransport(options: LocalStoreTransportOptions): 
         ...(options.outsideEventQueue !== undefined ? { outsideEventQueue: options.outsideEventQueue } : {}),
         inFlightCalls,
         ...(options.debug !== undefined ? { debug: options.debug } : {}),
+        ...(options.messages !== undefined ? { messages: options.messages } : {}),
       });
       return evaluateOrbitalEvent(
         {
@@ -67,6 +70,7 @@ export function createLocalStoreTransport(options: LocalStoreTransportOptions): 
           ...(options.debug !== undefined ? { debug: options.debug } : {}),
           ...(options.logContext !== undefined ? { logContext: options.logContext } : {}),
           ...(options.clientRelays !== undefined ? { clientRelays: options.clientRelays } : {}),
+          ...(request.locale !== undefined ? { locale: request.locale } : {}),
         },
         request,
       );

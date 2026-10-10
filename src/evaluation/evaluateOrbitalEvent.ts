@@ -595,90 +595,104 @@ export async function evaluateOrbitalEvent(
     // The requested (seed) steps are not counted, as in the Rust kernel's seed loop; every follow-up is.
     if (item.fromAtDelivery === true) steps += 1;
 
-    const cascade = await runTraitCascade<StepOutcome>({
-      trait: entry.traitDef,
-      delivery: item.delivery,
-      memory,
-      fromState: item.from,
-      readState: () => manager.getState(item.trait, currentEntityId)?.currentState,
-      // The item's own first step plus what is left of the dispatch's budget for its follow-ups.
-      maxSteps: CROSS_TRAIT_CASCADE_CAP - steps + 1,
-      eventKey: item.event,
-      payload: item.payload,
-      config: entry.config,
-      user: deps.user,
-      now,
-      ...(deps.guardMode !== undefined ? { guardMode: deps.guardMode } : {}),
-      ...(deps.strictBindings !== undefined ? { strictBindings: deps.strictBindings } : {}),
-      ...(deps.contextExtensions !== undefined ? { contextExtensions: deps.contextExtensions } : {}),
-      getEntityData: readFrame,
-      ...(deps.clientRelays === true ? { selfCascade: false } : {}),
-      runEffects: async (stepEffects, step) => {
-        // Transition, then effects: the state this step enters is the trait's state while its effects
-        // run, so a request served while an effect waits outside the host queue sees it.
-        manager.commitState(item.trait, step.toState, currentEntityId, step.event);
-        const emittedStart = emittedEvents.length;
-        const effectStart = effectResults.length;
-        const itemClientEffects: ClientEffectTuple[] = [];
-        const itemClientEffectsByTrait: ClientEffectByTrait[] = [];
-        // A fresh persisted read per step (the stage re-merges frames +
-        // declared defaults internally); a prior step's persist must be
-        // visible to this step, exactly like a fresh request would.
-        const persistedEntity = rowId
-          ? ((await persistence.getById(entry.entity.name, rowId)) ?? {})
-          : {};
-        await deps.runEffects(item.trait, {
-          effects: stepEffects,
-          payload: step.payload,
-          entityData: persistedEntity,
-          entityId: rowId,
-          emittedEvents,
-          fetchedData,
-          clientEffects: itemClientEffects,
-          effectResults,
-          ...(deps.user !== undefined ? { user: deps.user } : {}),
-          ...(deps.locale !== undefined ? { locale: deps.locale } : {}),
-          now,
-          clientEffectsByTrait: itemClientEffectsByTrait,
-          firing: { event: step.event, fromState: step.fromState },
-          ...(deps.originClientId !== undefined ? { originClientId: deps.originClientId } : {}),
-          dispatch: step.dispatch,
-          followOn: item.fromAtDelivery === true || step.index > 0,
-        });
-        // Render-facing effects are delivered only for traits the
-        // requesting page hosts (an off-page listener's effects ran, but
-        // nothing off-page renders them).
-        if (item.onPage || activeTraits?.has(item.trait) === true) {
-          clientEffects.push(...itemClientEffects);
-          clientEffectsByTrait.push(...itemClientEffectsByTrait);
-        }
-        // A step's `persist create` on a row that had none mints the real
-        // id — every read from here on uses it; the state stays addressed
-        // where the event came in. A `[shared]` entity's frame is the one
-        // working instance its traits share: a create records a row, it
-        // never re-addresses that instance.
-        if (rowId === undefined && !entry.isSharedEntity) {
-          const created = effectResults.slice(effectStart).find(
-            (r) => r.effect === 'persist' && r.action === 'create' && r.entityType === entry.entity.name && r.success,
-          );
-          const createdId = (created?.data as EntityRow | undefined)?.id;
-          if (typeof createdId === 'string') {
-            rowId = createdId;
-            rowByTrait.set(item.trait, createdId);
+    let cascade: Awaited<ReturnType<typeof runTraitCascade<StepOutcome>>>;
+    try {
+      cascade = await runTraitCascade<StepOutcome>({
+        trait: entry.traitDef,
+        delivery: item.delivery,
+        memory,
+        fromState: item.from,
+        readState: () => manager.getState(item.trait, currentEntityId)?.currentState,
+        // The item's own first step plus what is left of the dispatch's budget for its follow-ups.
+        maxSteps: CROSS_TRAIT_CASCADE_CAP - steps + 1,
+        eventKey: item.event,
+        payload: item.payload,
+        config: entry.config,
+        user: deps.user,
+        now,
+        ...(deps.guardMode !== undefined ? { guardMode: deps.guardMode } : {}),
+        ...(deps.strictBindings !== undefined ? { strictBindings: deps.strictBindings } : {}),
+        ...(deps.contextExtensions !== undefined ? { contextExtensions: deps.contextExtensions } : {}),
+        getEntityData: readFrame,
+        ...(deps.clientRelays === true ? { selfCascade: false } : {}),
+        runEffects: async (stepEffects, step) => {
+          // Transition, then effects: the state this step enters is the trait's state while its effects
+          // run, so a request served while an effect waits outside the host queue sees it.
+          manager.commitState(item.trait, step.toState, currentEntityId, step.event);
+          const emittedStart = emittedEvents.length;
+          const effectStart = effectResults.length;
+          const itemClientEffects: ClientEffectTuple[] = [];
+          const itemClientEffectsByTrait: ClientEffectByTrait[] = [];
+          // A fresh persisted read per step (the stage re-merges frames +
+          // declared defaults internally); a prior step's persist must be
+          // visible to this step, exactly like a fresh request would.
+          const persistedEntity = rowId
+            ? ((await persistence.getById(entry.entity.name, rowId)) ?? {})
+            : {};
+          await deps.runEffects(item.trait, {
+            effects: stepEffects,
+            payload: step.payload,
+            entityData: persistedEntity,
+            entityId: rowId,
+            emittedEvents,
+            fetchedData,
+            clientEffects: itemClientEffects,
+            effectResults,
+            ...(deps.user !== undefined ? { user: deps.user } : {}),
+            ...(deps.locale !== undefined ? { locale: deps.locale } : {}),
+            now,
+            clientEffectsByTrait: itemClientEffectsByTrait,
+            firing: { event: step.event, fromState: step.fromState },
+            received: { delivery: step.delivery, log: step.log },
+            ...(deps.originClientId !== undefined ? { originClientId: deps.originClientId } : {}),
+            dispatch: step.dispatch,
+            followOn: item.fromAtDelivery === true || step.index > 0,
+          });
+          // Render-facing effects are delivered only for traits the
+          // requesting page hosts (an off-page listener's effects ran, but
+          // nothing off-page renders them).
+          if (item.onPage || activeTraits?.has(item.trait) === true) {
+            clientEffects.push(...itemClientEffects);
+            clientEffectsByTrait.push(...itemClientEffectsByTrait);
           }
-        }
-        return {
-          effectResults: [{
-            results: effectResults.slice(effectStart),
-            from: step.fromState,
-            to: step.toState,
-            event: step.event,
-          }],
-          emitted: emittedEvents.slice(emittedStart),
-        };
-      },
-      ...(deps.logContext !== undefined ? { logContext: deps.logContext } : {}),
-    });
+          // A step's `persist create` on a row that had none mints the real
+          // id — every read from here on uses it; the state stays addressed
+          // where the event came in. A `[shared]` entity's frame is the one
+          // working instance its traits share: a create records a row, it
+          // never re-addresses that instance.
+          if (rowId === undefined && !entry.isSharedEntity) {
+            const created = effectResults.slice(effectStart).find(
+              (r) => r.effect === 'persist' && r.action === 'create' && r.entityType === entry.entity.name && r.success,
+            );
+            const createdId = (created?.data as EntityRow | undefined)?.id;
+            if (typeof createdId === 'string') {
+              rowId = createdId;
+              rowByTrait.set(item.trait, createdId);
+            }
+          }
+          return {
+            effectResults: [{
+              results: effectResults.slice(effectStart),
+              from: step.fromState,
+              to: step.toState,
+              event: step.event,
+            }],
+            emitted: emittedEvents.slice(emittedStart),
+          };
+        },
+        ...(deps.logContext !== undefined ? { logContext: deps.logContext } : {}),
+      });
+    } catch (err: unknown) {
+      // The failing transition stops here; the rest of the dispatch goes on.
+      const error = err instanceof Error ? err.message : String(err);
+      rejections.push({ code: 'effect-failed', trait: item.trait, from: item.from, event: item.event, error });
+      evaluateLog.error('dispatch:effect-failed', { trait: item.trait, from: item.from, event: item.event, error, ...(deps.logContext ?? {}) });
+      scopeByTrait.set(item.trait, currentEntityId);
+      const reached = manager.getState(item.trait, currentEntityId)?.currentState;
+      if (reached !== undefined) states[item.trait] = reached;
+      entityByTrait[item.trait] = await readFrame();
+      continue;
+    }
 
     steps += Math.max(cascade.steps - 1, 0);
     if (cascade.cappedAt !== undefined && !truncatedTraits.includes(item.trait)) truncatedTraits.push(item.trait);
@@ -837,8 +851,8 @@ export async function evaluateOrbitalEvent(
 
   // A mount batch reports every seed that did not fire, even when others did.
   const reportedRejections = request.mount !== undefined
-    ? rejections.filter((r) => r.trait !== undefined && request.mount?.some((m) => m.trait === r.trait && m.event === r.event))
-    : transitioned ? [] : rejections;
+    ? rejections.filter((r) => r.code === 'effect-failed' || (r.trait !== undefined && request.mount?.some((m) => m.trait === r.trait && m.event === r.event)))
+    : transitioned ? rejections.filter((r) => r.code === 'effect-failed') : rejections;
   return {
     success: true,
     transitioned,

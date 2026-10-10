@@ -5,7 +5,7 @@
  * the client's response fold. The fold's local re-run must render the value
  * the server-side aggregator computed — Active Employees > 0, Total Hours > 0.
  */
-import { getTraitName } from '@almadar/core';
+import { getTraitName, isRenderBindingMarker } from '@almadar/core';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,6 +15,8 @@ import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import {
   buildTraitIndex,
   createClientKernel,
+  createContextFromBindings,
+  interpolateValue,
   createInProcessTransport,
   createMemoryCircuitStore,
   type IndexedTrait,
@@ -75,6 +77,14 @@ describe('stateful fold of mounted listeners (std-time-tracking /reports)', () =
     // resolves them against the trait's frame; resolve the same way here.
     const shown = (trait: string, prop: string) => {
       const value = lastPattern.get(trait)?.[prop];
+      // A render-time binding (a deferred expression, e.g. labels translated at render) resolves
+      // against the trait's frame and config, as the UI's resolveRenderBindingMarkers does.
+      const indexed = traitIndex.byName.get(trait);
+      if (value !== undefined && isRenderBindingMarker(value) && indexed !== undefined) {
+        const entity = store.frames.get(indexed.frameKey) ?? {};
+        const ctx = createContextFromBindings({ entity, payload: {}, state: 'idle', ...(indexed.config !== undefined ? { config: indexed.config } : {}) });
+        return interpolateValue(value.expression, ctx);
+      }
       if (value !== null && typeof value === 'object' && !Array.isArray(value) && 'expression' in value) {
         const expr = value.expression;
         const frameKey = traitIndex.byName.get(trait)?.frameKey;

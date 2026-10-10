@@ -10,7 +10,7 @@ import { orderFetchedRows } from './fetch-order.js';
 import { createLogger } from '@almadar/logger';
 import { EffectExecutor, clientResolvesRenderBindings } from './EffectExecutor.js';
 import type { ServerEffectResult } from './ServerEffectHandlers.js';
-import type { PersistenceAdapter } from '@almadar/core';
+import type { DeliveryRecord, DispatchLog, PersistenceAdapter } from '@almadar/core';
 import { stampEmitSource } from '../events/emit-stamp.js';
 import type { EffectDispatch } from '../evaluation/dispatch-memory.js';
 import { buildConfigBinding, buildEntityBinding } from '../traits/config-defaults.js';
@@ -189,6 +189,8 @@ export interface ServerEffectStageArgs {
   clientEffectsByTrait?: ClientEffectByTrait[];
   /** The transition whose effects these are; tags each client effect with its provenance. */
   firing?: { event: string; fromState: string };
+  /** What `@event` read for that transition, and the trait's dispatch log before it. */
+  received?: { delivery: DeliveryRecord; log: DispatchLog };
   onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void;
   /** Per-request originating client (from `OrbitalEventRequest.clientId`); absent for ticks. Carried through to persist-envelope broadcast items so the sink can exclude the origin. */
   originClientId?: string;
@@ -398,6 +400,7 @@ export async function runServerEffectStage(
   let contextRef: EffectContext | null = null;
 
   const { callService: _delegatedCallService, ...hostOverrides } = deps.extraEffectHandlers ?? {};
+  const hostProgramEffect = hostOverrides.programEffect;
   const handlers: EffectHandlers = {
     emit: (event, eventPayload, source, fromPersistSuccess) => {
       if (deps.debug) {
@@ -1161,6 +1164,9 @@ export async function runServerEffectStage(
     // stage's own handler above already delegates to (recording the result and
     // awaiting it outside the event queue).
     ...hostOverrides,
+    ...(hostProgramEffect !== undefined
+      ? { programEffect: (op, args) => hostProgramEffect(op, args, user !== undefined ? { principal: user.id, role: user.role } : undefined) }
+      : {}),
   };
 
   const state = deps.getTraitState(traitName);

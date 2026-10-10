@@ -1525,13 +1525,13 @@ export class OrbitalServerRuntime {
     const now = Date.now();
 
     try {
-      // Get all entities (or filtered by appliesTo)
-      let entities = await this.persistence.list(entityType);
-
+      // `appliesTo` lists the trait states the tick runs in; none listed = every state.
       if (tick.appliesTo && tick.appliesTo.length > 0) {
-        const appliesToSet = new Set(tick.appliesTo);
-        entities = entities.filter((e) => appliesToSet.has(e.id as string));
+        const traitState = registered.manager.getState(traitName)?.currentState;
+        if (traitState === undefined || !tick.appliesTo.includes(traitState)) return;
       }
+
+      const entities = await this.persistence.list(entityType);
 
       if (this.config.debug && entities.length > 0) {
         effectLog.debug('tick:processing', () => ({

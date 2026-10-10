@@ -24,6 +24,8 @@ import { buildConfigBinding, buildEntityBinding } from '../traits/config-default
 import type {
   AwaitingTrait,
   MessageCatalogs,
+  DeliveryRecord,
+  DispatchLog,
   DispatchMode,
   EventPayload,
   MountSeed,
@@ -44,10 +46,9 @@ import {
   type EvaluateOrbitalEventDeps,
 } from './evaluateOrbitalEvent.js';
 import { findInitialState, findMatchingTransitions } from '../traits/StateMachineCore.js';
-import { browserLegEvents, type IndexedTrait, type TraitIndex } from '../traits/trait-index.js';
-import { parseListenSource } from '../events/identity/routing.js';
+import { browserLegEvents, type TraitIndex } from '../traits/trait-index.js';
 import type { CircuitStore, TraitSnapshot } from './circuit-store.js';
-import type { EntityRow, SExpr } from '@almadar/core';
+import type { EntityRow, SExpr, TransitionRejection } from '@almadar/core';
 import { EffectExecutor, clientResolvesRenderBindings } from '../effects/EffectExecutor.js';
 import { createClientEffectHandlers } from '../effects/ClientEffectHandlers.js';
 import { ServerLegCollector } from '../effects/server-leg.js';
@@ -244,10 +245,14 @@ function createClientEffectRunner(
    * something the server leg needs to know about" — a bare state-only
    * transition (no effects) can have nothing server-only to replay either.
    */
-  onExecuted?: (traitName: string, firing: { event: string; fromState: string } | undefined, received: { payload?: EventPayload; entityId?: string }) => void,
+  onExecuted?: (traitName: string, firing: { event: string; fromState: string } | undefined, step: Omit<CascadeFiring, 'trait' | 'event' | 'fromState' | 'row'>) => void,
 ): EvaluateEffectRunner {
   return async (traitName, args) => {
-    onExecuted?.(traitName, args.firing, { ...(args.payload !== undefined ? { payload: args.payload } : {}), ...(args.entityId !== undefined ? { entityId: args.entityId } : {}) });
+    onExecuted?.(traitName, args.firing, {
+      ...(args.payload !== undefined ? { payload: args.payload } : {}),
+      ...(args.entityId !== undefined ? { entityId: args.entityId } : {}),
+      ...(args.received !== undefined ? args.received : {}),
+    });
     const entry = deps.traitIndex.byName.get(traitName);
     const frameKey = entry?.frameKey ?? traitName;
     let frame = deps.store.frames.get(frameKey);
@@ -420,18 +425,17 @@ export async function dispatchWithServerLeg(
 
   const executedTraitNames = new Set<string>();
   const firings = new Map<string, { event: string; fromState: string }>();
-  const received = new Map<string, { payload?: EventPayload; entityId?: string; row?: EntityRow }>();
+  const cascadeFirings: CascadeFiring[] = [];
   const collector = new ServerLegCollector();
   const runEffects = createClientEffectRunner(
     { traitIndex: opts.traitIndex, ...(opts.fullTraitIndex !== undefined ? { fullTraitIndex: opts.fullTraitIndex } : {}), store: opts.store, orbitalName: opts.orbitalName, ...i18nOpts(opts) },
     collector,
-    (name, firing, got) => {
+    (name, firing, step) => {
       executedTraitNames.add(name);
-      if (firing === undefined || firings.has(name)) return;
-      firings.set(name, firing);
-      const frameKey = opts.traitIndex.byName.get(name)?.frameKey ?? name;
-      const row = opts.store.frames.get(frameKey);
-      received.set(name, { ...got, ...(row !== undefined ? { row: { ...row } } : {}) });
+      if (firing === undefined) return;
+      if (!firings.has(name)) firings.set(name, firing);
+      const row = opts.store.frames.get(opts.traitIndex.byName.get(name)?.frameKey ?? name);
+      cascadeFirings.push({ trait: name, ...firing, ...step, ...(row !== undefined ? { row: { ...row } } : {}) });
     },
   );
 
@@ -457,19 +461,21 @@ export async function dispatchWithServerLeg(
   const browserStored = new Set(opts.traitIndex.allEntities.filter(storesRowsInBrowser).map((e) => e.name));
   // A trait the seed's cascade reached on a browser-leg event writes the browser
   // store; that store relays nothing, so the write goes as the trait's own request.
-  const browserWrites = new Map<string, IndexedTrait>();
-  for (const [name, firing] of firings) {
-    const indexed = opts.traitIndex.byName.get(name);
-    if (name === traitName || indexed === undefined) continue;
-    if (browserLegEvents(indexed.traitDef, (t) => browserStored.has(t), indexed.config).has(firing.event)) browserWrites.set(name, indexed);
-  }
+  const browserWrites = cascadeFirings.flatMap((f) => {
+    const indexed = opts.traitIndex.byName.get(f.trait);
+    return f.trait !== traitName && indexed !== undefined &&
+      browserLegEvents(indexed.traitDef, (t) => browserStored.has(t), indexed.config).has(f.event)
+      ? [{ firing: f, orbital: indexed.orbitalName }]
+      : [];
+  });
+  const writingTraits = new Set(browserWrites.map((w) => w.firing.trait));
   const delegating = [...collector.delegatingTraits()];
   let serverLeg: OrbitalEventRequest | undefined;
   let continuations: ClientContinuation[] | undefined;
-  if (hybrid && delegating.length > 0 && delegating.every((t) => browserWrites.has(t))) {
+  if (hybrid && delegating.length > 0 && delegating.every((t) => writingTraits.has(t))) {
     continuations = [
       ...offPage.map(({ emitted, target }) => offPageContinuation(emitted, target, request)),
-      ...[...browserWrites].map(([name, indexed]) => browserWriteContinuation(name, indexed, firings, received, response, request)),
+      ...browserWrites.map((w) => browserWriteContinuation(w.firing, w.orbital, request)),
     ];
   } else if (hybrid && !downstreamNeedsServer && drained.length === 0 && reachesOffPage) {
     // LOLO §7: a client-only seed takes no server round trip of its own; only
@@ -486,8 +492,14 @@ export async function dispatchWithServerLeg(
         drained: drained.length,
       });
     } else {
+      // The seed's leg masks the deliveries the client relayed, so a cascade trait's
+      // browser-store work goes as its own continuation, exactly as when the seed delegates nothing.
+      if (hybrid && browserWrites.length > 0) {
+        continuations = browserWrites.map((w) => browserWriteContinuation(w.firing, w.orbital, request));
+      }
       const executedTraits: Array<{ trait: string; from: string; event?: string }> = [];
       for (const name of executedTraitNames) {
+        if (continuations !== undefined && writingTraits.has(name)) continue;
         const indexed = opts.traitIndex.byName.get(name);
         const from = beforeStates.get(name) ?? (indexed !== undefined ? findInitialState(indexed.traitDef) : '');
         const event = firings.get(name)?.event;
@@ -540,35 +552,34 @@ function offPageContinuation(emitted: Emitted, target: CollectedListenerTarget, 
   };
 }
 
-/** The browser store's request for one cascaded trait's write: that trait's own event, payload and pre-dispatch state. */
-function browserWriteContinuation(
-  name: string,
-  indexed: IndexedTrait,
-  firings: ReadonlyMap<string, { event: string; fromState: string }>,
-  received: ReadonlyMap<string, { payload?: EventPayload; entityId?: string; row?: EntityRow }>,
-  response: OrbitalEventResponse,
-  request: OrbitalEventRequest,
-): ClientContinuation {
-  const firing = firings.get(name);
-  if (firing === undefined) throw new Error(`browser write for "${name}" has no firing`);
-  const got = received.get(name) ?? {};
-  const emitted = response.emittedEvents.find((e) => (indexed.traitDef.listens ?? []).some((l) => {
-    const { bareEvent, matcher } = parseListenSource(l, indexed.orbitalName);
-    return l.triggers === firing.event && bareEvent === e.event && matcher(e.source);
-  }));
+/** One transition a dispatch's local run took, with what the browser store needs to run it again. */
+interface CascadeFiring {
+  trait: string;
+  event: string;
+  fromState: string;
+  payload?: EventPayload;
+  entityId?: string;
+  row?: EntityRow;
+  delivery?: DeliveryRecord;
+  log?: DispatchLog;
+}
+
+/** The browser store's request for one cascaded firing's write: its own event, payload, pre-step state, `@event` and log. */
+function browserWriteContinuation(f: CascadeFiring, orbital: string, request: OrbitalEventRequest): ClientContinuation {
   return {
-    orbital: indexed.orbitalName,
+    orbital,
     request: {
-      event: firing.event,
-      ...(got.payload !== undefined ? { payload: got.payload } : {}),
-      ...(got.entityId !== undefined ? { entityId: got.entityId } : {}),
-      targetTrait: name,
-      sourceTrait: name,
-      traits: [{ trait: name, from: firing.fromState, event: firing.event }],
-      ...(got.row !== undefined ? { entityByTrait: { [name]: got.row } } : {}),
+      event: f.event,
+      ...(f.payload !== undefined ? { payload: f.payload } : {}),
+      ...(f.entityId !== undefined ? { entityId: f.entityId } : {}),
+      targetTrait: f.trait,
+      sourceTrait: f.trait,
+      traits: [{ trait: f.trait, from: f.fromState, event: f.event }],
+      ...(f.row !== undefined ? { entityByTrait: { [f.trait]: f.row } } : {}),
       ...(request.clientId !== undefined ? { clientId: request.clientId } : {}),
       ...(request.locale !== undefined ? { locale: request.locale } : {}),
-      ...(emitted !== undefined ? { delivery: deliveryOf(emitted) } : {}),
+      ...(f.delivery !== undefined ? { delivery: f.delivery } : {}),
+      ...(f.log !== undefined ? { dispatchLog: f.log } : {}),
     },
   };
 }
@@ -736,6 +747,8 @@ export async function applyOrbitalEventResponse(
   clientEffectsByTrait: ClientEffectByTrait[];
   /** A client-only trait's own unconsumed emits, for the caller to dispatch. */
   ownContinuations: OrbitalEventRequest[];
+  /** Browser-store work a locally fanned cascade reached, for the caller to send. */
+  browserWrites: ClientContinuation[];
 }> {
   // A client-only trait still awaiting its INIT on this mount: no host holds
   // its deliveries (its INIT never posts), so whatever the host ran for it ran
@@ -745,11 +758,13 @@ export async function applyOrbitalEventResponse(
   // LOLO §7: a client-only trait's state is the client's own. Whatever a host
   // computed for it is dropped; the events that reached it run here instead.
   const clientOnly = clientOnlyTraits(opts.traitIndex);
+  const browserStored = new Set(opts.traitIndex.allEntities.filter(storesRowsInBrowser).map((e) => e.name));
   const response = withoutClientOnlyRuns(heldHere.size > 0 ? withoutTraits(serverResponse, heldHere) : serverResponse, clientOnly);
   const clientEffects: ClientEffectTuple[] = [...(response.clientEffects ?? [])];
   const clientEffectsByTrait: ClientEffectByTrait[] =
     [...(response.clientEffectsByTrait ?? [])];
   const ownContinuations: OrbitalEventRequest[] = [];
+  const browserWrites: ClientContinuation[] = [];
 
   clientRoleLog.debug('fold:apply', {
     rows: Object.keys(response.entityByTrait ?? {}),
@@ -806,14 +821,32 @@ export async function applyOrbitalEventResponse(
       }),
     }).filter((target) => !heldHere.has(target.listenerTrait) && (!hostRan || clientOnly.has(target.listenerTrait)));
     for (const target of targets) {
+      // Its rows live in the browser store: a local run here would drop the
+      // leg, so it takes the full client path like an own continuation.
+      if (browserLegEvents(target.entry.traitDef, (t) => browserStored.has(t), target.entry.config).has(target.triggers)) {
+        ownContinuations.push({
+          event: target.triggers,
+          ...(target.payload !== undefined ? { payload: target.payload } : {}),
+          ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
+          targetTrait: target.listenerTrait,
+          delivery,
+        });
+        continue;
+      }
       // A fresh, per-fan-out collector — any further server-only effect the
       // fanned listener's arm fires is not drained/posted from here,
       // mirroring `apply_server_response`'s own `run_cascade` call, which
       // runs through the same Client-env executor but posts nothing itself.
       const collector = new ServerLegCollector();
+      const fannedFirings: CascadeFiring[] = [];
       const runEffects = createClientEffectRunner(
         { traitIndex: opts.traitIndex, ...(opts.fullTraitIndex !== undefined ? { fullTraitIndex: opts.fullTraitIndex } : {}), store, orbitalName: opts.orbitalName, ...i18nOpts(opts) },
         collector,
+        (name, firing, step) => {
+          if (firing === undefined) return;
+          const row = store.frames.get(opts.traitIndex.byName.get(name)?.frameKey ?? name);
+          fannedFirings.push({ trait: name, ...firing, ...step, ...(row !== undefined ? { row: { ...row } } : {}) });
+        },
       );
       const fanned = await evaluateOrbitalEvent(
         { ...baseEvaluateDeps(opts, runEffects), seedVisited: alreadyDelivered, seedDelivery: delivery },
@@ -826,6 +859,14 @@ export async function applyOrbitalEventResponse(
       );
       if (fanned.clientEffects) clientEffects.push(...fanned.clientEffects);
       if (fanned.clientEffectsByTrait) clientEffectsByTrait.push(...fanned.clientEffectsByTrait);
+      // The local run only collected the browser-store work its cascade reached (a desk's emit
+      // opening a browser-stored detail); each such firing goes to the store as its own request.
+      for (const f of fannedFirings) {
+        const indexed = opts.traitIndex.byName.get(f.trait);
+        if (indexed !== undefined && browserLegEvents(indexed.traitDef, (t) => browserStored.has(t), indexed.config).has(f.event)) {
+          browserWrites.push(browserWriteContinuation(f, indexed.orbitalName, { event: f.event, ...(opts.locale !== undefined ? { locale: opts.locale } : {}) }));
+        }
+      }
       // Land this delivery's rows before the next one reads the frame.
       if (fanned.entityByTrait) {
         fanOutEntityRows(store, opts.traitIndex, fanned.entityByTrait, new Set([target.listenerTrait]));
@@ -847,7 +888,7 @@ export async function applyOrbitalEventResponse(
   }
 
   store.notify();
-  return { clientEffects, clientEffectsByTrait, ownContinuations };
+  return { clientEffects, clientEffectsByTrait, ownContinuations, browserWrites };
 }
 
 /**
@@ -857,12 +898,19 @@ export async function applyOrbitalEventResponse(
 async function dispatchOwnContinuations(
   transport: EventTransport,
   orbitalName: string,
-  continuations: readonly OrbitalEventRequest[],
+  folded: { ownContinuations: readonly OrbitalEventRequest[]; browserWrites: readonly ClientContinuation[] },
   store: CircuitStore,
   opts: ClientRoleOpts,
 ): Promise<{ clientEffects: ClientEffectTuple[]; clientEffectsByTrait: ClientEffectByTrait[] }> {
   const out = { clientEffects: [] as ClientEffectTuple[], clientEffectsByTrait: [] as ClientEffectByTrait[] };
-  for (const request of continuations) {
+  for (const write of folded.browserWrites) {
+    const posted = await transport.send(write.orbital, write.request);
+    const written = await applyOrbitalEventResponse(store, posted, new Set(), opts, new Set([write.request.targetTrait ?? '']));
+    const continued = await dispatchOwnContinuations(transport, write.orbital, written, store, opts);
+    out.clientEffects.push(...written.clientEffects, ...continued.clientEffects);
+    out.clientEffectsByTrait.push(...written.clientEffectsByTrait, ...continued.clientEffectsByTrait);
+  }
+  for (const request of folded.ownContinuations) {
     const continued = await dispatchWithServerLeg(opts, request);
     const presented = await postServerLeg(transport, orbitalName, continued, store, opts);
     out.clientEffects.push(...(presented.clientEffects ?? []));
@@ -879,6 +927,12 @@ function awaitingEntries(dispatch: ClientDispatch, opts: ClientRoleOpts): Awaiti
     out.push({ trait, event: firing.event, from: firing.fromState });
   }
   return out;
+}
+
+/** The server's effect outcomes appended to the local run's: a persist executes for real only on the server, so the settled response must carry its verdict. */
+function serverEffectResults(local: OrbitalEventResponse, posted: OrbitalEventResponse): Pick<OrbitalEventResponse, 'effectResults'> {
+  const merged = [...(local.effectResults ?? []), ...(posted.effectResults ?? [])];
+  return merged.length > 0 ? { effectResults: merged } : {};
 }
 
 /**
@@ -912,7 +966,7 @@ export async function postServerLeg(
   /** A progress-lane leg: never marks traits awaiting (nothing waits on it). */
   progress = false,
 ): Promise<OrbitalEventResponse> {
-  if (dispatch.continuations !== undefined) {
+  if (dispatch.continuations !== undefined && dispatch.serverLeg === undefined) {
     return postContinuations(transport, dispatch, store, opts);
   }
   if (dispatch.mode === 'hybridClientOnly' && dispatch.serverLeg === undefined) {
@@ -973,15 +1027,18 @@ export async function postServerLeg(
       dispatch.writtenTraits,
     );
     const local = dispatch.response;
-    const continued = await dispatchOwnContinuations(transport, orbitalName, folded.ownContinuations, store, opts);
+    const continued = await dispatchOwnContinuations(transport, orbitalName, folded, store, opts);
+    const answer = await answerContinuations(transport, dispatch, store, opts);
     return {
       ...local,
       emittedEvents: [
         ...local.emittedEvents,
         ...posted.emittedEvents.filter((e) => !delivered.has(alreadyDeliveredKey(e.source?.trait ?? '', e.event))),
+        ...answer.emittedEvents,
       ],
-      clientEffects: [...(local.clientEffects ?? []), ...folded.clientEffects, ...continued.clientEffects],
-      clientEffectsByTrait: [...(local.clientEffectsByTrait ?? []), ...folded.clientEffectsByTrait, ...continued.clientEffectsByTrait],
+      clientEffects: [...(local.clientEffects ?? []), ...folded.clientEffects, ...continued.clientEffects, ...answer.clientEffects],
+      clientEffectsByTrait: [...(local.clientEffectsByTrait ?? []), ...folded.clientEffectsByTrait, ...continued.clientEffectsByTrait, ...answer.clientEffectsByTrait],
+      ...serverEffectResults(local, posted),
     };
   } finally {
     store.awaiting.end(awaiting.map((a) => a.trait));
@@ -1011,7 +1068,7 @@ export async function answerContinuations(
   for (const continuation of dispatch.continuations ?? []) {
     const posted = await transport.send(continuation.orbital, continuation.request);
     const folded = await applyOrbitalEventResponse(store, posted, delivered, opts, dispatch.writtenTraits);
-    const continued = await dispatchOwnContinuations(transport, continuation.orbital, folded.ownContinuations, store, opts);
+    const continued = await dispatchOwnContinuations(transport, continuation.orbital, folded, store, opts);
     answer.emittedEvents.push(...posted.emittedEvents.filter((e) => !delivered.has(alreadyDeliveredKey(e.source?.trait ?? '', e.event))));
     answer.clientEffects.push(...folded.clientEffects, ...continued.clientEffects);
     answer.clientEffectsByTrait.push(...folded.clientEffectsByTrait, ...continued.clientEffectsByTrait);
@@ -1045,6 +1102,8 @@ export interface MountedDispatch {
 export interface MountLegResult {
   success: boolean;
   states: Record<string, string>;
+  /** Per-trait effect failures the server reported (`effect-failed`). */
+  rejections: TransitionRejection[];
   emittedEvents: OrbitalEventResponse['emittedEvents'];
   clientEffects: ClientEffectTuple[];
   clientEffectsByTrait: ClientEffectByTrait[];
@@ -1068,9 +1127,11 @@ export async function postMountLeg(
 ): Promise<MountLegResult> {
   const traits: Array<{ trait: string; from: string }> = [];
   const entityByTrait: Record<string, EntityRow> = {};
-  if (opts.carriesCircuitState) {
+  // As in `postServerLeg`: no server holds a local (hybrid) seed's state, so its leg carries it on every topology.
+  const carried = mounted.filter(({ dispatch }) => opts.carriesCircuitState || dispatch.mode === 'hybridClientOnly');
+  {
     const seen = new Set<string>();
-    for (const { dispatch } of mounted) {
+    for (const { dispatch } of carried) {
       for (const t of dispatch.serverLeg?.traits ?? []) {
         if (seen.has(t.trait)) continue;
         seen.add(t.trait);
@@ -1122,10 +1183,11 @@ export async function postMountLeg(
       opts,
       written,
     );
-    const continued = await dispatchOwnContinuations(transport, orbitalName, folded.ownContinuations, store, opts);
+    const continued = await dispatchOwnContinuations(transport, orbitalName, folded, store, opts);
     return {
       success: posted.success,
       states: posted.states,
+      rejections: (posted.rejections ?? []).filter((r) => r.code === 'effect-failed'),
       emittedEvents: posted.emittedEvents.filter((e) => !delivered.has(alreadyDeliveredKey(e.source?.trait ?? '', e.event))),
       clientEffects: [...folded.clientEffects, ...continued.clientEffects],
       clientEffectsByTrait: [...folded.clientEffectsByTrait, ...continued.clientEffectsByTrait],
@@ -1169,6 +1231,12 @@ export interface ClientKernelOutcome {
    */
   localPainted?: boolean;
   serverEffects?: Pick<OrbitalEventResponse, 'clientEffects' | 'clientEffectsByTrait'>;
+  /**
+   * A tick-lane dispatch: what its post's fold added on top of the local run,
+   * once the post settles (undefined when a newer firing superseded it). The
+   * drain never waits on it; the caller paints it when it lands.
+   */
+  tickSettled?: Promise<Pick<OrbitalEventResponse, 'clientEffects' | 'clientEffectsByTrait'> | undefined>;
 }
 
 /** Per-dispatch hooks: `onLocal` sees the locally-evaluated response before its server leg is sent. */
@@ -1189,6 +1257,8 @@ export interface ClientMountOutcome {
   posted: boolean;
   success: boolean;
   error?: string;
+  /** Per-trait effect failures the posted legs reported (`effect-failed`). */
+  rejections: TransitionRejection[];
   /** What the posted legs added: the server's effects and the emits the client had not run. */
   serverEffects: Pick<OrbitalEventResponse, 'clientEffects' | 'clientEffectsByTrait'>;
   emittedEvents: OrbitalEventResponse['emittedEvents'];
@@ -1325,7 +1395,8 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
   // so its round trip must never delay a queued command (R-CLIENT-TICK-POST-
   // BACKLOG). One lane per (event, trait): at most one post in flight,
   // newer firings replace the pending one, the newest goes out on settle.
-  const tickLanes = new Map<string, { inFlight: boolean; pending?: { dispatch: ClientDispatch; request: OrbitalEventRequest } }>();
+  type TickPost = { dispatch: ClientDispatch; request: OrbitalEventRequest; settle: (response: OrbitalEventResponse | undefined) => void };
+  const tickLanes = new Map<string, { inFlight: boolean; pending?: TickPost }>();
   const flushTickLane = (key: string): void => {
     const lane = tickLanes.get(key);
     if (lane === undefined || transport === undefined) return;
@@ -1338,20 +1409,25 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
     lane.inFlight = true;
     void postRole()
       .then((role) => postServerLeg(transport, orbitalFor(next.request), next.dispatch, roleOpts.store, role, next.request))
+      .then((response) => next.settle(response))
       .catch((err: Error) => {
         clientRoleLog.warn('tick-post-failed', { event: next.request.event, trait: next.request.targetTrait, error: String(err) });
+        next.settle(undefined);
       })
       .then(() => flushTickLane(key));
   };
-  const postTick = (dispatch: ClientDispatch, request: OrbitalEventRequest): void => {
+  const postTick = (dispatch: ClientDispatch, request: OrbitalEventRequest): Promise<OrbitalEventResponse | undefined> => {
     const key = `${request.targetTrait ?? ''}\u0000${request.event}`;
     const lane = tickLanes.get(key) ?? { inFlight: false };
     tickLanes.set(key, lane);
     // No rollback point: the post settles after later commands have run, so
     // restoring this snapshot would clobber them; the next tick supersedes.
     const { snapshot: _snapshot, siblingSnapshots: _siblings, ...unrollable } = dispatch;
-    lane.pending = { dispatch: unrollable, request };
-    if (!lane.inFlight) flushTickLane(key);
+    return new Promise((settle) => {
+      lane.pending?.settle(undefined);
+      lane.pending = { dispatch: unrollable, request, settle };
+      if (!lane.inFlight) flushTickLane(key);
+    });
   };
 
   let progressChain: Promise<void> = Promise.resolve();
@@ -1385,7 +1461,7 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
       }
       for (const { seed, dispatch } of mounted) entry.hooks?.onLocal?.(seed.trait, dispatch.response);
       const seeds = mounted.map(({ seed, dispatch }) => ({ trait: seed.trait, event: seed.event, mode: dispatch.mode, local: dispatch.response }));
-      const outcome: ClientMountOutcome = { seeds, posted: false, success: true, serverEffects: { clientEffects: [], clientEffectsByTrait: [] }, emittedEvents: [] };
+      const outcome: ClientMountOutcome = { seeds, posted: false, success: true, rejections: [], serverEffects: { clientEffects: [], clientEffectsByTrait: [] }, emittedEvents: [] };
       if (transport !== undefined) {
         const role = await postRole();
         const byOrbital = new Map<string, MountedDispatch[]>();
@@ -1400,6 +1476,7 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
           outcome.posted = true;
           outcome.success = outcome.success && leg.success;
           if (leg.error !== undefined) outcome.error = leg.error;
+          outcome.rejections.push(...leg.rejections);
           outcome.serverEffects.clientEffects?.push(...leg.clientEffects);
           outcome.serverEffects.clientEffectsByTrait?.push(...leg.clientEffectsByTrait);
           outcome.emittedEvents.push(...leg.emittedEvents);
@@ -1438,9 +1515,12 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
             const dispatch = await dispatchWithServerLeg(roleOpts, entry.request);
             let response = dispatch.response;
             let localPainted = false;
+            let tickSettled: ClientKernelOutcome['tickSettled'];
             if (transport !== undefined) {
-              if (entry.request.tick !== undefined) postTick(dispatch, entry.request);
-              else {
+              if (entry.request.tick !== undefined) {
+                const local = dispatch.response;
+                tickSettled = postTick(dispatch, entry.request).then((posted) => (posted === undefined ? undefined : serverOnlyEffects(local, posted)));
+              } else {
                 // Paint before waiting on the topology or the round trip.
                 const painters = entry.hooks.filter((h) => h.onLocal !== undefined);
                 if (painters.length > 0) {
@@ -1452,7 +1532,7 @@ export function createClientKernel(opts: ClientKernelOpts): ClientKernel {
             }
             const outcome: ClientKernelOutcome = localPainted
               ? { response, mode: dispatch.mode, localPainted, serverEffects: serverOnlyEffects(dispatch.response, response) }
-              : { response, mode: dispatch.mode };
+              : { response, mode: dispatch.mode, ...(tickSettled !== undefined ? { tickSettled } : {}) };
             for (const resolve of entry.resolvers) resolve(outcome);
           } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));

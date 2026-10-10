@@ -150,6 +150,8 @@ describe('i18n/t on the client role\'s local arm', () => {
   });
 
   it('control: without a host locale the local arm reports the missing message', async () => {
-    await expect(dispatchWithServerLeg(opts({}), { event: 'INIT', targetTrait: 'HomePage' })).rejects.toThrow('no `unset` message');
+    const dispatch = await dispatchWithServerLeg(opts({}), { event: 'INIT', targetTrait: 'HomePage' });
+    // A failing effect stops only its transition (G-UI-097): the missing message is reported, not thrown.
+    expect(dispatch.response.rejections).toEqual([expect.objectContaining({ code: 'effect-failed', trait: 'HomePage', error: expect.stringContaining('no `unset` message') })]);
   });
 });

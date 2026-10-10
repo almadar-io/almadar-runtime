@@ -69,7 +69,7 @@ describe.skipIf(!hasOrb)('program handlers (real orb) through the executor', () 
         await executor.execute(['program/eval', '@entity.program', EMIT]);
         expect(payloads('FAILED')).toHaveLength(0);
         expect(payloads('OK')[1]).toEqual({
-            result: { behavior: './orbitals/HelloApp', traits: [{ behavior: './orbitals/HelloApp', trait: 'Greet' }] },
+            result: { behavior: './orbitals/HelloApp', traits: [{ behavior: './orbitals/HelloApp', trait: 'Greet' }], value: { behavior: './orbitals/HelloApp' } },
         });
         expect(existsSync(join(cwd, 'orbitals', 'HelloApp.orb'))).toBe(true);
         expect(JSON.parse(readFileSync(join(cwd, 'orbitals', 'HelloApp.orb'), 'utf-8')).name).toBe('HelloApp');

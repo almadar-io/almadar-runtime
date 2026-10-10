@@ -35,7 +35,7 @@ import {
 } from './StateMachineCore.js';
 import type { TransitionResult } from '../types.js';
 import { createLogger } from '@almadar/logger';
-import { dispatchVisitKey, type BusEventSource, type DeliveryRecord, type EntityRow, type EventPayload } from '@almadar/core';
+import { dispatchVisitKey, type BusEventSource, type DeliveryRecord, type DispatchLog, type EntityRow, type EventPayload } from '@almadar/core';
 import { DispatchMemory, type EffectDispatch } from '../evaluation/dispatch-memory.js';
 
 const cascadeLog = createLogger('almadar:runtime:trait-cascade');
@@ -91,7 +91,7 @@ export interface RunTraitCascadeOptions<TEffectResult> {
      *  must read `@payload.X` off it, not the original top-level request's. */
     runEffects: (
         effects: TransitionResult['effects'],
-        step: { fromState: string; toState: string; event: string; payload?: EventPayload; dispatch: EffectDispatch; /** 0 for the requested event, then 1, 2… for the trait's own follow-ups. */ index: number },
+        step: { fromState: string; toState: string; event: string; payload?: EventPayload; dispatch: EffectDispatch; /** 0 for the requested event, then 1, 2… for the trait's own follow-ups. */ index: number; /** What `@event` read for this step, and the trait's log before it. */ delivery: DeliveryRecord; log: DispatchLog },
     ) => Promise<CascadeStepEffectsResult<TEffectResult>>;
     /** The steps this cascade may take: what is left of the enclosing dispatch's one budget
      *  (`CROSS_TRAIT_CASCADE_CAP`), so a trait's own follow-ups count like every other step —
@@ -201,6 +201,7 @@ export async function runTraitCascade<TEffectResult>(
         if (visited.has(stepKey)) continue; // this branch cycles — drop it, keep draining the rest of the queue
         visited.add(stepKey);
 
+        const log = memory.log(trait.name);
         const view = memory.view(trait.name, item.delivery);
         const result = processEvent({
             traitState: { traitName: trait.name, currentState: stepFromState, previousState: null, lastEvent: null, context: {} },
@@ -233,6 +234,8 @@ export async function runTraitCascade<TEffectResult>(
                 payload: item.payload,
                 dispatch: { ...view, fromState: stepFromState, toState: result.newState },
                 index: steps - 1,
+                delivery: item.delivery,
+                log,
             });
             effectResults.push(...stepOutcome.effectResults);
             emitted.push(...stepOutcome.emitted);

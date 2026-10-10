@@ -3,7 +3,7 @@
  * seeded once, and the in-process transport its legs run through. The runtime
  * host (`useBrowserStore`) and compiled static clients both open it here.
  */
-import type { EventPayload, SExpr, OrbitalDefinition, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, RuntimeValue } from '@almadar/core';
+import type { EventPayload, MessageCatalogs, SExpr, OrbitalDefinition, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, RuntimeValue } from '@almadar/core';
 import { externalInputsOf, isEventPayloadValue, orbitalInlineEntities, parseOrbitalSchema, readableEntitiesOf, storesRowsInBrowser } from '@almadar/core';
 import { entityAccessPolicies } from '@almadar/core/mock';
 import { applyRowAccess } from '../entities/entityAccess.js';
@@ -56,13 +56,19 @@ export interface BrowserStoreTransportOptions {
   clientRelays?: boolean;
   /** The viewer's locale: picks the entity's rows for it when the store is first seeded. */
   locale?: string;
+  /** Answers the program's calls to browser-only services (the client's web-hosted integrations). */
+  callService?: EffectHandlers['callService'];
+  /** The program's message catalogs, so a leg's `i18n/t` resolves for the request's locale. */
+  messages?: MessageCatalogs;
 }
 
 export async function openBrowserStoreTransport(options: BrowserStoreTransportOptions): Promise<EventTransport> {
-  const persistence = await openBrowserStore(options.databaseName, options.schema.orbitals, options.factory, options.locale);
-  if (persistence === null) {
+  const stored = await openBrowserStore(options.databaseName, options.schema.orbitals, options.factory, options.locale);
+  if (stored === null && options.callService === undefined) {
     throw new Error(`openBrowserStoreTransport: schema "${options.schema.name}" declares no browser-stored entity`);
   }
+  // Legs that only call browser-only services keep no rows of their own.
+  const persistence = stored ?? new InMemoryPersistence();
   const traitIndex = buildTraitIndex(options.schema.orbitals);
   const store = createMemoryCircuitStore(Array.from(traitIndex.byName.values(), (e) => e.traitDef));
   return createLocalStoreTransport({
@@ -71,6 +77,8 @@ export async function openBrowserStoreTransport(options: BrowserStoreTransportOp
     store,
     schema: options.schema,
     ...(options.clientRelays !== undefined ? { clientRelays: options.clientRelays } : {}),
+    ...(options.callService !== undefined ? { callService: options.callService } : {}),
+    ...(options.messages !== undefined ? { messages: options.messages } : {}),
   });
 }
 
@@ -79,13 +87,15 @@ export async function openBrowserStoreTransport(options: BrowserStoreTransportOp
  * core (the client's core may predate the browser-storage fields). A compiled
  * client relays every emit itself, as it does a compiled server's reply.
  */
-export function openBundledBrowserStore(bundled: RuntimeValue, locale?: string): Promise<EventTransport> {
+export function openBundledBrowserStore(bundled: RuntimeValue, locale?: string, callService?: EffectHandlers['callService'], messages?: MessageCatalogs): Promise<EventTransport> {
   const schema = parseOrbitalSchema(bundled);
   return openBrowserStoreTransport({
     databaseName: browserStoreName(schema.name, locale),
     schema,
     clientRelays: true,
     ...(locale !== undefined ? { locale } : {}),
+    ...(callService !== undefined ? { callService } : {}),
+    ...(messages !== undefined ? { messages } : {}),
   });
 }
 

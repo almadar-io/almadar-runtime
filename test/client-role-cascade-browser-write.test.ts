@@ -22,16 +22,21 @@ function schema(boardStoredInBrowser: boolean): OrbitalSchema {
   const tour: Trait = {
     name: 'Tour', linkedEntity: 'Scene', scope: 'instance',
     stateMachine: { states: [{ name: 'idle', isInitial: true }], events: [],
-      transitions: [{ from: 'idle', to: 'idle', event: 'STEP', effects: [['emit', 'TOUR_STEP', { event: '@payload.event' }]] }] },
+      transitions: [
+        { from: 'idle', to: 'idle', event: 'STEP', effects: [['emit', 'TOUR_STEP', { event: '@payload.event' }]] },
+        { from: 'idle', to: 'idle', event: 'RESET', effects: [['emit', 'TOUR_RESET', {}]] },
+      ] },
   };
   const board: Trait = {
     name: 'Board', linkedEntity: 'Task', scope: 'collection',
     listens: [
       { event: 'TOUR_STEP', source: { kind: 'trait', trait: 'Tour' }, triggers: 'MOVE', guard: ['=', '@payload.event', 'FINISH'], payloadMapping: { id: 'demo-1', stage: 'done' } },
       { event: 'TOUR_STEP', source: { kind: 'trait', trait: 'Tour' }, triggers: 'MOVE', guard: ['=', '@payload.event', 'START'], payloadMapping: { id: 'demo-1', stage: 'doing' } },
+      { event: 'TOUR_RESET', source: { kind: 'trait', trait: 'Tour' }, triggers: 'MOVE', payloadMapping: { id: 'demo-1', stage: 'todo' } },
+      { event: 'TOUR_RESET', source: { kind: 'trait', trait: 'Tour' }, triggers: 'MOVE', payloadMapping: { id: 'demo-3', stage: 'doing' } },
     ],
     stateMachine: { states: [{ name: 'viewing', isInitial: true }], events: [],
-      transitions: [{ from: 'viewing', to: 'viewing', event: 'MOVE', effects: [['persist', 'update', 'Task', { id: '@payload.id', stage: '@payload.stage' }]] }] },
+      transitions: [{ from: 'viewing', to: 'viewing', event: 'MOVE', effects: [['persist', 'update', 'Task', { id: '@payload.id', stage: '@payload.stage', seen: ['array/len', '@prevEvents'] }]] }] },
   };
   return {
     name: 'demo',
@@ -40,7 +45,7 @@ function schema(boardStoredInBrowser: boolean): OrbitalSchema {
       name: 'Demo',
       pages: [],
       entity: { name: 'Task', persistence: 'persistent', ...(boardStoredInBrowser ? { collection: 'tasks', local: true } : {}),
-        fields: [{ name: 'id', type: 'string' }, { name: 'stage', type: 'string' }] },
+        fields: [{ name: 'id', type: 'string' }, { name: 'stage', type: 'string' }, { name: 'seen', type: 'number' }] },
       auxiliaryEntities: [{ name: 'Scene', persistence: 'runtime', fields: [{ name: 'id', type: 'string' }] }],
       traits: [tour, board],
     }],
@@ -53,6 +58,7 @@ async function setup(boardStoredInBrowser: boolean) {
   const store = createMemoryCircuitStore([...traitIndex.byName.values()].map((e) => e.traitDef));
   const browser = new InMemoryPersistence();
   await browser.create('Task', { id: 'demo-1', stage: 'todo' });
+  await browser.create('Task', { id: 'demo-3', stage: 'doing' });
   const serverSent: OrbitalEventRequest[] = [];
   const remote: EventTransport = {
     register: async () => ({ success: true, carriesCircuitState: false }),
@@ -76,6 +82,22 @@ describe('a client-only step that drives a browser-stored board', () => {
     await kernel.dispatch({ event: 'STEP', targetTrait: 'Tour', payload: { event: 'FINISH' } });
     expect((await browser.getById('Task', 'demo-1'))?.['stage']).toBe('done');
     expect(serverSent).toEqual([]);
+  });
+
+  it('one step that moves two cards writes both', async () => {
+    const { kernel, browser } = await setup(true);
+    await kernel.dispatch({ event: 'STEP', targetTrait: 'Tour', payload: { event: 'FINISH' } });
+    await browser.update('Task', 'demo-3', { stage: 'done' });
+    await kernel.dispatch({ event: 'RESET', targetTrait: 'Tour' });
+    expect((await browser.getById('Task', 'demo-1'))?.['stage']).toBe('todo');
+    expect((await browser.getById('Task', 'demo-3'))?.['stage']).toBe('doing');
+  });
+
+  it('each write reads the same @prevEvents in the browser store as on the client', async () => {
+    const { kernel, browser } = await setup(true);
+    await kernel.dispatch({ event: 'RESET', targetTrait: 'Tour' });
+    expect((await browser.getById('Task', 'demo-1'))?.['seen']).toBe(0);
+    expect((await browser.getById('Task', 'demo-3'))?.['seen']).toBe(1);
   });
 
   it('control: a step no listen matches writes nothing', async () => {

@@ -25,6 +25,7 @@ import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParam
 import { omitFrameFields,
     isPersistBatchOperation,
     isRuntimeEntity,
+    storesRowsInBrowser,
 } from '@almadar/core';
 import { RESERVED_FIELD_NAMES } from '@almadar/core/mock';
 import { JsonValueSchema } from '@almadar/core';
@@ -263,13 +264,14 @@ function interpolateFilterTraitRefs(value: SExpr, ctx: ReturnType<typeof createC
  * than resolved eagerly by a server. True for a `[runtime]` entity (the
  * client's local writes and ticks own the row; a server-evaluated literal
  * would clobber them) and for a `[shared]` entity regardless of persistence
- * (one live frame across its bound traits is client-held by contract); an
+ * (one live frame across its bound traits is client-held by contract), and
+ * for a browser-stored entity (its rows live in the client's own store); an
  * unbound trait has no server row to resolve against. Persistent, non-shared
  * entities stay server-resolved: their `@entity` merges persistence rows the
  * client does not hold. The ONE rule every server on the event wire applies.
  */
 export function clientResolvesRenderBindings(entity: Entity | undefined): boolean {
-    return entity === undefined || isRuntimeEntity(entity) || entity.shared === true;
+    return entity === undefined || isRuntimeEntity(entity) || entity.shared === true || storesRowsInBrowser(entity);
 }
 
 export class EffectExecutor {

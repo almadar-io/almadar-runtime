@@ -35,6 +35,20 @@ describe('dispatch mode follows where the data lives', () => {
     expect(modeOf(orbital({ name: 'Scene', persistence: 'runtime' }, [['fetch', 'Scene', {}]]))).toBe('runtimeOptimistic');
   });
 
+  it('a runtime-entity trait calling a browser-only service is client-only, and the call is its browser leg', () => {
+    const o = orbital({ name: 'Visit', persistence: 'runtime' }, [['call-service', 'analytics', 'pageview', { endpoint: '', path: '/' }]]);
+    expect(modeOf(o)).toBe('hybridClientOnly');
+    const entry = buildTraitIndex([o]).byName.get('Browse');
+    expect(entry && [...browserLegEvents(entry.traitDef, () => false, entry.config)]).toEqual(['INIT']);
+  });
+
+  it('control: a service that also runs on node keeps the server leg and is no browser leg', () => {
+    const o = orbital({ name: 'Visit', persistence: 'runtime' }, [['call-service', 'llm', 'generate', {}]]);
+    expect(modeOf(o)).toBe('runtimeOptimistic');
+    const entry = buildTraitIndex([o]).byName.get('Browse');
+    expect(entry && [...browserLegEvents(entry.traitDef, () => false, entry.config)]).toEqual([]);
+  });
+
   it('a browser-stored entity trait calling a service is optimistic', () => {
     expect(modeOf(orbital({ name: 'Invoice', persistence: 'persistent', collection: 'invoices', local: true }, [['call-service', 'llm', 'call', {}]]))).toBe('runtimeOptimistic');
   });

@@ -505,7 +505,8 @@ export interface EffectHandlers {
     // program/read|print|eval). `@almadar/integrations/program`'s
     // `runProgramEffect` owns argument parsing and the `orb` call; an absent
     // handler makes the effect fail explicitly.
-    programEffect?: (op: ProgramEffectName, args: readonly JsonValue[]) => Promise<ProgramEffectOutcome>;
+    // The caller is the dispatch's viewer (`principal`/`role`), bound per stage like `callService`'s.
+    programEffect?: (op: ProgramEffectName, args: readonly JsonValue[], context?: Pick<ServiceCallContext, 'principal' | 'role'>) => Promise<ProgramEffectOutcome>;
 }
 
 /**

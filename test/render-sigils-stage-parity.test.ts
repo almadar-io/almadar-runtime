@@ -65,7 +65,8 @@ describe('render sigils: index stage runner matches the server stage', () => {
     let local: Record<string, RuntimeValue> | undefined;
     await kernel.dispatch({ event: 'INIT', targetTrait: 'Layout' }, { onLocal: (r) => { local = renderOf(r.clientEffectsByTrait) ?? local; } });
 
-    expect(server?.items).toEqual([{ href: '/', label: 'HomePage' }, { href: '/items', label: 'Items' }]);
+    // Only root pages that declare a label are entries (LOLO §13 nav entries); HomePage declares none.
+    expect(server?.items).toEqual([{ href: '/items', label: 'Items' }]);
     expect(indexed?.items).toEqual(server?.items);
     expect(indexed?.theme).toEqual(server?.theme);
     expect(local?.items).toEqual(server?.items);

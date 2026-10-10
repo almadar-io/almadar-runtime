@@ -10,19 +10,20 @@ import { isPageReference, themeDataKey, type NavItem, type OrbitalDefinition, ty
 export const DEFAULT_THEME_KEY = 'minimalist-light';
 
 /**
- * Map an orbital's inline pages to the `NavItem[]` the `@pages` sigil yields
- * (`href = page.path`, `label = page.label ?? page.name`). Only inline root pages
- * contribute — references and `:param` pages are skipped (the Rust resolver's filter).
+ * Map an orbital's inline pages to the `NavItem[]` the `@pages` sigil yields: one
+ * entry per root page that declares `@label` (`href = page.path`, its `@icon` and
+ * `@roles`). References (resolved before any stage runs) and `:param` pages are
+ * skipped — the Rust resolver's filter.
  */
 export function inlineNavItems(pages: readonly PageRef[]): NavItem[] {
   const items: NavItem[] = [];
   for (const page of pages) {
     if (isPageReference(page)) continue;
-    const p = page as Page;
-    if (typeof p.path !== 'string' || typeof p.name !== 'string') continue;
-    if (p.path.includes(':')) continue;
-    const item: NavItem = { href: p.path, label: p.label ?? p.name };
+    const p: Page = page;
+    if (typeof p.label !== 'string' || p.path.includes(':')) continue;
+    const item: NavItem = { href: p.path, label: p.label };
     if (typeof p.icon === 'string') item.icon = p.icon;
+    if (p.roles !== undefined) item.roles = [...p.roles];
     items.push(item);
   }
   return items;

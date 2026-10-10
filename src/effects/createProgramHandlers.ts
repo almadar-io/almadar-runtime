@@ -26,5 +26,5 @@ export type ProgramHandlers = Pick<EffectHandlers, 'programEffect'>;
 
 export function createProgramHandlers(host: ProgramHostConfig): ProgramHandlers {
     const opts = host.orbBin === undefined ? { cwd: host.cwd } : { cwd: host.cwd, orbBin: host.orbBin };
-    return { programEffect: (op, args) => runProgramEffect(op, args, opts) };
+    return { programEffect: (op, args, context) => runProgramEffect(op, args, opts, context) };
 }

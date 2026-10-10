@@ -5,7 +5,8 @@
  */
 import 'fake-indexeddb/auto';
 import { describe, it, expect } from 'vitest';
-import type { EntityRow, OrbitalSchema } from '@almadar/core';
+import type { EntityRow, OrbitalSchema, ServiceParams } from '@almadar/core';
+import type { EffectHandlers } from '../src/types';
 import { browserStoreName, openBrowserStore, openBrowserStoreTransport, openBundledBrowserStore } from '../src/evaluation/browser-store-transport';
 
 function schema(local: boolean, localeInstances?: Record<string, EntityRow[]>): OrbitalSchema {
@@ -100,5 +101,49 @@ describe('openBrowserStoreTransport', () => {
   it('names one database per app and locale', () => {
     expect(browserStoreName('Books', 'ar')).toBe('almadar:Books:ar');
     expect(browserStoreName('Books', undefined)).toBe('almadar:Books');
+  });
+});
+
+function analyticsSchema(name: string): OrbitalSchema {
+  return {
+    name,
+    orbitals: [{
+      name: 'Site',
+      entity: { name: 'Visit', persistence: 'runtime', fields: [{ name: 'id', type: 'string', required: true }] },
+      traits: [{
+        name: 'Pageview', linkedEntity: 'Visit', category: 'lifecycle', scope: 'instance',
+        stateMachine: {
+          states: [{ name: 'active', isInitial: true }],
+          events: [{ key: 'INIT', name: 'INIT' }, { key: 'SENT', name: 'SENT' }, { key: 'NOT_SENT', name: 'NOT_SENT' }],
+          transitions: [
+            { from: 'active', to: 'active', event: 'INIT', effects: [['call-service', 'analytics', 'pageview', { endpoint: 'https://c.example/e', path: '/docs' }, { emit: { success: 'SENT', failure: 'NOT_SENT' } }]] },
+            { from: 'active', to: 'active', event: 'SENT', effects: [] },
+            { from: 'active', to: 'active', event: 'NOT_SENT', effects: [] },
+          ],
+        },
+      }],
+      pages: [],
+    }],
+  };
+}
+
+describe('a browser leg that calls a browser-only service', () => {
+  it('runs the call through the host\'s callService, with no browser-stored entity', async () => {
+    const calls: Array<{ service: string; action: string; params: ServiceParams | undefined }> = [];
+    const callService: EffectHandlers['callService'] = async (service, action, params) => {
+      calls.push({ service, action, params });
+      return { sent: true };
+    };
+    const bundled = JSON.parse(JSON.stringify(analyticsSchema(`Site-${Math.random()}`)));
+    const transport = await openBundledBrowserStore(bundled, undefined, callService);
+    const response = await transport.send('Site', { event: 'INIT', traits: [{ trait: 'Pageview', from: 'active' }] });
+    expect(response.success).toBe(true);
+    expect(calls).toEqual([{ service: 'analytics', action: 'pageview', params: { endpoint: 'https://c.example/e', path: '/docs' } }]);
+    expect(response.emittedEvents.map((e) => e.event)).toContain('SENT');
+  });
+
+  it('control: without a callService a schema with no browser-stored entity is still refused', async () => {
+    const bundled = JSON.parse(JSON.stringify(analyticsSchema(`Site-${Math.random()}`)));
+    await expect(openBundledBrowserStore(bundled)).rejects.toThrow(/no browser-stored entity/);
   });
 });

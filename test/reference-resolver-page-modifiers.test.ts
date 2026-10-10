@@ -57,7 +57,7 @@ function wholeImport(pages: Record<string, string>, pageModifiers: NonNullable<O
   };
 }
 
-function pageRef(override: Record<string, string>): OrbitalDefinition {
+function pageRef(override: Record<string, string | string[]>): OrbitalDefinition {
   return {
     name: 'Local',
     uses: [{ from: './up.orb', as: 'Up' }],
@@ -94,5 +94,19 @@ describe('ReferenceResolver — import page modifiers', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data.pages[0].page).toMatchObject({ path: '/ar/about', indexing: 'noindex', translationOf: 'about', access: 'public', title: 'About' });
+  });
+
+  it('a remap entry declares the page nav entry (label, icon, roles)', async () => {
+    const pages = await importedPages(wholeImport({ '/account': '/me' }, { '/account': { label: 'My account', icon: 'user', roles: ['owner', 'manager'] } }));
+    expect(pages.find((p) => p.path === '/me')).toMatchObject({ label: 'My account', icon: 'user', roles: ['owner', 'manager'] });
+    expect(pages.find((p) => p.path === '/about')?.label).toBeUndefined();
+  });
+
+  it('a page reference declares its nav entry', async () => {
+    const result = await new ReferenceResolver({ basePath: '.', loader: loader() }).resolve(pageRef({ path: '/team', label: 'Team', roles: ['staff'] }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.pages[0].page).toMatchObject({ path: '/team', label: 'Team', roles: ['staff'] });
+    expect(result.data.pages[0].page.icon).toBeUndefined();
   });
 });
