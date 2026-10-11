@@ -12,12 +12,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OrbitalSchema, TraitRef } from '@almadar/core';
 import { resolveSchema } from '../src/entities/resolver/reference-resolver.js';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
 const BEHAVIORS_ROOT = IO_ROOT;
 const ORGANISMS = [
-  join(BEHAVIORS_ROOT, 'behaviors/registry/app/organisms/std-realtime-chat.orb'),
-  join(BEHAVIORS_ROOT, 'behaviors/registry/project-friday/organisms/project-friday.orb'),
+  join(IO_REGISTRY, 'app/organisms/std-realtime-chat.orb'),
+  join(IO_REGISTRY, 'project-friday/organisms/project-friday.orb'),
 ];
 
 function refIds(schema: OrbitalSchema): Map<string, string> {

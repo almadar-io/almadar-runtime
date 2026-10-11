@@ -23,11 +23,11 @@ import {
   type IndexedTrait,
   type TraitIndex,
 } from '../src/index.js';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
 const CHAT_ORBS = [
-  join(IO_ROOT, 'behaviors/registry/app/organisms/std-realtime-chat.orb'),
-  join(IO_ROOT, 'behaviors/registry/project-friday/organisms/project-friday.orb'),
+  join(IO_REGISTRY, 'app/organisms/std-realtime-chat.orb'),
+  join(IO_REGISTRY, 'project-friday/organisms/project-friday.orb'),
 ];
 
 async function resolve(orbPath: string): Promise<OrbitalSchema> {

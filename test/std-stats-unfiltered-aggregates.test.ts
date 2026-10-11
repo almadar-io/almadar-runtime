@@ -9,10 +9,10 @@ import type { EntityRow, OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import { buildTraitIndex, createIndexStageRunner, evaluateOrbitalEvent, StateMachineManager } from '../src/index.js';
-import { STD_ROOT } from './helpers/behavior-packages.js';
+import { STD_ROOT, STD_REGISTRY } from './helpers/behavior-packages.js';
 
 async function cardsFor(metrics: ReadonlyArray<Record<string, string | ReadonlyArray<string | boolean>>>) {
-  const raw = JSON.parse(readFileSync(join(STD_ROOT, 'behaviors/registry/ui/core/atoms/std-stats.orb'), 'utf-8')) as OrbitalSchema;
+  const raw = JSON.parse(readFileSync(join(STD_REGISTRY, 'ui/core/atoms/std-stats.orb'), 'utf-8')) as OrbitalSchema;
   const r = await preprocessSchema(raw, { basePath: STD_ROOT, stdLibPath: STD_ROOT, allowOutsideBasePath: true });
   if (!r.success) throw new Error(r.errors.join('; '));
   const s = r.data.schema;

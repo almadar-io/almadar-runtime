@@ -22,9 +22,9 @@ import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 import type { Orbital, OrbitalDefinition, OrbitalSchema, TraitRef } from '@almadar/core';
 import { normalizeCallSiteConfigToValues, isCallSiteConfigDeclaration } from '@almadar/core';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
-const REGISTRY_DIR = path.join(IO_ROOT, 'behaviors/registry');
+const REGISTRY_DIR = IO_REGISTRY;
 
 /** The upstream `Typo` behavior — one inline trait declaring `content` with
  *  no default of its own, matching `UiTypo.traits.TypographyRender`'s role
@@ -247,7 +247,7 @@ describe('ReferenceResolver — {ref}-entry call-site config forward: real regis
 
   for (const { file, knob, forward, expected } of cases) {
     it(`resolves ${file}'s {ref} entries forwarding ${knob}: @config.${forward} to the declaring atom's literal`, async () => {
-      const schemaPath = path.join(IO_ROOT, 'behaviors/registry', file);
+      const schemaPath = path.join(IO_REGISTRY, file);
       const schema = JSON.parse(await fs.readFile(schemaPath, 'utf8')) as OrbitalSchema;
       const forwarding = schema.orbitals.flatMap((orbital) =>
         orbital.traits.filter(
@@ -294,7 +294,7 @@ describe('ReferenceResolver — {ref}-entry call-site config forward: real regis
  */
 describe('ReferenceResolver — forwardedFrom provenance on a collapsed call-site forward', () => {
   it('records the original `@config.<knob>` token on std-time-tracking.orb\'s TimesheetAppLayout.config.appName', async () => {
-    const schemaPath = path.join(IO_ROOT, 'behaviors/registry/app/organisms/std-time-tracking.orb');
+    const schemaPath = path.join(IO_REGISTRY, 'app/organisms/std-time-tracking.orb');
     const schema = JSON.parse(await fs.readFile(schemaPath, 'utf8')) as OrbitalSchema;
 
     const result = await preprocessSchema(schema, {

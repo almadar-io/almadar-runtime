@@ -150,9 +150,9 @@ describe('@almadar/runtime/ui collectEmbeddedTraits', () => {
 // ---------------------------------------------------------------------------
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { IO_ROOT, STD_ROOT } from '../helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from '../helpers/behavior-packages.js';
 
-const SNAKE_ORB = join(IO_ROOT, 'behaviors/registry/game/organisms/std-snake.orb');
+const SNAKE_ORB = join(IO_REGISTRY, 'game/organisms/std-snake.orb');
 
 describe('@almadar/runtime/ui collectEmbeddedTraits — real std-snake', () => {
   it('the embedded set contains exactly the trio SnakePlay composes (shell via effect, canvas+hud via wrapper config)', async () => {

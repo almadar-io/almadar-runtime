@@ -873,13 +873,13 @@ export async function applyOrbitalEventResponse(
       }
     }
 
-    // A client-only trait's own emit that the host left unconsumed (a
-    // browser-store leg relays back to its client) continues that trait's
-    // cascade on this client — dispatched by the caller, whose transport
-    // carries any leg the continuation owes.
+    // A trait's own emit that the host left unconsumed (a browser-store leg
+    // relays back to its client, whatever the trait's dispatch mode) continues
+    // that trait's cascade on this client — dispatched by the caller, whose
+    // transport carries any leg the continuation owes.
     const own = emitted.source?.trait;
     const ownEntry = own !== undefined ? opts.traitIndex.byName.get(own) : undefined;
-    if (own !== undefined && ownEntry !== undefined && !hostRan && clientOnly.has(own) && !heldHere.has(own)) {
+    if (own !== undefined && ownEntry !== undefined && !hostRan && !heldHere.has(own)) {
       const from = store.manager.getState(own)?.currentState ?? findInitialState(ownEntry.traitDef);
       if (findMatchingTransitions(ownEntry.traitDef, from, emitted.event).length > 0) {
         ownContinuations.push({ event: emitted.event, ...(emitted.payload !== undefined ? { payload: emitted.payload } : {}), targetTrait: own });

@@ -31,10 +31,10 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { EventPayloadField, Orbital, OrbitalSchema, Trait, TraitRef } from '@almadar/core';
-import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, STD_ROOT, orbSpawnEnv } from './helpers/behavior-packages.js';
+import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, STD_ROOT, orbSpawnEnv, IO_REGISTRY } from './helpers/behavior-packages.js';
 
 const ORBITAL_BIN = ORB_BIN_INSTALLED;
-const BEHAVIORS_REGISTRY = join(IO_ROOT, 'behaviors/registry');
+const BEHAVIORS_REGISTRY = IO_REGISTRY;
 const CLI_ENV = orbSpawnEnv();
 
 /** Every registry trait authoring a call-site `typeArgs` override, verified

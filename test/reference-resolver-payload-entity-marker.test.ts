@@ -19,9 +19,9 @@ import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 import type { Orbital, OrbitalDefinition, OrbitalSchema, Event, TraitRef } from '@almadar/core';
 import { asEntityId } from '@almadar/core';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
-const REGISTRY_DIR = path.join(IO_ROOT, 'behaviors/registry');
+const REGISTRY_DIR = IO_REGISTRY;
 
 function payloadEntityOf(events: readonly Event[] | undefined, eventKey: string, fieldName: string): string | undefined {
   const event = events?.find((e) => e.key === eventKey);
@@ -344,7 +344,7 @@ describe('ReferenceResolver — payload-field entity marker rename: orbital impo
 
 describe('ReferenceResolver — payload-field entity marker rename: real registry corpus', () => {
   it('preprocessSchema on std-notes.orb resolves NoteDelete\'s DELETE.payloadSchema[row].entity to "Note"', async () => {
-    const schemaPath = path.join(IO_ROOT, 'behaviors/registry/app/organisms/std-notes.orb');
+    const schemaPath = path.join(IO_REGISTRY, 'app/organisms/std-notes.orb');
     const schema = JSON.parse(await fs.readFile(schemaPath, 'utf8')) as OrbitalSchema;
 
     const result = await preprocessSchema(schema, {

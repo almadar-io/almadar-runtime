@@ -15,12 +15,12 @@ import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { buildTraitIndex, collectListenerTargets, LIFECYCLE_EVENTS } from '../src/index.js';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY, STD_REGISTRY } from './helpers/behavior-packages.js';
 
 const DIRS = [
-  join(IO_ROOT, 'behaviors/registry/game/organisms'),
-  join(STD_ROOT, 'behaviors/registry/ui/game/organisms'),
-  join(STD_ROOT, 'behaviors/registry/ui/game/atoms'),
+  join(IO_REGISTRY, 'game/organisms'),
+  join(STD_REGISTRY, 'ui/game/organisms'),
+  join(STD_REGISTRY, 'ui/game/atoms'),
 ];
 const ORBS = DIRS.flatMap((d) => readdirSync(d).filter((f) => f.endsWith('.orb')).sort().map((f) => join(d, f)));
 

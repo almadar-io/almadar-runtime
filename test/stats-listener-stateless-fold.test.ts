@@ -23,9 +23,9 @@ import {
   type IndexedTrait,
   type TraitIndex,
 } from '../src/index.js';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
-const ORB = join(IO_ROOT, 'behaviors/registry/marketing/organisms/std-storefront.orb');
+const ORB = join(IO_REGISTRY, 'marketing/organisms/std-storefront.orb');
 
 function restrict(full: TraitIndex, names: ReadonlySet<string>): TraitIndex {
   const byName = new Map<string, IndexedTrait>();

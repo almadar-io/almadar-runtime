@@ -20,9 +20,9 @@ import { ReferenceResolver } from '../src/entities/resolver/reference-resolver.j
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { SchemaLoader, LoadResult, LoadedSchema } from '../src/entities/loader/schema-loader.js';
 import type { OrbitalDefinition, OrbitalSchema, Orbital, TraitRef } from '@almadar/core';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
-const REGISTRY_DIR = path.join(IO_ROOT, 'behaviors/registry');
+const REGISTRY_DIR = IO_REGISTRY;
 
 // Three levels: `Organism` (the top-level consumer) -> `PageAtom` (an
 // intermediate atom whose OWN trait is a REF, never inline) -> `Base` (the
@@ -127,7 +127,7 @@ describe('ReferenceResolver — nested composed trait refs (ledger (i))', () => 
 
 describe('ReferenceResolver — nested composed trait refs: real std-notes.orb corpus case', () => {
   it('preprocessSchema succeeds on std-notes.orb and resolves the nested NoteSubpages ref in NoteOrbital', async () => {
-    const stdNotesPath = path.join(IO_ROOT, 'behaviors/registry/app/organisms/std-notes.orb');
+    const stdNotesPath = path.join(IO_REGISTRY, 'app/organisms/std-notes.orb');
     const fs = await import('node:fs/promises');
     const schema = JSON.parse(await fs.readFile(stdNotesPath, 'utf8')) as OrbitalSchema;
 

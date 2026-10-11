@@ -16,20 +16,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { collectDeclaredConfigDefaults } from '../src/server/OrbitalServerRuntime.js';
 import type { OrbitalSchema, Trait } from '@almadar/core';
-import { STD_ROOT } from './helpers/behavior-packages.js';
+import { STD_REGISTRY } from './helpers/behavior-packages.js';
 
-function resolveStdRegistry(): string {
-    try {
-        return path.join(
-            path.dirname(require.resolve('@almadar/std/package.json')),
-            'behaviors/registry',
-        );
-    } catch {
-        // monorepo fallback
-        return path.join(STD_ROOT, 'behaviors/registry');
-    }
-}
-const STD_REGISTRY = resolveStdRegistry();
 
 function loadAtomTrait(orbRelative: string, traitName: string): Trait {
     const orbPath = path.join(STD_REGISTRY, orbRelative);

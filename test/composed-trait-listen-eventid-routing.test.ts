@@ -43,7 +43,7 @@ import { join } from 'node:path';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { asOrbitalId, asEntityId, asTraitId, asEventId, isInlineTrait } from '@almadar/core';
 import type { OrbitalSchema, Trait, Entity, EventPayload } from '@almadar/core';
-import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, orbSpawnEnv } from './helpers/behavior-packages.js';
+import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, orbSpawnEnv, IO_REGISTRY } from './helpers/behavior-packages.js';
 
 const ORB = asOrbitalId('orb_01HCCAAAAAAAAAAAAAAAAAAAAA');
 const ENT = asEntityId('ent_01HCCAAAAAAAAAAAAAAAAAAAAA');
@@ -364,7 +364,7 @@ describe('listen-level guard evaluation (kernel parity)', () => {
 // the synthetic test above is the portable regression; this is the
 // real-world confirmation.
 // ---------------------------------------------------------------------------
-const ORB_PATH = join(IO_ROOT, 'behaviors/registry/plugins/atoms/vim-mode.orb');
+const ORB_PATH = join(IO_REGISTRY, 'plugins/atoms/vim-mode.orb');
 const ORB_BIN = ORB_BIN_INSTALLED;
 
 function resolveViaCli(schema: object): OrbitalSchema {

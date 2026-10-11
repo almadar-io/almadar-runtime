@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { buildTraitIndex } from '../src/index.js';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY, STD_REGISTRY } from './helpers/behavior-packages.js';
 
 async function listenSources(file: string, trait: string): Promise<{ sources: string[]; ids: (string | undefined)[]; index: ReturnType<typeof buildTraitIndex> }> {
   const raw = JSON.parse(readFileSync(file, 'utf-8')) as OrbitalSchema;
@@ -29,7 +29,7 @@ async function listenSources(file: string, trait: string): Promise<{ sources: st
 
 describe('explicit rebind renames reach sibling listen sources', () => {
   it('std-vector-tactics: Authority listens to Player, by name and id', async () => {
-    const { sources, ids, index } = await listenSources(join(IO_ROOT, 'behaviors/registry/game/organisms/std-vector-tactics.orb'), 'Authority');
+    const { sources, ids, index } = await listenSources(join(IO_REGISTRY, 'game/organisms/std-vector-tactics.orb'), 'Authority');
     expect(sources.length).toBeGreaterThan(0);
     expect(new Set(sources)).toEqual(new Set(['Player']));
     const playerId = index.byName.get('Player')?.irTrait.id;
@@ -37,7 +37,7 @@ describe('explicit rebind renames reach sibling listen sources', () => {
   });
 
   it('control: the frame itself keeps its own PlayerIntent source', async () => {
-    const { sources } = await listenSources(join(STD_ROOT, 'behaviors/registry/ui/game/organisms/std-tactics-board-2d.orb'), 'TacticsAuthority');
+    const { sources } = await listenSources(join(STD_REGISTRY, 'ui/game/organisms/std-tactics-board-2d.orb'), 'TacticsAuthority');
     expect(sources).toContain('PlayerIntent');
   });
 });

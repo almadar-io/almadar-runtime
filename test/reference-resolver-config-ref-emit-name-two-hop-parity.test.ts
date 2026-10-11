@@ -52,7 +52,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { Orbital, OrbitalSchema, Trait, TraitRef } from '@almadar/core';
-import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, STD_ROOT, orbSpawnEnv } from './helpers/behavior-packages.js';
+import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, STD_ROOT, orbSpawnEnv, IO_REGISTRY, STD_REGISTRY } from './helpers/behavior-packages.js';
 
 const ORBITAL_BIN = ORB_BIN_INSTALLED;
 const CLI_ENV = orbSpawnEnv();
@@ -68,31 +68,31 @@ interface GateCase {
 const GATE_CASES: readonly GateCase[] = [
   {
     label: 'std-approval-gate (the atom itself)',
-    file: join(STD_ROOT, 'behaviors/registry/infra/atoms/std-approval-gate.orb'),
+    file: join(STD_REGISTRY, 'infra/atoms/std-approval-gate.orb'),
     basePath: STD_ROOT,
     composingTrait: 'ApprovalGateReview',
   },
   {
     label: 'std-purchase-order (POApproval composes ApprovalGateReview)',
-    file: join(IO_ROOT, 'behaviors/registry/app/atoms/std-purchase-order.orb'),
+    file: join(IO_REGISTRY, 'app/atoms/std-purchase-order.orb'),
     basePath: IO_ROOT,
     composingTrait: 'POApproval',
   },
   {
     label: 'std-cms (ArticleApprovalReview composes ApprovalGateReview)',
-    file: join(IO_ROOT, 'behaviors/registry/app/organisms/std-cms.orb'),
+    file: join(IO_REGISTRY, 'app/organisms/std-cms.orb'),
     basePath: IO_ROOT,
     composingTrait: 'ArticleApprovalReview',
   },
   {
     label: 'std-cicd-pipeline (DeploymentApproval composes ApprovalGateReview)',
-    file: join(IO_ROOT, 'behaviors/registry/app/organisms/std-cicd-pipeline.orb'),
+    file: join(IO_REGISTRY, 'app/organisms/std-cicd-pipeline.orb'),
     basePath: IO_ROOT,
     composingTrait: 'DeploymentApproval',
   },
   {
     label: 'std-wiki (WikiPublishApproval composes ApprovalGateReview)',
-    file: join(IO_ROOT, 'behaviors/registry/app/organisms/std-wiki.orb'),
+    file: join(IO_REGISTRY, 'app/organisms/std-wiki.orb'),
     basePath: IO_ROOT,
     composingTrait: 'WikiPublishApproval',
   },

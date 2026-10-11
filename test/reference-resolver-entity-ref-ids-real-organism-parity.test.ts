@@ -136,10 +136,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveSchema } from '../src/entities/resolver/reference-resolver.js';
 import type { OrbitalSchema, Orbital, Trait, TraitRef } from '@almadar/core';
-import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, STD_ROOT, orbSpawnEnv } from './helpers/behavior-packages.js';
+import { IO_ROOT, ORB_BIN as ORB_BIN_INSTALLED, PACKAGE_ROOT, STD_ROOT, orbSpawnEnv, IO_REGISTRY } from './helpers/behavior-packages.js';
 
 const BEHAVIORS_ROOT = IO_ROOT;
-const REGISTRY_ORGANISMS = join(BEHAVIORS_ROOT, 'behaviors/registry/app/organisms');
+const REGISTRY_ORGANISMS = join(IO_REGISTRY, 'app/organisms');
 const ORB_BIN = ORB_BIN_INSTALLED;
 const ORBITAL_BIN = ORB_BIN_INSTALLED;
 

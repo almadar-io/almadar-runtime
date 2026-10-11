@@ -346,11 +346,14 @@ function interpolateString(value: string, ctx: EvaluationContext): RuntimeValue 
         // protects entity rows, so recursion is scoped to CONFIG-rooted
         // bindings whose resolved tree still contains bindings — entity/
         // payload resolutions keep their identity semantics untouched.
+        // A knob whose value is a call (a compiled `(if …)` default, its `@config` reads already
+        // folded to literals) carries no bindings left, but is still an expression to evaluate.
+        const callValued = Array.isArray(resolved) && isSExpression(resolved);
         if (
             value.startsWith('@config.') &&
             resolved !== null &&
             typeof resolved === 'object' &&
-            containsBindings(resolved) &&
+            (containsBindings(resolved) || callValued) &&
             !inFlightConfigRecursions.has(value)
         ) {
             inFlightConfigRecursions.add(value);

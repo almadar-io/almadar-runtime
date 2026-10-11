@@ -13,19 +13,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { collectDeclaredEntityDefaults } from '../src/traits/config-defaults.js';
 import { isEntityReference, isEntityCall, type Entity, type OrbitalSchema } from '@almadar/core';
-import { STD_ROOT } from './helpers/behavior-packages.js';
+import { STD_REGISTRY } from './helpers/behavior-packages.js';
 
-function resolveStdRegistry(): string {
-    try {
-        return path.join(
-            path.dirname(require.resolve('@almadar/std/package.json')),
-            'behaviors/registry',
-        );
-    } catch {
-        return path.join(STD_ROOT, 'behaviors/registry');
-    }
-}
-const STD_REGISTRY = resolveStdRegistry();
 
 function loadOrbEntity(orbRelative: string): Entity {
     const orbPath = path.join(STD_REGISTRY, orbRelative);

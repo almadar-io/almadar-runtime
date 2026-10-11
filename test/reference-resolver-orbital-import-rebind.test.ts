@@ -10,10 +10,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
 import { resolveSchema } from '../src/entities/resolver/reference-resolver.js';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
 const BEHAVIORS_ROOT = IO_ROOT;
-const PF = join(BEHAVIORS_ROOT, 'behaviors/registry/project-friday/organisms/project-friday.orb');
+const PF = join(IO_REGISTRY, 'project-friday/organisms/project-friday.orb');
 
 function fetchedEntities(transitions: ReadonlyArray<{ effects?: unknown[] }>): string[] {
   const out = new Set<string>();

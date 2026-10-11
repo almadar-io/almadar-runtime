@@ -25,9 +25,9 @@ import {
   type IndexedTrait,
   type TraitIndex,
 } from '../src/index.js';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
-const PF_ORB = join(IO_ROOT, 'behaviors/registry/project-friday/organisms/project-friday.orb');
+const PF_ORB = join(IO_REGISTRY, 'project-friday/organisms/project-friday.orb');
 const FILTER = 'FinanceTransactionOrbitalTransactionFilter';
 const BROWSE = 'FinanceTransactionOrbitalTransactionBrowseList';
 

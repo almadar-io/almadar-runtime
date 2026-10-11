@@ -135,12 +135,10 @@ describe(
       await runtime.persistence.create('Project', { id: 'project-tools', name: 'Tool test project', workspaceId: 'workspace-tools' });
       const host = runtime.servicePorts({ orbital: 'AssistantOrbital', trait: 'AssistantOrbitalAssistantLoop' }, { id: 'owner-tools', role: 'owner' });
       const tools = [
-        ...['Task', 'Lead', 'TimeEntry', 'Project', 'Workspace', 'KnowledgeEntry'].map((read) => ({ read })),
+        ...['Task', 'TimeEntry', 'Project', 'Workspace', 'KnowledgeEntry'].map((read) => ({ read })),
         ...[
           'TaskOrbital.TaskOrbitalTaskPersistor.DO_CREATE',
           'TaskOrbital.TaskOrbitalTaskPersistor.DO_UPDATE',
-          'LeadOrbital.LeadOrbitalDealPersistor.DO_CREATE',
-          'LeadOrbital.LeadOrbitalDealPersistor.DO_UPDATE',
         ].map((event) => ({ event })),
       ];
       let turn = 0;
@@ -182,12 +180,10 @@ describe(
       if (!result.success) return;
 
       const expected = [
-        ...['Task', 'Lead', 'TimeEntry', 'Project', 'Workspace', 'KnowledgeEntry'].map((read) => ({ read })),
+        ...['Task', 'TimeEntry', 'Project', 'Workspace', 'KnowledgeEntry'].map((read) => ({ read })),
         ...[
           'TaskOrbital.TaskOrbitalTaskPersistor.DO_CREATE',
           'TaskOrbital.TaskOrbitalTaskPersistor.DO_UPDATE',
-          'LeadOrbital.LeadOrbitalDealPersistor.DO_CREATE',
-          'LeadOrbital.LeadOrbitalDealPersistor.DO_UPDATE',
         ].map((event) => ({ event })),
       ];
       for (const schema of [result.data.schema, rustSchema]) {

@@ -25,9 +25,9 @@ import * as path from 'node:path';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { Entity, EntityId, EntityRef, OrbitalSchema } from '@almadar/core';
 import { asOrbitalId } from '@almadar/core';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
-const REGISTRY_DIR = path.join(IO_ROOT, 'behaviors/registry');
+const REGISTRY_DIR = IO_REGISTRY;
 
 // `orb emit orb orbital_import_disjoint.lolo` output, verbatim (ids are the
 // real derived ids from that emit — irrelevant to this test beyond being

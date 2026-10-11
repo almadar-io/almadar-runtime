@@ -361,3 +361,25 @@ describe('nested literal lists (G-ORB-COMPILER-020 / §72)', () => {
         expect(interpolateValue(tree, ctx)).toEqual({ sections: [{ title: 'Meta', fields: ['and', 'slug'] }] });
     });
 });
+
+// ============================================================================
+// A knob whose value is a call (a compiled `(if …)` default) — evaluated, not passed as data
+// ============================================================================
+
+describe('@config.X — a call-valued knob', () => {
+    it('evaluates an `if` default that chooses between two object arrays', () => {
+        const ctx = makeCtx({ links: ['if', ['==', 'y', 'x'], [{ label: 'A', href: '#a' }], [{ label: 'B', href: '#b' }]] });
+        const out = interpolateProps({ links: '@config.links' }, ctx);
+        expect(out.links).toEqual([{ label: 'B', href: '#b' }]);
+    });
+
+    it('control: a literal array of objects stays the same data', () => {
+        const ctx = makeCtx({ links: [{ label: 'A', href: '#a' }, { label: 'B', href: '#b' }] });
+        expect(interpolateProps({ links: '@config.links' }, ctx).links).toEqual([{ label: 'A', href: '#a' }, { label: 'B', href: '#b' }]);
+    });
+
+    it('control: an array of plain strings whose first item is not an operator stays data', () => {
+        const ctx = makeCtx({ tags: ['alpha', 'beta'] });
+        expect(interpolateProps({ tags: '@config.tags' }, ctx).tags).toEqual(['alpha', 'beta']);
+    });
+});

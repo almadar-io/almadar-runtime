@@ -29,7 +29,7 @@ import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/server/Or
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { normalizeCallSiteConfigToValues } from '@almadar/core';
 import type { ClientEffectTuple, OrbitalSchema, RenderUIEffect, RuntimeValue, Trait } from '@almadar/core';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
 // `['render-ui', slot, pattern, props, priority]` — the resolved leaf
 // values (label/disabled/content/…) live in `pattern` (index 2), the fully
@@ -180,7 +180,7 @@ describe('callsite-payload capture — embedded child re-render (synthetic)', ()
 // trait `preprocessSchema` needs to inline).
 // ============================================================================
 
-const HELPDESK_ORB = join(IO_ROOT, 'behaviors/registry/app/organisms/std-helpdesk.orb');
+const HELPDESK_ORB = join(IO_REGISTRY, 'app/organisms/std-helpdesk.orb');
 
 /**
  * The `{ref}` entry of `ref` in `orbital` whose call-site `knob` is `value` —

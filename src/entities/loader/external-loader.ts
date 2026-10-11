@@ -13,6 +13,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Orbital, OrbitalSchema, DeclaredTraitConfig, JsonValue } from "@almadar/core";
 import { OrbitalSchemaSchema } from "@almadar/core";
+import { behaviorRegistryDir, readBehaviorPackage } from "@almadar/core/behavior-package";
 
 // ============================================================================
 // Types
@@ -250,6 +251,8 @@ export function mapBrowseSpecifier(importPath: string): BrowseMapping {
 export class ExternalOrbitalLoader {
   private options: Required<LoaderOptions>;
   private cache: LoaderCache;
+  /** Package root → its lowered tree, resolved once per cache lifetime (like `cache`). */
+  private registryRoots = new Map<string, string>();
 
   constructor(options: LoaderOptions) {
     this.options = {
@@ -440,10 +443,12 @@ export class ExternalOrbitalLoader {
   }
 
   /**
-   * Resolve a bare behavior name by recursively searching each configured
-   * registry root (`stdLibPath` + `behaviorsLibPaths`) for a file named
-   * `<name>.orb` anywhere under `<root>/behaviors/registry/`. Each candidate
-   * is path-traversal-guarded against its root.
+   * Resolve a bare behavior name by searching each configured package root
+   * (`stdLibPath` first, then `behaviorsLibPaths`) for `<name>.orb` under its
+   * registry: the `orb.registry` its manifest declares, or — for a workspace
+   * package declaring `orb.source` — the live mirror of its `.lolo` sources
+   * (`behaviorRegistryDir`), resolved once per cache lifetime: clearing the
+   * cache re-reads the sources, so an edit is seen by the next resolution.
    */
   private resolveBehaviorInRegistries(name: string): LoadResult<string> {
     const roots: string[] = [];
@@ -454,9 +459,16 @@ export class ExternalOrbitalLoader {
     }
     const target = `${name}.orb`;
     for (const root of roots) {
-      const registryRoot = path.join(root, "behaviors", "registry");
-      if (!fs.existsSync(registryRoot)) continue;
-      const found = this.findFileRecursive(registryRoot, target, root);
+      let registryRoot = this.registryRoots.get(root);
+      if (registryRoot === undefined) {
+        try {
+          registryRoot = path.normalize(behaviorRegistryDir(readBehaviorPackage(root)));
+        } catch (e) {
+          return { success: false, error: `${root}: ${e instanceof Error ? e.message : String(e)}` };
+        }
+        this.registryRoots.set(root, registryRoot);
+      }
+      const found = this.findFileRecursive(registryRoot, target, registryRoot);
       if (found) return { success: true, data: found };
     }
     return {
@@ -493,15 +505,9 @@ export class ExternalOrbitalLoader {
   }
 
   /**
-   * Resolve a standard library path.
-   *
-   * The std registry uses a topic/tier layout under
-   * `<stdLibPath>/behaviors/registry/<topic>/{atoms,molecules,organisms}/<name>.orb`
-   * (topic ∈ core|agent|game|service|app|probes). For `std/behaviors/<name>`
-   * imports, try each (topic × tier) combination in order and return the first
-   * one that exists on disk. Falls back to the pre-topic flat-tier layout and
-   * the very old flat layout for back-compat. This matches how the Rust
-   * compiler's `embedded.rs` resolves std paths.
+   * Resolve `std/behaviors/<name>`: the behavior file named `<name>` in the
+   * registry of std, then of each companion package — the same rule as a bare
+   * behavior import, matching the compiled-path loader (`registry_lookup`).
    */
   private resolveStdPath(importPath: string): LoadResult<string> {
     if (!this.options.stdLibPath && this.options.behaviorsLibPaths.length === 0) {
@@ -510,93 +516,14 @@ export class ExternalOrbitalLoader {
         error: `Standard library path not configured. Cannot load: ${importPath}`,
       };
     }
-
-    // std/behaviors/<name> → extract <name>.
-    const relativePath = importPath.slice(4); // strip "std/"
-    const name = relativePath
+    const name = importPath
+      .slice(4)
       .replace(/^behaviors\//, "")
       .replace(/\.orb$/, "");
-
-    // Tiers are whatever the registry actually holds, never a hardcoded
-    // list — same doctrine as the topic discovery below. The registry has
-    // grown `templates` (ui/game, ui/core) and any future
-    // tier; the previous ["atoms","molecules","organisms"] constant silently
-    // failed every `std/behaviors/<name>` import whose behavior lives in a
-    // non-listed tier (std-snake's `ui-game-shell` was the live casualty).
-    const discoverTiers = (dir: string): string[] =>
-      fs.existsSync(dir)
-        ? fs.readdirSync(dir, { withFileTypes: true })
-            .filter((entry) => entry.isDirectory())
-            .map((entry) => entry.name)
-        : [];
-
-    // Build candidate list across all configured roots: std first, then any
-    // companion package (@almadar-io/behaviors). For each root we try the
-    // canonical topic/tier layout, plus two legacy fallbacks for very old
-    // std layouts. Each (root, candidate) pair is path-traversal-guarded.
-    const roots: string[] = [];
-    if (this.options.stdLibPath) roots.push(path.normalize(this.options.stdLibPath));
-    for (const p of this.options.behaviorsLibPaths) {
-      const norm = path.normalize(p);
-      if (!roots.includes(norm)) roots.push(norm);
-    }
-
-    let totalCandidates = 0;
-    for (const root of roots) {
-      const candidates: string[] = [];
-      // Topics are whatever the registry actually holds, never a hardcoded
-      // list: a fourth hand-maintained copy of the topic set drifts silently.
-      // It already had — `ml` and `infra` were both absent, so every
-      // `std/behaviors/<name>` import in those topics resolved nowhere while
-      // `orb validate` stayed green.
-      const registryRoot = path.join(root, "behaviors", "registry");
-      const topics = fs.existsSync(registryRoot)
-        ? fs.readdirSync(registryRoot, { withFileTypes: true })
-            .filter((entry) => entry.isDirectory())
-            .map((entry) => entry.name)
-        : [];
-      const allTiers = new Set<string>();
-      for (const topic of topics) {
-        const tiers = discoverTiers(path.join(registryRoot, topic));
-        for (const tier of tiers) {
-          allTiers.add(tier);
-          candidates.push(path.join(registryRoot, topic, tier, `${name}.orb`));
-        }
-      }
-      // UI family layout: behaviors/registry/ui/<family>/<tier>/<name>.orb
-      const uiRoot = path.join(root, "behaviors", "registry", "ui");
-      if (fs.existsSync(uiRoot)) {
-        const families = fs.readdirSync(uiRoot, { withFileTypes: true })
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => entry.name);
-        for (const family of families) {
-          for (const tier of discoverTiers(path.join(uiRoot, family))) {
-            candidates.push(path.join(uiRoot, family, tier, `${name}.orb`));
-          }
-        }
-      }
-      // Back-compat: pre-topic flat-tier layout (std 6.1–7.10).
-      for (const tier of allTiers) {
-        candidates.push(path.join(root, "behaviors", "registry", tier, `${name}.orb`));
-      }
-      // Oldest back-compat: flat `<root>/behaviors/<name>.orb`.
-      candidates.push(path.join(root, relativePath.endsWith(".orb") ? relativePath : `${relativePath}.orb`));
-      totalCandidates += candidates.length;
-
-      for (const candidate of candidates) {
-        const normalized = path.normalize(candidate);
-        // Path-traversal guard: each candidate must stay within its own root
-        if (!normalized.startsWith(root)) continue;
-        if (fs.existsSync(normalized)) {
-          return { success: true, data: normalized };
-        }
-      }
-    }
-
-    return {
-      success: false,
-      error: `std behavior not found in registry: ${importPath} (tried ${totalCandidates} locations across ${roots.length} root(s): ${roots.join(", ")})`,
-    };
+    const result = this.resolveBehaviorInRegistries(name);
+    return result.success
+      ? result
+      : { success: false, error: `std behavior not found in registry: ${importPath} — ${result.error}` };
   }
 
   /**
@@ -729,6 +656,7 @@ export class ExternalOrbitalLoader {
    */
   clearCache(): void {
     this.cache.clear();
+    this.registryRoots.clear();
   }
 
   /**

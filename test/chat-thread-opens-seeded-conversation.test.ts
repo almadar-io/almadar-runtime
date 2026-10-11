@@ -12,12 +12,12 @@ import type { OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { MockPersistenceAdapter } from '@almadar/db/mock';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
 const CHAT_ORBS = [
-  join(IO_ROOT, 'behaviors/registry/app/organisms/std-realtime-chat.orb'),
+  join(IO_REGISTRY, 'app/organisms/std-realtime-chat.orb'),
   // project-friday imports the whole ChatMessageOrbital (OnlineUser -> Person).
-  join(IO_ROOT, 'behaviors/registry/project-friday/organisms/project-friday.orb'),
+  join(IO_REGISTRY, 'project-friday/organisms/project-friday.orb'),
 ];
 
 async function chatRuntime(orbPath: string) {

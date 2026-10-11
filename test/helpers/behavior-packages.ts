@@ -3,6 +3,8 @@
  * link in the monorepo, the published package in a standalone checkout.
  */
 import { createRequire } from 'node:module';
+
+import { behaviorRegistryDir, readBehaviorPackage } from '@almadar/core/behavior-package';
 import { dirname, join } from 'node:path';
 
 const require = createRequire(import.meta.url);
@@ -12,6 +14,13 @@ export const STD_ROOT = dirname(require.resolve('@almadar/std/package.json'));
 
 /** `@almadar-io/behaviors`'s package root. */
 export const IO_ROOT = dirname(require.resolve('@almadar-io/behaviors/package.json'));
+
+/** `@almadar/std`'s lowered programs, through its manifest: the live mirror of its
+ *  `.lolo` sources in the workspace, the shipped registry from npm. */
+export const STD_REGISTRY = behaviorRegistryDir(readBehaviorPackage(STD_ROOT));
+
+/** `@almadar-io/behaviors`'s lowered programs, through its manifest. */
+export const IO_REGISTRY = behaviorRegistryDir(readBehaviorPackage(IO_ROOT));
 
 /** This package's root: the cwd an `orb` spawn resolves `@almadar/std` / `@almadar-io/behaviors` from. */
 export const PACKAGE_ROOT = join(import.meta.dirname, '..', '..');

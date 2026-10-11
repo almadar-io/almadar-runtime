@@ -12,10 +12,10 @@ import type { OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { InMemoryPersistence } from '@almadar/db/mock';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
 async function sine(): Promise<OrbitalSchema> {
-  const raw = JSON.parse(readFileSync(join(IO_ROOT, 'behaviors/registry/riya/atoms/riya-level-sine.orb'), 'utf-8')) as OrbitalSchema;
+  const raw = JSON.parse(readFileSync(join(IO_REGISTRY, 'riya/atoms/riya-level-sine.orb'), 'utf-8')) as OrbitalSchema;
   const res = await preprocessSchema(raw, {
     basePath: IO_ROOT,
     stdLibPath: STD_ROOT,

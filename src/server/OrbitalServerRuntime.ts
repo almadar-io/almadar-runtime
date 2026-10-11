@@ -2578,6 +2578,7 @@ export class OrbitalServerRuntime {
       // produced it; skip THAT orbital (the emit's own), not the request's —
       // a relay hop's answer must still reach the requesting orbital.
       const producedIn = emitted.source?.orbital ?? sourceOrbital;
+      let delivered = false;
       for (const [orbitalName, registered] of this.orbitals) {
         if (orbitalName === producedIn && !opts.includeSourceOrbital) continue;
         const delivery = deliveryOf(emitted);
@@ -2625,6 +2626,7 @@ export class OrbitalServerRuntime {
                 targetTrait: target.listenerTrait,
               },
             );
+            delivered = true;
             queue.push(...response.emittedEvents);
             if (opts.into !== undefined) foldRelayHop(opts.into, response);
           } catch (error) {
@@ -2639,6 +2641,8 @@ export class OrbitalServerRuntime {
           }
         }
       }
+      // The requester's own entry: the client fold must not run these listeners again.
+      if (delivered) emitted.source = { ...(emitted.source ?? {}), dispatched: true };
     }
   }
 

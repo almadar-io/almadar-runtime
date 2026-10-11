@@ -11,9 +11,9 @@ import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { buildTraitIndex, collectListenerTargets } from '../src/index.js';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
-const PF = join(IO_ROOT, 'behaviors/registry/project-friday/organisms/project-friday.orb');
+const PF = join(IO_REGISTRY, 'project-friday/organisms/project-friday.orb');
 const OPTS = {
   basePath: IO_ROOT,
   stdLibPath: STD_ROOT,

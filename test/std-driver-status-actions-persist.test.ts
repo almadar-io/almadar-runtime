@@ -20,9 +20,9 @@ import {
   evaluateOrbitalEvent,
   StateMachineManager,
 } from '../src/index.js';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
-const ORB = join(IO_ROOT, 'behaviors/registry/app/atoms/std-driver.orb');
+const ORB = join(IO_REGISTRY, 'app/atoms/std-driver.orb');
 const TRAIT = 'DriverRoster';
 
 const cases = (['stateful', 'stateless'] as const).flatMap((topology) => [

@@ -10,13 +10,13 @@ import type { EntityRow, EventPayload, OrbitalEventResponse, OrbitalSchema } fro
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { MockPersistenceAdapter } from '@almadar/db/mock';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { IO_ROOT, STD_ROOT } from './helpers/behavior-packages.js';
+import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 
 const ORBITAL = 'TaskOrbital';
 const USER = { id: 'manager-1', role: 'manager', name: 'Mia' };
 
 async function pmRuntime() {
-  const raw = JSON.parse(readFileSync(join(IO_ROOT, 'behaviors/registry/app/organisms/std-project-manager.orb'), 'utf-8')) as OrbitalSchema;
+  const raw = JSON.parse(readFileSync(join(IO_REGISTRY, 'app/organisms/std-project-manager.orb'), 'utf-8')) as OrbitalSchema;
   const resolved = await preprocessSchema(raw, { basePath: IO_ROOT, stdLibPath: STD_ROOT, allowOutsideBasePath: true });
   if (!resolved.success) throw new Error(resolved.errors.join('; '));
   const persistence = new MockPersistenceAdapter();
