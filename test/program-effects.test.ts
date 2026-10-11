@@ -15,7 +15,7 @@ import {
 import { ServerLegCollector } from '../src/effects/server-leg.js';
 
 const EMIT = { emit: { success: 'OK', failure: 'FAILED' } };
-const OPS: ProgramEffectName[] = ['behavior/catalog', 'behavior/describe', 'behavior/source', 'program/read', 'program/print', 'program/eval', 'program/compose'];
+const OPS: ProgramEffectName[] = ['behavior/catalog', 'behavior/describe', 'behavior/source', 'behavior/resolve', 'program/read', 'program/print', 'program/eval', 'program/compose'];
 
 type ProgramEffect = NonNullable<EffectHandlers['programEffect']>;
 

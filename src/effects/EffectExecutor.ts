@@ -1858,6 +1858,7 @@ export class EffectExecutor {
             case 'behavior/catalog':
             case 'behavior/describe':
             case 'behavior/source':
+            case 'behavior/resolve':
             case 'program/read':
             case 'program/print':
             case 'program/eval':

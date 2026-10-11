@@ -35,7 +35,7 @@ import {
 } from './StateMachineCore.js';
 import type { TransitionResult } from '../types.js';
 import { createLogger } from '@almadar/logger';
-import { dispatchVisitKey, type BusEventSource, type DeliveryRecord, type DispatchLog, type EntityRow, type EventPayload } from '@almadar/core';
+import { DispatchVisits, type BusEventSource, type DeliveryRecord, type DispatchLog, type EntityRow, type EventPayload } from '@almadar/core';
 import { DispatchMemory, type EffectDispatch } from '../evaluation/dispatch-memory.js';
 
 const cascadeLog = createLogger('almadar:runtime:trait-cascade');
@@ -152,7 +152,7 @@ export async function runTraitCascade<TEffectResult>(
     const emitted: CascadeEmittedEvent[] = [];
     const hops: Array<{ from: string; to: string; event: string }> = [];
     // `dispatchVisitKey`, the one delivery identity both runtimes share.
-    const visited = new Set<string>();
+    const visited = new DispatchVisits();
 
     // A WORKLIST, not a single cursor: one step's effects can emit several
     // SIBLING events, and more than one can have its own matching arm from
@@ -197,9 +197,8 @@ export async function runTraitCascade<TEffectResult>(
         // The trait frame is part of the identity too: a loop whose effects persisted progress
         // (another batch saved) sees a new frame even when the event and payload repeat.
         const entityData = await getEntityData();
-        const stepKey = dispatchVisitKey(trait.name, item.event, stepFromState, item.payload, entityData ?? null);
-        if (visited.has(stepKey)) continue; // this branch cycles — drop it, keep draining the rest of the queue
-        visited.add(stepKey);
+        if (visited.has(trait.name, item.event, stepFromState, item.payload, entityData ?? null)) continue; // this branch cycles — drop it, keep draining the rest of the queue
+        visited.add(trait.name, item.event, stepFromState, item.payload, entityData ?? null);
 
         const log = memory.log(trait.name);
         const view = memory.view(trait.name, item.delivery);

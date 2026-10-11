@@ -75,7 +75,7 @@ import {
 import type { IndexedTrait, TraitIndex } from '../traits/trait-index.js';
 import type { BindingContext, EvaluationContextExtensions } from '../types.js';
 import type { PersistenceAdapter } from '@almadar/core';
-import { dispatchVisitKey, type DeliveryRecord, type SExpr } from '@almadar/core';
+import { DispatchVisits, type DeliveryRecord, type SExpr } from '@almadar/core';
 import { isLifecycleEvent, type MountLifecycle } from './mount-lifecycle.js';
 import { DispatchMemory } from './dispatch-memory.js';
 
@@ -541,7 +541,7 @@ export async function evaluateOrbitalEvent(
   // Traits the requester itself dispatched are on its page by construction
   // — a fan-out landing back on one must still deliver its render.
   const requesterTraits = new Set(targets.map((t) => t.trait));
-  const visited = new Set<string>();
+  const visited = new DispatchVisits();
   let steps = 0;
 
   while (queue.length > 0 && steps < CROSS_TRAIT_CASCADE_CAP) {
@@ -580,8 +580,8 @@ export async function evaluateOrbitalEvent(
     let rowId = rowByTrait.get(item.trait) ?? currentEntityId;
     const readFrame = (): Promise<EntityRow> => readTraitFrame(persistence, frames, entry, rowId);
 
-    const visitKey = dispatchVisitKey(item.trait, item.event, item.from, item.payload, await readFrame());
-    if (visited.has(visitKey)) continue;
+    const visitFrame = await readFrame();
+    if (visited.has(item.trait, item.event, item.from, item.payload, visitFrame)) continue;
     if (item.listenGuard !== undefined && !listenGuardPasses(item.listenGuard, {
       payload: item.delivery.payload,
       state: item.from,
@@ -591,7 +591,7 @@ export async function evaluateOrbitalEvent(
       evaluateLog.info('fanout:listen-guard-blocked', { trait: item.trait, event: item.event, ...(deps.logContext ?? {}) });
       continue;
     }
-    visited.add(visitKey);
+    visited.add(item.trait, item.event, item.from, item.payload, visitFrame);
     // The requested (seed) steps are not counted, as in the Rust kernel's seed loop; every follow-up is.
     if (item.fromAtDelivery === true) steps += 1;
 

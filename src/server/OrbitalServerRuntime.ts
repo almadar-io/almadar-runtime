@@ -230,7 +230,7 @@ import type {
 } from "@almadar/core";
 import { externalInputsOf, readableEntitiesOf } from "@almadar/core";
 import { dispatchDeclaredInput } from "../evaluation/declared-input-dispatch.js";
-import { dispatchVisitKey, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, resolveDefaultViewer, DEFAULT_VIEWER, isPageReference, type NavItem, type Page, type PageRef,
+import { DispatchVisits, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, resolveDefaultViewer, DEFAULT_VIEWER, isPageReference, type NavItem, type Page, type PageRef,
 } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf } from "@almadar/core/mock";
 import { runServerEffectStage } from "../effects/effect-stage.js";
@@ -1622,7 +1622,7 @@ export class OrbitalServerRuntime {
         this.enqueueEvent(async (queueHold) => {
           await this.relayEmittedEvents(orbitalName, emittedEvents, {
             includeSourceOrbital: true,
-            visited: new Set<string>(),
+            visited: new DispatchVisits(),
             queueHold,
           });
         }).catch((error: Error) => {
@@ -2365,7 +2365,7 @@ export class OrbitalServerRuntime {
     // response.
     await this.relayEmittedEvents(orbitalName, response.emittedEvents, {
       includeSourceOrbital: false,
-      visited: new Set<string>(),
+      visited: new DispatchVisits(),
       queueHold,
       into: response,
       ...(viewer !== undefined ? { viewer } : {}),
@@ -2559,7 +2559,7 @@ export class OrbitalServerRuntime {
     emits: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>,
     opts: {
       includeSourceOrbital: boolean;
-      visited: Set<string>;
+      visited: DispatchVisits;
       /** The requesting viewer; ticks and external producers have none and run as the default user. */
       viewer?: UserContext;
       /** The event-queue hold the relay runs under (each hop's service calls may release it). */
@@ -2600,13 +2600,13 @@ export class OrbitalServerRuntime {
           const from = registered.manager.getState(target.listenerTrait, target.entityId)?.currentState ??
             findInitialState(target.entry.traitDef);
           const frame = await readTraitFrame(this.persistence, registered.traitFieldStates, target.entry, target.entityId);
-          const key = `${orbitalName}\u0000${dispatchVisitKey(target.listenerTrait, target.triggers, from, target.payload, frame)}`;
-          if (opts.visited.has(key)) continue;
+          const relayTrait = `${orbitalName}\u0000${target.listenerTrait}`;
+          if (opts.visited.has(relayTrait, target.triggers, from, target.payload, frame)) continue;
           if (hops >= CROSS_ORBITAL_RELAY_CAP) {
             xOrbitalLog.warn('relay:truncated', { event: emitted.event, hops });
             return;
           }
-          opts.visited.add(key);
+          opts.visited.add(relayTrait, target.triggers, from, target.payload, frame);
           hops += 1;
           try {
             const response = await evaluateOrbitalEvent(
@@ -2658,7 +2658,7 @@ export class OrbitalServerRuntime {
       await this.relayEmittedEvents(
         undefined,
         [{ event, ...(payload !== undefined ? { payload } : {}) }],
-        { includeSourceOrbital: true, visited: new Set<string>(), queueHold },
+        { includeSourceOrbital: true, visited: new DispatchVisits(), queueHold },
       );
     }).catch((error: Error) => {
       xOrbitalLog.error('dispatchExternalEvent:error', {
