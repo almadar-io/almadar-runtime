@@ -3,8 +3,8 @@
  * seeded once, and the in-process transport its legs run through. The runtime
  * host (`useBrowserStore`) and compiled static clients both open it here.
  */
-import type { EventPayload, MessageCatalogs, SExpr, OrbitalDefinition, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, RuntimeValue } from '@almadar/core';
-import { externalInputsOf, isEventPayloadValue, orbitalInlineEntities, parseOrbitalSchema, readableEntitiesOf, storesRowsInBrowser } from '@almadar/core';
+import type { MessageCatalogs, OrbitalDefinition, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, RuntimeValue } from '@almadar/core';
+import { externalInputsOf, orbitalInlineEntities, parseOrbitalSchema, readableEntitiesOf, storesRowsInBrowser } from '@almadar/core';
 import { entityAccessPolicies } from '@almadar/core/mock';
 import { applyRowAccess } from '../entities/entityAccess.js';
 import type { ServerEffectStageDeps } from '../effects/effect-stage.js';
@@ -17,9 +17,7 @@ import type { EventTransport } from '../server/EventTransport.js';
 import { buildTraitIndex } from '../traits/trait-index.js';
 import { createMemoryCircuitStore } from './circuit-store.js';
 import { createLocalStoreTransport } from './local-store-transport.js';
-import { collectListenerTargets } from './evaluateOrbitalEvent.js';
-import { createContextFromBindings } from './BindingResolver.js';
-import { evaluateGuard, executeEffects } from '@almadar/evaluator';
+import { tickEventKey } from '../traits/StateMachineCore.js';
 import { createTickScheduler, type TickHandle } from '../time/TickScheduler.js';
 import { createLogger } from '@almadar/logger';
 import { isValidCronExpression } from '../time/cron.js';
@@ -118,26 +116,13 @@ export interface BrowserHost extends EventTransport {
   close(): void;
 }
 
-/**
- * The host runs ticks whose effects emit events (LOLO §11): a firing reads the trait's state and
- * entity frame, and each event it emits is dispatched as its own request in the host's queue.
- */
+/** The host runs the program's ticks (LOLO §11): each firing is one `runTick` request in the host's queue. */
 const tickLog = createLogger('almadar:runtime:browser-host:ticks');
 const queueLog = createLogger('almadar:runtime:browser-host:queue');
-
-function isPayloadObject(value: RuntimeValue): value is EventPayload {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date) && isEventPayloadValue(value);
-}
 
 function refuseUnhostedTicks(traitIndex: ReturnType<typeof buildTraitIndex>): void {
   for (const entry of traitIndex.byName.values()) {
     for (const tick of entry.irTrait.ticks ?? []) {
-      for (const effect of tick.effects) {
-        const op = Array.isArray(effect) ? effect[0] : undefined;
-        if (op !== 'emit') {
-          throw new Error(`openBrowserHost runs ticks that emit events; ${entry.orbitalName}.${entry.traitDef.name} tick '${tick.name}' has a '${String(op)}' effect`);
-        }
-      }
       if (tick.interval === 'frame') {
         throw new Error(`openBrowserHost has no frame clock; ${entry.orbitalName}.${entry.traitDef.name} tick '${tick.name}' runs every frame`);
       }
@@ -259,34 +244,17 @@ export async function openBrowserHost(options: BrowserHostOptions): Promise<Brow
       const fire = () => {
         if (firing) return;
         firing = true;
+        // Fired as a `runTick` request, so the tick runs where every transition runs: the gate, its
+        // effects, and its emits through the dispatch's own fan-out.
+        const request: OrbitalEventRequest = {
+          event: tickEventKey(tick.name),
+          runTick: { trait: entry.traitDef.name, tick: tick.name },
+          targetTrait: entry.traitDef.name,
+          tick: tick.name,
+        };
         void inBackground(async () => {
-          const state = store.manager.getState(entry.traitDef.name)?.currentState ?? '';
-          const ctx = createContextFromBindings({ entity: store.frames.get(entry.frameKey) ?? {}, payload: {}, state, now: Date.now() });
-          if (entry.config !== undefined) ctx.config = entry.config;
-          if (tick.guard !== undefined && !evaluateGuard(tick.guard, ctx)) return;
-          const emitted: Array<{ event: string; payload: EventPayload }> = [];
-          ctx.emit = (event, payload) => {
-            if (payload === undefined || payload === null) emitted.push({ event, payload: {} });
-            else if (isPayloadObject(payload)) emitted.push({ event, payload });
-            else throw new Error(`${entry.orbitalName}.${entry.traitDef.name} tick '${tick.name}' emitted ${event} with a payload that is not an object`);
-          };
-          executeEffects(tick.effects as SExpr[], ctx);
-          // Delivered as the bus would: to the ticking trait when it handles the event, and to every
-          // trait that listens for it from this one, as the event that trait maps it to.
-          const source = { orbital: entry.orbitalName, trait: entry.traitDef.name, tick: tick.name, ...(entry.orbitalId !== undefined ? { orbitalId: entry.orbitalId } : {}), ...(entry.traitDef.id !== undefined ? { traitId: entry.traitDef.id } : {}) };
-          for (const { event, payload } of emitted) {
-            const deliveries: Array<{ orbital: string; request: OrbitalEventRequest }> = [];
-            if (entry.traitDef.transitions.some((t) => t.event === event)) {
-              deliveries.push({ orbital: entry.orbitalName, request: { event, payload, targetTrait: entry.traitDef.name } });
-            }
-            for (const target of collectListenerTargets(traitIndex, source, event, payload)) {
-              deliveries.push({ orbital: target.entry.orbitalName, request: { event: target.triggers, payload: target.payload ?? {}, targetTrait: target.listenerTrait } });
-            }
-            for (const { orbital, request } of deliveries) {
-              const response = await local.send(orbital, request);
-              for (const listener of listeners) listener(orbital, request, response);
-            }
-          }
+          const response = await local.send(entry.orbitalName, request);
+          if (response.transitioned) for (const listener of listeners) listener(entry.orbitalName, request, response);
         }).catch((error: Error) => {
           tickLog.error('tick:failed', { orbital: entry.orbitalName, trait: entry.traitDef.name, tick: tick.name, error: error.message });
         }).finally(() => {

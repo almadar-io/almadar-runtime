@@ -751,7 +751,6 @@ export interface EffectResult {
  *
  * These options control how the runtime handles edge cases:
  * - `strictBindings`: Log warnings when bindings resolve to undefined (RCG-01)
- * - `guardMode`: Control whether guard errors block or allow transitions (RCG-02)
  * - `maxEventDepth`: Prevent infinite event loops (RCG-05)
  */
 export interface RuntimeConfig {
@@ -762,13 +761,6 @@ export interface RuntimeConfig {
      */
     strictBindings?: boolean;
 
-    /**
-     * Guard evaluation error handling mode. (RCG-02)
-     * - "permissive": Guard errors allow the transition (current default behavior)
-     * - "strict": Guard errors block the transition
-     * @default "permissive"
-     */
-    guardMode?: "strict" | "permissive";
 
     /**
      * Maximum event emission depth before triggering circuit breaker. (RCG-05)

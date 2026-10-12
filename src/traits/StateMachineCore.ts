@@ -8,7 +8,7 @@
  * @packageDocumentation
  */
 
-import { LIFECYCLE_EVENTS } from '@almadar/core';
+import { LIFECYCLE_EVENTS, guardHolds } from '@almadar/core';
 import type {
     TraitState,
     TraitDefinition,
@@ -22,7 +22,7 @@ import type {
     ConfigContext,
     EvaluationContextExtensions,
 } from '../types.js';
-import type { EventId, UserContext } from '@almadar/core';
+import type { EventId, ResolvedTraitTick, SExpr, TraitTick, UserContext } from '@almadar/core';
 import { interpolateValue, createContextFromBindings } from '../evaluation/BindingResolver.js';
 import type { DispatchView } from '../evaluation/dispatch-memory.js';
 import { evaluateGuard } from '@almadar/evaluator';
@@ -187,12 +187,6 @@ export interface ProcessEventOptions {
     /** The delivery and this trait's dispatch log, for `@event` / `@prevEvents` / `@prevStates` in guards. */
     dispatch?: DispatchView;
     /**
-     * Guard evaluation error handling mode. (RCG-02)
-     * - "permissive": Guard errors allow the transition (default, backwards-compatible)
-     * - "strict": Guard errors block the transition
-     */
-    guardMode?: "strict" | "permissive";
-    /**
      * When true, log warnings when bindings resolve to undefined. (RCG-01)
      */
     strictBindings?: boolean;
@@ -239,7 +233,6 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
         user,
         now,
         dispatch,
-        guardMode = 'permissive',
         strictBindings = false,
         contextExtensions,
     } = options;
@@ -262,8 +255,7 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
     }
 
     // Try each candidate in declaration order; pick the first whose
-    // guard passes (or that has no guard). Guard errors fall through to
-    // the next candidate in permissive mode, block in strict mode.
+    // guard passes (or that has no guard). A guard error counts as a failed guard.
     let lastFailedGuardTransition: TraitDefinition['transitions'][0] | undefined;
 
     for (const transition of candidates) {
@@ -305,54 +297,18 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
             ...(dispatch !== undefined ? dispatch : {}),
         }, strictBindings, contextExtensions);
 
-        try {
-            const guardPasses = evaluateGuard(
-                transition.guard as Parameters<typeof evaluateGuard>[0],
-                ctx
-            );
-            smLog.debug('guard:evaluate', { trait: trait.name, event: normalizedEvent, guardResult: guardPasses });
-            if (guardPasses) {
-                return {
-                    executed: true,
-                    newState: transition.to,
-                    previousState: traitState.currentState,
-                    effects: transition.effects || [],
-                    transition: {
-                        from: traitState.currentState,
-                        to: transition.to,
-                        event: normalizedEvent,
-                    },
-                    guardResult: true,
-                };
-            }
-            // Guard failed — try the next candidate.
-            lastFailedGuardTransition = transition;
-        } catch (error) {
-            if (guardMode === 'strict') {
-                // RCG-02: In strict mode, guard errors block the transition
-                smLog.error('guard-error-blocks-transition', {
-                    from: traitState.currentState,
-                    to: transition.to,
-                    event: normalizedEvent,
-                    error: error instanceof Error ? error : String(error),
-                });
-                return {
-                    executed: false,
-                    newState: traitState.currentState,
-                    previousState: traitState.currentState,
-                    effects: [],
-                    transition: {
-                        from: traitState.currentState,
-                        to: transition.to,
-                        event: normalizedEvent,
-                    },
-                    guardResult: false,
-                };
-            }
-            // Permissive mode: log and allow (treat as guard pass).
-            smLog.error('guard-evaluation-error', {
-                error: error instanceof Error ? error : String(error),
-            });
+        const guardPasses = guardHolds(
+            () => evaluateGuard(transition.guard as Parameters<typeof evaluateGuard>[0], ctx),
+            (error) => smLog.error('guard:error-blocks-arm', {
+                trait: trait.name,
+                from: traitState.currentState,
+                to: transition.to,
+                event: normalizedEvent,
+                error,
+            }),
+        );
+        smLog.debug('guard:evaluate', { trait: trait.name, event: normalizedEvent, guardResult: guardPasses });
+        if (guardPasses) {
             return {
                 executed: true,
                 newState: transition.to,
@@ -366,6 +322,8 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
                 guardResult: true,
             };
         }
+        // Guard failed (or could not be evaluated) — try the next candidate.
+        lastFailedGuardTransition = transition;
     }
 
     // No candidate's guard passed.
@@ -383,6 +341,53 @@ export function processEvent(options: ProcessEventOptions): TransitionResult {
             : undefined,
         guardResult: false,
     };
+}
+
+/** The event a tick firing carries on the wire (`OrbitalEventRequest.event` of a `runTick` leg). */
+export function tickEventKey(tickName: string): string {
+    return `$TICK_${tickName}`;
+}
+
+export interface ProcessTickOptions extends Omit<ProcessEventOptions, 'eventKey' | 'eventId'> {
+    /** A schema tick or its resolved form (the client's `ResolvedTrait.ticks`). */
+    tick: TraitTick | ResolvedTraitTick;
+}
+
+/**
+ * Fire one tick from `traitState`: it runs when `appliesTo` (empty = every state) names the
+ * current state and its guard holds (a throwing guard blocks). A tick never moves the state.
+ * Twin of Rust `RuntimeKernel::process_tick`.
+ */
+export function processTick(options: ProcessTickOptions): TransitionResult {
+    const { traitState, trait, tick } = options;
+    const state = traitState.currentState;
+    const event = tickEventKey(tick.name);
+    const self = { from: state, to: state, event };
+    const appliesTo = tick.appliesTo ?? [];
+    if (appliesTo.length > 0 && !appliesTo.includes(state)) {
+        smLog.debug('tick:not-applicable', { trait: trait.name, tick: tick.name, state, appliesTo });
+        return { executed: false, newState: state, previousState: state, effects: [], transition: self, guardResult: false };
+    }
+    const guard = tick.guard;
+    if (guard !== undefined && guard !== null) {
+        const ctx = createContextFromBindings({
+            entity: options.entityData,
+            payload: options.payload ?? {},
+            state,
+            config: options.config,
+            user: options.user,
+            ...(options.now !== undefined ? { now: options.now } : {}),
+            fromState: state,
+            toState: state,
+            ...(options.dispatch !== undefined ? options.dispatch : {}),
+        }, options.strictBindings ?? false, options.contextExtensions);
+        const holds = guardHolds(
+            () => evaluateGuard(guard, ctx),
+            (error) => smLog.error('guard:error-blocks-tick', { trait: trait.name, tick: tick.name, state, error }),
+        );
+        if (!holds) return { executed: false, newState: state, previousState: state, effects: [], transition: self, guardResult: false };
+    }
+    return { executed: true, newState: state, previousState: state, effects: tick.effects as SExpr[], transition: self };
 }
 
 // ============================================================================
@@ -867,7 +872,6 @@ export class StateMachineManager {
                 config: this.traitConfigs.get(traitName),
                 user,
                 now: dispatchNow,
-                guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,
                 contextExtensions: this.config.contextExtensions,
             });
@@ -1067,7 +1071,6 @@ export class StateMachineManager {
                 config: this.traitConfigs.get(traitName),
                 user: entry.user,
                 now: entry.now,
-                guardMode: this.config.guardMode,
                 strictBindings: this.config.strictBindings,
                 contextExtensions: this.config.contextExtensions,
             });

@@ -47,7 +47,7 @@ export function createResidenceTransport(options: ResidenceTransportOptions): Ev
   const route = (orbitalName: string, request: OrbitalEventRequest): EventTransport => {
     const traits = legTraits(request, orbitalName, traitIndex);
     const server = traits.filter(({ entry: e, event }) => touchesServer(e.traitDef, e.irTrait, e.config, stores, event)).map(({ entry }) => entry.traitDef.name);
-    const browser = traits.filter(({ entry: e, event }) => browserLegEvents(e.traitDef, stores, e.config).has(event)).map(({ entry }) => entry.traitDef.name);
+    const browser = traits.filter(({ entry: e, event }) => browserLegEvents(e.traitDef, stores, e.config, e.irTrait.ticks).has(event)).map(({ entry }) => entry.traitDef.name);
     if (server.length > 0 && browser.length > 0) {
       throw new Error(`residence: one dispatch reaches browser-stored data (${browser.join(', ')}) and server data (${server.join(', ')}); split it with an emit and a listen`);
     }

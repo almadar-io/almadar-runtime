@@ -83,11 +83,14 @@ export {
   findTransition,
   normalizeEventKey,
   processEvent,
+  processTick,
+  tickEventKey,
   selectDispatchCandidates,
   StateMachineManager,
   LIFECYCLE_EVENTS,
   UNMOUNT_EVENT,
   type ProcessEventOptions,
+  type ProcessTickOptions,
 } from "./traits/StateMachineCore.js";
 
 // TraitCascade — same-trait fetch->emit->self-apply cascade completion,
@@ -115,6 +118,7 @@ export {
 // linkedEntity, merged config, frame keys, V4 ids) shared by the unified
 // `evaluateOrbitalEvent` composition's stateful and stateless callers.
 export {
+  browserLegEvents,
   buildTraitIndex,
   buildTraitIndexForOrbital,
   type IndexedTrait,

@@ -27,7 +27,6 @@ export interface LocalStoreTransportOptions {
   /** Releases the host's request queue while a `call-service` awaits its provider. */
   outsideEventQueue?: ServerEffectStageDeps['outsideEventQueue'];
   user?: UserContext;
-  guardMode?: EvaluateOrbitalEventDeps['guardMode'];
   strictBindings?: EvaluateOrbitalEventDeps['strictBindings'];
   contextExtensions?: EvaluateOrbitalEventDeps['contextExtensions'];
   debug?: boolean;
@@ -64,7 +63,6 @@ export function createLocalStoreTransport(options: LocalStoreTransportOptions): 
           frames: store.frames,
           runEffects,
           ...(options.user !== undefined ? { user: options.user } : {}),
-          ...(options.guardMode !== undefined ? { guardMode: options.guardMode } : {}),
           ...(options.strictBindings !== undefined ? { strictBindings: options.strictBindings } : {}),
           ...(options.contextExtensions !== undefined ? { contextExtensions: options.contextExtensions } : {}),
           ...(options.debug !== undefined ? { debug: options.debug } : {}),

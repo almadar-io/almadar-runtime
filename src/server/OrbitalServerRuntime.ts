@@ -78,6 +78,7 @@ import {
   LIFECYCLE_EVENTS,
   UNMOUNT_EVENT,
   findInitialState,
+  processTick,
 } from "../traits/StateMachineCore.js";
 import { EffectExecutor } from "../effects/EffectExecutor.js";
 import { parseOrbitalTraits } from "../traits/OrbitalTraitParsing.js";
@@ -1525,12 +1526,8 @@ export class OrbitalServerRuntime {
     const now = Date.now();
 
     try {
-      // `appliesTo` lists the trait states the tick runs in; none listed = every state.
-      if (tick.appliesTo && tick.appliesTo.length > 0) {
-        const traitState = registered.manager.getState(traitName)?.currentState;
-        if (traitState === undefined || !tick.appliesTo.includes(traitState)) return;
-      }
-
+      const ticking = this.traitIndexFor(registered).byName.get(traitName);
+      if (ticking === undefined) return;
       const entities = await this.persistence.list(entityType);
 
       if (this.config.debug && entities.length > 0) {
@@ -1543,53 +1540,36 @@ export class OrbitalServerRuntime {
       }
 
       for (const entity of entities) {
-        // Evaluate guard if present
-        if (tick.guard) {
-          try {
-            const ctx = createContextFromBindings({
-              entity,
-              payload: {},
-              state:
-                registered.manager.getState(traitName)?.currentState ||
-                "unknown",
-              // A tick has no request user; only a dev host's ambient persona.
-              user: this.config.defaultUser,
-              now,
-            }, false, this.config.contextExtensions);
-
-            const guardPasses = evaluateGuard(
-              tick.guard as Parameters<typeof evaluateGuard>[0],
-              ctx,
-            );
-
-            if (!guardPasses) {
-              if (this.config.debug) {
-                effectLog.debug('tick:guard-failed', () => ({
-                  tick: tick.name,
-                  entityId: typeof entity.id === 'string' ? entity.id : undefined,
-                }));
-              }
-              continue;
-            }
-          } catch (error) {
-            effectLog.error('tick:guard-error', {
+        const fired = processTick({
+          traitState: { traitName, currentState: registered.manager.getState(traitName)?.currentState ?? findInitialState(ticking.traitDef), previousState: null, lastEvent: null, context: {} },
+          trait: ticking.traitDef,
+          tick,
+          entityData: entity,
+          payload: {},
+          config: ticking.config,
+          // A tick has no request user; only a dev host's ambient persona.
+          user: this.config.defaultUser,
+          now,
+          ...(this.config.contextExtensions !== undefined ? { contextExtensions: this.config.contextExtensions } : {}),
+        });
+        if (!fired.executed) {
+          if (this.config.debug) {
+            effectLog.debug('tick:not-fired', () => ({
               tick: tick.name,
               entityId: typeof entity.id === 'string' ? entity.id : undefined,
-              error: error instanceof Error ? error : String(error),
-            });
-            continue;
+            }));
           }
+          continue;
         }
 
-        // Execute effects for this entity
-        if (tick.effects && tick.effects.length > 0) {
+        if (fired.effects.length > 0) {
           const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
           const clientEffects: ClientEffectTuple[] = [];
           const tickEffectResults: ServerEffectResult[] = [];
           await this.executeEffects(
             registered,
             traitName,
-            tick.effects,
+            fired.effects,
             {}, // No payload for ticks
             entity,
             entity.id as string,

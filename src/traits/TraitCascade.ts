@@ -30,12 +30,13 @@
 
 import {
     processEvent,
+    processTick,
     findMatchingTransitions,
     type ProcessEventOptions,
 } from './StateMachineCore.js';
 import type { TransitionResult } from '../types.js';
 import { createLogger } from '@almadar/logger';
-import { DispatchVisits, type BusEventSource, type DeliveryRecord, type DispatchLog, type EntityRow, type EventPayload } from '@almadar/core';
+import { DispatchVisits, type BusEventSource, type DeliveryRecord, type DispatchLog, type EntityRow, type EventPayload, type TraitTick } from '@almadar/core';
 import { DispatchMemory, type EffectDispatch } from '../evaluation/dispatch-memory.js';
 
 const cascadeLog = createLogger('almadar:runtime:trait-cascade');
@@ -68,6 +69,8 @@ export interface RunTraitCascadeOptions<TEffectResult> {
     fromState: string;
     eventKey: string;
     payload?: EventPayload;
+    /** The first step fires this tick (`eventKey` is its `$TICK_<name>`) instead of a transition. */
+    tick?: TraitTick;
     /** Re-read fresh before EACH step — a prior step's `set`/`persist`
      *  effect may have mutated the persisted row, and the next step's guard
      *  and `@entity.X` bindings must see that, exactly like a fresh
@@ -76,7 +79,6 @@ export interface RunTraitCascadeOptions<TEffectResult> {
     config?: ProcessEventOptions['config'];
     user?: ProcessEventOptions['user'];
     now?: ProcessEventOptions['now'];
-    guardMode?: ProcessEventOptions['guardMode'];
     strictBindings?: ProcessEventOptions['strictBindings'];
     contextExtensions?: ProcessEventOptions['contextExtensions'];
     /** The seed's delivery record; a direct dispatch with no emitter has an empty `source`. */
@@ -142,8 +144,7 @@ export async function runTraitCascade<TEffectResult>(
     options: RunTraitCascadeOptions<TEffectResult>,
 ): Promise<TraitCascadeResult<TEffectResult>> {
     const {
-        trait, fromState, eventKey, payload, getEntityData, config, user, now,
-        guardMode, strictBindings, contextExtensions, runEffects,
+        trait, fromState, eventKey, payload, getEntityData, config, user, now, strictBindings, contextExtensions, runEffects,
         maxSteps, logContext,
     } = options;
     const memory = options.memory ?? new DispatchMemory();
@@ -169,10 +170,11 @@ export async function runTraitCascade<TEffectResult>(
     // arm no longer matches, `processEvent` reports `executed: false` and
     // this branch simply drops — the same outcome a real client's own
     // independent dispatch of the same event would reach.
-    interface QueuedEvent { event: string; payload?: EventPayload; delivery: DeliveryRecord }
+    interface QueuedEvent { event: string; payload?: EventPayload; delivery: DeliveryRecord; tick?: TraitTick }
     const queue: QueuedEvent[] = [{
         event: eventKey,
         payload,
+        ...(options.tick !== undefined ? { tick: options.tick } : {}),
         delivery: options.delivery ?? { event: eventKey, ...(payload !== undefined ? { payload } : {}), source: {} },
     }];
 
@@ -202,20 +204,21 @@ export async function runTraitCascade<TEffectResult>(
 
         const log = memory.log(trait.name);
         const view = memory.view(trait.name, item.delivery);
-        const result = processEvent({
+        const step = {
             traitState: { traitName: trait.name, currentState: stepFromState, previousState: null, lastEvent: null, context: {} },
             trait,
-            eventKey: item.event,
             payload: item.payload,
             entityData,
             config,
             user,
             ...(now !== undefined ? { now } : {}),
-            guardMode,
             strictBindings,
             contextExtensions,
             dispatch: view,
-        });
+        };
+        const result = item.tick !== undefined
+            ? processTick({ ...step, tick: item.tick })
+            : processEvent({ ...step, eventKey: item.event });
         memory.recordDelivery(trait.name, item.delivery);
 
         if (!result.executed) continue; // no matching/guarded-through arm from the CURRENT state — drop this branch

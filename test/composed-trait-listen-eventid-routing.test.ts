@@ -1,7 +1,7 @@
 /**
  * Regression for a composed/reference-form cross-trait cascade that
  * silently dropped every hop (verified against the real `vim-mode` plugin,
- * `packages/almadar-behaviors/behaviors/registry/plugins/atoms/vim-mode.orb`,
+ * `packages/almadar-behaviors/behaviors/lolo/editor-plugins/atoms/vim-mode.lolo`,
  * via `OrbitalServerRuntime` in mock mode — `docs/Almadar_Runtime_Gaps.md`).
  *
  * Root cause: `TraitEventListener.eventId` is "optional until the Phase-7
@@ -364,7 +364,7 @@ describe('listen-level guard evaluation (kernel parity)', () => {
 // the synthetic test above is the portable regression; this is the
 // real-world confirmation.
 // ---------------------------------------------------------------------------
-const ORB_PATH = join(IO_REGISTRY, 'plugins/atoms/vim-mode.orb');
+const ORB_PATH = join(IO_REGISTRY, 'editor-plugins/atoms/vim-mode.orb');
 const ORB_BIN = ORB_BIN_INSTALLED;
 
 function resolveViaCli(schema: object): OrbitalSchema {

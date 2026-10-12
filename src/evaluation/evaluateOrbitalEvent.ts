@@ -47,6 +47,7 @@ import {
   type OrbitalEventResponse,
   type ServerEffectResult,
   type TraitEventListener,
+  type TraitTick,
   type TransitionRejection,
   type UserContext,
 } from '@almadar/core';
@@ -136,7 +137,6 @@ export interface EvaluateOrbitalEventDeps {
   /** Default directly-addressed row id (request.entityId wins). */
   entityId?: string;
   originClientId?: string;
-  guardMode?: 'strict' | 'permissive';
   strictBindings?: boolean;
   contextExtensions?: EvaluationContextExtensions;
   debug?: boolean;
@@ -189,6 +189,8 @@ export interface WorklistItem {
   listenGuard?: SExpr;
   /** A fan-out delivery runs from the listener's state when it is processed, not when it was queued (Clause 5.3). */
   fromAtDelivery?: boolean;
+  /** A `runTick` seed: the step fires this tick instead of a transition. */
+  tick?: TraitTick;
 }
 
 /** A trait's frame as a step reads it: declared defaults, then its persisted row, then its in-memory frame. */
@@ -286,6 +288,25 @@ export async function evaluateOrbitalEvent(
       if (!entry) continue;
       const existing = frames.get(entry.frameKey);
       frames.set(entry.frameKey, existing === undefined ? { ...row } : { ...existing, ...row });
+    }
+  }
+
+  // A `runTick` leg names the tick its trait fires; it must be the leg's target and a declared tick.
+  let runTick: TraitTick | undefined;
+  if (request.runTick !== undefined) {
+    const { trait, tick } = request.runTick;
+    runTick = targetTrait === trait
+      ? traitIndex.byName.get(trait)?.irTrait.ticks?.find((t) => t.name === tick)
+      : undefined;
+    if (runTick === undefined) {
+      evaluateLog.warn('dispatch:unknown-tick', { trait, tick, targetTrait, ...(deps.logContext ?? {}) });
+      return {
+        success: true,
+        transitioned: false,
+        states: {},
+        emittedEvents: [],
+        rejections: [{ code: 'no-dispatchable-traits', trait, event }],
+      };
     }
   }
 
@@ -511,6 +532,7 @@ export async function evaluateOrbitalEvent(
     entityId: traitEntityIds.get(trait) ?? entityId,
     onPage: true,
     delivery: seedDelivery,
+    ...(runTick !== undefined && trait === targetTrait ? { tick: runTick } : {}),
   }));
   // A server leg carries the client's mount: deliveries held for a trait the
   // client has since initialized go out first, ahead of this request's seeds.
@@ -607,10 +629,10 @@ export async function evaluateOrbitalEvent(
         maxSteps: CROSS_TRAIT_CASCADE_CAP - steps + 1,
         eventKey: item.event,
         payload: item.payload,
+        ...(item.tick !== undefined ? { tick: item.tick } : {}),
         config: entry.config,
         user: deps.user,
         now,
-        ...(deps.guardMode !== undefined ? { guardMode: deps.guardMode } : {}),
         ...(deps.strictBindings !== undefined ? { strictBindings: deps.strictBindings } : {}),
         ...(deps.contextExtensions !== undefined ? { contextExtensions: deps.contextExtensions } : {}),
         getEntityData: readFrame,
@@ -727,7 +749,18 @@ export async function evaluateOrbitalEvent(
 
     // Structured rejection per non-fired dispatch (reported only when
     // NOTHING transitioned, below).
-    if (!cascade.executed) {
+    if (!cascade.executed && item.tick !== undefined) {
+      if (guardFailed === undefined) guardFailed = `${item.trait}.${item.event}`;
+      rejections.push({
+        code: 'guard-rejected',
+        trait: item.trait,
+        from: item.from,
+        event: item.event,
+        transition: `${item.from}--${item.event}-->${item.from}`,
+        ...(item.tick.guard !== undefined ? { guard: item.tick.guard } : {}),
+      });
+      evaluateLog.info('dispatch:tick-blocked', { trait: item.trait, tick: item.tick.name, from: item.from, ...(deps.logContext ?? {}) });
+    } else if (!cascade.executed) {
       const candidate = findTransition(entry.traitDef, item.from, normalizeEventKey(item.event));
       if (candidate !== undefined) {
         if (guardFailed === undefined) guardFailed = `${item.trait}.${item.event}`;

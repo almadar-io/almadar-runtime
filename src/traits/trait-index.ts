@@ -32,6 +32,7 @@ import {
   type SExpr,
   type SExprAtom,
   type Trait,
+  type TraitTick,
   type TraitConfig,
   type TraitConfigValue,
 } from '@almadar/core';
@@ -40,6 +41,7 @@ import { effectSiteFor, getOperatorRunsOn } from '@almadar/std/registry';
 import { collectDeclaredConfigDefaults } from './config-defaults.js';
 import { findEntityAmongOrbitals, parseOrbitalTraits } from './OrbitalTraitParsing.js';
 import type { TraitDefinition } from '../types.js';
+import { tickEventKey } from './StateMachineCore.js';
 
 const traitIndexLog = createLogger('almadar:runtime:trait-index');
 
@@ -227,19 +229,27 @@ export function touchesServer(
 
 /**
  * The events whose live transitions run a data effect on a browser-stored
- * entity: their leg goes to the browser store. Twin of orbital-core
- * `OirTrait::browser_leg_events`.
+ * entity: their leg goes to the browser store. A client tick that does is
+ * listed as its `runTick` event (`$TICK_<name>`). Twin of orbital-core
+ * `OirTrait::browser_leg_events` (ticks: `RuntimeKernel::dispatch_tick`'s `browser_leg`).
  */
 export function browserLegEvents(
   traitDef: TraitDefinition,
   storesRowsInBrowser: (entityType: string) => boolean,
   config?: Readonly<Record<string, TraitConfigValue>>,
+  ticks: readonly TraitTick[] = [],
 ): Set<string> {
   const resolve = configResolver(config);
-  return new Set(traitDef.transitions
-    .filter((t) => !(t.guard !== undefined && isStaticallyFalse(t.guard, resolve)))
-    .filter((t) => (t.effects ?? []).some((e) => runsBrowserDataEffect(e, storesRowsInBrowser, resolve)))
-    .map((t) => t.event));
+  return new Set([
+    ...traitDef.transitions
+      .filter((t) => !(t.guard !== undefined && isStaticallyFalse(t.guard, resolve)))
+      .filter((t) => (t.effects ?? []).some((e) => runsBrowserDataEffect(e, storesRowsInBrowser, resolve)))
+      .map((t) => t.event),
+    ...ticks
+      .filter((tick) => tick.runsInBackground !== true)
+      .filter((tick) => (tick.effects as SExpr[]).some((e) => runsBrowserDataEffect(e, storesRowsInBrowser, resolve)))
+      .map((tick) => tickEventKey(tick.name)),
+  ]);
 }
 
 export interface TraitIndexOptions {

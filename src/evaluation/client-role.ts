@@ -78,7 +78,6 @@ export interface ClientRoleOpts {
   locale?: string;
   /** The program's message catalogs (locale → qualified key → message). */
   messages?: MessageCatalogs;
-  guardMode?: 'strict' | 'permissive';
   strictBindings?: boolean;
   contextExtensions?: EvaluationContextExtensions;
   debug?: boolean;
@@ -357,7 +356,6 @@ function baseEvaluateDeps(
     mount: opts.store.mount,
     runEffects,
     ...(opts.user !== undefined ? { user: opts.user } : {}),
-    ...(opts.guardMode !== undefined ? { guardMode: opts.guardMode } : {}),
     ...(opts.strictBindings !== undefined ? { strictBindings: opts.strictBindings } : {}),
     ...(opts.contextExtensions !== undefined ? { contextExtensions: opts.contextExtensions } : {}),
     ...(opts.debug !== undefined ? { debug: opts.debug } : {}),
@@ -441,7 +439,7 @@ export async function dispatchWithServerLeg(
 
   const response = await evaluateOrbitalEvent(
     baseEvaluateDeps(opts, runEffects),
-    { event: request.event, payload: request.payload, entityId, targetTrait: traitName },
+    { event: request.event, payload: request.payload, entityId, targetTrait: traitName, ...(request.runTick !== undefined ? { runTick: request.runTick } : {}) },
   );
 
   if (response.entityByTrait) fanOutEntityRows(opts.store, opts.traitIndex, response.entityByTrait, executedTraitNames);
@@ -464,7 +462,7 @@ export async function dispatchWithServerLeg(
   const browserWrites = cascadeFirings.flatMap((f) => {
     const indexed = opts.traitIndex.byName.get(f.trait);
     return f.trait !== traitName && indexed !== undefined &&
-      browserLegEvents(indexed.traitDef, (t) => browserStored.has(t), indexed.config).has(f.event)
+      browserLegEvents(indexed.traitDef, (t) => browserStored.has(t), indexed.config, indexed.irTrait.ticks).has(f.event)
       ? [{ firing: f, orbital: indexed.orbitalName }]
       : [];
   });
@@ -484,7 +482,7 @@ export async function dispatchWithServerLeg(
   } else if (drained.length > 0 || reachesOffPage) {
     // A browser-stored entity's data effects run in the browser store, so a
     // client-only seed's browser-leg event owes that leg.
-    const seedBrowserLeg = browserLegEvents(entry.traitDef, (t) => browserStored.has(t), entry.config).has(request.event);
+    const seedBrowserLeg = browserLegEvents(entry.traitDef, (t) => browserStored.has(t), entry.config, entry.irTrait.ticks).has(request.event);
     if (hybrid && !downstreamNeedsServer && !reachesOffPage && !seedBrowserLeg) {
       clientRoleLog.error('hybrid-trait-produced-server-leg', {
         trait: traitName,
@@ -511,6 +509,8 @@ export async function dispatchWithServerLeg(
         ...(entityId !== undefined ? { entityId } : {}),
         targetTrait: traitName,
         sourceTrait: traitName,
+        ...(request.runTick !== undefined ? { runTick: request.runTick } : {}),
+        ...(request.tick !== undefined ? { tick: request.tick } : {}),
         ...(request.clientId !== undefined ? { clientId: request.clientId } : {}),
         ...(request.locale !== undefined ? { locale: request.locale } : {}),
         ...(executedTraits.length > 0 ? { traits: executedTraits } : {}),
@@ -823,7 +823,7 @@ export async function applyOrbitalEventResponse(
     for (const target of targets) {
       // Its rows live in the browser store: a local run here would drop the
       // leg, so it takes the full client path like an own continuation.
-      if (browserLegEvents(target.entry.traitDef, (t) => browserStored.has(t), target.entry.config).has(target.triggers)) {
+      if (browserLegEvents(target.entry.traitDef, (t) => browserStored.has(t), target.entry.config, target.entry.irTrait.ticks).has(target.triggers)) {
         ownContinuations.push({
           event: target.triggers,
           ...(target.payload !== undefined ? { payload: target.payload } : {}),
@@ -863,7 +863,7 @@ export async function applyOrbitalEventResponse(
       // opening a browser-stored detail); each such firing goes to the store as its own request.
       for (const f of fannedFirings) {
         const indexed = opts.traitIndex.byName.get(f.trait);
-        if (indexed !== undefined && browserLegEvents(indexed.traitDef, (t) => browserStored.has(t), indexed.config).has(f.event)) {
+        if (indexed !== undefined && browserLegEvents(indexed.traitDef, (t) => browserStored.has(t), indexed.config, indexed.irTrait.ticks).has(f.event)) {
           browserWrites.push(browserWriteContinuation(f, indexed.orbitalName, { event: f.event, ...(opts.locale !== undefined ? { locale: opts.locale } : {}) }));
         }
       }

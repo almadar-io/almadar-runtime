@@ -1859,10 +1859,12 @@ export class EffectExecutor {
             case 'behavior/describe':
             case 'behavior/source':
             case 'behavior/resolve':
+            case 'behavior/dependencies':
             case 'program/read':
             case 'program/print':
             case 'program/eval':
-            case 'program/compose': {
+            case 'program/compose':
+            case 'program/step': {
                 const [positional, emitCfg] = this.splitSubstrateEmit(args);
                 await this.runProgramEffectArm(operator, positional, emitCfg);
                 break;
