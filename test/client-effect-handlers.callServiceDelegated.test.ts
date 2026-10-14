@@ -24,8 +24,8 @@ describe('createClientEffectHandlers — callServiceDelegated', () => {
         expect(make().callServiceDelegated).toBeUndefined();
     });
 
-    it('callService is still a callable returning the mock shape', async () => {
-        const result = await make().callService('payments', 'charge', { amount: 100 });
-        expect(result).toMatchObject({ success: true, status: 'succeeded', amount: 100 });
+    it('callService is still a callable returning the registry-shaped mock', async () => {
+        const result = await make().callService('stripe', 'createPaymentIntent', { amount: 100, currency: 'usd' });
+        expect(result).toMatchObject({ id: expect.any(String), clientSecret: expect.any(String) });
     });
 });

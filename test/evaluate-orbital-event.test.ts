@@ -360,7 +360,7 @@ describe('evaluateOrbitalEvent — [runtime] row round-trip fold (the stateless 
         traits: [{ trait: 'Player', from: 'idle' }],
         // The client-held singleton row: the id is addressing, the fields
         // are the state (a [runtime] entity has no authoritative store).
-        entityByTrait: { Player: { id: 'runtime', score: 41 } },
+        entityByTrait: { Player: { id: 'singleton', score: 41 } },
       },
     );
     const score = response.emittedEvents.find((e) => e.event === 'SCORE');
@@ -374,10 +374,32 @@ describe('evaluateOrbitalEvent — [runtime] row round-trip fold (the stateless 
       {
         event: 'BUMP',
         traits: [{ trait: 'Player', from: 'idle' }],
-        entityByTrait: { Player: { id: 'runtime', score: 41 } },
+        entityByTrait: { Player: { id: 'singleton', score: 41 } },
       },
     );
     expect(response.entityByTrait?.['Player']?.['score']).toBe(42);
+  });
+
+  it('an id-less [runtime] row is addressed "singleton" (the Rust kernel\'s address), never "runtime"', async () => {
+    const deps = depsFor(gameSchema());
+    const response = await evaluateOrbitalEvent(
+      { ...deps, runtimeRowSentinel: true },
+      { event: 'BUMP', traits: [{ trait: 'Player', from: 'idle' }] },
+    );
+    const scopes = [...(deps.manager.getAllStatesByScope().get('Player')?.keys() ?? [])];
+    expect(scopes).toContain('singleton');
+    expect(scopes).not.toContain('runtime');
+  });
+
+  it('control: without the sentinel dep an id-less [runtime] row gets no singleton address', async () => {
+    const deps = depsFor(gameSchema());
+    const response = await evaluateOrbitalEvent(
+      deps,
+      { event: 'BUMP', traits: [{ trait: 'Player', from: 'idle' }] },
+    );
+    const scopes = [...(deps.manager.getAllStatesByScope().get('Player')?.keys() ?? [])];
+    expect(scopes).not.toContain('singleton');
+    expect(response.transitioned).toBe(true);
   });
 });
 

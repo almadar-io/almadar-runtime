@@ -49,7 +49,7 @@ describe('deferEntityBindings', () => {
     expect(deferEntityBindings('@payload.row', ctx)).toEqual({ id: 'r1' });
     // Mixed entity+payload s-expr: payload dies at render time, so the
     // whole expression must evaluate eagerly at flush.
-    const mixed = deferEntityBindings(['str/concat', '@entity.hp', '@payload.row'], ctx);
+    const mixed = deferEntityBindings(['str/concat', '@entity.hp', ['object/get', '@payload.row', 'id']], ctx);
     expect(isRenderBindingMarker(mixed)).toBe(false);
   });
 

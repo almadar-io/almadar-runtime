@@ -193,9 +193,9 @@ describe('createServerEffectHandlers — render-ui/navigate capture (Part G1)', 
         const exec = new EffectExecutor({ handlers, bindings, context });
         const renderEffect: Effect = ['render-ui', 'main', { type: 'card' }];
         await exec.executeAll([renderEffect]);
-        expect(clientEffects).toEqual([['render-ui', 'main', { type: 'card' }, undefined, undefined]]);
+        expect(clientEffects).toEqual([['render-ui', 'main', { type: 'card' }, null, null]]);
         expect(clientEffectsByTrait).toEqual([
-            { traitName: 'ListItemViewer', effect: ['render-ui', 'main', { type: 'card' }, undefined, undefined] },
+            { traitName: 'ListItemViewer', effect: ['render-ui', 'main', { type: 'card' }, null, null] },
         ]);
     });
 
@@ -222,8 +222,8 @@ describe('createServerEffectHandlers — render-ui/navigate capture (Part G1)', 
             ['navigate-back'] as Effect,
         ]);
         expect(clientEffects).toEqual([
-            ['navigate', '/items/1', undefined],
-            ['navigate', '/items/2', undefined, { crumb: 'Item 2' }],
+            ['navigate', '/items/1', null],
+            ['navigate', '/items/2', null, { crumb: 'Item 2' }],
             ['navigate-back'],
         ]);
     });

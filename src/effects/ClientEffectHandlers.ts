@@ -8,6 +8,7 @@
  */
 
 import { createLogger } from '@almadar/logger';
+import { mockCallService } from './defaultCallService.js';
 import type { PatternConfig, BusEventSource, FieldValue } from '@almadar/core';
 import type { EffectHandlers, EventPayload, EntityRow, ServiceParams, PatternProps, BrowserFilePickerOptions, BrowserGeolocationOptions } from '../types.js';
 
@@ -242,30 +243,9 @@ export function createClientEffectHandlers(
         callService: async (service: string, action: string, params?: ServiceParams) => {
             // Consumer-supplied handler wins — playgrounds wire real backends here.
             if (consumerCallService) return consumerCallService(service, action, params);
-            // Mock fallback: return a synthetic result that satisfies common
-            // service-atom emit shapes (id, clientSecret, success, status,
-            // params-echo). Mirrors OrbitalServerRuntime's mock-mode default
-            // so client-side state machines (offline preview, runtime-verify
-            // standalone) advance instead of stalling at null payloads. The
-            // server-side parallel exists for bridge mode where the SERVER
-            // processes call-service; this branch is the same intent for
-            // browser-only execution.
-            const mockId = `mock_${service}_${action}_${Math.random().toString(36).slice(2, 10)}`;
-            const paramsEcho: Partial<EntityRow> = {};
-            if (params) {
-                for (const [k, v] of Object.entries(params)) {
-                    if (v !== undefined && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null || v instanceof Date)) {
-                        paramsEcho[k] = v;
-                    }
-                }
-            }
-            return {
-                id: mockId,
-                clientSecret: `secret_${mockId}`,
-                success: true,
-                status: 'succeeded',
-                ...paramsEcho,
-            };
+            // Mock fallback: the registry-shaped answer every host's mock mode gives, so client-side state
+            // machines (offline preview, runtime-verify standalone) advance instead of stalling at null.
+            return mockCallService(service, action, params);
         },
 
         renderUI: (slot: string, pattern: PatternConfig | null, props?: PatternProps, priority?: number) => {

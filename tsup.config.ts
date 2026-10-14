@@ -5,6 +5,9 @@ export default defineConfig({
     index: 'src/index.ts',
     OrbitalServerRuntime: 'src/server/OrbitalServerRuntime.ts',
     ServerBridge: 'src/server/ServerBridge.ts',
+    // The kernel engine's host half (pure) and its Node-only loader for `@almadar/kernel`.
+    kernel: 'src/kernel/index.ts',
+    kernelNode: 'src/kernel/load-node.ts',
     // Renderer-agnostic UI contract. Any UI library (React, Web Components,
     // etc.) imports this surface and implements the framework-specific slot
     // manager / component registry on top of it.
@@ -38,5 +41,5 @@ export default defineConfig({
   // Top-level Node-only deps that must stay external so any consumer
   // (Node Express server, browser bundler) handles them correctly.
   // Browser bundlers substitute via the package.json `browser` field.
-  external: ['express', '@almadar/server', 'fs', 'fs/promises', 'path', 'net', 'child_process', 'url', 'module'],
+  external: ['express', '@almadar/server', '@almadar/core/language-data', 'fs', 'fs/promises', 'path', 'net', 'child_process', 'url', 'module'],
 });

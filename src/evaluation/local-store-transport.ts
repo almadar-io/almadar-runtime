@@ -11,6 +11,7 @@ import type { PersistenceAdapter } from '@almadar/core';
 import { createInProcessTransport, type EventTransport } from '../server/EventTransport.js';
 import type { TraitIndex } from '../traits/trait-index.js';
 import { InFlightCalls } from '../effects/in-flight-calls.js';
+import { browserLegCallService } from '../effects/defaultCallService.js';
 import type { CircuitStore } from './circuit-store.js';
 import { createIndexStageRunner } from './stage-runner.js';
 import { evaluateOrbitalEvent, type EvaluateOrbitalEventDeps } from './evaluateOrbitalEvent.js';
@@ -21,6 +22,7 @@ export interface LocalStoreTransportOptions {
   store: Pick<CircuitStore, 'frames' | 'manager'>;
   /** The resolved schema, so declared access policies apply in-process. */
   schema?: OrbitalSchema | null;
+  /** Answers every `call-service`; absent, a browser-only service is answered by the browser integrations and any other by the default provider. */
   callService?: EffectHandlers['callService'];
   /** The running app lent to `call-service` providers as the caller. */
   servicePorts?: ServerEffectStageDeps['servicePorts'];
@@ -48,7 +50,7 @@ export function createLocalStoreTransport(options: LocalStoreTransportOptions): 
         frames: store.frames,
         manager: store.manager,
         ...(options.schema !== undefined ? { schema: options.schema } : {}),
-        ...(options.callService !== undefined ? { extraEffectHandlers: { callService: options.callService } } : {}),
+        extraEffectHandlers: { callService: options.callService ?? browserLegCallService },
         ...(options.servicePorts !== undefined ? { servicePorts: options.servicePorts } : {}),
         ...(options.outsideEventQueue !== undefined ? { outsideEventQueue: options.outsideEventQueue } : {}),
         inFlightCalls,

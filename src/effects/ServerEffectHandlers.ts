@@ -47,6 +47,7 @@ import type { InFlightCalls } from "./in-flight-calls.js";
 import { createContextFromBindings } from "../evaluation/BindingResolver.js";
 import { evaluate } from "@almadar/evaluator";
 import { defaultCallService } from './defaultCallService.js';
+import { codeOf, noRowKeyFailure, notFoundFailure } from './persist-failure.js';
 import { createLogger } from '@almadar/logger';
 
 /** FATAL: re-measured and gated clean — a persist that resolves no row key
@@ -385,16 +386,14 @@ export function createServerEffectHandlers(
             const row = (data ?? {}) as EntityRow;
             const idOrFallback = (row.id as string | undefined) ?? entityId;
             if (idOrFallback) {
-              // `@update` is checked against the EXISTING row, read fresh — the
-              // incoming patch is what the caller wants, not what they may touch.
-              // Read only when a policy exists, so unpoliced entities keep today's
-              // single round-trip.
-              if (mutationPolicy !== undefined) {
-                const existing = await persistence.getById(type, idOrFallback);
-                if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings(type))) {
-                  deniedReason = 'access-denied';
-                  throw new Error(accessDeniedMessage("update", type));
-                }
+              // The row is read fresh before the write: absent is `not-found`, and
+              // `@update` is checked against the EXISTING row — the incoming patch is
+              // what the caller wants, not what they may touch.
+              const existing = await persistence.getById(type, idOrFallback);
+              if (existing === null) throw notFoundFailure(type, idOrFallback);
+              if (mutationPolicy !== undefined && !checkMutationAccess(existing, mutationPolicy, accessBindings(type))) {
+                deniedReason = 'access-denied';
+                throw new Error(accessDeniedMessage("update", type));
               }
               await persistence.update(type, idOrFallback, row);
               const updated = await persistence.getById(type, idOrFallback);
@@ -405,11 +404,7 @@ export function createServerEffectHandlers(
               effectLog.error('persist:no-row-key', { action, entityType: type });
               if (NO_ROW_KEY_IS_FATAL) {
                 deniedReason = 'no-row-key';
-                throw new Error(
-                  `persist ${action} ${type} resolved no row key — the id was neither `
-                  + `on the row being written nor on the request. Bind it before the `
-                  + `write, e.g. (set @entity.id ?row.id) on the transition that selects it.`,
-                );
+                throw noRowKeyFailure(action, type);
               }
             }
             break;
@@ -422,12 +417,11 @@ export function createServerEffectHandlers(
                 : undefined;
             const deleteId = directId ?? nestedId ?? entityId;
             if (deleteId) {
-              if (mutationPolicy !== undefined) {
-                const existing = await persistence.getById(type, deleteId);
-                if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings(type))) {
-                  deniedReason = 'access-denied';
-                  throw new Error(accessDeniedMessage("delete", type));
-                }
+              const existing = await persistence.getById(type, deleteId);
+              if (existing === null) throw notFoundFailure(type, deleteId);
+              if (mutationPolicy !== undefined && !checkMutationAccess(existing, mutationPolicy, accessBindings(type))) {
+                deniedReason = 'access-denied';
+                throw new Error(accessDeniedMessage("delete", type));
               }
               await persistence.delete(type, deleteId);
               resultData = { id: deleteId, deleted: true } as EntityRow;
@@ -436,11 +430,7 @@ export function createServerEffectHandlers(
               effectLog.error('persist:no-row-key', { action, entityType: type });
               if (NO_ROW_KEY_IS_FATAL) {
                 deniedReason = 'no-row-key';
-                throw new Error(
-                  `persist ${action} ${type} resolved no row key — the id was neither `
-                  + `on the row being written nor on the request. Bind it before the `
-                  + `write, e.g. (set @entity.id ?row.id) on the transition that selects it.`,
-                );
+                throw noRowKeyFailure(action, type);
               }
             }
             break;
@@ -457,6 +447,7 @@ export function createServerEffectHandlers(
             entityType: type,
             success: false,
             denied: true,
+            code: 'no-row-key',
             error: `persist ${action} ${type} resolved no row key`,
           });
           return undefined;
@@ -490,6 +481,7 @@ export function createServerEffectHandlers(
           action,
           entityType: type,
           ...(deniedReason !== undefined ? { denied: true as const } : {}),
+          ...codeOf(err),
           success: false,
           error: err instanceof Error ? err.message : String(err),
         });
@@ -749,14 +741,14 @@ export function createServerEffectHandlers(
     },
 
     renderUI: (slot, pattern, props, priority) => {
-      pushClientEffect(["render-ui", slot, pattern, props, priority]);
+      pushClientEffect(["render-ui", slot, pattern, props ?? null, priority ?? null]);
     },
 
     navigate: (path, params, crumb) => {
       if (crumb !== undefined) {
-        pushClientEffect(["navigate", path, params, { crumb }]);
+        pushClientEffect(["navigate", path, params ?? null, { crumb }]);
       } else {
-        pushClientEffect(["navigate", path, params]);
+        pushClientEffect(["navigate", path, params ?? null]);
       }
     },
 

@@ -16,7 +16,7 @@ import type {
     BrowserFilePickerOptions,
     BrowserGeolocationOptions,
 } from '../types.js';
-import { getOperatorRunsOn } from '@almadar/std/registry';
+import { effectSiteFor } from '@almadar/std/registry';
 import { HANDLER_MANIFEST } from '../types.js';
 import type { EffectDelegate } from './server-leg.js';
 import { untilAborted, type InFlightCalls } from './in-flight-calls.js';
@@ -154,7 +154,7 @@ function failureMessage(err: RuntimeValue): string {
     return String(err);
 }
 
-function issuePayload(issue: ProgramValidationIssue): EventPayload {
+export function issuePayload(issue: ProgramValidationIssue): EventPayload {
     const payload: EventPayload = { code: issue.code, message: issue.message };
     if (issue.path !== undefined) payload.path = issue.path;
     if (issue.line !== undefined) payload.line = issue.line;
@@ -312,13 +312,22 @@ export class EffectExecutor {
     }
 
     /**
-     * On a client host, hand a registry `runsOn: 'server'` effect to the
+     * Whether the server leg owns this call: its registry site is `server`, except a `call-service`
+     * to a browser-only service, which the client answers (twin of orbital-core `effect_site`).
+     * Browser-stored entity residence is the client-role fold's, not the executor's.
+     */
+    private runsOnServer(operator: string, args: RuntimeValue[]): boolean {
+        return effectSiteFor(operator, args, () => false) === 'server';
+    }
+
+    /**
+     * On a client host, hand a server-site effect to the
      * `delegate` instead of executing it (twin of `executor.rs`
      * `delegate_to_server`). Returns `true` when the caller must not also
      * execute it: delegated, or dropped as server-only with no delegate.
      */
     private delegateIfClient(operator: string, args: RuntimeValue[]): boolean {
-        if (this.environment !== 'client' || getOperatorRunsOn(operator) !== 'server') return false;
+        if (this.environment !== 'client' || !this.runsOnServer(operator, args)) return false;
         this.delegate?.delegate([operator, ...args], 'server');
         return true;
     }
@@ -1262,7 +1271,7 @@ export class EffectExecutor {
                 // Bridge mode (`EffectHandlers.callServiceDelegated`): the server
                 // already ran this call-service and its cascade carries the
                 // result — no local call, no local emit (mirrors `persistDelegated`).
-                if (this.handlers.callServiceDelegated === true) {
+                if (this.handlers.callServiceDelegated === true && this.runsOnServer('call-service', args)) {
                     effectLog.debug('call-service:delegated', { service, action, traitName: this.context.traitName, transition: this.context.transition });
                     break;
                 }

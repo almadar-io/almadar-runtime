@@ -4,7 +4,7 @@
  */
 import { createRequire } from 'node:module';
 
-import { behaviorRegistryDir, readBehaviorPackage } from '@almadar/core/behavior-package';
+import { behaviorRegistryDir, readBehaviorPackage, resolveOrbBinary } from '@almadar/core/behavior-package';
 import { dirname, join } from 'node:path';
 
 const require = createRequire(import.meta.url);
@@ -25,8 +25,17 @@ export const IO_REGISTRY = behaviorRegistryDir(readBehaviorPackage(IO_ROOT));
 /** This package's root: the cwd an `orb` spawn resolves `@almadar/std` / `@almadar-io/behaviors` from. */
 export const PACKAGE_ROOT = join(import.meta.dirname, '..', '..');
 
-/** Explicit dev compiler, otherwise the installed CLI used by standalone CI. */
-export const ORB_BIN = process.env.ORB_BIN ?? join(dirname(require.resolve('@almadar/orb/package.json')), 'bin', 'orb');
+/** The compiler the runtime itself reaches (`ORB_BIN`, `~/bin/orb`, PATH); a standalone checkout with none keeps its installed pin. */
+function resolveTestOrb(): string {
+  if (process.env.ORB_BIN) return resolveOrbBinary();
+  try {
+    return resolveOrbBinary();
+  } catch {
+    return join(dirname(require.resolve('@almadar/orb/package.json')), 'bin', 'orb');
+  }
+}
+
+export const ORB_BIN = resolveTestOrb();
 
 /** Spawn options for `orb`: behaviors from this package's `node_modules`, no dev-registry override. */
 export function orbSpawnEnv(): NodeJS.ProcessEnv {

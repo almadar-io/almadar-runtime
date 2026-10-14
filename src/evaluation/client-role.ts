@@ -179,13 +179,16 @@ function rowIdOf(row: EntityRow): string | undefined {
  * `writtenTraits` into every frame sharing their entity instance
  * (G-RUNTIME-026/027). Only written traits fan out, and last: the other
  * rows are echoes that may predate this write, and fanning one of those
- * would clobber the fresh row.
+ * would clobber the fresh row. A written trait whose pre-dispatch row is in
+ * `rowsBefore` fans only the fields it changed: two traits of one entity in
+ * one cascade each wrote their own fields, and the rest of a row is an echo.
  */
 function fanOutEntityRows(
   store: CircuitStore,
   traitIndex: TraitIndex,
   entityByTrait: Record<string, EntityRow>,
   writtenTraits: ReadonlySet<string>,
+  rowsBefore?: ReadonlyMap<string, EntityRow | undefined>,
 ): void {
   const merge = (frameKey: string, row: EntityRow): void => {
     const existing = store.frames.get(frameKey);
@@ -198,8 +201,14 @@ function fanOutEntityRows(
   for (const traitName of writtenTraits) {
     const row = entityByTrait[traitName];
     if (row === undefined) continue;
-    for (const frameKey of sameEntityFrameKeys(traitIndex, store, traitName, rowIdOf(row))) merge(frameKey, row);
+    const written = writtenFields(row, rowsBefore?.has(traitName) === true ? rowsBefore.get(traitName) ?? {} : undefined);
+    for (const frameKey of sameEntityFrameKeys(traitIndex, store, traitName, rowIdOf(row))) merge(frameKey, written);
   }
+}
+
+function writtenFields(row: EntityRow, before: EntityRow | undefined): EntityRow {
+  if (before === undefined) return row;
+  return Object.fromEntries(Object.entries(row).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(before[key])));
 }
 
 function restoreDispatch(store: CircuitStore, dispatch: ClientDispatch, cause: RollbackCause): void {
@@ -281,7 +290,7 @@ function createClientEffectRunner(
         addPattern: (slot, pattern, props, priority) => {
           pushClientEffect(
             priority !== undefined
-              ? ['render-ui', slot, pattern, props, priority]
+              ? ['render-ui', slot, pattern, props ?? null, priority]
               : props !== undefined ? ['render-ui', slot, pattern, props] : ['render-ui', slot, pattern],
           );
         },
@@ -290,7 +299,7 @@ function createClientEffectRunner(
         },
       },
       navigate: (path, params, crumb) => {
-        pushClientEffect(crumb !== undefined ? ['navigate', path, params, { crumb }] : ['navigate', path, params]);
+        pushClientEffect(crumb !== undefined ? ['navigate', path, params ?? null, { crumb }] : ['navigate', path, params ?? null]);
       },
       navigateBack: () => {
         pushClientEffect(['navigate-back']);
@@ -422,6 +431,7 @@ export async function dispatchWithServerLeg(
   }
 
   const executedTraitNames = new Set<string>();
+  const rowsBefore = new Map<string, EntityRow | undefined>();
   const firings = new Map<string, { event: string; fromState: string }>();
   const cascadeFirings: CascadeFiring[] = [];
   const collector = new ServerLegCollector();
@@ -429,6 +439,10 @@ export async function dispatchWithServerLeg(
     { traitIndex: opts.traitIndex, ...(opts.fullTraitIndex !== undefined ? { fullTraitIndex: opts.fullTraitIndex } : {}), store: opts.store, orbitalName: opts.orbitalName, ...i18nOpts(opts) },
     collector,
     (name, firing, step) => {
+      if (!rowsBefore.has(name)) {
+        const before = opts.store.frames.get(opts.traitIndex.byName.get(name)?.frameKey ?? name);
+        rowsBefore.set(name, before !== undefined ? { ...before } : undefined);
+      }
       executedTraitNames.add(name);
       if (firing === undefined) return;
       if (!firings.has(name)) firings.set(name, firing);
@@ -442,7 +456,7 @@ export async function dispatchWithServerLeg(
     { event: request.event, payload: request.payload, entityId, targetTrait: traitName, ...(request.runTick !== undefined ? { runTick: request.runTick } : {}) },
   );
 
-  if (response.entityByTrait) fanOutEntityRows(opts.store, opts.traitIndex, response.entityByTrait, executedTraitNames);
+  if (response.entityByTrait) fanOutEntityRows(opts.store, opts.traitIndex, response.entityByTrait, executedTraitNames, rowsBefore);
   opts.store.notify();
 
   const drained = collector.drain();
@@ -456,6 +470,10 @@ export async function dispatchWithServerLeg(
   // A local (hybrid) seed never needs the server for ITS OWN effects — but the
   // traits its cascade reached (a persistor, a refetching list) may.
   const downstreamNeedsServer = [...collector.delegatingTraits()].some((t) => t !== traitName);
+  // A server that holds circuit state never sees a client-only seed's own run, so when that run moved a
+  // trait the server holds, the seed's leg (which carries the states) goes out for the server to replay.
+  const movedServerHeld = hybrid && !opts.carriesCircuitState && [...executedTraitNames].some((t) =>
+    t !== traitName && opts.traitIndex.byName.get(t)?.dispatchMode !== 'hybridClientOnly');
   const browserStored = new Set(opts.traitIndex.allEntities.filter(storesRowsInBrowser).map((e) => e.name));
   // A trait the seed's cascade reached on a browser-leg event writes the browser
   // store; that store relays nothing, so the write goes as the trait's own request.
@@ -475,15 +493,15 @@ export async function dispatchWithServerLeg(
       ...offPage.map(({ emitted, target }) => offPageContinuation(emitted, target, request)),
       ...browserWrites.map((w) => browserWriteContinuation(w.firing, w.orbital, request)),
     ];
-  } else if (hybrid && !downstreamNeedsServer && drained.length === 0 && reachesOffPage) {
+  } else if (hybrid && !downstreamNeedsServer && !movedServerHeld && drained.length === 0 && reachesOffPage) {
     // LOLO §7: a client-only seed takes no server round trip of its own; only
     // the deliveries its emits owe off-page listeners leave the client.
     continuations = offPage.map(({ emitted, target }) => offPageContinuation(emitted, target, request));
-  } else if (drained.length > 0 || reachesOffPage) {
+  } else if (drained.length > 0 || reachesOffPage || movedServerHeld) {
     // A browser-stored entity's data effects run in the browser store, so a
     // client-only seed's browser-leg event owes that leg.
     const seedBrowserLeg = browserLegEvents(entry.traitDef, (t) => browserStored.has(t), entry.config, entry.irTrait.ticks).has(request.event);
-    if (hybrid && !downstreamNeedsServer && !reachesOffPage && !seedBrowserLeg) {
+    if (hybrid && !downstreamNeedsServer && !reachesOffPage && !seedBrowserLeg && !movedServerHeld) {
       clientRoleLog.error('hybrid-trait-produced-server-leg', {
         trait: traitName,
         event: request.event,

@@ -14,6 +14,7 @@ import {
   isInlineTrait,
   isEntityCall,
   normalizeCallSiteConfigToValues,
+  unwrapTraitRef,
   type Entity,
   type OrbitalDefinition,
   type Trait,
@@ -44,16 +45,12 @@ export function parseOrbitalTraits(orbital: OrbitalDefinition): ParsedOrbitalTra
   // name, so effects can read `@config.X`.
   const configByTrait = new Map<string, TraitConfig>();
   const unwrapped = (orbital.traits || []).map((t) => {
-    if (t && typeof t === "object" && "ref" in t && "_resolved" in t) {
-      const wrapper = t as { _resolved: Trait; config?: TraitConfig };
-      const inner = wrapper._resolved;
-      const normalizedConfig = normalizeCallSiteConfigToValues(wrapper.config);
-      if (normalizedConfig && inner?.name) {
-        configByTrait.set(inner.name, normalizedConfig);
-      }
-      return inner;
+    const { trait, config } = unwrapTraitRef(t);
+    const normalizedConfig = normalizeCallSiteConfigToValues(config);
+    if (normalizedConfig && typeof trait !== "string" && isInlineTrait(trait) && trait.name) {
+      configByTrait.set(trait.name, normalizedConfig);
     }
-    return t;
+    return trait;
   });
   const inlineTraits = unwrapped.filter(isInlineTrait);
   const traits: TraitDefinition[] = inlineTraits.map((t: Trait) => {

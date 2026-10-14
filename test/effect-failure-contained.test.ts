@@ -61,6 +61,16 @@ describe('a failing effect stops only its own transition', () => {
     expect(rendered(r, 'Broken')).not.toContain('after');
   });
 
+  it('the failing transition delivers none of its client effects, not even those before the throw', async () => {
+    const r = await evaluateOrbitalEvent(deps(schema(throwing)), mount);
+    expect(rendered(r, 'Broken')).toEqual([]);
+  });
+
+  it('control: a later effect of a non-failing transition still runs', async () => {
+    const r = await evaluateOrbitalEvent(deps(schema([render('before'), ['set', '@entity.ok', true], render('after')])), mount);
+    expect(rendered(r, 'Broken')).toEqual(['before', 'after']);
+  });
+
   it('the stateful server path answers success with the other trait settled', async () => {
     const runtime = new OrbitalServerRuntime({ persistence: new InMemoryPersistence(), debug: false });
     await runtime.register(schema(throwing));

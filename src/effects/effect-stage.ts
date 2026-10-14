@@ -60,9 +60,10 @@ import {
 import { entityAccessPolicies } from '@almadar/core/mock';
 import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from '../entities/entityAccess.js';
 import { findEntityAmongOrbitals } from '../traits/OrbitalTraitParsing.js';
-import { defaultCallService } from './defaultCallService.js';
+import { defaultCallService, mockCallService } from './defaultCallService.js';
 import type { InFlightCalls } from './in-flight-calls.js';
 import { getPatternFieldsContract } from '@almadar/core/patterns';
+import { codeOf, noRowKeyFailure, notFoundFailure } from './persist-failure.js';
 
 const effectLog = createLogger("almadar:runtime:effects");
 const busLog = createLogger("almadar:runtime:bus");
@@ -637,12 +638,11 @@ export async function runServerEffectStage(
           case "update":
             if (data?.id || entityId) {
               const updateId = (data?.id as string) || entityId!;
-              if (mutationPolicy !== undefined) {
-                const existing = await deps.persistence.getById(type, updateId);
-                if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings)) {
-                  deniedReason = 'access-denied';
-                  throw new Error(accessDeniedMessage('update', type));
-                }
+              const existing = await deps.persistence.getById(type, updateId);
+              if (existing === null) throw notFoundFailure(type, updateId);
+              if (mutationPolicy !== undefined && !checkMutationAccess(existing, mutationPolicy, accessBindings)) {
+                deniedReason = 'access-denied';
+                throw new Error(accessDeniedMessage('update', type));
               }
               await deps.persistence.update(type, updateId, data || {});
               // Return the updated entity
@@ -660,11 +660,7 @@ export async function runServerEffectStage(
               effectLog.error('persist:no-row-key', { action, entityType: type });
               if (NO_ROW_KEY_IS_FATAL) {
                 deniedReason = 'no-row-key';
-                throw new Error(
-                  `persist ${action} ${type} resolved no row key — the id was neither `
-                  + `on the row being written nor on the request. Bind it before the `
-                  + `write, e.g. (set @entity.id ?row.id) on the transition that selects it.`,
-                );
+                throw noRowKeyFailure(action, type);
               }
             }
             break;
@@ -680,12 +676,11 @@ export async function runServerEffectStage(
               : undefined;
             const deleteId = directId ?? nestedId ?? entityId;
             if (deleteId) {
-              if (mutationPolicy !== undefined) {
-                const existing = await deps.persistence.getById(type, deleteId);
-                if (!existing || !checkMutationAccess(existing, mutationPolicy, accessBindings)) {
-                  deniedReason = 'access-denied';
-                  throw new Error(accessDeniedMessage('delete', type));
-                }
+              const existing = await deps.persistence.getById(type, deleteId);
+              if (existing === null) throw notFoundFailure(type, deleteId);
+              if (mutationPolicy !== undefined && !checkMutationAccess(existing, mutationPolicy, accessBindings)) {
+                deniedReason = 'access-denied';
+                throw new Error(accessDeniedMessage('delete', type));
               }
               // Enforce onDelete relation rules before deleting
               await deps.enforceOnDeleteRules?.(type, deleteId);
@@ -696,11 +691,7 @@ export async function runServerEffectStage(
               effectLog.error('persist:no-row-key', { action, entityType: type });
               if (NO_ROW_KEY_IS_FATAL) {
                 deniedReason = 'no-row-key';
-                throw new Error(
-                  `persist ${action} ${type} resolved no row key — the id was neither `
-                  + `on the row being written nor on the request. Bind it before the `
-                  + `write, e.g. (set @entity.id ?row.id) on the transition that selects it.`,
-                );
+                throw noRowKeyFailure(action, type);
               }
             }
             break;
@@ -719,6 +710,7 @@ export async function runServerEffectStage(
             entityType: type,
             success: false,
             denied: true,
+            code: 'no-row-key',
             error: `persist ${action} ${type} resolved no row key`,
           });
           return undefined;
@@ -754,6 +746,7 @@ export async function runServerEffectStage(
           entityType: type,
           success: false,
           ...(deniedReason !== undefined ? { denied: true as const } : {}),
+          ...codeOf(err),
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -795,31 +788,7 @@ export async function runServerEffectStage(
           const provider = deps.extraEffectHandlers.callService;
           result = await awaitProvider(() => provider(service, action, params, callContext));
         } else if (deps.mockMode === true) {
-          // Mock mode: return a useful default so service-atom chains
-          // (e.g. std-service-stripe createPaymentIntent → PAYMENT_CREATED
-          // → confirmPayment → PAYMENT_CONFIRMED) advance instead of
-          // stalling at an empty payload. Fields cover the common
-          // service-result shapes:
-          //   - `id` / `clientSecret` for payment-intent style results
-          //   - `success` / `status` for boolean-ish action results
-          //   - `result` (object) for actions that wrap a result
-          //   - echo `params` so consumers reading the request shape see it
-          const mockId = `mock_${service}_${action}_${Math.random().toString(36).slice(2, 10)}`;
-          const paramsEcho: Partial<EntityRow> = {};
-          if (params) {
-            for (const [k, v] of Object.entries(params)) {
-              if (v !== undefined && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null || v instanceof Date)) {
-                paramsEcho[k] = v;
-              }
-            }
-          }
-          result = {
-            id: mockId,
-            clientSecret: `secret_${mockId}`,
-            success: true,
-            status: 'succeeded',
-            ...paramsEcho,
-          } as EntityRow;
+          result = await awaitProvider(() => mockCallService(service, action, params));
         } else {
           result = await awaitProvider(() =>
             defaultCallService(service, action, params, callContext),
@@ -1136,13 +1105,13 @@ export async function runServerEffectStage(
         entityRowId: typeof entityRow?.id === 'string' ? entityRow.id : undefined,
         entityIsObject: entityRow !== null,
       });
-      pushClientEffect(['render-ui', slot, pattern, props, priority]);
+      pushClientEffect(['render-ui', slot, pattern, props ?? null, priority ?? null]);
     },
     navigate: (path, params, crumb) => {
       if (crumb !== undefined) {
-        pushClientEffect(['navigate', path, params, { crumb }]);
+        pushClientEffect(['navigate', path, params ?? null, { crumb }]);
       } else {
-        pushClientEffect(['navigate', path, params]);
+        pushClientEffect(['navigate', path, params ?? null]);
       }
     },
 
@@ -1228,9 +1197,7 @@ export async function runServerEffectStage(
   // siblings, so the nav is assembled from the union of root pages across
   // ALL registered orbitals (deduped by path). Mirrors the compiler's
   // resolver in `resolve_to_oir`. `@currentTheme` stays per-orbital.
-  if (deps.sigilPages.length > 0) {
-    bindings.pages = deps.sigilPages;
-  }
+  bindings.pages = deps.sigilPages;
   bindings.currentTheme = deps.sigilTheme;
 
   // `@entity` resolves to a three-layer merge (outermost wins):

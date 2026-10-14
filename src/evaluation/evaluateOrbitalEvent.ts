@@ -79,6 +79,7 @@ import type { PersistenceAdapter } from '@almadar/core';
 import { DispatchVisits, type DeliveryRecord, type SExpr } from '@almadar/core';
 import { isLifecycleEvent, type MountLifecycle } from './mount-lifecycle.js';
 import { DispatchMemory } from './dispatch-memory.js';
+import { evaluateOnKernel, type KernelEvaluation } from '../kernel/engine.js';
 
 const evaluateLog = createLogger('almadar:runtime:evaluate');
 
@@ -91,6 +92,9 @@ const evaluateLog = createLogger('almadar:runtime:evaluate');
  * a warning, never silent (G-RUNTIME-027).
  */
 const CROSS_TRAIT_CASCADE_CAP = 2000;
+
+/** The id an id-less `[runtime]` row is addressed by: the Rust kernel's address (drift D-5). */
+const RUNTIME_ROW_ADDRESS = 'singleton';
 
 /** Per-trait effect execution, supplied by the host. The host resolves
  *  the trait's own stage deps (its entity, frame key, orbital identity)
@@ -143,7 +147,7 @@ export interface EvaluateOrbitalEventDeps {
   logContext?: { behavior?: string; orbitalName?: string };
   /**
    * The stateless round-trip contract: a `[runtime]` entity's own row is
-   * addressed via the literal sentinel id `'runtime'` when no explicit id
+   * addressed via the literal id `'singleton'` (the Rust kernel's address) when no explicit id
    * is present (the client holds that singleton row across requests). The
    * stateful server has no such contract — its `[runtime]` frames live in
    * the `frames` map only — so it leaves this unset.
@@ -160,6 +164,11 @@ export interface EvaluateOrbitalEventDeps {
   mount?: MountLifecycle<WorklistItem>;
   /** `@event` for the seed when it is itself a delivery (a relayed or folded emit); a direct dispatch has none. */
   seedDelivery?: DeliveryRecord;
+  /**
+   * Run the request on the Rust kernel (`@almadar/kernel`) instead of this composition: the kernel decides
+   * every step, the host answers its I/O. Absent = this composition (the default).
+   */
+  kernel?: KernelEvaluation;
 }
 
 /** One dispatched trait's per-step effect output (see `runTraitCascade`). */
@@ -221,6 +230,7 @@ export async function evaluateOrbitalEvent(
   deps: EvaluateOrbitalEventDeps,
   request: OrbitalEventRequest,
 ): Promise<OrbitalEventResponse> {
+  if (deps.kernel !== undefined) return evaluateOnKernel(deps.kernel, request, deps.user, deps.locale);
   const { traitIndex, manager, persistence, frames } = deps;
   const now = deps.now ?? Date.now();
   const event = request.event;
@@ -259,11 +269,11 @@ export async function evaluateOrbitalEvent(
   // Where a trait's state lives absent a forwarded id: the stateless
   // `[runtime]` sentinel. Carried states seed here so every step finds them.
   const defaultAddress = (entry: IndexedTrait | undefined): string | undefined =>
-    deps.runtimeRowSentinel === true && entry !== undefined && isRuntimeEntity(entry.entity) ? 'runtime' : undefined;
+    deps.runtimeRowSentinel === true && entry !== undefined && isRuntimeEntity(entry.entity) ? RUNTIME_ROW_ADDRESS : undefined;
   const carriedAddress = (trait: string): string | undefined =>
     entityId ?? defaultAddress(traitIndex.byName.get(trait));
   // Per-trait directly-addressed row ids (a round-tripped row carrying an
-  // id — including the `'runtime'` sentinel — keeps its own addressing).
+  // id — including the `'singleton'` sentinel — keeps its own addressing).
   const traitEntityIds = new Map<string, string>();
   if (request.entityByTrait) {
     for (const [traitName, row] of Object.entries(request.entityByTrait)) {
@@ -273,7 +283,7 @@ export async function evaluateOrbitalEvent(
         traitEntityIds.set(traitName, rowId);
         // A `[runtime]` entity has no authoritative store — the client's
         // round-trip IS the source of truth (the id is only addressing, the
-        // `'runtime'` sentinel included). Fold the row into the frame like
+        // `'singleton'` sentinel included). Fold the row into the frame like
         // an id-less one so `set`-written fields survive the round-trip; a
         // persisted read (the host's mock seed) merges underneath it.
         if (entry && isRuntimeEntity(entry.entity)) {

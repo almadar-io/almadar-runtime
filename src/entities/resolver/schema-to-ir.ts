@@ -242,6 +242,7 @@ function resolveTrait(trait: Trait, source: 'schema' | 'library' | 'inline'): Re
       effects: (tick.effects || []) as SExpr[],
       priority: tick.priority ?? 0,
       appliesTo: tick.appliesTo || [],
+      whileVisible: tick.whileVisible === true,
     })),
     listens: (trait.listens || []).map((listen): ResolvedTraitListener => ({
       event: listen.event || '',

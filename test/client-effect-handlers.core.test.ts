@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createClientEffectHandlers } from '../src/effects/ClientEffectHandlers.js';
 import type { EntityRow } from '../src/types.js';
+import { mockServiceAnswer } from '@almadar/core/mock';
 import type { BusEventSource } from '@almadar/core';
+import { mockCallService } from '../src/effects/defaultCallService.js';
 
 // Coverage for the two behaviors folded in from @almadar/ui's copy that had
 // no prior test anywhere (docs/Almadar_Runtime_Stateless_Stateful_PLAN.md §4.2):
@@ -51,16 +53,27 @@ describe('createClientEffectHandlers — liveEntity-backed set', () => {
     });
 });
 
-describe('createClientEffectHandlers — callService mock fallback shape', () => {
-    it('echoes primitive params and mints an id/clientSecret pair', async () => {
-        const h = createClientEffectHandlers({
-            eventBus: { emit: vi.fn() },
-            slotSetter: { addPattern: vi.fn(), clearSlot: vi.fn() },
-        });
-        const result = await h.callService('payments', 'charge', { amount: 100, note: 'x' });
-        expect(result).toMatchObject({ success: true, status: 'succeeded', amount: 100, note: 'x' });
-        expect(String(result?.id)).toMatch(/^mock_payments_charge_/);
-        expect(String(result?.clientSecret)).toMatch(/^secret_mock_payments_charge_/);
+describe('createClientEffectHandlers — callService mock fallback', () => {
+    const make = () => createClientEffectHandlers({
+        eventBus: { emit: vi.fn() },
+        slotSetter: { addPattern: vi.fn(), clearSlot: vi.fn() },
+    });
+
+    it('answers with the registry-shaped mock the server path gives (one mock source)', async () => {
+        const params = { amount: 100, currency: 'usd' };
+        const expected = mockServiceAnswer('stripe', 'createPaymentIntent', params);
+        if (!expected.ok) throw new Error('control: stripe.createPaymentIntent is in the registry');
+        expect(await make().callService('stripe', 'createPaymentIntent', params)).toEqual(expected.value);
+        expect(await mockCallService('stripe', 'createPaymentIntent', params)).toEqual(expected.value);
+    });
+
+    it('refuses a service the registry does not declare, as the server mock does', async () => {
+        await expect(make().callService('payments', 'charge', { amount: 100 })).rejects.toThrow('Unknown service: payments');
+        await expect(mockCallService('payments', 'charge', { amount: 100 })).rejects.toThrow('Unknown service: payments');
+    });
+
+    it('refuses an action the service does not declare', async () => {
+        await expect(make().callService('stripe', 'charge', {})).rejects.toThrow('No mock response for action: charge');
     });
 
     it('runs the consumer-supplied handler instead of the mock when provided', async () => {

@@ -17,7 +17,7 @@ const schema: OrbitalSchema = {
   orbitals: [
     {
       name: 'ShellOrbital',
-      theme: 'ocean',
+      theme: 'ocean-light',
       entity: { name: 'Shell', persistence: 'runtime', fields: [{ name: 'id', type: 'string' }] },
       traits: [{
         name: 'Layout', scope: 'instance', linkedEntity: 'Shell',

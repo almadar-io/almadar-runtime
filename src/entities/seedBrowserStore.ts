@@ -10,11 +10,14 @@ import type { OrbitalEntity } from '@almadar/core';
 import { instancesForLocale } from '@almadar/core';
 import type { EntityRow } from '../types.js';
 import type { PersistenceAdapter } from '@almadar/core';
-import { MockPersistenceAdapter, entitySchemaOf } from '@almadar/db/mock';
+import { MockPersistenceAdapter, entitySchemaOf, stampSeedTimestamps } from '@almadar/db/mock';
 
 function seedRows(entity: OrbitalEntity, locale: string | undefined): EntityRow[] {
   const written = instancesForLocale(entity, locale);
-  if (written.length > 0) return written;
+  if (written.length > 0) {
+    const seededAt = new Date().toISOString();
+    return written.map((row) => stampSeedTimestamps(row, seededAt));
+  }
   if (!entity.seedMock) return [];
   const mock = new MockPersistenceAdapter();
   mock.registerEntity(entitySchemaOf(entity));

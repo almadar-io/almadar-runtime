@@ -46,7 +46,6 @@ const PRIMITIVE_TYPE_ARG_NAMES = new Set<string>([
   "timestamp",
   "object",
   "sexpr",
-  "scalar",
 ]);
 
 /** The synthetic field name `orbital-lolo` gives a payload lowered from a

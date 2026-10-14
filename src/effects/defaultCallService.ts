@@ -5,6 +5,8 @@
  * @almadar/integrations away), so a client bundle never pulls provider SDKs.
  */
 import type { EventPayload, ServiceParams } from '@almadar/core';
+import { mockServiceAnswer } from '@almadar/core/mock';
+import { isBrowserOnlyService } from '@almadar/core/patterns';
 import type { IntegrationCallContext } from '@almadar/integrations';
 
 type ServiceCall = (
@@ -37,4 +39,41 @@ export async function defaultCallService(
 ): Promise<EventPayload | null> {
   loaded ??= load();
   return (await loaded)(service, action, params, context);
+}
+
+let loadedBrowser: Promise<ServiceCall> | null = null;
+
+async function loadBrowser(): Promise<ServiceCall> {
+  const { BROWSER_SERVICES, createBrowserCallService, webBrowserServices } = await import('@almadar/integrations/browser');
+  return createBrowserCallService(webBrowserServices(BROWSER_SERVICES));
+}
+
+/**
+ * The call-service provider of a browser leg (a local store, no server): a browser-only service is
+ * answered by the web-hosted browser integrations, since the node integrations
+ * (`@almadar/integrations/runtime`) do not exist in a browser; any other service takes the default.
+ */
+export async function browserLegCallService(
+  service: string,
+  action: string,
+  params: ServiceParams | undefined,
+  context?: IntegrationCallContext,
+): Promise<EventPayload | null> {
+  if (!isBrowserOnlyService(service)) return defaultCallService(service, action, params, context);
+  loadedBrowser ??= loadBrowser();
+  return (await loadedBrowser)(service, action, params, context);
+}
+
+/**
+ * Mock-mode `call-service`: the registry-shaped answer (`@almadar/core` `mockServiceAnswer`), the same one
+ * every host's mock mode gives. Pure and browser-safe, so an in-browser mock runtime answers too.
+ */
+export async function mockCallService(
+  service: string,
+  action: string,
+  params: ServiceParams | undefined,
+): Promise<EventPayload | null> {
+  const answer = mockServiceAnswer(service, action, params ?? {});
+  if (!answer.ok) throw new Error(answer.message);
+  return answer.value;
 }

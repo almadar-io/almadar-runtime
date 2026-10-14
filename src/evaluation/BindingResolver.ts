@@ -292,7 +292,7 @@ export function deferEntityBindings(value: SExpr, ctx: EvaluationContext, config
         return interpolateValue(value, ctx) as RuntimePatternValue | Date;
     }
     if (Array.isArray(value)) {
-        if (value.length === 3 && value[0] === 'fn' && typeof value[1] === 'string') {
+        if (isRenderLambda(value)) {
             return resolveConfigLeavesInLambdaBody(value, ctx);
         }
         if (isSExpression(value)) {
@@ -434,8 +434,7 @@ function interpolateArray(value: RuntimeValue[], ctx: EvaluationContext): Runtim
     // Filter atom's chips empty. Preserve the raw array (with deep
     // recursion into the body so nested `@<arg>.*` placeholders and
     // any other inner SExpressions stay intact) instead.
-    if (Array.isArray(value) && value.length === 3 && value[0] === 'fn'
-        && typeof value[1] === 'string') {
+    if (Array.isArray(value) && isRenderLambda(value)) {
         // Same asymmetry as the deferring twin: `@config.*` inside a lambda
         // body is resolved by no layer downstream, so resolve it here.
         return resolveConfigLeavesInLambdaBody(value, ctx);
@@ -489,6 +488,14 @@ function interpolateArray(value: RuntimeValue[], ctx: EvaluationContext): Runtim
         if (interpolated !== item) anyChanged = true;
     }
     return anyChanged ? mapped : value;
+}
+
+/** `["fn", param, body]` or the grouped `["fn", [param…], body]` — the forms `@almadar/ui`'s `isFnFormLambda` converts. */
+function isRenderLambda(value: RuntimeValue[]): boolean {
+    if (value.length !== 3 || value[0] !== 'fn') return false;
+    const params = value[1];
+    return typeof params === 'string'
+        || (Array.isArray(params) && params.length > 0 && params.every((p) => typeof p === 'string'));
 }
 
 function isFnForm(node: RuntimeValue): boolean {
