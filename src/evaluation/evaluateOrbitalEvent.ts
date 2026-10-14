@@ -835,7 +835,6 @@ export async function evaluateOrbitalEvent(
           fromAtDelivery: true,
           event: target.triggers,
           payload: target.payload,
-          ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
           // Withheld only when the requester's page is KNOWN and excludes it
           // — the client filters renders by its own mounted set anyway.
           onPage: activeTraits === undefined || activeTraits.has(target.listenerTrait) || requesterTraits.has(target.listenerTrait),
@@ -964,7 +963,6 @@ export interface CollectedListenerTarget {
   triggers: string;
   triggersId?: EventId;
   payload: EventPayload | undefined;
-  entityId: string | undefined;
 }
 
 /**
@@ -1024,9 +1022,6 @@ export function collectListenerTargets(
         payload,
         evaluateListenPayloadExpr,
       );
-      const pickId = (field: string): string | undefined =>
-        (mappedPayload?.[field] as string | undefined) ?? (payload?.[field] as string | undefined);
-
       targets.push({
         listenerTrait: listenerName,
         entry: listenerEntry,
@@ -1034,7 +1029,6 @@ export function collectListenerTargets(
         triggers: listener.triggers,
         ...(listener.triggersId !== undefined ? { triggersId: listener.triggersId } : {}),
         payload: mappedPayload,
-        entityId: pickId('entityId') ?? pickId('orbitalName'),
       });
     }
   }

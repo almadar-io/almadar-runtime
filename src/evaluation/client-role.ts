@@ -562,7 +562,6 @@ function offPageContinuation(emitted: Emitted, target: CollectedListenerTarget, 
     request: {
       event: target.triggers,
       ...(target.payload !== undefined ? { payload: target.payload } : {}),
-      ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
       targetTrait: target.listenerTrait,
       ...(request.clientId !== undefined ? { clientId: request.clientId } : {}),
       delivery: deliveryOf(emitted),
@@ -820,8 +819,7 @@ export async function applyOrbitalEventResponse(
         fromAtDelivery: true,
         event: target.triggers,
         payload: target.payload,
-        ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
-        onPage: true,
+          onPage: true,
         delivery,
         ...(target.listener.guard !== undefined ? { listenGuard: target.listener.guard as SExpr } : {}),
       });
@@ -845,8 +843,7 @@ export async function applyOrbitalEventResponse(
         ownContinuations.push({
           event: target.triggers,
           ...(target.payload !== undefined ? { payload: target.payload } : {}),
-          ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
-          targetTrait: target.listenerTrait,
+              targetTrait: target.listenerTrait,
           delivery,
         });
         continue;
@@ -871,7 +868,6 @@ export async function applyOrbitalEventResponse(
         {
           event: target.triggers,
           payload: target.payload,
-          entityId: target.entityId,
           targetTrait: target.listenerTrait,
         },
       );

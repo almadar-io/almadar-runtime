@@ -2715,9 +2715,9 @@ export class OrbitalServerRuntime {
             }),
           },
         )) {
-          const from = registered.manager.getState(target.listenerTrait, target.entityId)?.currentState ??
+          const from = registered.manager.getState(target.listenerTrait)?.currentState ??
             findInitialState(target.entry.traitDef);
-          const frame = await readTraitFrame(this.persistence, registered.traitFieldStates, target.entry, target.entityId);
+          const frame = await readTraitFrame(this.persistence, registered.traitFieldStates, target.entry, undefined);
           const relayTrait = `${orbitalName}\u0000${target.listenerTrait}`;
           if (opts.visited.has(relayTrait, target.triggers, from, target.payload, frame)) continue;
           if (hops >= CROSS_ORBITAL_RELAY_CAP) {
@@ -2740,7 +2740,6 @@ export class OrbitalServerRuntime {
                 event: target.triggers,
                 ...(target.triggersId !== undefined ? { eventId: target.triggersId } : {}),
                 ...(target.payload !== undefined ? { payload: target.payload } : {}),
-                ...(target.entityId !== undefined ? { entityId: target.entityId } : {}),
                 targetTrait: target.listenerTrait,
               },
             );
