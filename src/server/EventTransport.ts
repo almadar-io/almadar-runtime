@@ -18,10 +18,13 @@
 import { createLogger } from '@almadar/logger';
 import {
   OrbitalRegisterResponseSchema,
+  RowQueryPageSchema,
   type EmittedEvent,
   type OrbitalEventRequest,
   type OrbitalEventResponse,
   type OrbitalSchema,
+  type RowQueryPage,
+  type RowSetRef,
   type ServerTopology,
 } from '@almadar/core';
 
@@ -73,6 +76,12 @@ export interface EventTransport {
   unregister(): Promise<void>;
   /** Play one event through the orbital named `orbitalName`. */
   send(orbitalName: string, request: OrbitalEventRequest): Promise<OrbitalEventResponse>;
+  /**
+   * A row-set reference resolved by the host that holds the rows, for the viewer the transport is signed in as (the
+   * host applies `@read`): the rows that still match, in the reference's order. Absent when the transport has no
+   * such route (an in-process evaluator resolves against its own store).
+   */
+  resolveRows?(reference: RowSetRef): Promise<RowQueryPage>;
   /**
    * Subscribe to server-pushed cascade events (e.g. another client's
    * persist-envelope emits, Almadar_Live_Push.md). Absent when the
@@ -330,6 +339,12 @@ export function createHttpTransport(options: HttpTransportOptions): EventTranspo
         compress,
       );
       return (await res.json()) as OrbitalEventResponse;
+    },
+
+    async resolveRows(reference) {
+      const res = await jsonPost(fetchFn, `${serverUrl}/resolve-rows`, { ref: reference }, getAccessToken, compress);
+      if (!res.ok) throw new Error(`resolve-rows: the server answered ${res.status}`);
+      return RowQueryPageSchema.parse(await res.json());
     },
 
     subscribe(onPush, params = {}) {

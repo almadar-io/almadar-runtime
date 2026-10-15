@@ -71,7 +71,7 @@ describe('call-service key + cancel-call', () => {
         calls[0].resolve({ answer: 1 });
         await pending;
         expect(calls[0].context?.signal?.aborted).toBe(false);
-        expect(emitted).toEqual([{ event: 'OK', payload: { answer: 1 } }]);
+        expect(emitted).toEqual([{ event: 'OK', payload: { answer: 1, key: 'job-1' } }]);
     });
 
     it('control: a keyed call whose provider fails routes to failure', async () => {
@@ -80,7 +80,7 @@ describe('call-service key + cancel-call', () => {
         await flush();
         calls[0].reject(new Error('boom'));
         await pending;
-        expect(emitted).toEqual([{ event: 'ERR', payload: { error: 'boom' } }]);
+        expect(emitted).toEqual([{ event: 'ERR', payload: { error: 'boom', key: 'job-1' } }]);
     });
 
     it('control: an unkeyed call is unaffected by a cancel-call of some key', async () => {
@@ -115,7 +115,7 @@ describe('call-service key + cancel-call', () => {
         calls[0].resolve({ answer: 3 });
         await pending;
         await run(['cancel-call', 'job-1']);
-        expect(emitted).toEqual([{ event: 'OK', payload: { answer: 3 } }]);
+        expect(emitted).toEqual([{ event: 'OK', payload: { answer: 3, key: 'job-1' } }]);
         expect(registry.inFlight('job-1')).toBe(false);
     });
 
@@ -131,7 +131,7 @@ describe('call-service key + cancel-call', () => {
         await b;
         expect(emitted).toEqual([
             { event: 'CANCELLED', payload: { key: 'a' } },
-            { event: 'OK', payload: { done: true } },
+            { event: 'OK', payload: { done: true, key: 'b' } },
         ]);
     });
 
@@ -178,5 +178,39 @@ describe('cancel-call placement', () => {
         const server = new EffectExecutor({ handlers: stub(), bindings: {}, context, environment: 'server', delegate: collector, inFlightCalls: registry });
         await server.execute(['cancel-call', 'job-1']);
         expect(collector.drain()).toEqual([]);
+    });
+});
+
+describe('keyed call-service payloads carry the key (D-A82)', () => {
+    it('keyed success has key beside the result fields; unkeyed has none', async () => {
+        const keyed = app();
+        const p1 = keyed.run(call('job-1', ALL));
+        await flush();
+        keyed.calls[0].resolve({ answer: 1 });
+        await p1;
+        expect(keyed.emitted).toEqual([{ event: 'OK', payload: { answer: 1, key: 'job-1' } }]);
+
+        const plain = app();
+        const p2 = plain.run(call(undefined, ALL));
+        await flush();
+        plain.calls[0].resolve({ answer: 1 });
+        await p2;
+        expect(plain.emitted).toEqual([{ event: 'OK', payload: { answer: 1 } }]);
+    });
+
+    it('keyed failure has key; unkeyed failure has none', async () => {
+        const keyed = app();
+        const p1 = keyed.run(call('job-1', ALL));
+        await flush();
+        keyed.calls[0].reject(new Error('boom'));
+        await p1;
+        expect(keyed.emitted).toEqual([{ event: 'ERR', payload: { error: 'boom', key: 'job-1' } }]);
+
+        const plain = app();
+        const p2 = plain.run(call(undefined, ALL));
+        await flush();
+        plain.calls[0].reject(new Error('boom'));
+        await p2;
+        expect(plain.emitted).toEqual([{ event: 'ERR', payload: { error: 'boom' } }]);
     });
 });

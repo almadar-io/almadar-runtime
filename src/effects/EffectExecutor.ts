@@ -7,7 +7,8 @@
  * @packageDocumentation
  */
 
-import type { EmitConfig, FetchOptions, PatternConfig } from '@almadar/core';
+import { isJsonObject } from '@almadar/core';
+import type { EmitConfig, FetchOptions, HttpStreamEvent, JsonObject, PatternConfig } from '@almadar/core';
 import type {
     EffectHandlers,
     EffectContext,
@@ -20,15 +21,16 @@ import { effectSiteFor } from '@almadar/std/registry';
 import { HANDLER_MANIFEST } from '../types.js';
 import type { EffectDelegate } from './server-leg.js';
 import { untilAborted, type InFlightCalls } from './in-flight-calls.js';
-import { interpolateValue, createContextFromBindings, deferEntityBindings } from '../evaluation/BindingResolver.js';
-import type { BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from '../types.js';
+import { credentialForgetPayload, credentialStatusPayload, HttpEffectFailure, HttpUnavailableError, randomBytesPayload, runHttpCall, type HttpCall, type HttpPorts } from '../kernel/http-exchange.js';
+import { interpolateValue, createContextFromBindings, deferEntityBindings, extractBindings } from '../evaluation/BindingResolver.js';
+import type { ServiceMessageRoute, BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from '../types.js';
 import { omitFrameFields,
     isPersistBatchOperation,
     isRuntimeEntity,
     storesRowsInBrowser,
 } from '@almadar/core';
 import { RESERVED_FIELD_NAMES } from '@almadar/core/mock';
-import { JsonValueSchema } from '@almadar/core';
+import { JsonValueSchema, rowSetMarker } from '@almadar/core';
 import type { ProgramEffectName } from '@almadar/integrations/program';
 import type { FieldValue, SExpr, Orbital, OrbitalDefinition, OrbitalSchema, ProgramValidationIssue, TraitConfig, RuntimeValue, EntityField, Entity, JsonValue } from '@almadar/core';
 import type { ComposeBehaviorsInput, EventWiringEntry } from './composition/index.js';
@@ -135,6 +137,10 @@ export interface EffectExecutorOptions {
      * when the call ends, for the host to run as its own dispatch. Absent: the call is awaited.
      */
     deferCallOutcome?: (event: string, payload: EventPayload | undefined) => void;
+    /** The `http` effect's ports (kernel builder, secrets, egress); absent, an `http` effect fails with `HTTP_KERNEL_UNAVAILABLE`. */
+    http?: HttpPorts;
+    /** Deliver one live message of a running call (`emit.onMessage`) to the requesting client only, never in-band. */
+    deliverLive?: (route: ServiceMessageRoute, payload: EventPayload) => void;
 }
 
 // ============================================================================
@@ -291,6 +297,8 @@ export class EffectExecutor {
     private inFlightCalls?: InFlightCalls;
     private readonly outsideEventQueue: <T>(work: () => Promise<T>) => Promise<T>;
     private readonly deferCallOutcome?: (event: string, payload: EventPayload | undefined) => void;
+    private readonly http?: HttpPorts;
+    private readonly deliverLive?: EffectExecutorOptions['deliverLive'];
 
     constructor(options: EffectExecutorOptions) {
         this.handlers = options.handlers;
@@ -309,6 +317,8 @@ export class EffectExecutor {
         this.inFlightCalls = options.inFlightCalls;
         this.outsideEventQueue = options.outsideEventQueue ?? (<T,>(work: () => Promise<T>): Promise<T> => work());
         this.deferCallOutcome = options.deferCallOutcome;
+        this.http = options.http;
+        this.deliverLive = options.deliverLive;
     }
 
     /**
@@ -471,6 +481,7 @@ export class EffectExecutor {
                 registered.push(name);
             }
         }
+        if (this.http !== undefined) registered.push('http', 'random-bytes', 'credential-status', 'credential-forget');
         // Compound operators are always available
         registered.push('do', 'when', 'let', 'if');
         return registered;
@@ -549,6 +560,9 @@ export class EffectExecutor {
         if (isCompound) {
             return args;
         }
+        if (operator === 'http' && args.length >= 4) {
+            return this.resolveHttpArgs(args);
+        }
         if (isDeferringRenderUI) {
             const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
             return args.map((arg, index) =>
@@ -585,6 +599,8 @@ export class EffectExecutor {
                 ...(opts.offset !== undefined && { offset: interpolateValue(opts.offset, ctx) as number }),
                 ...(opts.orderBy !== undefined && { orderBy: interpolateValue(opts.orderBy, ctx) as string }),
                 ...(opts.include !== undefined && { include: interpolateValue(opts.include, ctx) as string[] }),
+                ...(opts.deliver !== undefined && { deliver: opts.deliver }),
+                ...(opts.total !== undefined && { total: opts.total }),
                 ...(opts.emit !== undefined && { emit: interpolateValue(opts.emit, ctx) as FetchOptions['emit'] }),
             };
             return [
@@ -594,6 +610,26 @@ export class EffectExecutor {
             ];
         }
         return resolveArgs(args, this.bindings, this.strictBindings, this.contextExtensions);
+    }
+
+    /**
+     * `http` resolves like `call-service` except the `paginate` expressions: `next` and `collect` read `@response`,
+     * which exists only per page, so they stay S-expressions until `evalOverResponse`.
+     */
+    private resolveHttpArgs(args: RuntimeValue[]): RuntimeValue[] {
+        const ctx = createContextFromBindings(this.bindings, this.strictBindings, this.contextExtensions);
+        const [method, origin, path, request, ...rest] = args;
+        const head = [interpolateValue(method, ctx), interpolateValue(origin, ctx), interpolateValue(path, ctx)];
+        const tail = rest.map((arg) => interpolateValue(arg, ctx));
+        const raw = request === undefined ? undefined : JsonValueSchema.parse(request);
+        if (raw === undefined || !isJsonObject(raw) || !isJsonObject(raw.paginate)) return [...head, interpolateValue(request, ctx), ...tail];
+        const { paginate, ...plain } = raw;
+        const { next, collect, ...settings } = paginate;
+        const resolved: RuntimeValue = {
+            ...(interpolateValue(plain, ctx) as PatternProps),
+            paginate: { ...(interpolateValue(settings, ctx) as PatternProps), ...(next !== undefined ? { next } : {}), ...(collect !== undefined ? { collect } : {}) },
+        };
+        return [...head, resolved, ...tail];
     }
 
     /**
@@ -633,9 +669,119 @@ export class EffectExecutor {
      * Execute multiple effects in sequence.
      */
     async executeAll(effects: RuntimeValue[]): Promise<void> {
-        for (const effect of effects) {
-            await this.execute(effect);
+        let index = 0;
+        while (index < effects.length) {
+            const consumed = await this.executePersistRun(effects, index);
+            if (consumed > 0) {
+                index += consumed;
+                continue;
+            }
+            await this.execute(effects[index]);
+            index += 1;
         }
+    }
+
+    /**
+     * A run of consecutive plain `persist` effects goes to the store as ONE stop-mode request when the handler set can
+     * push it (`EffectHandlers.persistRun`); results map back per effect, and the effects after the first failure are
+     * left unapplied. Returns how many effects were consumed, 0 when the run goes effect by effect. A later member
+     * that reads `@entity` after an earlier `create` in the run breaks the run: that create binds the minted id.
+     */
+    private async executePersistRun(effects: RuntimeValue[], start: number): Promise<number> {
+        const persistRun = this.handlers.persistRun;
+        if (persistRun === undefined || this.handlers.persistDelegated === true || this.environment === 'client') return 0;
+        const members: Array<{ action: 'create' | 'upsert' | 'update' | 'delete'; args: RuntimeValue[] }> = [];
+        let created = false;
+        for (let i = start; i < effects.length; i++) {
+            const parsed = parseEffect(effects[i]);
+            if (!parsed || parsed.operator !== 'persist') break;
+            const action = parsed.args[0];
+            if (action !== 'create' && action !== 'upsert' && action !== 'update' && action !== 'delete') break;
+            if (created && extractBindings(parsed.args).some((b) => b === '@entity' || b.startsWith('@entity.'))) break;
+            if (action === 'create') created = true;
+            members.push({ action, args: parsed.args });
+        }
+        if (members.length < 2) return 0;
+        const prepared: Array<{ action: 'create' | 'upsert' | 'update' | 'delete'; entityType: string; data: EntityRow | string | undefined; emitCfg: EmitConfig | undefined }> = [];
+        for (const member of members) {
+            const resolved = await this.resolveEffectArgs('persist', member.args);
+            const last = resolved[resolved.length - 1];
+            const emitCfg = last && typeof last === 'object' && !Array.isArray(last) && 'emit' in (last as object) ? this.extractEmitConfig(last) : undefined;
+            const entityType = resolved[1] as string;
+            const data = member.action === 'delete'
+                ? resolved[2] as EntityRow | string | undefined
+                : this.stripFrameFields(entityType, resolved[2] as EntityRow | undefined);
+            if ((member.action === 'create' || member.action === 'upsert') && this.missingRequiredFields(entityType, data as EntityRow | undefined).length > 0) return 0;
+            prepared.push({ action: member.action, entityType, data, emitCfg });
+        }
+        const results = await persistRun(prepared.map(({ action, entityType, data }) => ({ action, entityType, data })));
+        if (results === null) return 0;
+        for (let k = 0; k < results.length; k++) {
+            const m = prepared[k];
+            try {
+                this.afterPersist(m.emitCfg, m.action, m.entityType, m.data, results[k]);
+            } catch (err) {
+                this.emitFailure(m.emitCfg, err as RuntimeValue);
+                throw err;
+            }
+        }
+        return members.length;
+    }
+
+
+    /** What follows a persist handler's answer: the failure emit for `undefined`, else the bound id and the success emit. */
+    private afterPersist(
+        emitCfg: EmitConfig | undefined,
+        action: 'create' | 'upsert' | 'update' | 'delete',
+        entityType: string,
+        data: EntityRow | string | undefined,
+        persisted: EntityRow | undefined,
+    ): { failed: true; error: string } | undefined {
+        if (persisted === undefined) {
+            const attemptedId = typeof data === 'string'
+                ? data
+                : (data && typeof data === 'object' ? data.id : undefined);
+            persistLog.error('persist:denied', { action, entityType, attemptedId });
+            const deniedError = `persist ${action} ${entityType} was denied or failed`;
+            this.emitFailure(
+                emitCfg,
+                new Error(deniedError),
+                { entityType, id: attemptedId },
+            );
+            return { failed: true, error: deniedError };
+        } else {
+            const dataId = typeof persisted === 'string'
+                ? persisted
+                : persisted.id;
+            persistLog.debug('persist:success', {
+                action,
+                entityType,
+                dataId,
+                willEmit: emitCfg?.success,
+            });
+            // Write the store-minted id back into the live entity
+            // binding so later effects in this transition
+            // (`emit … { taskId: @entity.id }`) and a same-instance
+            // follow-up `persist update` see a real row key —
+            // otherwise a create with no caller-supplied id leaves
+            // `@entity.id` undefined until the next fetch.
+            if (action === 'create' && this.bindings.entity && typeof dataId === 'string') {
+                const boundId = this.bindings.entity.id;
+                const submittedId = data && typeof data === 'object'
+                    ? data.id
+                    : undefined;
+                if (boundId === undefined || boundId === submittedId) {
+                    this.bindings.entity.id = dataId;
+                    persistLog.debug('persist:create-bound-id', {
+                        entityType,
+                        id: dataId,
+                    });
+                }
+            }
+            this.emitSuccess(emitCfg, 'success', persisted, true);
+            persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
+        }
+        return undefined;
     }
 
     /**
@@ -812,20 +958,15 @@ export class EffectExecutor {
 
     /** A follow-on step's call: started, not awaited; its outcome event goes to `deliver`. */
     private startDeferredCall(
-        service: string,
-        action: string,
-        params: ServiceParams | undefined,
-        options: RuntimeValue,
+        label: string,
+        callKey: string | undefined,
+        call: (signal?: AbortSignal) => Promise<RuntimeValue>,
         emitCfg: EmitConfig | undefined,
         deliver: (event: string, payload: EventPayload | undefined) => void,
     ): void {
-        const route = emitCfg?.on_message !== undefined
-            ? { event: emitCfg.on_message, source: this.sourceStamp(emitCfg.on_message) }
-            : undefined;
-        const callKey = this.resolveCallKey(options, 'call-service key');
         const outcome = callKey === undefined
-            ? this.handlers.callService(service, action, params, { outsideRequest: true }, route).then((value) => ({ cancelled: false as const, value }))
-            : this.requireInFlightCalls('call-service key').run(callKey, (signal) => untilAborted(signal, this.handlers.callService(service, action, params, { signal, outsideRequest: true }, route)));
+            ? call().then((value) => ({ cancelled: false as const, value }))
+            : this.requireInFlightCalls(`${label} key`).run(callKey, (signal) => untilAborted(signal, call(signal)));
         void outcome.then(
             (settled) => {
                 if (settled.cancelled) {
@@ -835,10 +976,46 @@ export class EffectExecutor {
                 }
             },
             (err: RuntimeValue) => {
-                if (emitCfg?.failure) deliver(emitCfg.failure, { error: failureMessage(err) });
-                else effectLog.error('call-service:deferred-failed', { service, action, error: failureMessage(err) });
+                if (emitCfg?.failure) deliver(emitCfg.failure, err instanceof HttpEffectFailure ? { ...err.payload } : { error: failureMessage(err), ...(label === 'call-service' && callKey !== undefined ? { key: callKey } : {}) });
+                else effectLog.error(`${label}:deferred-failed`, { error: failureMessage(err) });
             },
         );
+    }
+
+    private httpRequestObject(request: RuntimeValue): JsonObject {
+        if (request === undefined) return {};
+        const parsed = JsonValueSchema.parse(request);
+        if (!isJsonObject(parsed)) throw new Error('http: the request must be an object');
+        return parsed;
+    }
+
+    /**
+     * One `http` effect to its success payload. The request, credentials, OAuth, pagination and framing are the
+     * kernel's driver (`runHttpCall`); a failure throws `HttpEffectFailure`, a non-2xx reply is a success.
+     */
+    private async runHttp(call: HttpCall, emitCfg: EmitConfig | undefined, signal: AbortSignal | undefined): Promise<EventPayload> {
+        if (this.http === undefined) throw new HttpUnavailableError('this host was given no http ports');
+        const route = this.liveRoute(emitCfg);
+        const deliverLive = this.deliverLive;
+        const principal = this.bindings.user?.id;
+        const outcome = await runHttpCall(this.http, call, {
+            ...(signal !== undefined ? { signal } : {}),
+            ...(principal !== undefined ? { principal } : {}),
+            ...(route !== undefined && deliverLive !== undefined ? { onMessage: (event: HttpStreamEvent): void => deliverLive(route, { ...event }) } : {}),
+        });
+        if ('error' in outcome) throw new HttpEffectFailure(outcome.error);
+        if (!isJsonObject(outcome.ok)) throw new Error('http: the driver finished with a payload that is not an object');
+        return outcome.ok;
+    }
+
+    /** A keyed `call-service` result with its `key` beside its fields (D-A82); a non-record result is left unchanged. */
+    private withCallKey<T extends RuntimeValue>(result: T, key: string | undefined): T | (T & { key: string }) {
+        if (key === undefined || result === null || typeof result !== 'object' || Array.isArray(result)) return result;
+        return { ...result, key };
+    }
+
+    private liveRoute(emit: EmitConfig | undefined): ServiceMessageRoute | undefined {
+        return emit?.on_message !== undefined ? { event: emit.on_message, source: this.sourceStamp(emit.on_message) } : undefined;
     }
 
     private emitCancelled(emit: EmitConfig | undefined, key: string): void {
@@ -1078,7 +1255,7 @@ export class EffectExecutor {
             }
 
             case 'persist': {
-                const action = args[0] as 'create' | 'update' | 'delete' | 'batch';
+                const action = args[0] as 'create' | 'upsert' | 'update' | 'delete' | 'batch';
                 // Optional trailing options object carrying `emit:` — detected
                 // by having an `emit` key, never by position (so inline data
                 // payloads for create/update are not mistaken for options).
@@ -1176,10 +1353,10 @@ export class EffectExecutor {
                         persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
                     } else {
                         const entityType = args[1] as string;
-                        const data = (action === 'create' || action === 'update')
+                        const data = (action === 'create' || action === 'upsert' || action === 'update')
                             ? this.stripFrameFields(entityType, args[2] as EntityRow | undefined)
                             : args[2] as EntityRow | undefined;
-                        if (action === 'create') {
+                        if (action === 'create' || action === 'upsert') {
                             const missing = this.missingRequiredFields(entityType, data);
                             if (missing.length > 0) {
                                 persistLog.error('persist:required-missing', { entityType, missing });
@@ -1205,50 +1382,8 @@ export class EffectExecutor {
                         // failed/missing outcome is signalled by return
                         // value, not by throwing.
                         const persisted = await this.handlers.persist(action, entityType, data);
-                        if (persisted === undefined) {
-                            const attemptedId = typeof data === 'string'
-                                ? data
-                                : (data && typeof data === 'object' ? data.id : undefined);
-                            persistLog.error('persist:denied', { action, entityType, attemptedId });
-                            const deniedError = `persist ${action} ${entityType} was denied or failed`;
-                            this.emitFailure(
-                                emitCfg,
-                                new Error(deniedError),
-                                { entityType, id: attemptedId },
-                            );
-                            return { failed: true, error: deniedError };
-                        } else {
-                            const dataId = typeof persisted === 'string'
-                                ? persisted
-                                : persisted.id;
-                            persistLog.debug('persist:success', {
-                                action,
-                                entityType,
-                                dataId,
-                                willEmit: emitCfg?.success,
-                            });
-                            // Write the store-minted id back into the live entity
-                            // binding so later effects in this transition
-                            // (`emit … { taskId: @entity.id }`) and a same-instance
-                            // follow-up `persist update` see a real row key —
-                            // otherwise a create with no caller-supplied id leaves
-                            // `@entity.id` undefined until the next fetch.
-                            if (action === 'create' && this.bindings.entity && typeof dataId === 'string') {
-                                const boundId = this.bindings.entity.id;
-                                const submittedId = data && typeof data === 'object'
-                                    ? data.id
-                                    : undefined;
-                                if (boundId === undefined || boundId === submittedId) {
-                                    this.bindings.entity.id = dataId;
-                                    persistLog.debug('persist:create-bound-id', {
-                                        entityType,
-                                        id: dataId,
-                                    });
-                                }
-                            }
-                            this.emitSuccess(emitCfg, 'success', persisted, true);
-                            persistLog.debug('persist:emit-fired', { action, eventName: emitCfg?.success });
-                        }
+                        const settled = this.afterPersist(emitCfg, action, entityType, data, persisted);
+                        if (settled !== undefined) return settled;
                     }
                 } catch (err) {
                     persistLog.error('persist:error', {
@@ -1276,14 +1411,19 @@ export class EffectExecutor {
                     break;
                 }
                 if (this.deferCallOutcome !== undefined) {
-                    this.startDeferredCall(service, action, params, args[3], emitCfg, this.deferCallOutcome);
+                    const route = this.liveRoute(emitCfg);
+                    const deferredKey = this.resolveCallKey(args[3], 'call-service key');
+                    this.startDeferredCall('call-service', deferredKey,
+                        async (signal) => this.withCallKey(await this.handlers.callService(service, action, params, { ...(signal !== undefined ? { signal } : {}), outsideRequest: true }, route), deferredKey),
+                        emitCfg, this.deferCallOutcome);
                     break;
                 }
+                let callKey: string | undefined;
                 try {
                     const route = emitCfg?.on_message !== undefined
                         ? { event: emitCfg.on_message, source: this.sourceStamp(emitCfg.on_message) }
                         : undefined;
-                    const callKey = this.resolveCallKey(args[3], 'call-service key');
+                    callKey = this.resolveCallKey(args[3], 'call-service key');
                     if (callKey === undefined) {
                         const result = await this.handlers.callService(service, action, params, undefined, route);
                         this.emitSuccess(emitCfg, 'success', result);
@@ -1297,12 +1437,63 @@ export class EffectExecutor {
                     if (outcome.cancelled) {
                         this.emitCancelled(emitCfg, callKey);
                     } else {
-                        this.emitSuccess(emitCfg, 'success', outcome.value);
+                        this.emitSuccess(emitCfg, 'success', this.withCallKey(outcome.value, callKey));
                     }
                 } catch (err) {
                     // A declared failure route IS the handling: emit it and let the
                     // transition complete, as `persist` does. Rethrowing aborted the
                     // whole transition, so the failure arm never reached the client.
+                    if (!emitCfg?.failure) throw err;
+                    this.emitFailure(emitCfg, err as RuntimeValue, callKey !== undefined ? { key: callKey } : undefined);
+                    return { failed: true, error: failureMessage(err as RuntimeValue) };
+                }
+                break;
+            }
+
+            case 'http': {
+                const [method, origin, path, request, options] = args;
+                const emitCfg = this.extractEmitConfig(options);
+                const callKey = this.resolveCallKey(options, 'http key');
+                if (typeof method !== 'string' || typeof origin !== 'string' || typeof path !== 'string') {
+                    throw new Error('http: method, origin and path must be text');
+                }
+                const httpCall: HttpCall = { method, origin, path, request: this.httpRequestObject(request), ...(callKey !== undefined ? { key: callKey } : {}) };
+                const call = (signal?: AbortSignal): Promise<EventPayload> => this.runHttp(httpCall, emitCfg, signal);
+                if (this.deferCallOutcome !== undefined) {
+                    this.startDeferredCall('http', callKey, call, emitCfg, this.deferCallOutcome);
+                    break;
+                }
+                try {
+                    if (callKey === undefined) {
+                        this.emitSuccess(emitCfg, 'success', await call());
+                        break;
+                    }
+                    const outcome = await this.requireInFlightCalls('http key').run(callKey, (signal) =>
+                        this.outsideEventQueue(() => untilAborted(signal, call(signal))));
+                    if (outcome.cancelled) this.emitCancelled(emitCfg, callKey);
+                    else this.emitSuccess(emitCfg, 'success', outcome.value);
+                } catch (err) {
+                    if (!emitCfg?.failure) throw err;
+                    this.emitFailure(emitCfg, err as RuntimeValue, err instanceof HttpEffectFailure ? { kind: err.payload.kind, key: err.payload.key } : { kind: 'failed' });
+                    return { failed: true, error: failureMessage(err as RuntimeValue) };
+                }
+                break;
+            }
+
+            case 'random-bytes':
+            case 'credential-status':
+            case 'credential-forget': {
+                const emitCfg = this.extractEmitConfig(args[1]);
+                if (this.http === undefined) throw new HttpUnavailableError('this host was given no http ports');
+                try {
+                    const principal = this.bindings.user?.id;
+                    const payload = operator === 'random-bytes'
+                        ? randomBytesPayload(this.http, args[0])
+                        : operator === 'credential-status'
+                            ? await credentialStatusPayload(this.http, args[0], principal)
+                            : await credentialForgetPayload(this.http, args[0], principal);
+                    this.emitSuccess(emitCfg, 'success', payload);
+                } catch (err) {
                     if (!emitCfg?.failure) throw err;
                     this.emitFailure(emitCfg, err as RuntimeValue);
                     return { failed: true, error: failureMessage(err as RuntimeValue) };
@@ -1334,6 +1525,8 @@ export class EffectExecutor {
                             offset?: number;
                             orderBy?: string;
                             include?: string[];
+                            deliver?: 'rows' | 'ids';
+                            total?: 'exact' | 'none';
                         } | undefined;
                     const emitCfg = this.extractEmitConfig(rawOpt);
                     // A declared id that resolved to nothing must never widen into a collection fetch (Rust `resolve_fetch_id`).
@@ -1341,6 +1534,20 @@ export class EffectExecutor {
                         const error = new Error(`${entityType} fetch: id resolved to ${String(options.id)}`);
                         effectLog.warn('fetch:unresolved-id', { entityType, traitName: this.context.traitName, transition: this.context.transition });
                         this.emitFailure(emitCfg, error);
+                        break;
+                    }
+                    if (options?.deliver === 'ids') {
+                        try {
+                            if (options.id !== undefined || (options.include?.length ?? 0) > 0) {
+                                throw new Error(`${entityType}: \`deliver: ids\` applies to a collection fetch with no \`id\` or \`include\``);
+                            }
+                            if (!this.handlers.fetchRowSet) throw new Error(`${entityType}: this host cannot deliver a fetch by reference`);
+                            const reference = await this.handlers.fetchRowSet(entityType, options);
+                            this.emitSuccess(emitCfg, 'success', options.total === 'none' ? { data: rowSetMarker(reference) } : { data: rowSetMarker(reference), totalCount: reference.total });
+                        } catch (err) {
+                            this.emitFailure(emitCfg, err as RuntimeValue);
+                            throw err;
+                        }
                         break;
                     }
                     try {
@@ -1366,10 +1573,10 @@ export class EffectExecutor {
                                 // A collection fetch matching nothing is still a
                                 // successful query — an empty result set, not a
                                 // miss.
-                                this.emitSuccess(emitCfg, 'success', { data: [], totalCount: 0 });
+                                this.emitSuccess(emitCfg, 'success', options?.total === 'none' ? { data: [] } : { data: [], totalCount: 0 });
                             }
                         } else {
-                            const payload: EventPayload = { data: result.rows, totalCount: result.total };
+                            const payload: EventPayload = options?.total === 'none' ? { data: result.rows } : { data: result.rows, totalCount: result.total };
                             this.emitSuccess(emitCfg, 'success', payload);
                         }
                     } catch (err) {

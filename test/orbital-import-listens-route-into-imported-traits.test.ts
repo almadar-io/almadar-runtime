@@ -5,7 +5,7 @@
  * and BudgetLifecycle's CONSUME_HOURS / ROLL_OVER into imported traits this way;
  * without the route they reach nothing.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
@@ -24,13 +24,21 @@ function pf(): OrbitalSchema {
   return JSON.parse(readFileSync(PF, 'utf-8')) as OrbitalSchema;
 }
 
+// Measured 2026-10-14: one preprocessSchema of project-friday is ~7 s alone; two per file here (was four), 120 s hook budget covers loaded runs.
+const SETUP_TIMEOUT_MS = 120_000;
+
 describe('orbital import listens', () => {
+  let resolved: Awaited<ReturnType<typeof preprocessSchema>>;
+  beforeAll(async () => {
+    resolved = await preprocessSchema(pf(), OPTS);
+  }, SETUP_TIMEOUT_MS);
+
   it.each([
     ['ProjectLifecycle', 'PROJECT_CREATE_REQUESTED', 'ProjectOrbitalProjectPersistor:PROJECT_CREATE_REQUESTED'],
     ['BudgetLifecycle', 'CONSUME_HOURS', 'BudgetOrbitalBudgetHoursLifecycle:CONSUME_HOURS'],
     ['BudgetLifecycle', 'ROLL_OVER', 'BudgetOrbitalBudgetHoursLifecycle:ROLL_OVER'],
   ])('%s.%s reaches %s', async (trait, event, expected) => {
-    const res = await preprocessSchema(pf(), OPTS);
+    const res = resolved;
     if (!res.success) throw new Error(res.errors.join('; '));
     const index = buildTraitIndex(res.data.schema.orbitals);
     const e = index.byName.get(trait);
@@ -53,5 +61,5 @@ describe('orbital import listens', () => {
     const res = await preprocessSchema(schema, OPTS);
     expect(res.success).toBe(false);
     if (!res.success) expect(res.errors.join('\n')).toContain('ORB_O_LISTEN_TARGET_UNKNOWN');
-  });
+  }, SETUP_TIMEOUT_MS);
 });

@@ -197,6 +197,9 @@ export {
   type OrbitalEvaluator,
 } from "./server/EventTransport.js";
 
+// The one resolve of a row-set reference against a store (browser store resolver in `@almadar/ui`, JS server engine).
+export { resolveRowSetFromStore, resolveRowSetFromRows, type RowSetStore } from "./effects/row-set-resolve.js";
+
 // CircuitStore (P2) — the manager+frames port `evaluateOrbitalEvent`
 // already consumes, made explicit; `snapshot`/`restore` back the client
 // role's `runtimeOptimistic` rollback.
@@ -242,13 +245,6 @@ export type {
 // `./traits/config-defaults.js` (NOT OrbitalServerRuntime.js, which top-level-imports
 // node `module`) precisely so this browser consumer doesn't pull node code.
 export { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults, normalizeCallSiteConfigToValues } from "./traits/config-defaults.js";
-
-// Row-level entity access — the one evaluator for every declared
-// `@read`/`@create`/`@update`/`@delete` directive. Generated app servers should
-// prefer the `@almadar/runtime/entityAccess` subpath so a Node process does not
-// pull this whole barrel; re-exported here for consumers already on the root.
-export { applyRowAccess, checkMutationAccess } from "./entities/entityAccess.js";
-export type { AccessBindings } from "./entities/entityAccess.js";
 
 // `[persistent: x, local]` entities: the browser store seed rule and the
 // transports that run their data in-process (the adapters live in `@almadar/db`).

@@ -47,6 +47,8 @@ export interface IndexStageRunnerOptions {
   inFlightCalls?: InFlightCalls;
   /** Releases the host's request queue while a `call-service` awaits its provider. */
   outsideEventQueue?: ServerEffectStageDeps['outsideEventQueue'];
+  /** What the `http` effect runs on in this host (the browser's request driver in a browser host). */
+  http?: ServerEffectStageDeps['http'];
 }
 
 /**
@@ -108,6 +110,7 @@ export function createIndexStageRunner(options: IndexStageRunnerOptions): Evalua
         ...(options.servicePorts !== undefined ? { servicePorts: options.servicePorts } : {}),
         ...(options.inFlightCalls !== undefined ? { inFlightCalls: options.inFlightCalls } : {}),
         ...(options.outsideEventQueue !== undefined ? { outsideEventQueue: options.outsideEventQueue } : {}),
+        ...(options.http !== undefined ? { http: options.http } : {}),
         ...(options.schema?.locales?.[0] !== undefined ? { defaultLocale: options.schema.locales[0] } : {}),
       },
       { ...args, traitName },

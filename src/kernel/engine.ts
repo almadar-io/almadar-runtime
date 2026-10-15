@@ -3,9 +3,9 @@
  * (`@almadar/kernel`, WebAssembly) decides every execution step; this host answers the I/O it asks for
  * and nothing else. The continuation of a stopped dispatch never leaves the wasm instance.
  */
-import type { EventPayload, MessageCatalogs, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, UserContext } from '@almadar/core';
-import { decodeProgress } from './decode.js';
-import { answerRequest, type KernelAnswerScope, type KernelHostPorts } from './host.js';
+import { isEntityReferenceAny, type EventPayload, type MessageCatalogs, type OrbitalEventRequest, type OrbitalEventResponse, type OrbitalSchema, type RowQueryPage, type RowSetRef, type UserContext } from '@almadar/core';
+import { decodeProgress, decodeResolveProgress } from './decode.js';
+import { answerRequest, declareCapabilities, type KernelAnswerScope, type KernelHostPorts } from './host.js';
 import type { IoReplyWire, KernelModule, KernelServerHandle } from './wire.js';
 
 export class KernelEngine {
@@ -17,18 +17,26 @@ export class KernelEngine {
     private readonly kernel: KernelModule,
     private readonly schemaJson: string,
     private readonly ports: KernelHostPorts,
+    private readonly entityTypes: readonly string[] = [],
   ) {
     this.handle = new kernel.Server(schemaJson);
+    this.declare();
+  }
+
+  private declare(): void {
+    const handle = this.handle;
+    declareCapabilities(this.ports.persistence, (entityType, queryJson, writeJson) => handle.setCapabilities(entityType, queryJson, writeJson), this.entityTypes);
   }
 
   static open(kernel: KernelModule, schema: OrbitalSchema, ports: KernelHostPorts): KernelEngine {
-    return new KernelEngine(kernel, JSON.stringify(schema), ports);
+    return new KernelEngine(kernel, JSON.stringify(schema), ports, schema.orbitals.flatMap((orbital) => (isEntityReferenceAny(orbital.entity) ? [] : [orbital.entity.name])));
   }
 
   /** A fresh kernel on the same program: every trait back at its initial state. */
   reset(): void {
     this.handle.free();
     this.handle = new this.kernel.Server(this.schemaJson);
+    this.declare();
     this.handle.setTickMount(JSON.stringify(this.tickMount));
     this.handle.setMessages(JSON.stringify(this.messages.locales), JSON.stringify(this.messages.catalogs));
   }
@@ -52,6 +60,31 @@ export class KernelEngine {
   /** The current state of a trait instance, `''` when it has none. */
   stateOf(traitName: string, entityId?: string): string {
     return this.handle.getState(traitName, entityId);
+  }
+
+  /**
+   * `reference` resolved for `scope.user` against the host-answered store (EXEC-RENDER-3): the rows that still
+   * match its query and the viewer's `@read` in the reference's order, a missing or hidden row omitted, and `total`
+   * re-counted (a `total: none` reference is not re-counted: the total is the resolved window). Each read the
+   * kernel makes is answered here, as in `evaluate`.
+   */
+  async resolveRows(reference: RowSetRef, scope: KernelAnswerScope): Promise<RowQueryPage> {
+    const handle = this.handle;
+    let progress = decodeResolveProgress(handle.resolveRows(JSON.stringify(reference), JSON.stringify(scope.user ?? null)));
+    while (progress.status === 'await') {
+      const { flight, requests } = progress;
+      let replies: IoReplyWire[];
+      try {
+        replies = await Promise.all(
+          requests.map(async (pending) => ({ id: pending.id, answer: await answerRequest(this.ports, pending.request, scope) })),
+        );
+      } catch (error) {
+        handle.abandon(flight);
+        throw error;
+      }
+      progress = decodeResolveProgress(handle.resumeResolve(flight, JSON.stringify(replies)));
+    }
+    return { rows: progress.rows, total: progress.total };
   }
 
   /** Run `request` against `orbital`: start it, answer every request the kernel asks for, resume until done. */

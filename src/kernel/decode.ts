@@ -1,6 +1,6 @@
 /** Decoders for what the kernel hands back as JSON: narrowed by checks, never cast. */
-import { OrbitalEventResponseSchema, type JsonValue, type OrbitalEventResponse } from '@almadar/core';
-import type { CallSiteWire, IoRequestWire, PendingRequestWire, ServerProgressWire } from './wire.js';
+import { OrbitalEventResponseSchema, RowQuerySchema, RowWriteBatchSchema, type EntityRow, type JsonValue, type OrbitalEventResponse } from '@almadar/core';
+import type { CallSiteWire, HttpBody, HttpRequestWire, HttpResponseWire, IoRequestWire, PendingRequestWire, ResolveProgressWire, ServerProgressWire } from './wire.js';
 
 type JsonRecord = { [key: string]: JsonValue };
 
@@ -60,6 +60,52 @@ function decodeSite(value: JsonValue): CallSiteWire {
   };
 }
 
+function headerPairs(record: JsonRecord, name: string): Array<[string, string]> {
+  return list(record, name).map((pair) => {
+    const [headerName, headerValue, ...rest] = Array.isArray(pair) ? pair : [];
+    if (typeof headerName !== 'string' || typeof headerValue !== 'string' || rest.length > 0) {
+      throw new Error(`kernel wire: "${name}" holds a header that is not a [name, value] pair`);
+    }
+    return [headerName, headerValue];
+  });
+}
+
+export function decodeHttpBody(value: JsonValue): HttpBody {
+  if (!isRecord(value)) throw new Error('kernel wire: an http body is not an object');
+  const kind = text(value, 'kind');
+  switch (kind) {
+    case 'empty':
+      return { kind };
+    case 'text':
+      return { kind, text: text(value, 'text') };
+    case 'base64':
+      return { kind, data: text(value, 'data') };
+    default:
+      throw new Error(`kernel wire: unknown http body kind "${kind}"`);
+  }
+}
+
+export function decodeHttpRequest(value: JsonValue): HttpRequestWire {
+  if (!isRecord(value)) throw new Error('kernel wire: an http request is not an object');
+  const timeoutMs = value.timeoutMs;
+  if (timeoutMs !== undefined && (typeof timeoutMs !== 'number' || !Number.isInteger(timeoutMs) || timeoutMs < 0)) {
+    throw new Error('kernel wire: "timeoutMs" is not a non-negative integer');
+  }
+  return {
+    method: text(value, 'method'),
+    url: text(value, 'url'),
+    headers: headerPairs(value, 'headers'),
+    body: decodeHttpBody(field(value, 'body')),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+  };
+}
+
+export function decodeHttpResponse(value: JsonValue): HttpResponseWire {
+  if (!isRecord(value)) throw new Error('kernel wire: an http response is not an object');
+  const status = whole(value, 'status');
+  return { status, headers: headerPairs(value, 'headers'), body: decodeHttpBody(field(value, 'body')) };
+}
+
 export function decodeRequest(value: JsonValue): IoRequestWire {
   if (!isRecord(value)) throw new Error('kernel wire: a request is not an object');
   const kind = text(value, 'kind');
@@ -68,6 +114,13 @@ export function decodeRequest(value: JsonValue): IoRequestWire {
       return { kind, entityType: text(value, 'entityType'), id: text(value, 'id') };
     case 'listRows':
       return { kind, entityType: text(value, 'entityType') };
+    case 'queryRows': {
+      const project = text(value, 'project');
+      if (project !== 'rows' && project !== 'ids') throw new Error(`kernel wire: unknown projection "${project}"`);
+      return { kind, entityType: text(value, 'entityType'), query: RowQuerySchema.parse(field(value, 'query')), project };
+    }
+    case 'writeRows':
+      return { kind, batch: RowWriteBatchSchema.parse(field(value, 'batch')) };
     case 'createRow':
       return { kind, entityType: text(value, 'entityType'), data: field(value, 'data') };
     case 'writeRow':
@@ -98,6 +151,44 @@ export function decodeRequest(value: JsonValue): IoRequestWire {
       return { kind, key: text(value, 'key') };
     case 'substrate':
       return { kind, op: text(value, 'op'), args: list(value, 'args') };
+    case 'http': {
+      const key = optionalText(value, 'key');
+      const rawSite = value.site;
+      return {
+        kind,
+        request: decodeHttpRequest(field(value, 'request')),
+        ...(key !== undefined ? { key } : {}),
+        ...(rawSite !== undefined ? { site: decodeSite(rawSite) } : {}),
+      };
+    }
+    case 'httpStream': {
+      const key = optionalText(value, 'key');
+      const framing = text(value, 'framing');
+      if (framing !== 'sse' && framing !== 'jsonLines') throw new Error(`kernel wire: unknown stream framing "${framing}"`);
+      const rawSite = value.site;
+      return {
+        kind,
+        request: decodeHttpRequest(field(value, 'request')),
+        framing,
+        ...(key !== undefined ? { key } : {}),
+        ...(rawSite !== undefined ? { site: decodeSite(rawSite) } : {}),
+      };
+    }
+    case 'secret': {
+      const principal = optionalText(value, 'principal');
+      return { kind, name: text(value, 'name'), ...(principal !== undefined ? { principal } : {}) };
+    }
+    case 'secretSet': {
+      const principal = optionalText(value, 'principal');
+      return { kind, name: text(value, 'name'), value: text(value, 'value'), ttlMs: whole(value, 'ttlMs'), ...(principal !== undefined ? { principal } : {}) };
+    }
+    case 'random':
+      return { kind, bytes: whole(value, 'bytes') };
+    case 'credentialStatus':
+    case 'credentialForget': {
+      const principal = optionalText(value, 'principal');
+      return { kind, name: text(value, 'name'), ...(principal !== undefined ? { principal } : {}) };
+    }
     default:
       throw new Error(`kernel wire: unknown request kind "${kind}"`);
   }
@@ -124,6 +215,25 @@ export function decodeProgress(json: string): ServerProgressWire {
   const status = text(value, 'status');
   if (status === 'done') {
     return { status, response: withSharedEffects(OrbitalEventResponseSchema.parse(field(value, 'response'))) };
+  }
+  if (status === 'await') {
+    return { status, flight: whole(value, 'flight'), requests: list(value, 'requests').map(decodePending) };
+  }
+  throw new Error(`kernel wire: unknown status "${status}"`);
+}
+
+export function decodeResolveProgress(json: string): ResolveProgressWire {
+  const value: JsonValue = JSON.parse(json);
+  if (!isRecord(value)) throw new Error('kernel wire: resolve progress is not an object');
+  const status = text(value, 'status');
+  if (status === 'done') {
+    const rows: EntityRow[] = list(value, 'rows').map((row) => {
+      if (!isRecord(row)) throw new Error('kernel wire: a resolved row is not an object');
+      return row;
+    });
+    const total = field(value, 'total');
+    if (typeof total !== 'number') throw new Error('kernel wire: "total" is not a number');
+    return { status, rows, total };
   }
   if (status === 'await') {
     return { status, flight: whole(value, 'flight'), requests: list(value, 'requests').map(decodePending) };

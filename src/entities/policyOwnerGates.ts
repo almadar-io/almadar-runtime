@@ -2,7 +2,7 @@ import type { OrbitalSchema, UserContext } from '@almadar/core';
 import { personaFromIdentityRow } from '@almadar/core';
 import { entityAccessPoliciesByStoreKey } from '@almadar/core/mock';
 import type { MockPersistenceAdapter } from '@almadar/db/mock';
-import { applyRowAccess, checkMutationAccess } from './entityAccess.js';
+import { applyRowAccess, checkMutationAccess } from '@almadar/evaluator/entityAccess';
 
 /**
  * Install the schema's access policies as the seeder's owner gates — the one

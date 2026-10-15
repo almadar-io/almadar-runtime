@@ -9,8 +9,9 @@
 import { orderFetchedRows } from './fetch-order.js';
 import { createLogger } from '@almadar/logger';
 import { EffectExecutor, clientResolvesRenderBindings } from './EffectExecutor.js';
+import type { HttpPorts } from '../kernel/http-exchange.js';
 import type { ServerEffectResult } from './ServerEffectHandlers.js';
-import type { DeliveryRecord, DispatchLog, PersistenceAdapter } from '@almadar/core';
+import type { DeliveryRecord, DispatchLog, PersistenceAdapter, RowSetRef } from '@almadar/core';
 import { stampEmitSource } from '../events/emit-stamp.js';
 import type { EffectDispatch } from '../evaluation/dispatch-memory.js';
 import { buildConfigBinding, buildEntityBinding } from '../traits/config-defaults.js';
@@ -27,6 +28,7 @@ import type {
   RuntimePatternValue,
   TraitState,
   PersistBatchSummary,
+  ServiceMessageRoute,
 } from '../types.js';
 import { isEffectTuple } from '../types.js';
 import type {
@@ -47,6 +49,8 @@ import type {
   UserContext,
   FieldValue,
   RuntimeValue,
+  RowWriteOp,
+  RowWriteOutcome,
   FetchOptions,
   ServiceHostPorts,
   MessageCatalogs,
@@ -58,12 +62,14 @@ import {
   orbitalInlineEntities,
 } from '@almadar/core';
 import { entityAccessPolicies } from '@almadar/core/mock';
-import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from '../entities/entityAccess.js';
+import { applyRowAccess, checkMutationAccess, accessDeniedMessage } from '@almadar/evaluator/entityAccess';
+import { PushdownViolation, compensateBatch, hasOwnId, noteFallback, type AppliedBatchOp, planRun, requiredFieldNames, type WritePlan } from '@almadar/db/pushdown';
+import { pushPersistBatch, planWrite, pushFetch, pushFetchRowSet, settleWrite } from './pushdown.js';
 import { findEntityAmongOrbitals } from '../traits/OrbitalTraitParsing.js';
 import { defaultCallService, mockCallService } from './defaultCallService.js';
 import type { InFlightCalls } from './in-flight-calls.js';
 import { getPatternFieldsContract } from '@almadar/core/patterns';
-import { codeOf, noRowKeyFailure, notFoundFailure } from './persist-failure.js';
+import { codeOf, duplicateIdFailure, noRowKeyFailure, notFoundFailure } from './persist-failure.js';
 
 const effectLog = createLogger("almadar:runtime:effects");
 const busLog = createLogger("almadar:runtime:bus");
@@ -117,6 +123,8 @@ export interface ServerEffectStageDeps {
   /** On-delete cascade rules. Optional for the same reason as
    *  `validateRelationCardinality`. */
   enforceOnDeleteRules?: (entityType: string, deletedId: string) => Promise<void>;
+  /** Whether deleting a row of this type has relation rules to enforce; absent = unknown, so a delete keeps the per-op path. */
+  hasOnDeleteRules?: (entityType: string) => boolean;
   /** Relation population on fetched rows. Optional for the same reason —
    *  absent means fetched rows carry raw foreign keys, no joined labels. */
   populateRelations?: (entities: EntityRow[], entityType: string, include: string[]) => Promise<void>;
@@ -155,6 +163,8 @@ export interface ServerEffectStageDeps {
    * the client routes it through its own listens.
    */
   deliverLive?: (event: string, payload: EventPayload, stamp: BusEventSource) => void;
+  /** The `http` effect's ports (kernel builder, secrets, egress); absent, an `http` effect fails with `HTTP_KERNEL_UNAVAILABLE`. */
+  http?: HttpPorts;
   /** Whether a live-broadcast sink is wired (read by the sink-call debug log). */
   liveBroadcastSinkWired?: boolean;
   debug?: boolean;
@@ -179,6 +189,8 @@ export interface ServerEffectStageArgs {
   entityId: string | undefined;
   emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>;
   fetchedData: { [entityType: string]: EntityRow | EntityRow[] };
+  /** Pages the dispatch fetched by reference (`deliver: ids`), by entity type; the response's `dataRefs`. */
+  fetchedRefs?: { [entityType: string]: RowSetRef };
   clientEffects: ClientEffectTuple[];
   effectResults: ServerEffectResult[];
   /** Already-normalized viewer (see `processOrbitalEvent`'s `viewer`). */
@@ -357,6 +369,7 @@ export async function runServerEffectStage(
     entityId,
     emittedEvents,
     fetchedData,
+    fetchedRefs,
     clientEffects,
     effectResults,
     user,
@@ -400,8 +413,29 @@ export async function runServerEffectStage(
   let bindingsRef: BindingContext | null = null;
   let contextRef: EffectContext | null = null;
 
+  const deliverRouteLive = (route: ServiceMessageRoute, payload: EventPayload): void => {
+    const callingTrait = deps.irTraits.find((t) => t.name === traitName);
+    const stamp = stampEmitSource(route.source, {
+      orbitalName: deps.orbitalName,
+      traitName,
+      orbitalId: deps.orbitalId,
+      traitId: callingTrait?.id,
+      emitContractEventId: callingTrait?.emits?.find((e) => e.event === route.event)?.eventId,
+      originClientId,
+    });
+    deps.deliverLive?.(route.event, payload, stamp);
+  };
+
   const { callService: _delegatedCallService, ...hostOverrides } = deps.extraEffectHandlers ?? {};
   const hostProgramEffect = hostOverrides.programEffect;
+  // The outcome a run's one `writeBatch` already produced for the persist being settled (see `persistRun`).
+  let presetOutcome: RowWriteOutcome | undefined;
+  const takePreset = (): RowWriteOutcome | undefined => {
+    const outcome = presetOutcome;
+    presetOutcome = undefined;
+    return outcome;
+  };
+
   const handlers: EffectHandlers = {
     emit: (event, eventPayload, source, fromPersistSuccess) => {
       if (deps.debug) {
@@ -486,6 +520,73 @@ export async function runServerEffectStage(
       });
     },
 
+    persistRun: async (runOps) => {
+      const accessBindings = { user: bindingsRef?.user, payload: bindingsRef?.payload, config: bindingsRef?.config, now: bindingsRef?.now };
+      const writes: RowWriteOp[] = [];
+      for (const run of runOps) {
+        const type = run.entityType || entityType;
+        const policies = deps.resolvedSchema ? entityAccessPolicies(deps.resolvedSchema, type) : undefined;
+        const writesRow = run.action === 'create' || run.action === 'upsert';
+        const policy = policies?.[run.action === 'upsert' ? 'create' : run.action];
+        const row = typeof run.data === 'object' ? run.data : undefined;
+        if (run.action === 'delete' && deps.enforceOnDeleteRules !== undefined && deps.hasOnDeleteRules?.(type) !== false) return null;
+        let stripped = row;
+        if (run.action !== 'delete') {
+          const intrinsic = deps.intrinsicFieldNames(type);
+          stripped = row !== undefined && intrinsic.length > 0 ? omitFrameFields(row, intrinsic) : row;
+          try {
+            deps.validateRelationCardinality?.(type, stripped ?? {});
+          } catch {
+            return null;
+          }
+        }
+        if (writesRow) {
+          // A row naming its own id goes out as a write; one naming none needs the store to mint it, and an upsert
+          // naming none fails on its own path. A denied `@create` / `@update` keeps its own path, which words the denial.
+          if (!hasOwnId(stripped)) {
+            if (run.action === 'create') noteFallback(deps.persistence, 'kernel.write.pushdown-fallback', type, 'create-mints-id');
+            return null;
+          }
+          if (policy !== undefined && !checkMutationAccess(stripped ?? {}, policy, accessBindings)) return null;
+          if (run.action === 'upsert' && policies?.update !== undefined) return null;
+        }
+        const id = run.action === 'delete'
+          ? (typeof run.data === 'string' ? run.data : row?.id) ?? entityId
+          : writesRow ? stripped?.id : row?.id ?? entityId;
+        if (typeof id !== 'string' || id === '') return null;
+        const plan = planWrite(deps.persistence, type, writesRow ? undefined : policy, accessBindings, requiredFieldNames(deps.entityFieldsFor(type)));
+        if (!plan.push) return null;
+        const guard = plan.guard ? { guard: plan.guard } : {};
+        if (run.action === 'create' || run.action === 'upsert') {
+          writes.push({ kind: run.action, entityType: type, data: stripped ?? {} });
+        } else if (run.action === 'update') {
+          writes.push({ kind: 'update', entityType: type, id, data: stripped ?? {}, ...guard });
+        } else {
+          writes.push({ kind: 'delete', entityType: type, id, ...guard });
+        }
+      }
+      if (!planRun(deps.persistence, writes.map((w) => w.entityType))) return null;
+      // A stop-mode batch ends at its first non-applied outcome. A persist refusal is a handled outcome (EXEC-STEP-7), so
+      // the ops after it go out as a new run and the effects behave exactly as they do one by one.
+      const results: Array<EntityRow | undefined> = [];
+      let position = 0;
+      while (position < writes.length) {
+        const outcomes = await deps.persistence.writeBatch!({ ops: writes.slice(position), onFailure: 'stop' });
+        if (outcomes.length === 0) break;
+        for (const outcome of outcomes) {
+          const run = runOps[position];
+          presetOutcome = outcome;
+          try {
+            results.push(await handlers.persist!(run.action, run.entityType, run.data as EntityRow | undefined));
+          } finally {
+            presetOutcome = undefined;
+          }
+          position += 1;
+        }
+      }
+      return results;
+    },
+
     persist: async (action, targetEntityType, data) => {
       // ----------------------------------------------------------------
       // Batch mode: ["persist", "batch", [...operations]]
@@ -505,9 +606,13 @@ export async function runServerEffectStage(
           return;
         }
 
+        const pushedBatch = await pushPersistBatch(deps.persistence, operations, deps.intrinsicFieldNames, (r) => effectResults.push(r));
+        if (pushedBatch !== null) return pushedBatch;
+
         const batchResults: Array<EntityRow> = [];
         // Track completed ops for rollback on failure (best-effort)
         const completed: Array<{ action: string; entityType: string; id?: string }> = [];
+        const applied: AppliedBatchOp[] = [];
         let batchFailed = false;
         let batchError = '';
 
@@ -536,9 +641,13 @@ export async function runServerEffectStage(
                 const createData = createIntrinsicFields.length > 0
                   ? omitFrameFields(op[2] ?? {}, createIntrinsicFields)
                   : op[2] ?? {};
+                if (hasOwnId(createData) && (await deps.persistence.getById(opEntityType, String(createData.id))) !== null) {
+                  throw new Error(`${opEntityType} ${String(createData.id)} already exists`);
+                }
                 const { id: newId } = await deps.persistence.create(opEntityType, createData);
                 batchResults.push({ ...createData, action: 'create', entityType: opEntityType, id: newId });
                 completed.push({ action: 'create', entityType: opEntityType, id: newId });
+                applied.push({ kind: 'create', entityType: opEntityType, id: newId });
                 break;
               }
               case 'update': {
@@ -547,8 +656,11 @@ export async function runServerEffectStage(
                 const updateData = updateIntrinsicFields.length > 0
                   ? omitFrameFields(op[3] ?? {}, updateIntrinsicFields)
                   : op[3] ?? {};
+                const updateBefore = await deps.persistence.getById(opEntityType, updateId);
+                if (updateBefore === null) throw notFoundFailure(opEntityType, updateId);
                 await deps.persistence.update(opEntityType, updateId, updateData);
                 const updated = await deps.persistence.getById(opEntityType, updateId);
+                applied.push({ kind: 'update', entityType: opEntityType, id: updateId, before: updateBefore ? { ...updateBefore } : null, after: updated });
                 batchResults.push({ ...(updated || updateData), action: 'update', entityType: opEntityType, id: updateId });
                 completed.push({ action: 'update', entityType: opEntityType, id: updateId });
                 break;
@@ -556,7 +668,9 @@ export async function runServerEffectStage(
               case 'delete': {
                 const deleteId = op[2];
                 // Snapshot before delete for potential rollback info
+                const deleteBefore = await deps.persistence.getById(opEntityType, deleteId);
                 await deps.persistence.delete(opEntityType, deleteId);
+                applied.push({ kind: 'delete', entityType: opEntityType, id: deleteId, before: deleteBefore ? { ...deleteBefore } : null });
                 batchResults.push({ action: 'delete', entityType: opEntityType, id: deleteId, deleted: true });
                 completed.push({ action: 'delete', entityType: opEntityType, id: deleteId });
                 break;
@@ -575,6 +689,11 @@ export async function runServerEffectStage(
           if (batchFailed) break;
         }
 
+        if (batchFailed && applied.length > 0) {
+          await compensateBatch(deps.persistence, applied);
+          batchResults.length = 0;
+          completed.length = 0;
+        }
         const batchSummary: PersistBatchSummary = {
           operations: batchResults,
           completedCount: completed.length,
@@ -600,12 +719,27 @@ export async function runServerEffectStage(
       // `data` (bare `@entity`, an explicit literal that names one, an
       // `object/merge` result, …). Deterministic on the entity's declared
       // schema, not on how the value was constructed.
-      if ((action === 'create' || action === 'update') && data !== undefined) {
+      if ((action === 'create' || action === 'upsert' || action === 'update') && data !== undefined) {
         const intrinsicFields = deps.intrinsicFieldNames(type);
         if (intrinsicFields.length > 0) data = omitFrameFields(data, intrinsicFields);
       }
       let resultData: EntityRow | undefined;
-      const sizeBefore = (await deps.persistence.list(type)).length;
+      const accessBindings = { user: bindingsRef?.user, payload: bindingsRef?.payload, config: bindingsRef?.config, now: bindingsRef?.now };
+      const typePolicies = deps.resolvedSchema ? entityAccessPolicies(deps.resolvedSchema, type) : undefined;
+      const mutationPolicy = typePolicies?.[
+        action === 'create' || action === 'upsert' ? 'create' : action === 'update' ? 'update' : 'delete'
+      ];
+      // A create's or upsert's `@create` policy reads the incoming data, so it stays here; an update/delete policy rides the write as its guard.
+      const deleteRulesBlock = action === 'delete' && deps.enforceOnDeleteRules !== undefined && deps.hasOnDeleteRules?.(type) !== false;
+      if (deleteRulesBlock) noteFallback(deps.persistence, 'kernel.write.pushdown-fallback', type, 'on-delete-rules');
+      const writesRow = action === 'create' || action === 'upsert';
+      const incoming: EntityRow = typeof data === 'object' && data !== null ? data : {};
+      const mintsId = action === 'create' && !hasOwnId(incoming);
+      if (mintsId) noteFallback(deps.persistence, 'kernel.write.pushdown-fallback', type, 'create-mints-id');
+      const plan: WritePlan = deleteRulesBlock || mintsId
+        ? { push: false }
+        : planWrite(deps.persistence, type, writesRow ? undefined : mutationPolicy, accessBindings, requiredFieldNames(deps.entityFieldsFor(type)));
+      const sizeBefore = plan.push ? 0 : (await deps.persistence.list(type)).length;
       // Distinguishes a policy/row-key REJECTION from any other thrown
       // failure (a persistence-backend error, a validation exception) so
       // the catch below can stamp `denied: true` on the pushed result —
@@ -614,16 +748,12 @@ export async function runServerEffectStage(
 
       try {
         // Validate relation cardinality before create/update
-        if (action === 'create' || action === 'update') {
+        if (action === 'create' || action === 'upsert' || action === 'update') {
           deps.validateRelationCardinality?.(type, data || {});
         }
 
-        const accessBindings = { user: bindingsRef?.user, payload: bindingsRef?.payload, config: bindingsRef?.config, now: bindingsRef?.now };
-        const mutationPolicy = deps.resolvedSchema
-          ? entityAccessPolicies(deps.resolvedSchema, type)?.[
-              action === 'create' ? 'create' : action === 'update' ? 'update' : 'delete'
-            ]
-          : undefined;
+        const settle = (outcome: RowWriteOutcome, write: RowWriteOp): EntityRow =>
+          settleWrite(outcome, write, plan.push ? plan.guard : undefined, () => { deniedReason = 'access-denied'; });
 
         switch (action) {
           case "create": {
@@ -631,12 +761,58 @@ export async function runServerEffectStage(
               deniedReason = 'access-denied';
               throw new Error(accessDeniedMessage('create', type));
             }
+            if (plan.push) {
+              const write: RowWriteOp = { kind: 'create', entityType: type, data: incoming };
+              resultData = settle(takePreset() ?? await deps.persistence.writeWhere!(write), write);
+              break;
+            }
+            if (hasOwnId(incoming) && (await deps.persistence.getById(type, String(incoming.id))) !== null) throw duplicateIdFailure(type, String(incoming.id));
             const { id } = await deps.persistence.create(type, data || {});
             resultData = (await deps.persistence.getById(type, id)) ?? { ...(data || {}), id };
             break;
           }
+          case "upsert": {
+            // `@create` is checked on the incoming row, `@update` (when declared) on the row it replaces.
+            if (!checkMutationAccess(incoming, mutationPolicy, accessBindings)) {
+              deniedReason = 'access-denied';
+              throw new Error(accessDeniedMessage('create', type));
+            }
+            if (!hasOwnId(incoming)) {
+              effectLog.error('persist:no-row-key', { action, entityType: type });
+              deniedReason = 'no-row-key';
+              throw noRowKeyFailure(action, type);
+            }
+            const upsertId = String(incoming.id);
+            const updatePolicy = typePolicies?.update;
+            let existing: EntityRow | null | undefined;
+            if (updatePolicy !== undefined) {
+              existing = await deps.persistence.getById(type, upsertId);
+              if (existing !== null && !checkMutationAccess(existing, updatePolicy, accessBindings)) {
+                deniedReason = 'access-denied';
+                throw new Error(accessDeniedMessage('update', type));
+              }
+            }
+            if (plan.push) {
+              const write: RowWriteOp = { kind: 'upsert', entityType: type, data: incoming };
+              resultData = settle(takePreset() ?? await deps.persistence.writeWhere!(write), write);
+              break;
+            }
+            existing ??= await deps.persistence.getById(type, upsertId);
+            if (existing === null) {
+              await deps.persistence.create(type, incoming);
+            } else {
+              await deps.persistence.delete(type, upsertId);
+              await deps.persistence.create(type, existing.createdAt === undefined ? incoming : { ...incoming, createdAt: existing.createdAt });
+            }
+            resultData = (await deps.persistence.getById(type, upsertId)) ?? incoming;
+            break;
+          }
           case "update":
-            if (data?.id || entityId) {
+            if (plan.push && (data?.id || entityId)) {
+              const updateId = (data?.id as string) || entityId!;
+              const write: RowWriteOp = { kind: 'update', entityType: type, id: updateId, data: data || {}, ...(plan.guard ? { guard: plan.guard } : {}) };
+              resultData = settle(takePreset() ?? await deps.persistence.writeWhere!(write), write);
+            } else if (data?.id || entityId) {
               const updateId = (data?.id as string) || entityId!;
               const existing = await deps.persistence.getById(type, updateId);
               if (existing === null) throw notFoundFailure(type, updateId);
@@ -675,7 +851,10 @@ export async function runServerEffectStage(
               ? (data.id as string | undefined)
               : undefined;
             const deleteId = directId ?? nestedId ?? entityId;
-            if (deleteId) {
+            if (deleteId && plan.push) {
+              const write: RowWriteOp = { kind: 'delete', entityType: type, id: deleteId, ...(plan.guard ? { guard: plan.guard } : {}) };
+              resultData = settle(takePreset() ?? await deps.persistence.writeWhere!(write), write);
+            } else if (deleteId) {
               const existing = await deps.persistence.getById(type, deleteId);
               if (existing === null) throw notFoundFailure(type, deleteId);
               if (mutationPolicy !== undefined && !checkMutationAccess(existing, mutationPolicy, accessBindings)) {
@@ -716,15 +895,19 @@ export async function runServerEffectStage(
           return undefined;
         }
 
-        const sizeAfter = (await deps.persistence.list(type)).length;
-        effectLog.debug("persist:store-mutate", {
-          action,
-          entityType: type,
-          resultId: resultData?.id as string | undefined,
-          sizeBefore,
-          sizeAfter,
-          delta: sizeAfter - sizeBefore,
-        });
+        if (plan.push) {
+          effectLog.debug("persist:store-mutate", { action, entityType: type, resultId: resultData?.id as string | undefined });
+        } else {
+          const sizeAfter = (await deps.persistence.list(type)).length;
+          effectLog.debug("persist:store-mutate", {
+            action,
+            entityType: type,
+            resultId: resultData?.id as string | undefined,
+            sizeBefore,
+            sizeAfter,
+            delta: sizeAfter - sizeBefore,
+          });
+        }
 
         effectResults.push({
           effect: 'persist',
@@ -762,17 +945,7 @@ export async function runServerEffectStage(
           ? deps.outsideEventQueue
           : <T,>(work: () => Promise<T>): Promise<T> => work();
         const message = (payload: EventPayload): void => {
-          if (route === undefined) return;
-          const callingTrait = deps.irTraits.find((t) => t.name === traitName);
-          const stamp = stampEmitSource(route.source, {
-            orbitalName: deps.orbitalName,
-            traitName,
-            orbitalId: deps.orbitalId,
-            traitId: callingTrait?.id,
-            emitContractEventId: callingTrait?.emits?.find((e) => e.event === route.event)?.eventId,
-            originClientId,
-          });
-          deps.deliverLive?.(route.event, payload, stamp);
+          if (route !== undefined) deliverRouteLive(route, payload);
         };
         const host = deps.servicePorts?.({ orbital: deps.orbitalName, trait: traitName }, user, message);
         const signal = context?.signal;
@@ -815,6 +988,24 @@ export async function runServerEffectStage(
       }
     },
 
+    fetchRowSet: async (fetchEntityType, options) => {
+      const callSiteFilter = options?.filter !== undefined && options.filter !== null ? (options.filter as SExpr) : undefined;
+      const reference = await pushFetchRowSet({
+        persistence: deps.persistence,
+        entityType: fetchEntityType,
+        readPolicy: deps.resolvedSchema ? entityAccessPolicies(deps.resolvedSchema, fetchEntityType)?.read : undefined,
+        filter: callSiteFilter,
+        orderBy: options?.orderBy,
+        offset: options?.offset,
+        limit: options?.limit,
+        ...(options?.total !== undefined ? { total: options.total } : {}),
+        bindings: { user: bindingsRef?.user, payload: bindingsRef?.payload, config: bindingsRef?.config, now: bindingsRef?.now },
+        requiredFields: requiredFieldNames(deps.entityFieldsFor(fetchEntityType)),
+      });
+      if (fetchedRefs) fetchedRefs[fetchEntityType] = reference;
+      return reference;
+    },
+
     fetch: async (fetchEntityType, options) => {
       try {
         let result: EntityRow | EntityRow[] | null = null;
@@ -851,28 +1042,42 @@ export async function runServerEffectStage(
         } else {
           // Collection fetch. `applyRowAccess` ANDs the declared @read
           // policy with the call-site filter (either may be absent).
-          let entities = await deps.persistence.list(fetchEntityType);
-          entities = applyRowAccess(
-            entities,
+          const callSiteFilter = options?.filter !== undefined && options.filter !== null
+            ? (options.filter as SExpr)
+            : undefined;
+          const pushed = await pushFetch({
+            persistence: deps.persistence,
+            entityType: fetchEntityType,
             readPolicy,
-            options?.filter !== undefined && options.filter !== null
-              ? (options.filter as SExpr)
-              : undefined,
-            accessBindings,
-          );
+            filter: callSiteFilter,
+            orderBy: options?.orderBy,
+            offset: options?.offset,
+            limit: options?.limit,
+        ...(options?.total !== undefined ? { total: options.total } : {}),
+            bindings: accessBindings,
+            requiredFields: requiredFieldNames(deps.entityFieldsFor(fetchEntityType)),
+          });
+          let entities: EntityRow[];
+          if (pushed !== null) {
+            entities = pushed.rows;
+            total = pushed.total;
+          } else {
+            entities = await deps.persistence.list(fetchEntityType);
+            entities = applyRowAccess(entities, readPolicy, callSiteFilter, accessBindings);
 
-          // Capture total AFTER filter, BEFORE offset/limit — paginating
-          // consumers need the count of rows matching the filter, not
-          // just the slice length.
-          total = entities.length;
-          entities = orderFetchedRows(entities, options?.orderBy);
+            // Capture total AFTER filter, BEFORE offset/limit — paginating
+            // consumers need the count of rows matching the filter, not
+            // just the slice length.
+            total = entities.length;
+            entities = orderFetchedRows(entities, options?.orderBy);
 
-          // Apply pagination
-          if (options?.offset && options.offset > 0) {
-            entities = entities.slice(options.offset);
-          }
-          if (options?.limit && options.limit > 0) {
-            entities = entities.slice(0, options.limit);
+            // Apply pagination
+            if (options?.offset && options.offset > 0) {
+              entities = entities.slice(options.offset);
+            }
+            if (options?.limit && options.limit > 0) {
+              entities = entities.slice(0, options.limit);
+            }
           }
 
           // Populate relations if include specified — on CLONES, for the
@@ -894,6 +1099,7 @@ export async function runServerEffectStage(
           entityType: fetchEntityType,
           error: error instanceof Error ? error : String(error),
         });
+        if (error instanceof PushdownViolation) throw error;
         return null;
       }
     },
@@ -1048,6 +1254,8 @@ export async function runServerEffectStage(
         inFlightCalls: deps.inFlightCalls,
     ...(deps.outsideEventQueue !== undefined ? { outsideEventQueue: deps.outsideEventQueue } : {}),
         ...(deps.outsideEventQueue !== undefined ? { outsideEventQueue: deps.outsideEventQueue } : {}),
+        ...(deps.http !== undefined ? { http: deps.http } : {}),
+        deliverLive: deliverRouteLive,
       });
 
       for (const innerEffect of atomicEffects) {
@@ -1267,6 +1475,8 @@ export async function runServerEffectStage(
     resolveEntityFields: (type) => deps.entityFieldsFor(type),
     inFlightCalls: deps.inFlightCalls,
     ...(deps.outsideEventQueue !== undefined ? { outsideEventQueue: deps.outsideEventQueue } : {}),
+    ...(deps.http !== undefined ? { http: deps.http } : {}),
+    deliverLive: deliverRouteLive,
     ...(followOn === true && deps.deferCallOutcome !== undefined
       ? { deferCallOutcome: (event: string, eventPayload: EventPayload | undefined) => deps.deferCallOutcome?.({ traitName, event, payload: eventPayload, entityId, originClientId }) }
       : {}),

@@ -15,7 +15,9 @@ function makeExecutor(environment: 'client' | 'server', delegate?: ServerLegColl
     return { emit, navigate, executor: new EffectExecutor({ handlers, bindings, context, environment, delegate }) };
 }
 
-const serverEffect = (op: string): RuntimeValue[] => [op, 'Note'];
+// `http` is server work only when it carries `auth`; a keyless one runs where it is placed.
+const serverEffect = (op: string): RuntimeValue[] =>
+    op === 'http' ? [op, 'GET', 'https://api.example.com', '/x', { auth: { scheme: 'bearer', credential: 'KEY' } }] : [op, 'Note'];
 
 describe('runsOn delegation', () => {
     it('a client delegates every server effect, including ones it has no case for', async () => {

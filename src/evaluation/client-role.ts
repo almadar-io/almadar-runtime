@@ -52,6 +52,7 @@ import type { EntityRow, SExpr, TransitionRejection } from '@almadar/core';
 import { EffectExecutor, clientResolvesRenderBindings } from '../effects/EffectExecutor.js';
 import { createClientEffectHandlers } from '../effects/ClientEffectHandlers.js';
 import { ServerLegCollector } from '../effects/server-leg.js';
+import type { HttpPorts } from '../kernel/http-exchange.js';
 import type { PersistenceAdapter } from '@almadar/core';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import type { EventTransport } from '../server/EventTransport.js';
@@ -97,6 +98,11 @@ export interface ClientRoleOpts {
    * collected.
    */
   fullTraitIndex?: TraitIndex;
+  /**
+   * What a client-site `http` (a call with no `auth`) runs on: the kernel's request driver over the browser's
+   * `fetch` (`createBrowserHttpPorts`). Absent, such a call fails with `HTTP_KERNEL_UNAVAILABLE`.
+   */
+  http?: HttpPorts;
 }
 
 /**
@@ -235,15 +241,16 @@ function restoreDispatch(store: CircuitStore, dispatch: ClientDispatch, cause: R
  * emitted.event`) if left on the wire — stripped back off in the `eventBus`
  * sink below, the one place this runner owns the translation.
  */
-function i18nOpts(opts: Pick<ClientRoleOpts, 'locale' | 'messages'>): { locale?: string; messages?: MessageCatalogs } {
+function i18nOpts(opts: Pick<ClientRoleOpts, 'locale' | 'messages' | 'http'>): { locale?: string; messages?: MessageCatalogs; http?: HttpPorts } {
   return {
     ...(opts.locale !== undefined ? { locale: opts.locale } : {}),
     ...(opts.messages !== undefined ? { messages: opts.messages } : {}),
+    ...(opts.http !== undefined ? { http: opts.http } : {}),
   };
 }
 
 function createClientEffectRunner(
-  deps: { traitIndex: TraitIndex; fullTraitIndex?: TraitIndex; store: CircuitStore; orbitalName: string; locale?: string; messages?: MessageCatalogs },
+  deps: { traitIndex: TraitIndex; fullTraitIndex?: TraitIndex; store: CircuitStore; orbitalName: string; locale?: string; messages?: MessageCatalogs; http?: HttpPorts },
   collector: ServerLegCollector,
   /**
    * Invoked once per trait whose transition actually ran effects — the
@@ -343,6 +350,7 @@ function createClientEffectRunner(
       environment: 'client',
       delegate: collector,
       deferRenderBindings: clientResolvesRenderBindings(entry?.entity),
+      ...(deps.http !== undefined ? { http: deps.http } : {}),
     });
 
     await collector.attribute(traitName, () => executor.executeAll(args.effects).then(() => undefined));

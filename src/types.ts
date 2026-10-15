@@ -37,6 +37,7 @@ import type {
     NavItem,
     RuntimeValue,
     OrbitalDefinition,
+    RowSetRef,
 } from '@almadar/core';
 import type { ProgramEffectName, ProgramEffectOutcome } from '@almadar/integrations/program';
 import type {
@@ -277,10 +278,19 @@ export interface EffectHandlers {
      * one.
      */
     persist: (
-        action: 'create' | 'update' | 'delete' | 'batch',
+        action: 'create' | 'upsert' | 'update' | 'delete' | 'batch',
         entityType: string,
         data?: EntityRow
     ) => Promise<EntityRow | undefined>;
+
+    /**
+     * Runs a run of consecutive plain persists as stop-mode requests (one when nothing is refused) when the store declares it. Answers the
+     * per-op results in order (`undefined` = that persist failed, a handled outcome, and the ones after it still run).
+     * Answers `null` when the run cannot be pushed, and the executor then runs the effects one by one.
+     */
+    persistRun?: (
+        ops: Array<{ action: 'create' | 'upsert' | 'update' | 'delete'; entityType: string; data: EntityRow | string | undefined }>,
+    ) => Promise<Array<EntityRow | undefined> | null>;
 
     /**
      * Bridge mode: the SERVER executes every persist of this dispatch and
@@ -344,10 +354,28 @@ export interface EffectHandlers {
             offset?: number;
             /** `"field"` or `"field:asc|desc"` — ordered before offset/limit */
             orderBy?: string;
+            /** `none`: the store need not count every match; the success payload carries no `totalCount`. */
+            total?: 'exact' | 'none';
             /** Relation fields to include (populate) in the response */
             include?: string[];
         }
     ) => Promise<FetchResult | null>;
+
+    /** A collection fetch delivered by reference (`fetch … { deliver: ids }`, server only): the window's ids, the
+     * count of every match and the query that re-counts it at resolve time. Rejects when the fetch cannot be
+     * expressed as a row query, which the executor routes to `emit.failure`. */
+    fetchRowSet?: (
+        entityType: string,
+        options?: {
+            filter?: SExpr | Record<string, RuntimeValue>;
+            limit?: number;
+            offset?: number;
+            /** `"field"` or `"field:asc|desc"` — ordered before offset/limit */
+            orderBy?: string;
+            /** `none`: the store need not count every match; the success payload carries no `totalCount`. */
+            total?: 'exact' | 'none';
+        }
+    ) => Promise<RowSetRef>;
 
     /** Stream an LLM or HTTP response (server only).
      *

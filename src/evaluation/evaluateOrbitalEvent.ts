@@ -45,6 +45,7 @@ import {
   type EventPayload,
   type OrbitalEventRequest,
   type OrbitalEventResponse,
+  type RowSetRef,
   type ServerEffectResult,
   type TraitEventListener,
   type TraitTick,
@@ -526,6 +527,7 @@ export async function evaluateOrbitalEvent(
   const clientEffects: ClientEffectTuple[] = [];
   const clientEffectsByTrait: ClientEffectByTrait[] = [];
   const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
+  const fetchedRefs: { [entityType: string]: RowSetRef } = {};
   const entityByTrait: Record<string, EntityRow> = {};
   let transitioned = false;
   let guardFailed: string | undefined;
@@ -668,6 +670,7 @@ export async function evaluateOrbitalEvent(
             entityId: rowId,
             emittedEvents,
             fetchedData,
+            fetchedRefs,
             clientEffects: itemClientEffects,
             effectResults,
             ...(deps.user !== undefined ? { user: deps.user } : {}),
@@ -900,6 +903,7 @@ export async function evaluateOrbitalEvent(
     transitioned,
     states: allStates,
     emittedEvents,
+    ...(Object.keys(fetchedRefs).length > 0 ? { dataRefs: fetchedRefs } : {}),
     ...(Object.keys(entityByTrait).length > 0 ? { entityByTrait } : {}),
     ...(clientEffects.length > 0 ? { clientEffects } : {}),
     ...(clientEffectsByTrait.length > 0 ? { clientEffectsByTrait } : {}),

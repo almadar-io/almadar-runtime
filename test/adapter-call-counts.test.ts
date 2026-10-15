@@ -1,0 +1,93 @@
+/**
+ * Baseline for speed pass 2 (design 4.6): how many `PersistenceAdapter` calls one dispatch makes today, on the JS
+ * engine and on the kernel host. The JS engine column is the push-down result (one queryPage per fetch, ordered or not (EXEC-FETCH-1), one writeWhere per persist, one writeBatch per batch); the kernel column is the pushed-down result (writeWhere / writeBatch declared by the adapter's capabilities).
+ * The kernel suite needs the built `@almadar/kernel` (ALMADAR_KERNEL_DIR) and is skipped without it.
+ */
+import { beforeAll, describe, expect, it } from 'vitest';
+import { CountingPersistence, type PersistenceMethod } from '@almadar/db';
+import { InMemoryPersistence } from '@almadar/db/mock';
+import type { OrbitalSchema } from '@almadar/core';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
+import type { KernelModule } from '../src/kernel/index.js';
+import { KERNEL_DIR, loadKernel } from './helpers/kernel-module.js';
+
+const emit = { emit: { success: 'DONE', failure: 'FAILED' } };
+
+function program(): OrbitalSchema {
+  return {
+    name: 'counts',
+    version: '1.0.0',
+    orbitals: [{
+      name: 'Main',
+      pages: [],
+      entity: { name: 'Note', persistence: 'persistent', collection: 'notes', fields: [{ name: 'id', type: 'string', primaryKey: true }, { name: 'title', type: 'string' }] },
+      traits: [{
+        name: 'Notes',
+        scope: 'instance',
+        linkedEntity: 'Note',
+        stateMachine: {
+          states: [{ name: 'idle', isInitial: true }],
+          events: ['UPDATE', 'CREATE', 'BATCH', 'FETCH', 'DONE', 'FAILED'].map((e) => ({ key: e, name: e })),
+          transitions: [
+            { from: 'idle', to: 'idle', event: 'UPDATE', effects: [['persist', 'update', 'Note', { id: 'n1', title: 'changed' }, emit]] },
+            { from: 'idle', to: 'idle', event: 'CREATE', effects: [['persist', 'create', 'Note', { id: 'n2', title: 'fresh' }, emit]] },
+            {
+              from: 'idle',
+              to: 'idle',
+              event: 'BATCH',
+              effects: [['persist', 'batch', [['create', 'Note', { id: 'b1', title: 'b' }], ['create', 'Note', { id: 'b2', title: 'b' }], ['create', 'Note', { id: 'b3', title: 'b' }]], emit]],
+            },
+            { from: 'idle', to: 'idle', event: 'FETCH', effects: [['fetch', 'Note', emit]] },
+            { from: 'idle', to: 'idle', event: 'DONE' },
+            { from: 'idle', to: 'idle', event: 'FAILED' },
+          ],
+        },
+      }],
+    }],
+  };
+}
+
+type Verb = 'noop' | 'update' | 'create' | 'batch' | 'fetch';
+const event: Record<Verb, string> = { noop: 'DONE', update: 'UPDATE', create: 'CREATE', batch: 'BATCH', fetch: 'FETCH' };
+
+async function callsFor(verb: Verb, engine: { kernel?: KernelModule }): Promise<Record<PersistenceMethod, number>> {
+  const memory = new InMemoryPersistence();
+  await memory.create('Note', { id: 'n1', title: 'seed' });
+  const counting = new CountingPersistence(memory);
+  const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: counting, ...(engine.kernel !== undefined ? { engine: 'kernel' as const, kernel: engine.kernel } : {}) });
+  await runtime.register(program());
+  counting.reset();
+  const response = await runtime.processOrbitalEvent('Main', { event: event[verb], targetTrait: 'Notes' });
+  expect(response.success).toBe(true);
+  return counting.counts().byMethod;
+}
+
+const counts = (create: number, update: number, getById: number, list: number, pushed: Partial<Record<PersistenceMethod, number>> = {}): Record<PersistenceMethod, number> => ({
+  create, update, delete: 0, getById, list, countRows: 0, query: 0, listPage: 0, queryPage: 0, queryIds: 0, writeWhere: 0, writeBatch: 0, ...pushed,
+});
+
+// Totals include the dispatch's own frame reads (JS: readTraitFrame; kernel: readRow/listRows for the bound entity),
+// which the `noop` control isolates; the persist effect's own share is the difference.
+const JS = { noop: counts(0, 0, 0, 0), update: counts(0, 0, 0, 0, { writeWhere: 1 }), create: counts(1, 0, 3, 2), batch: counts(3, 0, 0, 0), fetch: counts(0, 0, 0, 0, { queryPage: 1 }) };
+const KERNEL = { noop: counts(0, 0, 2, 0), update: counts(0, 0, 4, 0, { writeWhere: 1 }), create: counts(0, 0, 4, 0, { writeWhere: 1 }), batch: counts(0, 0, 4, 0, { writeBatch: 1 }), fetch: counts(0, 0, 4, 0, { queryPage: 1 }) };
+
+describe('adapter calls per dispatch, JS engine (push-down)', () => {
+  it('control: an event with no effects reads nothing', async () => expect(await callsFor('noop', {})).toEqual(JS.noop));
+  it('persist update', async () => expect(await callsFor('update', {})).toEqual(JS.update));
+  it('persist create', async () => expect(await callsFor('create', {})).toEqual(JS.create));
+  it('persist batch of 3', async () => expect(await callsFor('batch', {})).toEqual(JS.batch));
+  it('fetch', async () => expect(await callsFor('fetch', {})).toEqual(JS.fetch));
+});
+
+describe.skipIf(KERNEL_DIR === undefined)('adapter calls per dispatch, kernel host (push-down)', () => {
+  let kernel: KernelModule;
+  beforeAll(async () => {
+    kernel = await loadKernel();
+  });
+  it('control: an event with no effects costs only the two frame reads', async () => expect(await callsFor('noop', { kernel })).toEqual(KERNEL.noop));
+  it('persist update', async () => expect(await callsFor('update', { kernel })).toEqual(KERNEL.update));
+  it('persist create', async () => expect(await callsFor('create', { kernel })).toEqual(KERNEL.create));
+  it('persist batch of 3', async () => expect(await callsFor('batch', { kernel })).toEqual(KERNEL.batch));
+  it('fetch', async () => expect(await callsFor('fetch', { kernel })).toEqual(KERNEL.fetch));
+});
+

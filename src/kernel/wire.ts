@@ -6,10 +6,15 @@ export type {
   CallerWire,
   CallRoutesWire,
   CallSiteWire,
+  HttpBody,
+  HttpFailureWire,
+  HttpRequestWire,
+  HttpResponseWire,
   IoAnswerWire,
   IoReplyWire,
   IoRequestWire,
   PendingRequestWire,
+  ResolveProgressWire,
   ServerProgressWire,
   Settled,
   SubstrateFailureWire,
@@ -19,6 +24,9 @@ export type {
 export interface KernelServerHandle {
   start(orbital: string, requestJson: string): string;
   resume(flight: number, repliesJson: string): string;
+  /** A row-set reference resolved for a viewer through the host-answered store; a `ResolveProgressWire` as JSON. */
+  resolveRows(refJson: string, viewerJson: string): string;
+  resumeResolve(flight: number, repliesJson: string): string;
   abandon(flight: number): boolean;
   inFlight(): number;
   getState(traitName: string, entityId?: string): string;
@@ -26,6 +34,7 @@ export interface KernelServerHandle {
   mount(traitsJson: string): void;
   remount(traitsJson: string): void;
   setTickMount(traitsJson: string): void;
+  setCapabilities(entityType: string, queryJson: string, writeJson: string): void;
   setMessages(localesJson: string, catalogsJson: string): void;
   lastError(): string;
   free(): void;

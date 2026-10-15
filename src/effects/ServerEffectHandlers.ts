@@ -14,6 +14,8 @@
  */
 
 import { orderFetchedRows } from './fetch-order.js';
+import { PushdownViolation, compensateBatch, hasOwnId, noteFallback, type AppliedBatchOp, type WritePlan } from '@almadar/db/pushdown';
+import { pushPersistBatch, planWrite, pushFetch, pushFetchRowSet, settleWrite } from './pushdown.js';
 import type { EntityAccessPolicies, EventPayload, SExpr, ServiceParams, RuntimeValue } from "@almadar/core";
 import { isPersistBatchOperation } from "@almadar/core";
 // Single upstream owner (`@almadar/core`'s `types/effect-result.ts`) —
@@ -22,7 +24,7 @@ import { isPersistBatchOperation } from "@almadar/core";
 // Re-exported here so every existing importer keeps working unchanged.
 import type { ClientEffectByTrait, ServerBatchSummary, ServerEffectResult } from "@almadar/core";
 export type { ServerBatchSummary, ServerEffectResult } from "@almadar/core";
-import type { PersistenceAdapter } from '@almadar/core';
+import type { PersistenceAdapter, RowSetRef, RowWriteOp, RowWriteOutcome } from '@almadar/core';
 // Type-only — erased before runtime (isolatedModules), so this does not pull
 // OrbitalServerRuntime's Express/Node code into this browser-safe module.
 // Mirrors the identical reverse edge OrbitalServerRuntime.ts already has
@@ -33,7 +35,7 @@ import {
   checkMutationAccess,
   accessDeniedMessage,
   type AccessBindings,
-} from "../entities/entityAccess.js";
+} from "@almadar/evaluator/entityAccess";
 import type {
   EffectHandlers,
   BindingContext,
@@ -47,7 +49,7 @@ import type { InFlightCalls } from "./in-flight-calls.js";
 import { createContextFromBindings } from "../evaluation/BindingResolver.js";
 import { evaluate } from "@almadar/evaluator";
 import { defaultCallService } from './defaultCallService.js';
-import { codeOf, noRowKeyFailure, notFoundFailure } from './persist-failure.js';
+import { codeOf, duplicateIdFailure, noRowKeyFailure, notFoundFailure } from './persist-failure.js';
 import { createLogger } from '@almadar/logger';
 
 /** FATAL: re-measured and gated clean — a persist that resolves no row key
@@ -96,6 +98,8 @@ export interface CreateServerEffectHandlersOptions {
    * a separate round-trip.
    */
   fetchedData?: Record<string, EntityRow[]>;
+  /** Per-event pages fetched by reference (`deliver: ids`), by entity type. */
+  fetchedRefs?: Record<string, RowSetRef>;
   /** Per-event emit log. Optional — telemetry only. */
   emittedEvents?: Array<{ event: string; payload?: EventPayload }>;
   /**
@@ -172,6 +176,7 @@ export function createServerEffectHandlers(
     context,
     effectResults,
     fetchedData,
+    fetchedRefs,
     emittedEvents,
     clientEffects,
     clientEffectsByTrait,
@@ -261,8 +266,11 @@ export function createServerEffectHandlers(
           });
           return;
         }
+        const pushedBatch = await pushPersistBatch(persistence, operations, () => [], record);
+        if (pushedBatch !== null) return pushedBatch;
         const batchResults: EntityRow[] = [];
         const completed: Array<{ action: string; entityType: string; id?: string }> = [];
+        const applied: AppliedBatchOp[] = [];
         let batchFailed = false;
         let batchError = "";
         const ops: readonly RuntimeValue[] = operations;
@@ -278,6 +286,9 @@ export function createServerEffectHandlers(
             switch (op[0]) {
               case "create": {
                 const createData = op[2] ?? {};
+                if (hasOwnId(createData) && (await persistence.getById(opEntityType, String(createData.id))) !== null) {
+                  throw new Error(`${opEntityType} ${String(createData.id)} already exists`);
+                }
                 const { id: newId } = await persistence.create(
                   opEntityType,
                   createData,
@@ -293,13 +304,17 @@ export function createServerEffectHandlers(
                   entityType: opEntityType,
                   id: newId,
                 });
+                applied.push({ kind: "create", entityType: opEntityType, id: newId });
                 break;
               }
               case "update": {
                 const updateId = op[2];
                 const updateData = op[3] ?? {};
+                const updateBefore = await persistence.getById(opEntityType, updateId);
+                if (updateBefore === null) throw notFoundFailure(opEntityType, updateId);
                 await persistence.update(opEntityType, updateId, updateData);
                 const updated = await persistence.getById(opEntityType, updateId);
+                applied.push({ kind: "update", entityType: opEntityType, id: updateId, before: { ...updateBefore }, after: updated });
                 batchResults.push({
                   ...(updated || updateData),
                   action: "update",
@@ -315,7 +330,9 @@ export function createServerEffectHandlers(
               }
               case "delete": {
                 const deleteId = op[2];
+                const deleteBefore = await persistence.getById(opEntityType, deleteId);
                 await persistence.delete(opEntityType, deleteId);
+                applied.push({ kind: "delete", entityType: opEntityType, id: deleteId, before: deleteBefore ? { ...deleteBefore } : null });
                 batchResults.push({
                   action: "delete",
                   entityType: opEntityType,
@@ -343,6 +360,11 @@ export function createServerEffectHandlers(
           }
           if (batchFailed) break;
         }
+        if (batchFailed && applied.length > 0) {
+          await compensateBatch(persistence, applied);
+          batchResults.length = 0;
+          completed.length = 0;
+        }
         const batchSummary: PersistBatchSummary = {
           operations: batchResults,
           completedCount: completed.length,
@@ -365,12 +387,21 @@ export function createServerEffectHandlers(
 
       const type = targetEntityType || entityType;
       let resultData: EntityRow | undefined;
-      const sizeBefore = (await persistence.list(type)).length;
+      const mutationPolicy = entityAccess?.get(type)?.[action === 'upsert' ? 'create' : action];
+      // This handler set enforces no on-delete rules, so a delete is pushable like an update. A create or upsert has no
+      // pre-image to guard: its `@create` directive is checked on the incoming row, so the plan carries no policy.
+      const writesRow = action === 'create' || action === 'upsert';
+      const incoming: EntityRow = typeof data === 'object' && data !== null ? data : {};
+      const mintsId = action === 'create' && !hasOwnId(incoming);
+      if (mintsId) noteFallback(persistence, 'kernel.write.pushdown-fallback', type, 'create-mints-id');
+      const plan: WritePlan = mintsId ? { push: false } : planWrite(persistence, type, writesRow ? undefined : mutationPolicy, accessBindings(type), new Set<string>());
+      const sizeBefore = plan.push ? 0 : (await persistence.list(type)).length;
       // Distinguishes a policy/row-key REJECTION from any other thrown
       // failure — see OrbitalServerRuntime's persist handler (same shape).
       let deniedReason: 'access-denied' | 'no-row-key' | undefined;
       try {
-        const mutationPolicy = entityAccess?.get(type)?.[action];
+        const settle = (outcome: RowWriteOutcome, write: RowWriteOp): EntityRow =>
+          settleWrite(outcome, write, plan.push ? plan.guard : undefined, () => { deniedReason = 'access-denied'; });
         switch (action) {
           case "create": {
             // `@create` is checked against the INCOMING data — no row exists yet.
@@ -378,14 +409,59 @@ export function createServerEffectHandlers(
               deniedReason = 'access-denied';
               throw new Error(accessDeniedMessage("create", type));
             }
-            const { id } = await persistence.create(type, (data ?? {}) as EntityRow);
-            resultData = { ...((data ?? {}) as EntityRow), id };
+            if (plan.push) {
+              const write: RowWriteOp = { kind: 'create', entityType: type, data: incoming };
+              resultData = settle(await persistence.writeWhere!(write), write);
+              break;
+            }
+            if (hasOwnId(incoming) && (await persistence.getById(type, String(incoming.id))) !== null) throw duplicateIdFailure(type, String(incoming.id));
+            const { id } = await persistence.create(type, incoming);
+            resultData = { ...incoming, id };
+            break;
+          }
+          case "upsert": {
+            // `@create` is checked on the incoming row, and `@update` (when declared) on the row it replaces.
+            if (!checkMutationAccess(incoming, mutationPolicy, accessBindings(type))) {
+              deniedReason = 'access-denied';
+              throw new Error(accessDeniedMessage("create", type));
+            }
+            if (!hasOwnId(incoming)) {
+              effectLog.error('persist:no-row-key', { action, entityType: type });
+              deniedReason = 'no-row-key';
+              throw noRowKeyFailure(action, type);
+            }
+            const upsertId = String(incoming.id);
+            const updatePolicy = entityAccess?.get(type)?.update;
+            let existing: EntityRow | null | undefined;
+            if (updatePolicy !== undefined) {
+              existing = await persistence.getById(type, upsertId);
+              if (existing !== null && !checkMutationAccess(existing, updatePolicy, accessBindings(type))) {
+                deniedReason = 'access-denied';
+                throw new Error(accessDeniedMessage("update", type));
+              }
+            }
+            if (plan.push) {
+              const write: RowWriteOp = { kind: 'upsert', entityType: type, data: incoming };
+              resultData = settle(await persistence.writeWhere!(write), write);
+              break;
+            }
+            existing ??= await persistence.getById(type, upsertId);
+            if (existing === null) {
+              await persistence.create(type, incoming);
+            } else {
+              await persistence.delete(type, upsertId);
+              await persistence.create(type, existing.createdAt === undefined ? incoming : { ...incoming, createdAt: existing.createdAt });
+            }
+            resultData = (await persistence.getById(type, upsertId)) ?? incoming;
             break;
           }
           case "update": {
             const row = (data ?? {}) as EntityRow;
             const idOrFallback = (row.id as string | undefined) ?? entityId;
-            if (idOrFallback) {
+            if (idOrFallback && plan.push) {
+              const write: RowWriteOp = { kind: 'update', entityType: type, id: idOrFallback, data: row, ...(plan.guard ? { guard: plan.guard } : {}) };
+              resultData = settle(await persistence.writeWhere!(write), write);
+            } else if (idOrFallback) {
               // The row is read fresh before the write: absent is `not-found`, and
               // `@update` is checked against the EXISTING row — the incoming patch is
               // what the caller wants, not what they may touch.
@@ -416,7 +492,10 @@ export function createServerEffectHandlers(
                 ? ((data as { id?: string }).id)
                 : undefined;
             const deleteId = directId ?? nestedId ?? entityId;
-            if (deleteId) {
+            if (deleteId && plan.push) {
+              const write: RowWriteOp = { kind: 'delete', entityType: type, id: deleteId, ...(plan.guard ? { guard: plan.guard } : {}) };
+              resultData = settle(await persistence.writeWhere!(write), write);
+            } else if (deleteId) {
               const existing = await persistence.getById(type, deleteId);
               if (existing === null) throw notFoundFailure(type, deleteId);
               if (mutationPolicy !== undefined && !checkMutationAccess(existing, mutationPolicy, accessBindings(type))) {
@@ -453,15 +532,19 @@ export function createServerEffectHandlers(
           return undefined;
         }
 
-        const sizeAfter = (await persistence.list(type)).length;
-        effectLog.debug("persist:store-mutate", {
-          action,
-          entityType: type,
-          resultId: resultData?.id as string | undefined,
-          sizeBefore,
-          sizeAfter,
-          delta: sizeAfter - sizeBefore,
-        });
+        if (plan.push) {
+          effectLog.debug("persist:store-mutate", { action, entityType: type, resultId: resultData?.id as string | undefined });
+        } else {
+          const sizeAfter = (await persistence.list(type)).length;
+          effectLog.debug("persist:store-mutate", {
+            action,
+            entityType: type,
+            resultId: resultData?.id as string | undefined,
+            sizeBefore,
+            sizeAfter,
+            delta: sizeAfter - sizeBefore,
+          });
+        }
         record({
           effect: "persist",
           action,
@@ -525,6 +608,23 @@ export function createServerEffectHandlers(
       }
     },
 
+    fetchRowSet: async (fetchEntityType, options) => {
+      const reference = await pushFetchRowSet({
+        persistence,
+        entityType: fetchEntityType,
+        readPolicy: entityAccess?.get(fetchEntityType)?.read,
+        filter: options?.filter as SExpr | undefined,
+        orderBy: options?.orderBy,
+        offset: options?.offset,
+        limit: options?.limit,
+        ...(options?.total !== undefined ? { total: options.total } : {}),
+        bindings: accessBindings(fetchEntityType),
+        requiredFields: new Set<string>(),
+      });
+      if (fetchedRefs) fetchedRefs[fetchEntityType] = reference;
+      return reference;
+    },
+
     fetch: async (fetchEntityType, options) => {
       try {
         let result: EntityRow | EntityRow[] | null = null;
@@ -548,25 +648,40 @@ export function createServerEffectHandlers(
             total = 1;
           }
         } else {
-          let entities = await persistence.list(fetchEntityType);
-          // The declared `@read` directive AND the call-site `filter:`, through
-          // the one evaluator OrbitalServerRuntime uses — a second inline copy
-          // here is how this path silently diverged before.
-          entities = applyRowAccess(
-            entities,
-            entityAccess?.get(fetchEntityType)?.read,
-            options?.filter as SExpr | undefined,
-            accessBindings(fetchEntityType),
-          );
-          // Capture total AFTER filter, BEFORE offset/limit so paginating
-          // consumers receive the count of rows matching the filter.
-          total = entities.length;
-          entities = orderFetchedRows(entities, options?.orderBy);
-          if (options?.offset && options.offset > 0) {
-            entities = entities.slice(options.offset);
-          }
-          if (options?.limit && options.limit > 0) {
-            entities = entities.slice(0, options.limit);
+          const readPolicy = entityAccess?.get(fetchEntityType)?.read;
+          const callSiteFilter = options?.filter as SExpr | undefined;
+          const pushed = await pushFetch({
+            persistence,
+            entityType: fetchEntityType,
+            readPolicy,
+            filter: callSiteFilter,
+            orderBy: options?.orderBy,
+            offset: options?.offset,
+            limit: options?.limit,
+        ...(options?.total !== undefined ? { total: options.total } : {}),
+            bindings: accessBindings(fetchEntityType),
+            requiredFields: new Set<string>(),
+          });
+          let entities: EntityRow[];
+          if (pushed !== null) {
+            entities = pushed.rows;
+            total = pushed.total;
+          } else {
+            entities = await persistence.list(fetchEntityType);
+            // The declared `@read` directive AND the call-site `filter:`, through
+            // the one evaluator OrbitalServerRuntime uses — a second inline copy
+            // here is how this path silently diverged before.
+            entities = applyRowAccess(entities, readPolicy, callSiteFilter, accessBindings(fetchEntityType));
+            // Capture total AFTER filter, BEFORE offset/limit so paginating
+            // consumers receive the count of rows matching the filter.
+            total = entities.length;
+            entities = orderFetchedRows(entities, options?.orderBy);
+            if (options?.offset && options.offset > 0) {
+              entities = entities.slice(options.offset);
+            }
+            if (options?.limit && options.limit > 0) {
+              entities = entities.slice(0, options.limit);
+            }
           }
           if (fetchedData) fetchedData[fetchEntityType] = entities;
           result = entities;
@@ -577,6 +692,7 @@ export function createServerEffectHandlers(
           entityType: fetchEntityType,
           error: err instanceof Error ? err : String(err),
         });
+        if (err instanceof PushdownViolation) throw err;
         return null;
       }
     },

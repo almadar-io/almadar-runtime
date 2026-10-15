@@ -21,7 +21,7 @@
  * the dev binaries aren't on this machine, same convention as
  * `composed-trait-listen-eventid-routing.test.ts`'s real-plugin suite.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -67,13 +67,19 @@ describe(
       /* best-effort cleanup */
     }
 
+    // Measured 2026-10-14: one preprocessSchema of project-friday is ~7 s alone (was four per file run); computed once, 120 s hook budget covers loaded runs.
+    let preprocessed: Awaited<ReturnType<typeof preprocessSchema>>;
+    beforeAll(async () => {
+      preprocessed = await preprocessSchema(pfSchema, {
+        basePath: IO_ROOT,
+        stdLibPath: STD_ROOT,
+        allowOutsideBasePath: true,
+      });
+    }, 120_000);
+
     for (const orbitalName of ['TimesheetOrbital', 'ApprovalRequestOrbital'] as const) {
       it(`"${orbitalName}" resolves the same trait SET through both paths (order-independent)`, async () => {
-        const result = await preprocessSchema(pfSchema, {
-          basePath: IO_ROOT,
-          stdLibPath: STD_ROOT,
-          allowOutsideBasePath: true,
-        });
+        const result = preprocessed;
         expect(result.success).toBe(true);
         if (!result.success) return;
 
@@ -104,11 +110,7 @@ describe(
     }
 
     it('both AppLayout shells forward the imported app-level appName/navItems knobs (uses { config } override)', async () => {
-      const result = await preprocessSchema(pfSchema, {
-        basePath: IO_ROOT,
-        stdLibPath: STD_ROOT,
-        allowOutsideBasePath: true,
-      });
+      const result = preprocessed;
       expect(result.success).toBe(true);
       if (!result.success) return;
 
@@ -171,11 +173,7 @@ describe(
     });
 
     it('preserves the assistant allowlist and resolved input identities on both paths', async () => {
-      const result = await preprocessSchema(pfSchema, {
-        basePath: IO_ROOT,
-        stdLibPath: STD_ROOT,
-        allowOutsideBasePath: true,
-      });
+      const result = preprocessed;
       expect(result.success, result.success ? undefined : JSON.stringify(result)).toBe(true);
       if (!result.success) return;
 

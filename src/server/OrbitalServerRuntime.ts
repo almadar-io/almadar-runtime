@@ -165,7 +165,7 @@ const registerLog = createLogger("almadar:runtime:register");
  * (G-RUNTIME-027).
  */
 const CROSS_ORBITAL_RELAY_CAP = 500;
-import type { SSEEvent } from '@almadar/server';
+import { setupSSE, sendSSEEvent, sendSSEDone, closeSSE } from './sse.js';
 import {
   interpolateProps,
   createContextFromBindings,
@@ -205,7 +205,9 @@ import type {
   ServiceHostPorts,
 } from "@almadar/core";
 import { entityAccessPolicies } from "@almadar/core/mock";
-import { applyRowAccess } from "../entities/entityAccess.js";
+import { orbitalInlineEntities, RowSetRefSchema, type RowQueryPage } from "@almadar/core";
+import { resolveRowSetFromPersistence } from "../effects/pushdown.js";
+import { applyRowAccess } from "@almadar/evaluator/entityAccess";
 
 // Single upstream owner (`@almadar/core`'s `types/bus.ts`) — both execution
 // paths (this runtime and orbital-shell-typescript's generated handlers,
@@ -239,7 +241,7 @@ import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf } from "@
 import { runServerEffectStage } from "../effects/effect-stage.js";
 import { InFlightCalls } from "../effects/in-flight-calls.js";
 import { defaultCallService, mockCallService } from "../effects/defaultCallService.js";
-import { KernelEngine, type KernelHostPorts, type KernelModule } from "../kernel/index.js";
+import { createHttpPorts, KernelEngine, type HttpPorts, type HttpPortsOptions, type KernelHostPorts, type KernelModule } from "../kernel/index.js";
 export type { KernelModule } from "../kernel/index.js";
 import { installPolicyOwnerGates } from "../entities/policyOwnerGates.js";
 import { MockPersistenceAdapter } from "@almadar/db/mock";
@@ -481,12 +483,18 @@ export interface OrbitalServerRuntimeConfig {
   engine?: 'js' | 'kernel';
   /** The initialised `@almadar/kernel` module (`loadKernelModule` in Node); required when `engine` is `'kernel'`. */
   kernel?: KernelModule;
+  /**
+   * What the `http` effect runs on: the kernel's request driver (`loadHttpKernel`), and optionally the secret store,
+   * pinned fetch and resolver. The program's `egress` is read from the registered schema. Absent, an `http` effect
+   * fails with `HTTP_KERNEL_UNAVAILABLE`.
+   */
+  http?: Omit<HttpPortsOptions, 'egress'>;
 }
 
 /**
  * Adapter for persisting entity data
  */
-import type { PersistenceAdapter } from '@almadar/core';
+import type { PersistenceAdapter, RowSetRef } from '@almadar/core';
 import { InMemoryPersistence, stampSeedTimestamps } from '@almadar/db/mock';
 
 // ============================================================================
@@ -1433,8 +1441,15 @@ export class OrbitalServerRuntime {
    * Register a single orbital (sync wrapper for backward compatibility)
    */
   /** The adapters the kernel's I/O is answered with: this runtime's persistence, services and program host. */
+  private httpPorts(): HttpPorts | undefined {
+    const options = this.config.http;
+    return options === undefined ? undefined : createHttpPorts({ ...options, egress: this.resolvedSchema?.egress ?? [] });
+  }
+
   private kernelPorts(): KernelHostPorts {
+    const http = this.httpPorts();
     return {
+      ...(http !== undefined ? { http } : {}),
       persistence: this.persistence,
       inFlightCalls: this.inFlightCalls,
       callService: (service, action, params, context) => {
@@ -2119,6 +2134,20 @@ export class OrbitalServerRuntime {
     return resolveViewer(verified ?? null, source, this.persistence);
   }
 
+  /**
+   * `reference` resolved for `user` against the store as it is now: the rows that still match its query and the
+   * viewer's `@read`, in the reference's order, `total` re-counted. The kernel engine resolves through its server
+   * resolve flight, the JS engine through the store push-down; both apply the same rule. A client reaches it with
+   * `POST /:orbital/../resolve-rows` as the signed-in viewer.
+   */
+  async resolveRows(reference: RowSetRef, user: UserContext): Promise<RowQueryPage> {
+    const schema = this.resolvedSchema;
+    const owner = schema?.orbitals.find((orbital) => orbitalInlineEntities(orbital).some((entity) => entity.name === reference.entityType));
+    if (schema === null || owner === undefined) throw new Error(`${reference.entityType}: no registered orbital declares this entity`);
+    if (this.kernelEngine !== null) return this.kernelEngine.resolveRows(reference, { orbital: owner.name, user });
+    return resolveRowSetFromPersistence(this.persistence, reference, entityAccessPolicies(schema, reference.entityType)?.read, { user }, new Set<string>());
+  }
+
   async getIdentityRoster(): Promise<UserContext[]> {
     const schema = this.resolvedSchema;
     if (!schema) return [];
@@ -2533,6 +2562,7 @@ export class OrbitalServerRuntime {
         context.queueHold,
         args.locale,
         args.followOn,
+        args.fetchedRefs,
       );
       await this.rerenderCallsiteCaptureChildren(
         registered,
@@ -2826,6 +2856,8 @@ export class OrbitalServerRuntime {
     locale?: string,
     /** A follow-on step of the dispatch: its calls do not hold the request (`ServerEffectStageArgs.followOn`). */
     followOn?: boolean,
+    /** Pages fetched by reference (`deliver: ids`) land here; the response's `dataRefs`. */
+    fetchedRefs?: { [entityType: string]: RowSetRef },
   ): Promise<void> {
     if (callsitePayload !== undefined) this.composedCallsitePayloads.set(traitName, callsitePayload);
     const capture = callsitePayload ?? this.composedCallsitePayloads.get(traitName);
@@ -2851,12 +2883,14 @@ export class OrbitalServerRuntime {
         entityFieldsFor: (type) => this.entityFieldsFor(registered, type),
         validateRelationCardinality: (type, data) => this.validateRelationCardinality(type, data),
         enforceOnDeleteRules: (type, id) => this.enforceOnDeleteRules(type, id),
+        hasOnDeleteRules: (type) => this.hasOnDeleteRules(type),
         populateRelations: (entities, type, include) => this.populateRelations(registered, entities, type, include),
         sigilPages,
         sigilTheme,
         extraEffectHandlers: this.config.effectHandlers,
         outsideEventQueue: (work) => this.outsideEventQueue(queueHold, work),
         inFlightCalls: this.inFlightCalls,
+        ...(this.httpPorts() !== undefined ? { http: this.httpPorts() } : {}),
         servicePorts: (caller, user, message) => this.servicePorts(caller, user, message),
         deliverEmit: (event, eventPayload, stamp, fromPersistSuccess) => {
           // Observability tap, NOT circuit routing (W4): the runtime's own
@@ -2892,7 +2926,7 @@ export class OrbitalServerRuntime {
         messages: this.messages,
         ...(this.appLocales[0] !== undefined ? { defaultLocale: this.appLocales[0] } : {}),
       },
-      { traitName, effects, payload, entityData, entityId, emittedEvents, fetchedData, clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, callsitePayload: capture, ...(locale !== undefined ? { locale } : {}), ...(now !== undefined ? { now } : {}), ...(dispatch !== undefined ? { dispatch } : {}), ...(firing !== undefined ? { firing } : {}), ...(followOn === true ? { followOn } : {}) },
+      { traitName, effects, payload, entityData, entityId, emittedEvents, fetchedData, ...(fetchedRefs !== undefined ? { fetchedRefs } : {}), clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, callsitePayload: capture, ...(locale !== undefined ? { locale } : {}), ...(now !== undefined ? { now } : {}), ...(dispatch !== undefined ? { dispatch } : {}), ...(firing !== undefined ? { firing } : {}), ...(followOn === true ? { followOn } : {}) },
     );
     if (capture !== undefined && clientEffectsByTrait !== undefined) {
       for (const frame of clientEffectsByTrait.slice(framesBefore)) {
@@ -3085,6 +3119,15 @@ export class OrbitalServerRuntime {
       }
       break;
     }
+  }
+
+  private hasOnDeleteRules(entityType: string): boolean {
+    for (const [, registered] of this.orbitals) {
+      for (const field of registered.entity.fields ?? []) {
+        if (field.type === 'relation' && field.relation?.entity === entityType) return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -3483,6 +3526,21 @@ export class OrbitalServerRuntime {
         .catch(next);
     });
 
+    // A row-set reference resolved for the signed-in viewer (rows-by-reference markers on a server-hosted store).
+    router.post("/resolve-rows", async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const parsed = RowSetRefSchema.safeParse(req.body?.ref);
+        if (!parsed.success) {
+          res.status(400).json({ success: false, error: parsed.error.message });
+          return;
+        }
+        const user = await this.viewerOf(req.authUser);
+        res.json(await this.resolveRows(parsed.data, user));
+      } catch (error) {
+        next(error);
+      }
+    });
+
     // Send event to orbital - this is the ONLY data access point
     // All reads go through `fetch` effects with guard enforcement
     // All writes go through `persist` effects with guard enforcement
@@ -3507,15 +3565,7 @@ export class OrbitalServerRuntime {
 
         // SSE streaming path — true incremental: each emitted event or client
         // effect is written to the stream immediately via onPush as it fires,
-        // before processOrbitalEvent resolves. Dynamic import keeps
-        // @almadar/server (ESM, Node-only) out of browser bundles.
-        const { setupSSE, sendSSEEvent, sendSSEDone, closeSSE } =
-          (await import('@almadar/server')) as {
-            setupSSE: (res: import('http').ServerResponse) => void;
-            sendSSEEvent: (res: import('http').ServerResponse, ev: SSEEvent) => void;
-            sendSSEDone: (res: import('http').ServerResponse) => void;
-            closeSSE: (res: import('http').ServerResponse) => void;
-          };
+        // before processOrbitalEvent resolves.
         setupSSE(res);
         try {
           const orbitalName = req.params.orbital as string;

@@ -14,7 +14,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import { createServerEffectHandlers, type ServerEffectResult } from '../src/effects/ServerEffectHandlers.js';
-import { accessDeniedMessage } from '../src/entities/entityAccess.js';
+import { accessDeniedMessage } from '@almadar/evaluator/entityAccess';
 import type { EntityAccessPolicies, SExpr } from '@almadar/core';
 
 /** `assignee == @user.id` — the ownership-scoping shape helpdesk declares. */

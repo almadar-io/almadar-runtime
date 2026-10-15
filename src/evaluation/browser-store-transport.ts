@@ -6,8 +6,9 @@
 import type { MessageCatalogs, OrbitalDefinition, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, RuntimeValue } from '@almadar/core';
 import { externalInputsOf, orbitalInlineEntities, parseOrbitalSchema, readableEntitiesOf, storesRowsInBrowser } from '@almadar/core';
 import { entityAccessPolicies } from '@almadar/core/mock';
-import { applyRowAccess } from '../entities/entityAccess.js';
+import { applyRowAccess } from '@almadar/evaluator/entityAccess';
 import type { ServerEffectStageDeps } from '../effects/effect-stage.js';
+import type { HttpPorts } from '../kernel/http-exchange.js';
 import { dispatchDeclaredInput } from './declared-input-dispatch.js';
 import { IndexedDbPersistence } from '@almadar/db/browser';
 import { InMemoryPersistence } from '@almadar/db/mock';
@@ -56,6 +57,8 @@ export interface BrowserStoreTransportOptions {
   locale?: string;
   /** Answers the program's calls to browser-only services (the client's web-hosted integrations). */
   callService?: EffectHandlers['callService'];
+  /** What a leg's client-site `http` runs on (`createBrowserHttpPorts`). */
+  http?: HttpPorts;
   /** The program's message catalogs, so a leg's `i18n/t` resolves for the request's locale. */
   messages?: MessageCatalogs;
 }
@@ -76,6 +79,7 @@ export async function openBrowserStoreTransport(options: BrowserStoreTransportOp
     schema: options.schema,
     ...(options.clientRelays !== undefined ? { clientRelays: options.clientRelays } : {}),
     ...(options.callService !== undefined ? { callService: options.callService } : {}),
+    ...(options.http !== undefined ? { http: options.http } : {}),
     ...(options.messages !== undefined ? { messages: options.messages } : {}),
   });
 }
@@ -85,7 +89,7 @@ export async function openBrowserStoreTransport(options: BrowserStoreTransportOp
  * core (the client's core may predate the browser-storage fields). A compiled
  * client relays every emit itself, as it does a compiled server's reply.
  */
-export function openBundledBrowserStore(bundled: RuntimeValue, locale?: string, callService?: EffectHandlers['callService'], messages?: MessageCatalogs): Promise<EventTransport> {
+export function openBundledBrowserStore(bundled: RuntimeValue, locale?: string, callService?: EffectHandlers['callService'], messages?: MessageCatalogs, http?: HttpPorts): Promise<EventTransport> {
   const schema = parseOrbitalSchema(bundled);
   return openBrowserStoreTransport({
     databaseName: browserStoreName(schema.name, locale),
@@ -93,6 +97,7 @@ export function openBundledBrowserStore(bundled: RuntimeValue, locale?: string, 
     clientRelays: true,
     ...(locale !== undefined ? { locale } : {}),
     ...(callService !== undefined ? { callService } : {}),
+    ...(http !== undefined ? { http } : {}),
     ...(messages !== undefined ? { messages } : {}),
   });
 }
@@ -102,6 +107,8 @@ export interface BrowserHostOptions {
   schema: OrbitalSchema;
   /** Answers every `call-service` of the program (the host's browser integrations). */
   callService: EffectHandlers['callService'];
+  /** What the program's client-site `http` effects run on (`createBrowserHttpPorts`). */
+  http?: HttpPorts;
   factory?: IDBFactory;
   locale?: string;
 }
@@ -232,7 +239,7 @@ export async function openBrowserHost(options: BrowserHostOptions): Promise<Brow
       message,
     };
   };
-  const local = createLocalStoreTransport({ traitIndex, persistence, store, schema, callService: options.callService, servicePorts, outsideEventQueue });
+  const local = createLocalStoreTransport({ traitIndex, persistence, store, schema, callService: options.callService, servicePorts, outsideEventQueue, ...(options.http !== undefined ? { http: options.http } : {}) });
   transport = local;
 
   const scheduler = createTickScheduler();

@@ -1,6 +1,6 @@
 import type { ServerEffectResult } from '@almadar/core';
 
-/** The coded reason a persist update/delete resolved no target row (`ServerEffectResult.code`). */
+/** The coded reason a persist failed: no target row (`not-found`, `no-row-key`) or a create on a taken id (`duplicate-id`). */
 export type PersistFailureCode = NonNullable<ServerEffectResult['code']>;
 
 /** A persist refused with a declared code; the stage records `code` on its `ServerEffectResult`. */
@@ -22,6 +22,10 @@ export function noRowKeyFailure(action: string, entityType: string): PersistFail
 
 export function notFoundFailure(entityType: string, id: string): PersistFailure {
   return new PersistFailure(`${entityType} ${id} not found`, 'not-found');
+}
+
+export function duplicateIdFailure(entityType: string, id: string): PersistFailure {
+  return new PersistFailure(`${entityType} ${id} already exists`, 'duplicate-id');
 }
 
 /** The `code` field to spread onto a failed persist result: the thrown failure's, else none. */

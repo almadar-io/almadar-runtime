@@ -28,6 +28,8 @@ export interface LocalStoreTransportOptions {
   servicePorts?: ServerEffectStageDeps['servicePorts'];
   /** Releases the host's request queue while a `call-service` awaits its provider. */
   outsideEventQueue?: ServerEffectStageDeps['outsideEventQueue'];
+  /** What the `http` effect runs on (the browser's request driver); absent, an `http` effect fails as unavailable. */
+  http?: ServerEffectStageDeps['http'];
   user?: UserContext;
   strictBindings?: EvaluateOrbitalEventDeps['strictBindings'];
   contextExtensions?: EvaluateOrbitalEventDeps['contextExtensions'];
@@ -53,6 +55,7 @@ export function createLocalStoreTransport(options: LocalStoreTransportOptions): 
         extraEffectHandlers: { callService: options.callService ?? browserLegCallService },
         ...(options.servicePorts !== undefined ? { servicePorts: options.servicePorts } : {}),
         ...(options.outsideEventQueue !== undefined ? { outsideEventQueue: options.outsideEventQueue } : {}),
+        ...(options.http !== undefined ? { http: options.http } : {}),
         inFlightCalls,
         ...(options.debug !== undefined ? { debug: options.debug } : {}),
         ...(options.messages !== undefined ? { messages: options.messages } : {}),

@@ -9,7 +9,6 @@
   "browser": {
     "express": false,
     "module": false,
-    "@almadar/server": false,
     "./dist/kernelNode.js": false,
     "./dist/createOsHandlers.js": false,
     "./dist/createProgramHandlers.js": false,
@@ -61,11 +60,6 @@
       "import": "./dist/createProgramHandlers.js",
       "require": "./dist/createProgramHandlers.js"
     },
-    "./entityAccess": {
-      "types": "./dist/entityAccess.d.ts",
-      "import": "./dist/entityAccess.js",
-      "require": "./dist/entityAccess.js"
-    },
     "./mockRandom": {
       "types": "./dist/mockRandom.d.ts",
       "import": "./dist/mockRandom.js",
@@ -75,6 +69,11 @@
       "types": "./dist/mockPersistence.d.ts",
       "import": "./dist/mockPersistence.js",
       "require": "./dist/mockPersistence.js"
+    },
+    "./sse": {
+      "types": "./dist/sse.d.ts",
+      "import": "./dist/sse.js",
+      "require": "./dist/sse.js"
     },
     "./ui": {
       "types": "./dist/ui/index.d.ts",
@@ -106,8 +105,8 @@
     "@almadar/evaluator": "^2.61.0",
     "@almadar/integrations": "^2.58.0",
     "@almadar/logger": "^1.18.0",
-    "@almadar/server": "^2.58.0",
-    "@almadar/std": "^16.255.0"
+    "@almadar/std": "^16.255.0",
+    "undici": "^6.27.0"
   },
   "peerDependencies": {
     "express": "^5.0.0"

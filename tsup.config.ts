@@ -24,13 +24,10 @@ export default defineConfig({
     // Lightweight seeded PRNG exposed for downstream tooling that needs
     // deterministic mock values without pulling in @faker-js/faker.
     mockRandom: 'src/entities/mockRandom.ts',
-    // Row-level entity access. A separate entry because generated app servers
-    // import it directly — going through the root barrel would drag `./ui`,
-    // MockPersistenceAdapter and the whole @almadar/std chain into a Node
-    // process that needs two pure functions.
-    entityAccess: 'src/entities/entityAccess.ts',
     // The owner-gate installer shared with `@almadar/server`'s MockDataService (the compiled apps' mock).
     mockPersistence: 'src/entities/policyOwnerGates.ts',
+    // Server-Sent Events helpers, shared with `@almadar/server` (which re-exports them).
+    sse: 'src/server/sse.ts',
   },
   format: ['esm'],
   dts: true,
@@ -41,5 +38,5 @@ export default defineConfig({
   // Top-level Node-only deps that must stay external so any consumer
   // (Node Express server, browser bundler) handles them correctly.
   // Browser bundlers substitute via the package.json `browser` field.
-  external: ['express', '@almadar/server', '@almadar/core/language-data', 'fs', 'fs/promises', 'path', 'net', 'child_process', 'url', 'module'],
+  external: ['express', '@almadar/core/language-data', 'fs', 'fs/promises', 'path', 'net', 'child_process', 'url', 'module'],
 });
