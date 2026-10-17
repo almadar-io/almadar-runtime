@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { existsSync } from 'node:fs';
+import { STD_ROOT, STD_REGISTRY, IO_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
 import {
   mapBrowseSpecifier,
   ExternalOrbitalLoader,
@@ -61,5 +63,35 @@ describe('ExternalOrbitalLoader.resolvePath — browse-form integration', () => 
     expect(result.error).toContain('std/behaviors/std-stats');
     expect(result.error).toContain('@std/ui/core/atoms/std-stats.lolo');
     expect(result.error).toContain('@behaviors/app/molecules/app-crud-manager.lolo');
+  });
+});
+
+describe('ExternalOrbitalLoader.resolvePath — live behavior-package mirror', () => {
+  const loader = new ExternalOrbitalLoader({ basePath: IO_ROOT, stdLibPath: STD_ROOT });
+
+  it('resolves std/behaviors/<name> into the std live mirror', () => {
+    const result = loader.resolvePath('std/behaviors/std-stats');
+    if (!result.success) throw new Error(result.error);
+    expect(result.data.startsWith(STD_REGISTRY)).toBe(true);
+    expect(existsSync(result.data)).toBe(true);
+  });
+
+  it('resolves almadar-behaviors/<name> into the io live mirror, auto-detected beside std', () => {
+    const result = loader.resolvePath('almadar-behaviors/std-time-tracking');
+    if (!result.success) throw new Error(result.error);
+    expect(result.data.startsWith(IO_REGISTRY)).toBe(true);
+    expect(existsSync(result.data)).toBe(true);
+  });
+
+  it('fails explicitly for an unknown behavior name', () => {
+    const result = loader.resolvePath('almadar-behaviors/no-such-behavior-xyz');
+    expect(result.success).toBe(false);
+  });
+
+  it('fails explicitly for an unknown std behavior name', () => {
+    const result = loader.resolvePath('std/behaviors/no-such-behavior-xyz');
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('expected failure');
+    expect(result.error).toContain('no-such-behavior-xyz');
   });
 });

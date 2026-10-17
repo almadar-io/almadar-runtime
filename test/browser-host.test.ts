@@ -20,7 +20,7 @@ function program(entity: OrbitalSchema['orbitals'][number]['entity']): OrbitalSc
           states: [{ name: 'idle', isInitial: true }],
           events: [{ key: 'JUDGE', name: 'JUDGE' }, { key: 'JUDGED', name: 'JUDGED' }, { key: 'JUDGE_FAILED', name: 'JUDGE_FAILED' }],
           transitions: [
-            { from: 'idle', to: 'idle', event: 'JUDGE', effects: [['call-service', 'llm', 'classify', { text: '@payload.title', categories: ['learn', 'laugh'] }, { emit: { success: 'JUDGED', failure: 'JUDGE_FAILED' } }]] },
+            { from: 'idle', to: 'idle', event: 'JUDGE', effects: [['call-service', 'knowledge', 'status', { text: '@payload.title', categories: ['learn', 'laugh'] }, { emit: { success: 'JUDGED', failure: 'JUDGE_FAILED' } }]] },
             { from: 'idle', to: 'idle', event: 'JUDGED', effects: [] },
             { from: 'idle', to: 'idle', event: 'JUDGE_FAILED', effects: [] },
           ],
@@ -44,7 +44,7 @@ describe('openBrowserHost', () => {
     const host = await openBrowserHost({ databaseName: db(), schema: program(runtimeItem), callService });
     const res = await host.send('Feed', { event: 'JUDGE', payload: { title: 'Graphs 101' } });
     expect(res.success).toBe(true);
-    expect(calls).toEqual([{ service: 'llm', action: 'classify', params: { text: 'Graphs 101', categories: ['learn', 'laugh'] } }]);
+    expect(calls).toEqual([{ service: 'knowledge', action: 'status', params: { text: 'Graphs 101', categories: ['learn', 'laugh'] } }]);
     expect(res.emittedEvents.map((e) => e.event)).toContain('JUDGED');
   });
 
@@ -72,7 +72,7 @@ describe('openBrowserHost', () => {
             states: [{ name: 'idle', isInitial: true }, { name: 'seen' }],
             events: [{ key: 'START', name: 'START' }, { key: 'ITEM_SEEN', name: 'ITEM_SEEN', external: true, payloadSchema: [{ name: 'title', type: 'string' }] }],
             transitions: [
-              { from: 'idle', to: 'idle', event: 'START', effects: [['call-service', 'page', 'watch', { match: 'https://example.com/*', selector: '.i', fields: {}, event: 'ITEM_SEEN' }]] },
+              { from: 'idle', to: 'idle', event: 'START', effects: [['call-service', 'test-svc', 'watch', { match: 'https://example.com/*', selector: '.i', fields: {}, event: 'ITEM_SEEN' }]] },
               { from: 'idle', to: 'seen', event: 'ITEM_SEEN', effects: [] },
             ],
           },
@@ -110,7 +110,7 @@ describe('openBrowserHost', () => {
             states: [{ name: 'idle', isInitial: true }, { name: 'seen' }],
             events: [{ key: 'START', name: 'START' }, { key: 'ITEM_SEEN', name: 'ITEM_SEEN', external: true, payloadSchema: [{ name: 'title', type: 'string' }] }],
             transitions: [
-              { from: 'idle', to: 'idle', event: 'START', effects: [['call-service', 'page', 'watch', { match: 'https://example.com/*', selector: '.i', fields: {}, event: 'ITEM_SEEN' }]] },
+              { from: 'idle', to: 'idle', event: 'START', effects: [['call-service', 'test-svc', 'watch', { match: 'https://example.com/*', selector: '.i', fields: {}, event: 'ITEM_SEEN' }]] },
               { from: 'idle', to: 'seen', event: 'ITEM_SEEN', effects: [['render-ui', 'main', { type: 'typography', content: 'Seen an item' }]] },
             ],
           },

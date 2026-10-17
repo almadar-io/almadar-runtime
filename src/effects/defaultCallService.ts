@@ -71,9 +71,8 @@ export async function browserLegCallService(
 export async function mockCallService(
   service: string,
   action: string,
-  params: ServiceParams | undefined,
 ): Promise<EventPayload | null> {
-  const answer = mockServiceAnswer(service, action, params ?? {});
+  const answer = mockServiceAnswer(service, action);
   if (!answer.ok) throw new Error(answer.message);
   return answer.value;
 }

@@ -1,0 +1,23 @@
+app image-openrouter [
+  version: "1.0.0",
+  description: "Probe for std-image.",
+  egress: ["https://openrouter.ai", "https://api.openai.com", "http://127.0.0.1:8180"]
+]
+orbital ProbeOrbital {
+  uses Img from "std/behaviors/std-image"
+
+  entity ProbeRun [runtime] {
+    id : string!
+  }
+
+  trait ProbeImage = Img.traits.ImageClient -> ProbeRun {
+    config {
+      provider: openrouter
+      origin: "https://openrouter.ai"
+      basePath: "/api/v1"
+      model: "bytedance-seed/seedream-5-0-lite"
+    }
+  }
+
+  page "/probe" as ProbePage -> ProbeImage
+}

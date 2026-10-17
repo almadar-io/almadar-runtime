@@ -10,6 +10,8 @@ import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { InFlightCalls } from '../src/effects/in-flight-calls.js';
 import { answerRequest, type DeferredCallOutcome, type KernelAnswerScope, type KernelHostPorts } from '../src/kernel/index.js';
 import type { KernelModule } from '../src/kernel/index.js';
+import { loadHttpKernel } from '../src/kernel/load-node.js';
+import { memorySecrets } from './helpers/fake-http-kernel.js';
 import { KERNEL_DIR, loadKernel } from './helpers/kernel-module.js';
 
 const emit = { emit: { success: 'SAVED', failure: 'SAVE_FAILED' } };
@@ -40,6 +42,33 @@ function notes(): OrbitalSchema {
   };
 }
 
+function fetcher(egress: string[]): OrbitalSchema {
+  return {
+    name: 'fetcher',
+    version: '1.0.0',
+    egress,
+    orbitals: [{
+      name: 'Main',
+      pages: [],
+      entity: { name: 'Run', fields: [{ name: 'id', type: 'string' }] },
+      traits: [{
+        name: 'Getter',
+        scope: 'instance',
+        linkedEntity: 'Run',
+        stateMachine: {
+          states: [{ name: 'idle', isInitial: true }, { name: 'got' }, { name: 'missed' }],
+          events: [{ key: 'GO', name: 'GO' }, { key: 'GOT', name: 'GOT' }, { key: 'MISSED', name: 'MISSED' }],
+          transitions: [
+            { from: 'idle', to: 'idle', event: 'GO', effects: [['http', 'GET', 'http://127.0.0.1:9000', '/x', {}, { emit: { success: 'GOT', failure: 'MISSED' } }]] },
+            { from: 'idle', to: 'got', event: 'GOT' },
+            { from: 'idle', to: 'missed', event: 'MISSED' },
+          ],
+        },
+      }],
+    }],
+  };
+}
+
 function service(): OrbitalSchema {
   const options = { emit: { success: 'DONE', failure: 'FAILED' } };
   return {
@@ -57,7 +86,7 @@ function service(): OrbitalSchema {
           states: [{ name: 'idle', isInitial: true }, { name: 'done' }, { name: 'failed' }],
           events: [{ key: 'GO', name: 'GO' }, { key: 'DONE', name: 'DONE' }, { key: 'FAILED', name: 'FAILED' }],
           transitions: [
-            { from: 'idle', to: 'idle', event: 'GO', effects: [['call-service', 'llm', 'embed', { texts: ['a'] }, options]] },
+            { from: 'idle', to: 'idle', event: 'GO', effects: [['call-service', 'test-svc', 'run', { event: 'a' }, options]] },
             { from: 'idle', to: 'done', event: 'DONE', effects: [['set', '@entity.got', '@payload']] },
             { from: 'idle', to: 'failed', event: 'FAILED', effects: [['set', '@entity.got', '@payload']] },
           ],
@@ -125,7 +154,7 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel engine', () => {
     });
     const response = await runtime.processOrbitalEvent('Main', { event: 'GO', targetTrait: 'Runner', user: { id: 'u1', role: 'admin' } });
     expect(response.states).toEqual({ Runner: 'done' });
-    expect(seen).toEqual([{ service: 'llm', action: 'embed', params: { texts: ['a'] }, principal: 'u1', role: 'admin' }]);
+    expect(seen).toEqual([{ service: 'test-svc', action: 'run', params: { event: 'a' }, principal: 'u1', role: 'admin' }]);
   });
 
   it('control: a provider that throws routes to the declared failure event', async () => {
@@ -155,8 +184,9 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel engine', () => {
     expect(runtime.getState('Main', 'Draft')).toMatchObject({ currentState: 'saved' });
     runtime.resetCircuitState();
     expect(runtime.getState('Main', 'Draft')).toBeUndefined();
+    // The circuit restarts from `editing`; the rows are not the circuit's, so re-creating d1 is a duplicate (EXEC-STEP-8).
     const again = await runtime.processOrbitalEvent('Main', { event: 'SAVE', targetTrait: 'Draft' });
-    expect(again.states).toEqual({ Draft: 'saved' });
+    expect(again.states).toEqual({ Draft: 'failed' });
   });
 
   it('feeds the event bus and onPush from the dispatch response, emits before client effects', async () => {
@@ -339,6 +369,30 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel engine', () => {
         kind: 'substrate',
         result: { error: { message: 'program/eval refused', errors: [{ code: 'ORB_X', message: 'bad', path: 'a.b' }] } },
       });
+    });
+  });
+
+  describe('http egress', () => {
+    const run = async (egress: string[]): Promise<string[]> => {
+      const urls: string[] = [];
+      const runtime = await open(fetcher(egress), {
+        http: {
+          kernel: () => loadHttpKernel(KERNEL_DIR ?? ''),
+          secrets: memorySecrets({}),
+          fetch: async (url) => { urls.push(url.href); return new Response('ok', { status: 200 }); },
+          resolve: async (host) => ({ literal: true, addresses: [host] }),
+        },
+      });
+      await runtime.processOrbitalEvent('Main', { event: 'GO', targetTrait: 'Getter' });
+      return urls;
+    };
+
+    it('a program\'s declared egress reaches the host on the first register', async () => {
+      expect(await run(['http://127.0.0.1:9000'])).toEqual(['http://127.0.0.1:9000/x']);
+    });
+
+    it('control: an origin the program does not list is refused before any send', async () => {
+      expect(await run([])).toEqual([]);
     });
   });
 });

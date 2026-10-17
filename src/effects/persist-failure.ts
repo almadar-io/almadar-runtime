@@ -1,6 +1,6 @@
 import type { ServerEffectResult } from '@almadar/core';
 
-/** The coded reason a persist failed: no target row (`not-found`, `no-row-key`) or a create on a taken id (`duplicate-id`). */
+/** The coded reason a persist failed (`ServerEffectCode` from the generated kernel wire, the one source). */
 export type PersistFailureCode = NonNullable<ServerEffectResult['code']>;
 
 /** A persist refused with a declared code; the stage records `code` on its `ServerEffectResult`. */

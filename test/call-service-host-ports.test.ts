@@ -1,11 +1,11 @@
 // A `call-service` provider gets the running app lent as the caller: the declared
 // inputs, the input channel and a `@read`-filtered read, bound to the requesting
-// user and the calling trait. Exercised with the real `llm call-tools` loop and a
+// user and the calling trait. Exercised with a tool loop over the ports and a
 // scripted model.
 import { describe, it, expect } from 'vitest';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { InMemoryPersistence } from '@almadar/db/mock';
-import { runToolLoop } from '@almadar/integrations';
+import { runScriptedToolLoop, type ScriptedModel, type ToolMessage } from './helpers/scripted-tool-loop.js';
 import type { EventPayload, OrbitalSchema, ServiceHostPorts, SExpr, UserContext } from '@almadar/core';
 
 const OWN_ROWS: SExpr = ['=', '@entity.ownerId', '@user.id'];
@@ -65,7 +65,7 @@ function schema(): OrbitalSchema {
                 {
                   from: 'idle', to: 'thinking', event: 'ASK',
                   effects: [[
-                    'call-service', 'llm', 'call-tools',
+                    'call-service', 'test-svc', 'run',
                     { messages: [{ role: 'user', content: '@payload.message' }], tools: [{ event: 'TaskPersistor.DO_CREATE' }, { read: 'Task' }] },
                     { emit: { success: 'ANSWERED', failure: 'FAILED' } },
                   ]],
@@ -81,24 +81,22 @@ function schema(): OrbitalSchema {
   };
 }
 
-type ToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
-type Message = { role: 'system' | 'user' | 'assistant' | 'tool'; content: string | null; tool_calls?: ToolCall[]; tool_call_id?: string };
 interface ScriptedTurn {
-  message: Message;
+  message: ToolMessage;
 }
 
-/** Replays `turns` in order and records each request (the `@almadar/llm` double, inlined: no llm dependency here). */
+/** Replays `turns` in order and records each request. */
 function createScriptedToolClient(turns: ScriptedTurn[]) {
-  const requests: Array<{ messages: Message[] }> = [];
-  return {
-    requests,
-    async callWithTools(options: { messages: ReadonlyArray<Message> }) {
+  const requests: Array<{ messages: ToolMessage[] }> = [];
+  const client: ScriptedModel = {
+    async callWithTools(options) {
       const turn = turns[requests.length];
       requests.push({ messages: [...options.messages] });
       if (turn === undefined) throw new Error(`no scripted turn ${requests.length}`);
       return { message: turn.message, finishReason: 'stop', usage: null };
     },
   };
+  return { requests, client };
 }
 
 const create = (title: string): ScriptedTurn => ({
@@ -111,7 +109,7 @@ const reply = (text: string): ScriptedTurn => ({ message: { role: 'assistant', c
 
 async function setup(turns: ScriptedTurn[]) {
   const seen: { host?: ServiceHostPorts } = {};
-  const client = createScriptedToolClient(turns);
+  const scripted = createScriptedToolClient(turns);
   const runtime = new OrbitalServerRuntime({
     persistence: new InMemoryPersistence(),
     debug: false,
@@ -119,16 +117,16 @@ async function setup(turns: ScriptedTurn[]) {
       callService: async (_service, _action, _params, context): Promise<EventPayload> => {
         if (!context?.host) throw new Error('no host ports lent');
         seen.host = context.host;
-        const result = await runToolLoop(client, context.host, {
+        const result = await runScriptedToolLoop(scripted.client, context.host, {
           messages: [{ role: 'user', content: 'request' }],
           tools: [{ event: 'TaskPersistor.DO_CREATE' }, { read: 'Task' }],
-        }, { provider: 'scripted', model: 'scripted' });
+        });
         return { reply: result.reply, steps: result.steps.length };
       },
     },
   });
   await runtime.register(schema());
-  return { runtime, seen, client };
+  return { runtime, seen, client: scripted };
 }
 
 const ask = (runtime: OrbitalServerRuntime, user: UserContext, message: string) =>

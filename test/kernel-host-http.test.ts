@@ -1,11 +1,12 @@
 // The kernel host's answers to the `http` family: the request the kernel built is sent as asked, a keyed one is
 // aborted by cancel-call, secrets come from the host store. The built request is the kernel's; only transport is tested here.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import type { EventPayload } from '@almadar/core';
 import { answerRequest, type KernelHostPorts } from '../src/kernel/host.js';
 import { InFlightCalls } from '../src/effects/in-flight-calls.js';
 import type { HttpRequestWire, IoRequestWire } from '../src/kernel/wire.js';
+import { createHttpPorts } from '../src/kernel/http-exchange.js';
 import { fakeApp, hangingFetch, replying, type FakeApp } from './helpers/fake-http-kernel.js';
 
 const wireRequest = (extra: Partial<HttpRequestWire> = {}): HttpRequestWire => ({
@@ -29,7 +30,51 @@ function host(app: FakeApp | undefined) {
   return { live, answer };
 }
 
+const agentOptions = vi.hoisted(() => ({ seen: [] as Array<{ headersTimeout?: number; bodyTimeout?: number }> }));
+vi.mock('undici', () => ({
+  Agent: class {
+    constructor(options: { headersTimeout?: number; bodyTimeout?: number }) { agentOptions.seen.push(options); }
+    close(): Promise<void> { return Promise.resolve(); }
+  },
+  fetch: async () => new Response('ok'),
+}));
+
+describe('pinned transport timers', () => {
+  const send = async (signal: AbortSignal | undefined): Promise<{ headersTimeout?: number; bodyTimeout?: number }> => {
+    agentOptions.seen.length = 0;
+    const ports = createHttpPorts({ kernel: async () => { throw new Error('unused'); }, egress: [] });
+    await ports.fetch(new URL('http://127.0.0.1:9/x'), { method: 'GET', headers: [], redirect: 'manual', ...(signal !== undefined ? { signal } : {}) }, '127.0.0.1');
+    return agentOptions.seen[0];
+  };
+
+  it('a request with a deadline carries it in the signal alone: undici keeps no 300s timer of its own', async () => {
+    const options = await send(AbortSignal.timeout(900_000));
+    expect(options.headersTimeout).toBe(0);
+    expect(options.bodyTimeout).toBe(0);
+  });
+
+  it('control: a request with no deadline keeps undici\'s default timers', async () => {
+    const options = await send(undefined);
+    expect(options.headersTimeout).toBeUndefined();
+    expect(options.bodyTimeout).toBeUndefined();
+  });
+});
+
 describe('kernel host http', () => {
+  it('app credential status treats missing and empty values as disconnected, while user presence is unchanged', async () => {
+    const app = fakeApp({ fetch: replying(200, 'x'), secrets: { KEY: '' } });
+    const h = host(app);
+    expect(await h.answer({ kind: 'credentialStatus', name: 'KEY' })).toEqual({ kind: 'credentialStatus', result: { ok: false } });
+    expect(await h.answer({ kind: 'secret', name: 'KEY' })).toEqual({ kind: 'secret', result: { ok: '' } });
+    expect(await h.answer({ kind: 'credentialStatus', name: 'MISSING' })).toEqual({ kind: 'credentialStatus', result: { ok: false } });
+    await h.answer({ kind: 'secretSet', name: 'KEY', value: '', ttlMs: 1000, principal: 'u1' });
+    expect(await h.answer({ kind: 'credentialStatus', name: 'KEY', principal: 'u1' })).toEqual({ kind: 'credentialStatus', result: { ok: true } });
+    expect(await h.answer({ kind: 'secret', name: 'KEY', principal: 'u1' })).toEqual({ kind: 'secret', result: { ok: '' } });
+    expect(await h.answer({ kind: 'credentialStatus', name: 'KEY', principal: 'u2' })).toEqual({ kind: 'credentialStatus', result: { ok: false } });
+    expect(app.secrets.held.get('KEY')).toBe('');
+    expect(app.urls).toEqual([]);
+  });
+
   it('answers a request with the reply, headers as pairs and a text body', async () => {
     const app = fakeApp({ fetch: replying(200, 'hello', [['X-A', '1']]) });
     const answer = await host(app).answer({ kind: 'http', request: wireRequest() });
@@ -121,6 +166,15 @@ describe('kernel host http', () => {
     expect(app.secrets.held.get('oauth2:t|ID')).toBe('tok');
     await h.answer({ kind: 'secretSet', name: 'oauth2:t|ID', value: '', ttlMs: 0 });
     expect(app.secrets.held.has('oauth2:t|ID')).toBe(false);
+  });
+
+  it('secretRotate replaces the stored credential, per principal, and fails closed without a rotate port', async () => {
+    const app = fakeApp({ fetch: replying(200, 'x'), secrets: { RT: 'old' } });
+    const h = host(app);
+    expect(await h.answer({ kind: 'secretRotate', name: 'RT', value: 'new' })).toEqual({ kind: 'secretRotate', result: { ok: null } });
+    expect(app.secrets.held.get('RT')).toBe('new');
+    expect(await h.answer({ kind: 'secretRotate', name: 'MISSING', value: 'x' })).toMatchObject({ result: { error: expect.stringContaining('not stored') } });
+    expect(await host(undefined).answer({ kind: 'secretRotate', name: 'RT', value: 'x' })).toMatchObject({ result: { error: expect.stringContaining('HTTP_KERNEL_UNAVAILABLE') } });
   });
 
   it('without http ports every ask fails with the coded unavailable error', async () => {

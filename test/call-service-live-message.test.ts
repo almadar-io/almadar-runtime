@@ -31,7 +31,7 @@ function schema(emit: Record<string, string>): OrbitalSchema {
                 { key: 'FAILED', name: 'Failed' },
               ],
               transitions: [
-                { from: 'idle', to: 'thinking', event: 'ASK', effects: [['call-service', 'llm', 'call-tools', {}, { emit }]] },
+                { from: 'idle', to: 'thinking', event: 'ASK', effects: [['call-service', 'test-svc', 'run', {}, { emit }]] },
                 { from: 'thinking', to: 'idle', event: 'ANSWERED' },
                 { from: 'thinking', to: 'idle', event: 'FAILED' },
               ],

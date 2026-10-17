@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createClientEffectHandlers } from '../src/effects/ClientEffectHandlers.js';
 
+vi.mock('@almadar/core/mock', async (importOriginal) => {
+    const { withTestService } = await import('./helpers/test-service-mock.js');
+    return withTestService(await importOriginal<typeof import('@almadar/core/mock')>());
+});
+
 // Bridge mode (no consumer callService): the server runs every call-service
 // and its cascade carries the result — the client handlers must declare the
 // mock as DELEGATED so the runtime executor skips it instead of also
@@ -25,7 +30,7 @@ describe('createClientEffectHandlers — callServiceDelegated', () => {
     });
 
     it('callService is still a callable returning the registry-shaped mock', async () => {
-        const result = await make().callService('stripe', 'createPaymentIntent', { amount: 100, currency: 'usd' });
-        expect(result).toMatchObject({ id: expect.any(String), clientSecret: expect.any(String) });
+        const result = await make().callService('test-svc', 'run', { url: 'https://hooks.example.com/in', event: 'ORDER_PLACED' });
+        expect(result).toMatchObject({ status: expect.any(Number), ok: true, durationMs: expect.any(Number) });
     });
 });

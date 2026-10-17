@@ -936,6 +936,17 @@ export async function runServerEffectStage(
       return undefined;
     },
 
+    httpResult: (report) => {
+      effectResults.push({
+        effect: 'http',
+        success: report.success,
+        target: report.target,
+        ...(report.error !== undefined ? { error: report.error } : {}),
+        ...(report.routed !== undefined ? { routed: report.routed } : {}),
+      });
+      if (report.routed !== undefined) effectResults.push({ effect: 'emit', success: true, target: report.routed });
+    },
+
     callService: async (service, action, params, context, route) => {
       try {
         let result = null;
@@ -961,7 +972,7 @@ export async function runServerEffectStage(
           const provider = deps.extraEffectHandlers.callService;
           result = await awaitProvider(() => provider(service, action, params, callContext));
         } else if (deps.mockMode === true) {
-          result = await awaitProvider(() => mockCallService(service, action, params));
+          result = await awaitProvider(() => mockCallService(service, action));
         } else {
           result = await awaitProvider(() =>
             defaultCallService(service, action, params, callContext),
@@ -1336,6 +1347,8 @@ export async function runServerEffectStage(
         dynamicLog.debug(message);
       }
     },
+
+    agentPorts: () => deps.servicePorts?.({ orbital: deps.orbitalName, trait: traitName }, user, () => {}),
 
     // Allow custom handlers to override — except `callService`, which the
     // stage's own handler above already delegates to (recording the result and

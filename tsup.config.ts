@@ -8,18 +8,19 @@ export default defineConfig({
     // The kernel engine's host half (pure) and its Node-only loader for `@almadar/kernel`.
     kernel: 'src/kernel/index.ts',
     kernelNode: 'src/kernel/load-node.ts',
+    // The Node `os` answerer of a kernel host (fs, child_process, net, dgram, dns); the browser bundle never imports it.
+    kernelOsNode: 'src/kernel/os-node.ts',
+    // Load a program on the kernel engine from Node, dispatch an event and read its external emits.
+    kernelProgram: 'src/kernel/program-node.ts',
+    // The program host's workspaces: std-workspace run by the kernel (Node only).
+    kernelWorkspace: 'src/kernel/workspace-node.ts',
     // Renderer-agnostic UI contract. Any UI library (React, Web Components,
     // etc.) imports this surface and implements the framework-specific slot
     // manager / component registry on top of it.
     'ui/index': 'src/ui/index.ts',
     // Node-only module: separate entry so dist emits a standalone
-    // `createOsHandlers.js` file. OrbitalServerRuntime loads it via
-    // dynamic import() at runtime — needs the file to exist as a
-    // separate path. The browser stubs it via the package.json `browser`
-    // field path mapping; the import is never invoked in browsers (gated
-    // by `isNodeEnv()`).
-    createOsHandlers: 'src/effects/createOsHandlers.ts',
-    // Node-only for the same reason: it spawns `orb` through @almadar/integrations/program.
+    // `createProgramHandlers.js` file that OrbitalServerRuntime loads via dynamic import().
+    // It spawns `orb` through @almadar/integrations/program.
     createProgramHandlers: 'src/effects/createProgramHandlers.ts',
     // Lightweight seeded PRNG exposed for downstream tooling that needs
     // deterministic mock values without pulling in @faker-js/faker.
@@ -38,5 +39,5 @@ export default defineConfig({
   // Top-level Node-only deps that must stay external so any consumer
   // (Node Express server, browser bundler) handles them correctly.
   // Browser bundlers substitute via the package.json `browser` field.
-  external: ['express', '@almadar/core/language-data', 'fs', 'fs/promises', 'path', 'net', 'child_process', 'url', 'module'],
+  external: ['express', '@almadar/core/language-data', 'fs', 'fs/promises', 'path', 'net', 'child_process', 'url', 'module', 'dgram', 'dns/promises', 'os', 'tty', 'crypto'],
 });

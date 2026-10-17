@@ -28,6 +28,8 @@ export interface KernelServerHandle {
   resolveRows(refJson: string, viewerJson: string): string;
   resumeResolve(flight: number, repliesJson: string): string;
   abandon(flight: number): boolean;
+  /** `OsGrants::allows` over the grants the registered program declares; `requirementJson` is an `OsRequirement`. */
+  osAllows(requirementJson: string): boolean;
   inFlight(): number;
   getState(traitName: string, entityId?: string): string;
   setDefaultUser(userJson: string): void;
@@ -43,4 +45,14 @@ export interface KernelServerHandle {
 /** An initialised `@almadar/kernel` module: what `OrbitalServerRuntime({ engine: 'kernel' })` is handed. */
 export interface KernelModule {
   Server: new (resolvedSchemaJson: string) => KernelServerHandle;
+  /** Whether the absolute `glob` matches `path`, as the one-grant matcher `os/glob` filters with. */
+  osGlobMatches(glob: string, path: string): boolean;
+  /** `is_public_address`: the rule an outbound host name must pass. */
+  isPublicAddress(ip: string): boolean;
+  /** The `os/` operations whose keyed call may defer its completion (`OsOp::defers_completion`), as a JSON array of names. */
+  osDeferringOps(): string;
+  /** The `{ event, payload }` JSON a deferred keyed `os/` call's outcome fires on its call site, or `null` when it declares no route. */
+  osCompletionEvent(siteJson: string, key: string, outcomeJson: string): string;
+  /** Whether the Chrome match pattern matches the URL: the one rule a browser-tab host filters tabs with. */
+  tabUrlMatches(pattern: string, url: string): boolean;
 }

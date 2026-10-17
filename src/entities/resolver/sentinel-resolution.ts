@@ -23,6 +23,7 @@ import type { Entity, EntityField, EventPayloadField, Trait } from "@almadar/cor
 const PRIMITIVE_TYPE_ARG_NAMES = new Set<string>([
   "string",
   "money",
+  "bytes",
   "any",
   "icon",
   "component",

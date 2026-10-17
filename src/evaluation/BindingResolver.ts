@@ -378,8 +378,8 @@ function interpolateString(value: string, ctx: EvaluationContext): RuntimeValue 
 /**
  * Check if a string is a pure binding (no embedded text).
  *
- * Accepts bracket-index segments anywhere in the path —
- * `@config.sections[0].bullets`, `@payload.rows[2]`, etc. — so the
+ * Accepts bracket segments anywhere in the path (`@payload.rows[2]` is
+ * the literal key `rows[2]`, EXEC binding-path) so the
  * binding is fully consumed by `resolveBinding` instead of falling
  * through to `interpolateEmbeddedBindings` which would stop at the
  * first `[`, partially resolve, and string-concat the suffix.
@@ -392,8 +392,8 @@ function isPureBinding(value: string): boolean {
  * Interpolate embedded bindings in a string.
  */
 function interpolateEmbeddedBindings(value: string, ctx: EvaluationContext): string {
-    // Match bindings with optional bracket-index segments
-    // (`@config.sections[0].bullets`, `@payload.rows[2]`) so the regex
+    // Match bindings with optional bracket segments (literal keys,
+    // `@payload.rows[2]`) so the regex
     // captures the WHOLE binding before delegating to resolveBinding —
     // pre-fix the regex stopped at the first `[`, which left the
     // suffix dangling and string-concatenated junk onto the resolved

@@ -158,7 +158,6 @@ export interface CreateServerEffectHandlersOptions {
  * sinks and gets `EffectExecutor`'s default no-op, unchanged from before.
  *
  * Intentionally does NOT implement:
- * - `os/watch-*` observers — these are a no-op outside the server.
  * - Schema-aware relation cardinality / on-delete cascades — those live
  *   in `OrbitalServerRuntime` and depend on the full registered schema.
  *   Clients that need them can wrap the persist handler with their own

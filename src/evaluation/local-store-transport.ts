@@ -4,14 +4,16 @@
  * client against `persistence`. The offline preview and the browser-stored
  * side of a residence-routed host both use it.
  */
-import type { MessageCatalogs, OrbitalEventRequest, OrbitalSchema, UserContext } from '@almadar/core';
+import type { MessageCatalogs, OnDeviceModelPorts, OrbitalEventRequest, OrbitalSchema, UserContext } from '@almadar/core';
 import type { EffectHandlers } from '../types.js';
 import type { ServerEffectStageDeps } from '../effects/effect-stage.js';
 import type { PersistenceAdapter } from '@almadar/core';
+import type { KernelEngine } from '../kernel/engine.js';
 import { createInProcessTransport, type EventTransport } from '../server/EventTransport.js';
 import type { TraitIndex } from '../traits/trait-index.js';
 import { InFlightCalls } from '../effects/in-flight-calls.js';
 import { browserLegCallService } from '../effects/defaultCallService.js';
+import { onDeviceHandlers } from '../effects/on-device-model.js';
 import type { CircuitStore } from './circuit-store.js';
 import { createIndexStageRunner } from './stage-runner.js';
 import { evaluateOrbitalEvent, type EvaluateOrbitalEventDeps } from './evaluateOrbitalEvent.js';
@@ -30,6 +32,8 @@ export interface LocalStoreTransportOptions {
   outsideEventQueue?: ServerEffectStageDeps['outsideEventQueue'];
   /** What the `http` effect runs on (the browser's request driver); absent, an `http` effect fails as unavailable. */
   http?: ServerEffectStageDeps['http'];
+  /** The on-device model and embedder `browser/prompt` and `browser/embed` ask; absent, they fail `unconfigured`. */
+  onDevice?: OnDeviceModelPorts;
   user?: UserContext;
   strictBindings?: EvaluateOrbitalEventDeps['strictBindings'];
   contextExtensions?: EvaluateOrbitalEventDeps['contextExtensions'];
@@ -37,6 +41,8 @@ export interface LocalStoreTransportOptions {
   logContext?: EvaluateOrbitalEventDeps['logContext'];
   /** The requesting client relays every emit itself (a compiled client). */
   clientRelays?: boolean;
+  /** Run every request on this kernel instead of the interpreter; the kernel decides each step and this host answers its I/O. */
+  kernelEngine?: KernelEngine;
   /** The program's message catalogs, so `i18n/t` resolves for the request's locale. */
   messages?: MessageCatalogs;
 }
@@ -46,13 +52,34 @@ export function createLocalStoreTransport(options: LocalStoreTransportOptions): 
   const inFlightCalls = new InFlightCalls();
   return createInProcessTransport(
     async (_orbitalName: string, request: OrbitalEventRequest) => {
+      if (options.kernelEngine !== undefined) {
+        return evaluateOrbitalEvent(
+          {
+            traitIndex,
+            manager: store.manager,
+            persistence,
+            frames: store.frames,
+            runEffects: async () => {
+              throw new Error('the kernel engine runs no interpreter effect stage');
+            },
+            kernel: {
+              engine: options.kernelEngine,
+              orbital: _orbitalName,
+              ...(options.outsideEventQueue !== undefined ? { outsideEventQueue: options.outsideEventQueue } : {}),
+            },
+            ...(options.user !== undefined ? { user: options.user } : {}),
+            ...(request.locale !== undefined ? { locale: request.locale } : {}),
+          },
+          request,
+        );
+      }
       const runEffects = createIndexStageRunner({
         traitIndex,
         persistence,
         frames: store.frames,
         manager: store.manager,
         ...(options.schema !== undefined ? { schema: options.schema } : {}),
-        extraEffectHandlers: { callService: options.callService ?? browserLegCallService },
+        extraEffectHandlers: { callService: options.callService ?? browserLegCallService, ...(options.onDevice !== undefined ? onDeviceHandlers(options.onDevice) : {}) },
         ...(options.servicePorts !== undefined ? { servicePorts: options.servicePorts } : {}),
         ...(options.outsideEventQueue !== undefined ? { outsideEventQueue: options.outsideEventQueue } : {}),
         ...(options.http !== undefined ? { http: options.http } : {}),

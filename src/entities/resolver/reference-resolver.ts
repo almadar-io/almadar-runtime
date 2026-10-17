@@ -832,21 +832,17 @@ const ENTITY_AT_POS_1 = new Set(["fetch", "ref", "deref", "spawn"]);
 /**
  * Wrapper operators where ALL positional args (positions ≥ 1) are
  * nested effects. Recurse into every arg. From the typed effect
- * tuples: DoEffect, AtomicEffect, AsyncRaceEffect, AsyncAllEffect,
- * AsyncSequenceEffect.
+ * tuples: DoEffect, AtomicEffect.
  */
 const ALL_ARGS_ARE_EFFECTS = new Set([
   "do",
   "atomic",
-  "async/race",
-  "async/all",
-  "async/sequence",
 ]);
 
 /**
  * Wrapper operators where position 1 is something other than an
- * effect (a condition expression, a let-binding list, or an
- * async-timing value), and positions ≥ 2 are nested effects.
+ * effect (a condition expression or a let-binding list), and
+ * positions ≥ 2 are nested effects.
  * Skipping position 1 is critical so we don't accidentally rewrite
  * a literal value used as a comparison RHS (e.g. `(if (= @entity.foo
  * "BrowseItem") ...)` — the string "BrowseItem" there is a value
@@ -854,16 +850,11 @@ const ALL_ARGS_ARE_EFFECTS = new Set([
  *
  * IfEffect / WhenEffect — position 1 is `Expression` (condition).
  * LetEffect — position 1 is `[string, unknown][]` (bindings).
- * AsyncDelay / Debounce / Throttle / Interval — position 1 is duration.
  */
 const ARGS_FROM_POS_2_ARE_EFFECTS = new Set([
   "if",
   "when",
   "let",
-  "async/delay",
-  "async/debounce",
-  "async/throttle",
-  "async/interval",
 ]);
 
 function renameEntityInEffect<T extends RuntimeValue>(
@@ -1877,7 +1868,7 @@ function resolveConfigRefsById(
     // `@trait.X` binding must stay a binding after the name refresh — the
     // render channel (UISlotRenderer's recursive `@trait.X` walk, embed
     // sidecar routing) keys on the prefix, and stripping it turned
-    // std-service-email's standalone default form into a dead text leaf
+    // a service wrapper atom's standalone default form into a dead text leaf
     // (blank boot). Bare-name defaults (`targetEntity: "Task"`) keep the
     // bare form as before.
     const isTraitBinding =

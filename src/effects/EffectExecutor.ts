@@ -18,10 +18,14 @@ import type {
     BrowserGeolocationOptions,
 } from '../types.js';
 import { effectSiteFor } from '@almadar/std/registry';
+import { parsePageFactFields } from './page-facts.js';
+import { NO_ON_DEVICE_EMBEDDER, NO_ON_DEVICE_MODEL, OnDeviceModelFailure } from './on-device-model.js';
 import { HANDLER_MANIFEST } from '../types.js';
+import type { HttpEffectReport } from '../types.js';
 import type { EffectDelegate } from './server-leg.js';
 import { untilAborted, type InFlightCalls } from './in-flight-calls.js';
-import { credentialForgetPayload, credentialStatusPayload, HttpEffectFailure, HttpUnavailableError, randomBytesPayload, runHttpCall, type HttpCall, type HttpPorts } from '../kernel/http-exchange.js';
+import { oauthAuthorizePayload, oauthConnectionPayload, OAuthEffectFailure } from '../kernel/oauth-effects.js';
+import { credentialForgetPayload, credentialStatusPayload, HttpEffectFailure, HttpUnavailableError, randomBytesPayload, runHttpCall, unavailableFailure, type HttpCall, type HttpPorts } from '../kernel/http-exchange.js';
 import { interpolateValue, createContextFromBindings, deferEntityBindings, extractBindings } from '../evaluation/BindingResolver.js';
 import type { ServiceMessageRoute, BindingContext, EntityRow, EventPayload, FetchResult, ServiceParams, PatternProps, EvaluationContextExtensions } from '../types.js';
 import { omitFrameFields,
@@ -30,7 +34,8 @@ import { omitFrameFields,
     storesRowsInBrowser,
 } from '@almadar/core';
 import { RESERVED_FIELD_NAMES } from '@almadar/core/mock';
-import { JsonValueSchema, rowSetMarker } from '@almadar/core';
+import { JsonValueSchema, agentPortPayload, rowSetMarker, runAgentPort } from '@almadar/core';
+import type { AgentPortOperator } from '@almadar/core';
 import type { ProgramEffectName } from '@almadar/integrations/program';
 import type { FieldValue, SExpr, Orbital, OrbitalDefinition, OrbitalSchema, ProgramValidationIssue, TraitConfig, RuntimeValue, EntityField, Entity, JsonValue } from '@almadar/core';
 import type { ComposeBehaviorsInput, EventWiringEntry } from './composition/index.js';
@@ -154,6 +159,15 @@ export interface EffectExecutorOptions {
  */
 /** The text a failure route carries: an Error's message, a thrown result object's
  *  string `message` (integration errors are plain `{code, message}` objects), else String(). */
+function httpReport(call: HttpCall, error: string | undefined, routed: string | undefined): HttpEffectReport {
+    return {
+        success: error === undefined,
+        target: `${call.method} ${call.origin}${call.path}`,
+        ...(error !== undefined ? { error } : {}),
+        ...(error !== undefined && routed !== undefined ? { routed } : {}),
+    };
+}
+
 function failureMessage(err: RuntimeValue): string {
     if (err instanceof Error) return err.message;
     if (typeof err === 'object' && err !== null && 'message' in err && typeof err.message === 'string') return err.message;
@@ -481,7 +495,7 @@ export class EffectExecutor {
                 registered.push(name);
             }
         }
-        if (this.http !== undefined) registered.push('http', 'random-bytes', 'credential-status', 'credential-forget');
+        if (this.http !== undefined) registered.push('http', 'random-bytes', 'credential-status', 'credential-forget', 'oauth-authorize', 'oauth-connection-status', 'oauth-connection-forget');
         // Compound operators are always available
         registered.push('do', 'when', 'let', 'if');
         return registered;
@@ -865,7 +879,7 @@ export class EffectExecutor {
     // ==========================================================================
     // `emit:` config extraction — close-the-circuit on async/reactive ops.
     //
-    // `fetch`, `persist`, `call-service`, `set`, `ref`, `os/watch-*` may carry
+    // `fetch`, `persist`, `call-service`, `set`, `ref` may carry
     // an `emit:` key in their options object. After the effect's work finishes,
     // the runtime fires the author-configured bus event so downstream state
     // machines can branch on success/failure without stitching async/sequence.
@@ -976,7 +990,7 @@ export class EffectExecutor {
                 }
             },
             (err: RuntimeValue) => {
-                if (emitCfg?.failure) deliver(emitCfg.failure, err instanceof HttpEffectFailure ? { ...err.payload } : { error: failureMessage(err), ...(label === 'call-service' && callKey !== undefined ? { key: callKey } : {}) });
+                if (emitCfg?.failure) deliver(emitCfg.failure, err instanceof HttpEffectFailure || err instanceof OnDeviceModelFailure ? { ...err.payload } : { error: failureMessage(err), ...(label === 'call-service' && callKey !== undefined ? { key: callKey } : {}) });
                 else effectLog.error(`${label}:deferred-failed`, { error: failureMessage(err) });
             },
         );
@@ -994,6 +1008,9 @@ export class EffectExecutor {
      * kernel's driver (`runHttpCall`); a failure throws `HttpEffectFailure`, a non-2xx reply is a success.
      */
     private async runHttp(call: HttpCall, emitCfg: EmitConfig | undefined, signal: AbortSignal | undefined): Promise<EventPayload> {
+        if (call.delivery === 'beacon' && (this.http === undefined || this.http.beacon === undefined)) {
+            throw new HttpEffectFailure(unavailableFailure('browser/beacon: this host has no beacon port', call.key ?? null));
+        }
         if (this.http === undefined) throw new HttpUnavailableError('this host was given no http ports');
         const route = this.liveRoute(emitCfg);
         const deliverLive = this.deliverLive;
@@ -1032,22 +1049,6 @@ export class EffectExecutor {
     ): void {
         if (!emit?.failure) return;
         this.handlers.emit(emit.failure, { ...extra, error: failureMessage(err) }, this.sourceStamp(emit.failure));
-    }
-
-    /**
-     * Narrow the generic emit config into the `os/watch-*` handler surface
-     * (only `on_message` + `failure` are meaningful for streaming ops).
-     * Returns `undefined` when neither field is set so handlers can test
-     * with a single `if (emit)` guard.
-     */
-    private osEmit(
-        emit: EmitConfig | undefined,
-    ): import('../types.js').OsEmitConfig | undefined {
-        if (!emit || (!emit.on_message && !emit.failure)) return undefined;
-        return {
-            on_message: emit.on_message,
-            failure: emit.failure,
-        };
     }
 
     /**
@@ -1098,6 +1099,29 @@ export class EffectExecutor {
         const outcome = await handler(op, json);
         if (!outcome.ok) return fail(outcome.error, outcome.errors ? { errors: outcome.errors.map(issuePayload) } : undefined);
         if (emitCfg) this.emitSuccess(emitCfg, 'success', { result: outcome.result });
+    }
+
+    /**
+     * `program/inputs`, `program/dispatch` and `persist/read-named`: run over the host ports lent to this
+     * call, so a dispatch and a read are the caller's own. `{ result, text }` on success (`text` is `result` as
+     * JSON text), `{ error, errors? }` on failure; without an emit config a failure throws.
+     */
+    private async runAgentPortArm(op: AgentPortOperator, positional: RuntimeValue[], emitCfg: EmitConfig | undefined): Promise<void> {
+        const fail = (message: string, extra?: EventPayload): void => {
+            if (!emitCfg) throw new Error(message);
+            this.emitFailure(emitCfg, new Error(message), extra);
+        };
+        const ports = this.handlers.agentPorts?.();
+        if (ports === undefined) return fail(`no host ports configured for ${op}`);
+        const json: JsonValue[] = [];
+        for (const arg of positional) {
+            const parsed = JsonValueSchema.safeParse(arg);
+            if (!parsed.success) return fail(`${op}: arguments must be JSON data`);
+            json.push(parsed.data);
+        }
+        const outcome = await runAgentPort(op, json, ports);
+        if (!outcome.ok) return fail(outcome.error, outcome.errors ? { errors: outcome.errors.map((e) => ({ code: e.code, message: e.message })) } : undefined);
+        if (emitCfg) this.emitSuccess(emitCfg, 'success', agentPortPayload(outcome.result));
     }
 
     /**
@@ -1450,14 +1474,18 @@ export class EffectExecutor {
                 break;
             }
 
-            case 'http': {
-                const [method, origin, path, request, options] = args;
+            case 'http':
+            case 'browser/beacon': {
+                const beacon = operator === 'browser/beacon';
+                const [method, origin, path, request, options] = beacon ? ['POST', args[0], '', args[1], args[2]] : args;
                 const emitCfg = this.extractEmitConfig(options);
-                const callKey = this.resolveCallKey(options, 'http key');
+                const requestObject = this.httpRequestObject(request);
+                const { key: requestKey, ...beaconRequest } = requestObject;
+                const callKey = this.resolveCallKey(options, 'http key') ?? (beacon && requestKey !== undefined ? this.resolveCallKey({ key: requestKey }, 'beacon key') : undefined);
                 if (typeof method !== 'string' || typeof origin !== 'string' || typeof path !== 'string') {
-                    throw new Error('http: method, origin and path must be text');
+                    throw new Error(beacon ? 'browser/beacon: the URL must be text' : 'http: method, origin and path must be text');
                 }
-                const httpCall: HttpCall = { method, origin, path, request: this.httpRequestObject(request), ...(callKey !== undefined ? { key: callKey } : {}) };
+                const httpCall: HttpCall = { method, origin, path, request: beacon ? beaconRequest : requestObject, ...(beacon ? { delivery: 'beacon' as const } : {}), ...(callKey !== undefined ? { key: callKey } : {}), ...(this.bindings.now !== undefined ? { nowMs: this.bindings.now } : {}) };
                 const call = (signal?: AbortSignal): Promise<EventPayload> => this.runHttp(httpCall, emitCfg, signal);
                 if (this.deferCallOutcome !== undefined) {
                     this.startDeferredCall('http', callKey, call, emitCfg, this.deferCallOutcome);
@@ -1465,16 +1493,22 @@ export class EffectExecutor {
                 }
                 try {
                     if (callKey === undefined) {
-                        this.emitSuccess(emitCfg, 'success', await call());
+                        const payload = await call();
+                        if (!beacon) this.handlers.httpResult?.(httpReport(httpCall, undefined, undefined));
+                        this.emitSuccess(emitCfg, 'success', payload);
                         break;
                     }
                     const outcome = await this.requireInFlightCalls('http key').run(callKey, (signal) =>
                         this.outsideEventQueue(() => untilAborted(signal, call(signal))));
                     if (outcome.cancelled) this.emitCancelled(emitCfg, callKey);
-                    else this.emitSuccess(emitCfg, 'success', outcome.value);
+                    else {
+                        if (!beacon) this.handlers.httpResult?.(httpReport(httpCall, undefined, undefined));
+                        this.emitSuccess(emitCfg, 'success', outcome.value);
+                    }
                 } catch (err) {
+                    if (!beacon) this.handlers.httpResult?.(httpReport(httpCall, failureMessage(err as RuntimeValue), emitCfg?.failure));
                     if (!emitCfg?.failure) throw err;
-                    this.emitFailure(emitCfg, err as RuntimeValue, err instanceof HttpEffectFailure ? { kind: err.payload.kind, key: err.payload.key } : { kind: 'failed' });
+                    this.emitFailure(emitCfg, err as RuntimeValue, err instanceof HttpEffectFailure ? { ...err.payload } : { kind: 'failed' });
                     return { failed: true, error: failureMessage(err as RuntimeValue) };
                 }
                 break;
@@ -1485,28 +1519,56 @@ export class EffectExecutor {
             case 'credential-forget': {
                 const emitCfg = this.extractEmitConfig(args[1]);
                 if (this.http === undefined) throw new HttpUnavailableError('this host was given no http ports');
+                let randomKey: string | undefined;
                 try {
                     const principal = this.bindings.user?.id;
+                    if (operator === 'random-bytes') randomKey = this.resolveCallKey(args[1], 'random-bytes key');
                     const payload = operator === 'random-bytes'
-                        ? randomBytesPayload(this.http, args[0])
+                        ? randomBytesPayload(this.http, args[0], randomKey)
                         : operator === 'credential-status'
                             ? await credentialStatusPayload(this.http, args[0], principal)
                             : await credentialForgetPayload(this.http, args[0], principal);
                     this.emitSuccess(emitCfg, 'success', payload);
                 } catch (err) {
                     if (!emitCfg?.failure) throw err;
-                    this.emitFailure(emitCfg, err as RuntimeValue);
+                    this.emitFailure(emitCfg, err as RuntimeValue, randomKey !== undefined ? { key: randomKey } : {});
+                    return { failed: true, error: failureMessage(err as RuntimeValue) };
+                }
+                break;
+            }
+
+            case 'oauth-authorize':
+            case 'oauth-connection-status':
+            case 'oauth-connection-forget': {
+                const emitCfg = this.extractEmitConfig(operator === 'oauth-authorize' ? args[2] : args[1]);
+                if (this.http === undefined) throw new HttpUnavailableError('this host was given no http ports');
+                let authorizeKey: string | undefined;
+                try {
+                    const principal = this.bindings.user?.id;
+                    if (operator === 'oauth-authorize') authorizeKey = this.resolveCallKey(args[2], 'oauth-authorize key');
+                    const payload = operator === 'oauth-authorize'
+                        ? await oauthAuthorizePayload(this.http, args[0], args[1], principal, authorizeKey)
+                        : await oauthConnectionPayload(this.http, operator, args[0], principal);
+                    this.emitSuccess(emitCfg, 'success', payload);
+                } catch (err) {
+                    if (!emitCfg?.failure) throw err;
+                    const keyed = operator === 'oauth-authorize' ? { key: authorizeKey ?? null } : {};
+                    this.emitFailure(emitCfg, err as RuntimeValue, { ...(err instanceof OAuthEffectFailure ? { code: err.payload.code, reason: err.payload.reason } : {}), ...keyed });
                     return { failed: true, error: failureMessage(err as RuntimeValue) };
                 }
                 break;
             }
 
             case 'cancel-call': {
-                const callKey = args[0];
-                if (typeof callKey !== 'string' || callKey === '') {
-                    throw new Error(`cancel-call: key resolved to ${String(callKey)}`);
+                const named = args[0];
+                const callKeys = Array.isArray(named) ? named : [named];
+                for (const callKey of callKeys) {
+                    if (typeof callKey !== 'string' || callKey === '') {
+                        throw new Error(`cancel-call: key resolved to ${String(callKey)}`);
+                    }
                 }
-                this.requireInFlightCalls('cancel-call').cancel(callKey);
+                const calls = this.requireInFlightCalls('cancel-call');
+                for (const callKey of callKeys) calls.cancel(String(callKey));
                 break;
             }
 
@@ -1918,104 +1980,6 @@ export class EffectExecutor {
                 break;
             }
 
-            // OS trigger operators (server-side only)
-            //
-            // Each may carry `emit:` inside a trailing options object. The
-            // executor extracts it and passes it to the handler so the
-            // hardcoded fallback name (e.g. OS_CRON_FIRE) is replaced by the
-            // author-configured event.
-            case 'os/watch-files': {
-                if (this.handlers.osWatchFiles) {
-                    const glob = args[0] as string;
-                    // options may carry emit: — strip it before passing to the handler.
-                    const rawOptions = args[1] as
-                        | { recursive?: boolean; debounce?: number; emit?: RuntimeValue }
-                        | undefined;
-                    const emitCfg = this.extractEmitConfig(rawOptions);
-                    const options = rawOptions
-                        ? { recursive: rawOptions.recursive, debounce: rawOptions.debounce }
-                        : {};
-                    this.handlers.osWatchFiles(glob, options, this.osEmit(emitCfg));
-                } else {
-                    this.logUnsupported('os/watch-files');
-                }
-                break;
-            }
-            case 'os/watch-process': {
-                if (this.handlers.osWatchProcess) {
-                    const emitCfg = this.extractEmitConfig(args[2]);
-                    this.handlers.osWatchProcess(
-                        args[0] as string,
-                        args[1] as string | undefined,
-                        this.osEmit(emitCfg),
-                    );
-                } else {
-                    this.logUnsupported('os/watch-process');
-                }
-                break;
-            }
-            case 'os/watch-port': {
-                if (this.handlers.osWatchPort) {
-                    const emitCfg = this.extractEmitConfig(args[2]);
-                    this.handlers.osWatchPort(
-                        args[0] as number,
-                        (args[1] as string) ?? 'tcp',
-                        this.osEmit(emitCfg),
-                    );
-                } else {
-                    this.logUnsupported('os/watch-port');
-                }
-                break;
-            }
-            case 'os/watch-http': {
-                if (this.handlers.osWatchHttp) {
-                    const emitCfg = this.extractEmitConfig(args[2]);
-                    this.handlers.osWatchHttp(
-                        args[0] as string,
-                        args[1] as string | undefined,
-                        this.osEmit(emitCfg),
-                    );
-                } else {
-                    this.logUnsupported('os/watch-http');
-                }
-                break;
-            }
-            case 'os/watch-cron': {
-                if (this.handlers.osWatchCron) {
-                    const emitCfg = this.extractEmitConfig(args[1]);
-                    this.handlers.osWatchCron(args[0] as string, this.osEmit(emitCfg));
-                } else {
-                    this.logUnsupported('os/watch-cron');
-                }
-                break;
-            }
-            case 'os/watch-signal': {
-                if (this.handlers.osWatchSignal) {
-                    const emitCfg = this.extractEmitConfig(args[1]);
-                    this.handlers.osWatchSignal(args[0] as string, this.osEmit(emitCfg));
-                } else {
-                    this.logUnsupported('os/watch-signal');
-                }
-                break;
-            }
-            case 'os/watch-env': {
-                if (this.handlers.osWatchEnv) {
-                    const emitCfg = this.extractEmitConfig(args[1]);
-                    this.handlers.osWatchEnv(args[0] as string, this.osEmit(emitCfg));
-                } else {
-                    this.logUnsupported('os/watch-env');
-                }
-                break;
-            }
-            case 'os/debounce': {
-                if (this.handlers.osDebounce) {
-                    this.handlers.osDebounce(args[0] as number, args[1] as string);
-                } else {
-                    this.logUnsupported('os/debounce');
-                }
-                break;
-            }
-
             // === Composition operators (compile-time, optional) ===
 
             case 'behavior/compose': {
@@ -2071,6 +2035,14 @@ export class EffectExecutor {
             // explicit failure, never a silent no-op. Without an emit config the
             // call is fire-and-forget and errors propagate.
 
+            case 'program/inputs':
+            case 'program/dispatch':
+            case 'persist/read-named': {
+                const [positional, emitCfg] = this.splitSubstrateEmit(args);
+                await this.runAgentPortArm(operator, positional, emitCfg);
+                break;
+            }
+
             case 'behavior/catalog':
             case 'behavior/describe':
             case 'behavior/source':
@@ -2079,6 +2051,7 @@ export class EffectExecutor {
             case 'program/read':
             case 'program/print':
             case 'program/eval':
+            case 'program/validate':
             case 'program/compose':
             case 'program/step': {
                 const [positional, emitCfg] = this.splitSubstrateEmit(args);
@@ -2140,6 +2113,70 @@ export class EffectExecutor {
                     }
                     return this.handlers.browserGeolocationCurrent(options);
                 }, emitCfg);
+                break;
+            }
+
+            case 'browser/page-facts': {
+                const emitCfg = this.extractEmitConfig(args[1]);
+                const parsed = parsePageFactFields(args[0]);
+                let callKey: string | undefined;
+                try {
+                    callKey = this.resolveCallKey(args[1], 'browser/page-facts key');
+                    if ('error' in parsed) throw new Error(parsed.error);
+                    if (!this.handlers.browserPageFacts) throw new Error('browser/page-facts: this host has no page-facts handler');
+                    const keyField = callKey !== undefined ? { key: callKey } : {};
+                    this.emitSuccess(emitCfg, 'success', { ...(await this.handlers.browserPageFacts(parsed.fields)), ...keyField });
+                } catch (err) {
+                    if (!emitCfg?.failure) throw err;
+                    this.emitFailure(emitCfg, err as RuntimeValue, callKey !== undefined ? { key: callKey } : undefined);
+                }
+                break;
+            }
+
+            case 'browser/prompt':
+            case 'browser/embed': {
+                const prompt = operator === 'browser/prompt';
+                const options = prompt ? args[2] : args[1];
+                const emitCfg = this.extractEmitConfig(options);
+                const callKey = this.resolveCallKey(options, `${operator} key`);
+                const key = callKey ?? null;
+                const call = async (signal?: AbortSignal): Promise<EventPayload> => {
+                    if (prompt) {
+                        const [text, schema] = args;
+                        if (typeof text !== 'string' || typeof schema !== 'string') {
+                            throw new OnDeviceModelFailure('failed', 'browser/prompt: the text and the response schema must be text', key);
+                        }
+                        const handler = this.handlers.browserPrompt;
+                        if (handler === undefined) throw new OnDeviceModelFailure('unconfigured', NO_ON_DEVICE_MODEL, key);
+                        return { reply: await handler(text, schema, key, signal), key };
+                    }
+                    const texts = args[0];
+                    if (!Array.isArray(texts) || !texts.every((t): t is string => typeof t === 'string')) {
+                        throw new OnDeviceModelFailure('failed', 'browser/embed: the texts must be a list of text', key);
+                    }
+                    if (texts.length === 0) return { embeddings: [], key };
+                    const handler = this.handlers.browserEmbed;
+                    if (handler === undefined) throw new OnDeviceModelFailure('unconfigured', NO_ON_DEVICE_EMBEDDER, key);
+                    return { embeddings: await handler(texts, key, signal), key };
+                };
+                if (this.deferCallOutcome !== undefined) {
+                    this.startDeferredCall(operator, callKey, call, emitCfg, this.deferCallOutcome);
+                    break;
+                }
+                try {
+                    if (callKey === undefined) {
+                        this.emitSuccess(emitCfg, 'success', await call());
+                        break;
+                    }
+                    const outcome = await this.requireInFlightCalls(`${operator} key`).run(callKey, (signal) =>
+                        this.outsideEventQueue(() => untilAborted(signal, call(signal))));
+                    if (outcome.cancelled) this.emitCancelled(emitCfg, callKey);
+                    else this.emitSuccess(emitCfg, 'success', outcome.value);
+                } catch (err) {
+                    if (!emitCfg?.failure) throw err;
+                    this.emitFailure(emitCfg, err as RuntimeValue, err instanceof OnDeviceModelFailure ? { ...err.payload } : { kind: 'failed', key });
+                    return { failed: true, error: failureMessage(err as RuntimeValue) };
+                }
                 break;
             }
 

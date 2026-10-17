@@ -22,7 +22,8 @@ function textOf(value: JsonValue | undefined): string {
 export const OAUTH_CACHE = 'oauth2:https://api.example.com/token|ID';
 const PRIVATE = /^(127\.|10\.|169\.254\.|0\.0\.0\.0|::1$)/;
 const keyOf = (driver: JsonObject): JsonValue => objectOf(driver.call).key ?? null;
-const refused = (error: string, key: JsonValue): JsonValue => ({ kind: 'done', result: { error: { error, kind: 'refused', key } } });
+const noFailureFields = { phase: null, grantStatus: null, grantBody: null, code: null, reason: null } as const;
+const refused = (error: string, key: JsonValue): JsonValue => ({ kind: 'done', result: { error: { error, kind: 'refused', credential: null, ...noFailureFields, key } } });
 const ask = (driver: JsonObject, value: JsonObject): string => JSON.stringify({ driver, step: { kind: 'ask', ask: value } });
 const done = (driver: JsonObject | null, step: JsonValue): string => JSON.stringify({ driver, step });
 
@@ -51,10 +52,37 @@ function resultOf(answer: JsonObject): JsonObject {
   return objectOf(answer.result);
 }
 
+function beaconStart(call: JsonObject, egress: JsonValue): string {
+  const key = call.key ?? null;
+  let url: URL;
+  try {
+    url = new URL(textOf(call.origin));
+  } catch {
+    return done(null, refused(`beacon URL \`${textOf(call.origin)}\` is not an absolute http(s) URL`, key));
+  }
+  if (!Array.isArray(egress) || !egress.includes(url.origin)) return done(null, refused(`egress denied: ${url.origin}`, key));
+  if (typeof objectOf(call.request).text !== 'string' || Object.keys(objectOf(call.request)).some((name) => name !== 'text')) return done(null, refused('a beacon request carries only `text`, a string', key));
+  const wire = { method: 'POST', url: url.href, headers: [['Content-Type', 'text/plain']], body: { kind: 'text', text: textOf(objectOf(call.request).text) } };
+  return ask({ call, phase: 'beacon' }, { kind: 'beacon', request: wire });
+}
+
+function beaconDone(driver: JsonObject, result: JsonObject): string {
+  const key = keyOf(driver);
+  if (result.error !== undefined) return done(null, { kind: 'done', result: { ok: { sent: false, via: 'fetch', status: null, key } } });
+  const outcome = objectOf(result.ok);
+  if (outcome.via === 'unavailable') {
+    return done(null, { kind: 'done', result: { error: { error: textOf(outcome.message), kind: 'unavailable', credential: null, ...noFailureFields, key } } });
+  }
+  const status = typeof outcome.status === 'number' ? outcome.status : null;
+  const sent = outcome.via === 'queue' || (status !== null && status >= 200 && status < 300);
+  return done(null, { kind: 'done', result: { ok: { sent, via: outcome.via, status, key } } });
+}
+
 export const fakeHttpKernel: HttpKernel = {
   httpDriverStart(callJson, egressJson) {
     const call = objectOf(parse(callJson));
     const egress = parse(egressJson);
+    if (call.delivery === 'beacon') return beaconStart(call, egress);
     if (!Array.isArray(egress) || !egress.includes(textOf(call.origin))) return done(null, refused(`${textOf(call.origin)} is not in egress`, call.key ?? null));
     const driver: JsonObject = { call, phase: 'start' };
     const auth = authOf(driver);
@@ -70,7 +98,10 @@ export const fakeHttpKernel: HttpKernel = {
       case 'cached': {
         const value = result.ok;
         if (typeof value === 'string') return httpAsk(driver, value);
-        if (auth?.scheme !== 'oauth2-client') return done(null, refused(`credential ${textOf(auth?.credential)} is missing`, keyOf(driver)));
+        if (auth?.scheme !== 'oauth2-client') {
+          const credential = textOf(auth?.credential);
+          return done(null, { kind: 'done', result: { error: { error: `credential missing: ${credential}`, kind: 'unconfigured', credential, ...noFailureFields, key: keyOf(driver) } } });
+        }
         const wire = { method: 'POST', url: textOf(auth.tokenUrl), headers: [], body: { kind: 'text', text: 'grant_type=client_credentials' } };
         return ask({ ...driver, phase: 'granted' }, { kind: 'http', request: wire });
       }
@@ -82,10 +113,12 @@ export const fakeHttpKernel: HttpKernel = {
       }
       case 'stored':
         return httpAsk(driver, textOf(driver.token));
+      case 'beacon':
+        return beaconDone(driver, result);
       case 'reply': {
         if (result.error !== undefined) {
           const failure = objectOf(result.error);
-          const payload = failure.kind === 'timedOut' ? { error: 'timed out', kind: 'timeout', key: keyOf(driver) } : { error: textOf(failure.message), kind: failure.kind, key: keyOf(driver) };
+          const payload = failure.kind === 'timedOut' ? { error: 'timed out', kind: 'timeout', credential: null, ...noFailureFields, key: keyOf(driver) } : { error: textOf(failure.message), kind: failure.kind, credential: null, ...noFailureFields, key: keyOf(driver) };
           return done(null, { kind: 'done', result: { error: payload } });
         }
         const reply = objectOf(result.ok);
@@ -114,10 +147,15 @@ export const fakeHttpKernel: HttpKernel = {
 /** The driver JSON of every call the host dropped before its final step. */
 export const dropped: string[] = [];
 
-export function memorySecrets(initial: { [name: string]: string }): HttpSecrets & { held: Map<string, string> } {
+export function memorySecrets(initial: { [name: string]: string }, rotatable = true): HttpSecrets & { held: Map<string, string> } {
   const held = new Map(Object.entries(initial));
   return {
     held,
+    ...(rotatable ? { async rotate(name: string, value: string, principal?: string) {
+      const key = principal === undefined ? name : userCredentialKey(principal, name);
+      if (!held.has(key)) throw new Error(`credential ${name} is not stored`);
+      held.set(key, value);
+    } } : {}),
     async get(name, principal) { return held.get(principal === undefined ? name : userCredentialKey(principal, name)); },
     async set(name, value, ttlMs, principal) {
       const key = principal === undefined ? name : userCredentialKey(principal, name);

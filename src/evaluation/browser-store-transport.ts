@@ -3,19 +3,26 @@
  * seeded once, and the in-process transport its legs run through. The runtime
  * host (`useBrowserStore`) and compiled static clients both open it here.
  */
-import type { MessageCatalogs, OrbitalDefinition, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, RuntimeValue } from '@almadar/core';
-import { externalInputsOf, orbitalInlineEntities, parseOrbitalSchema, readableEntitiesOf, storesRowsInBrowser } from '@almadar/core';
+import type { BrowserTabPort, MessageCatalogs, OnDeviceModelPorts, OrbitalDefinition, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, RuntimeValue } from '@almadar/core';
+import type { PersistenceAdapter } from '@almadar/core';
+import { externalInputsOf, inlineTraitRefs, orbitalInlineEntities, parseOrbitalSchema, readableEntitiesOf, storesRowsInBrowser } from '@almadar/core';
 import { entityAccessPolicies } from '@almadar/core/mock';
 import { applyRowAccess } from '@almadar/evaluator/entityAccess';
 import type { ServerEffectStageDeps } from '../effects/effect-stage.js';
 import type { HttpPorts } from '../kernel/http-exchange.js';
+import { KernelEngine } from '../kernel/engine.js';
+import type { KernelHostPorts } from '../kernel/host.js';
+import type { KernelModule } from '../kernel/wire.js';
+import { InFlightCalls } from '../effects/in-flight-calls.js';
 import { dispatchDeclaredInput } from './declared-input-dispatch.js';
 import { IndexedDbPersistence } from '@almadar/db/browser';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import type { EffectHandlers } from '../types.js';
+import type { DeferredCallOutcome } from '../kernel/host.js';
 import { seedBrowserStore } from '../entities/seedBrowserStore.js';
 import type { EventTransport } from '../server/EventTransport.js';
 import { buildTraitIndex } from '../traits/trait-index.js';
+import { routeByEntity } from './routed-persistence.js';
 import { createMemoryCircuitStore } from './circuit-store.js';
 import { createLocalStoreTransport } from './local-store-transport.js';
 import { tickEventKey } from '../traits/StateMachineCore.js';
@@ -109,6 +116,14 @@ export interface BrowserHostOptions {
   callService: EffectHandlers['callService'];
   /** What the program's client-site `http` effects run on (`createBrowserHttpPorts`). */
   http?: HttpPorts;
+  /** The on-device model and embedder `browser/prompt` and `browser/embed` ask (the host plugs its Prompt API and embedder in here). */
+  onDevice?: OnDeviceModelPorts;
+  /** Which engine decides execution; `'kernel'` (needs `kernel`) runs the wasm kernel and answers its I/O, `'js'` (the default) is the interpreter. */
+  engine?: 'js' | 'kernel';
+  /** The initialised `@almadar/kernel` module; required when `engine` is `'kernel'`. */
+  kernel?: KernelModule;
+  /** The browser's tabs for the `browser/tab-*` effects (kernel engine only); absent, a tab ask fails `unavailable`. */
+  tabs?: BrowserTabPort;
   factory?: IDBFactory;
   locale?: string;
 }
@@ -121,6 +136,30 @@ export interface BrowserHost extends EventTransport {
   onInputDispatched(listener: InputDispatchListener): () => void;
   /** Stop the program's ticks. */
   close(): void;
+}
+
+/**
+ * What the kernel's I/O is answered with in a browser host: its rows, its `call-service` provider, its tabs, `http` and
+ * on-device model. The host has no bus to a requesting tab, so a running call's live messages have no delivery path here.
+ */
+function kernelPorts(
+  options: BrowserHostOptions,
+  persistence: PersistenceAdapter,
+  servicePorts: NonNullable<ServerEffectStageDeps['servicePorts']>,
+  deferred: () => ((call: DeferredCallOutcome) => void) | undefined,
+): KernelHostPorts {
+  return {
+    persistence,
+    callService: (service, action, params, context) => options.callService(service, action, params, context),
+    programEffect: () => undefined,
+    inFlightCalls: new InFlightCalls(),
+    servicePorts,
+    deliverLive: () => undefined,
+    deferCallOutcome: deferred,
+    ...(options.http !== undefined ? { http: options.http } : {}),
+    ...(options.onDevice !== undefined ? { onDevice: options.onDevice } : {}),
+    ...(options.tabs !== undefined ? { tabs: options.tabs } : {}),
+  };
 }
 
 /** The host runs the program's ticks (LOLO §11): each firing is one `runTick` request in the host's queue. */
@@ -143,8 +182,14 @@ function refuseUnhostedTicks(traitIndex: ReturnType<typeof buildTraitIndex>): vo
  * by `callService`. The host holds the circuit state itself.
  */
 export async function openBrowserHost(options: BrowserHostOptions): Promise<BrowserHost> {
-  const persistence =
-    (await openBrowserStore(options.databaseName, options.schema.orbitals, options.factory, options.locale)) ?? new InMemoryPersistence();
+  if (options.engine === 'kernel' && options.kernel === undefined) {
+    throw new Error("openBrowserHost: engine 'kernel' needs the initialised @almadar/kernel module (options.kernel)");
+  }
+  const browserStore = await openBrowserStore(options.databaseName, options.schema.orbitals, options.factory, options.locale);
+  // The interpreter keeps a runtime entity's rows in its own frames; the kernel reads and writes every entity through one store.
+  const persistence = options.engine === 'kernel'
+    ? routeByEntity(new Set(options.schema.orbitals.flatMap(orbitalInlineEntities).filter(storesRowsInBrowser).map((entity) => entity.name)), browserStore ?? new InMemoryPersistence(), new InMemoryPersistence())
+    : browserStore ?? new InMemoryPersistence();
   const traitIndex = buildTraitIndex(options.schema.orbitals);
   refuseUnhostedTicks(traitIndex);
   const store = createMemoryCircuitStore(Array.from(traitIndex.byName.values(), (e) => e.traitDef));
@@ -217,7 +262,7 @@ export async function openBrowserHost(options: BrowserHostOptions): Promise<Brow
     }
   };
 
-  const servicePorts: ServerEffectStageDeps['servicePorts'] = (caller, user, message) => {
+  const servicePorts: NonNullable<ServerEffectStageDeps['servicePorts']> = (caller, user, message) => {
     // A dispatch made while the lending request still runs is part of that request (a tool loop);
     // one made after it finished (a watch reporting later) is a new request and takes its turn.
     const lentBy = running;
@@ -239,8 +284,31 @@ export async function openBrowserHost(options: BrowserHostOptions): Promise<Brow
       message,
     };
   };
-  const local = createLocalStoreTransport({ traitIndex, persistence, store, schema, callService: options.callService, servicePorts, outsideEventQueue, ...(options.http !== undefined ? { http: options.http } : {}) });
+  let deferred: ((call: DeferredCallOutcome) => void) | undefined;
+  const kernelEngine = options.engine === 'kernel' && options.kernel !== undefined
+    ? KernelEngine.open(options.kernel, { ...schema, orbitals: inlineTraitRefs(schema.orbitals) }, kernelPorts(options, persistence, servicePorts, () => deferred))
+    : undefined;
+  kernelEngine?.setTickMount(Array.from(traitIndex.byName.values(), (entry) => entry.traitDef.name));
+  const local = createLocalStoreTransport({ traitIndex, persistence, store, schema, callService: options.callService, servicePorts, outsideEventQueue, ...(kernelEngine !== undefined ? { kernelEngine } : {}), ...(options.http !== undefined ? { http: options.http } : {}), ...(options.onDevice !== undefined ? { onDevice: options.onDevice } : {}) });
   transport = local;
+  // A follow-on call's outcome runs as a dispatch of its own, in the background lane, and shows in open views.
+  deferred = (call) => {
+    const request: OrbitalEventRequest = {
+      event: call.event,
+      ...(call.payload !== undefined ? { payload: call.payload } : {}),
+      targetTrait: call.traitName,
+      ...(call.entityId !== undefined ? { entityId: call.entityId } : {}),
+      ...(call.originClientId !== undefined ? { clientId: call.originClientId } : {}),
+      ...(call.user !== undefined ? { user: call.user } : {}),
+      ...(call.locale !== undefined ? { locale: call.locale } : {}),
+    };
+    void inBackground(async () => {
+      const response = await local.send(call.orbital, request);
+      for (const listener of listeners) listener(call.orbital, request, response);
+    }).catch((error: Error) => {
+      queueLog.error('deferred-outcome:failed', { orbital: call.orbital, event: call.event, trait: call.traitName, error: error.message });
+    });
+  };
 
   const scheduler = createTickScheduler();
   const tickHandles: TickHandle[] = [];

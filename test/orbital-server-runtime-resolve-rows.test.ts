@@ -115,9 +115,10 @@ describe('the kernel engine resolves through its resolve flight', () => {
       setCapabilities(): void {}
       setMessages(): void {}
       lastError(): string { return ''; }
+      osAllows(): boolean { return false; }
       free(): void {}
     }
-    const kernel: KernelModule = { Server: Handle };
+    const kernel: KernelModule = { Server: Handle, osGlobMatches: () => false, isPublicAddress: () => false };
     const runtime = new OrbitalServerRuntime({ persistence: new InMemoryPersistence(), debug: false, engine: 'kernel', kernel });
     await runtime.register(schema(true));
     const page = await runtime.resolveRows(reference(['a1']), ALICE);

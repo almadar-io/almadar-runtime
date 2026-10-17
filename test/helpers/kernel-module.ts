@@ -8,3 +8,6 @@ export function loadKernel(): Promise<KernelModule> {
   if (KERNEL_DIR === undefined) throw new Error('ALMADAR_KERNEL_DIR is not set');
   return loadKernelModule(KERNEL_DIR);
 }
+
+/** The built native kernel add-on (`kernel.node`); the native-engine suites skip without it. */
+export const NATIVE_ADDON: string | undefined = process.env.ALMADAR_KERNEL_NODE;

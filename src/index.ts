@@ -23,6 +23,7 @@ export type {
   TransitionResult,
   TraitDefinition,
   EffectHandlers,
+  HttpEffectReport,
   BrowserFileMeta,
   BrowserFilePickerOptions,
   BrowserGeolocationOptions,
@@ -162,6 +163,7 @@ export {
 } from "./effects/effect-stage.js";
 
 export { InFlightCalls, type KeyedCallOutcome } from "./effects/in-flight-calls.js";
+export { embedOnDevice, onDeviceHandlers, OnDeviceModelFailure, promptOnDevice } from "./effects/on-device-model.js";
 
 // EffectExecutor
 export {
@@ -251,6 +253,7 @@ export { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults, normalize
 export { seedBrowserStore } from "./entities/seedBrowserStore.js";
 export { createLocalStoreTransport } from "./evaluation/local-store-transport.js";
 export { dispatchDeclaredInput } from "./evaluation/declared-input-dispatch.js";
+export { dispatchInbound } from "./evaluation/inbound-dispatch.js";
 export { createChannelTransport, holdUntilServed, serveChannel, type ChannelMessage, type ChannelTransportOptions, type ServedChannel, type TransportChannel } from "./server/channel-transport.js";
 export type { LocalStoreTransportOptions } from "./evaluation/local-store-transport.js";
 export { createResidenceTransport } from "./evaluation/residence-transport.js";
@@ -279,7 +282,6 @@ export {
 
 export type { ServerBridgeConfig, ServerBridgeState } from "./server/ServerBridge.js";
 
-export type { OsHandlerContext, OsHandlerResult } from "./effects/createOsHandlers.js";
 
 // Payload Validation (RCG-10)
 export {

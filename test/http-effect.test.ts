@@ -3,9 +3,12 @@
 import { describe, it, expect } from 'vitest';
 import type { EventPayload } from '@almadar/core';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
-import { EffectExecutor, type BindingContext, type EffectContext } from '../src/index.js';
+import { EffectExecutor, type BindingContext, type EffectContext, type HttpEffectReport } from '../src/index.js';
 import { InFlightCalls } from '../src/effects/in-flight-calls.js';
-import { OAUTH_CACHE, dropped, fakeApp, hangingFetch, replying, type FakeApp, type FakeFetch } from './helpers/fake-http-kernel.js';
+import { OAUTH_CACHE, dropped, fakeApp, fakeHttpKernel, hangingFetch, replying, type FakeApp, type FakeFetch } from './helpers/fake-http-kernel.js';
+import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
+import { InMemoryPersistence } from '@almadar/db/mock';
+import type { OrbitalSchema } from '@almadar/core';
 
 interface Emitted { event: string; payload: EventPayload | undefined }
 
@@ -13,20 +16,49 @@ const ORIGIN = 'https://api.example.com';
 const ALL = { success: 'OK', failure: 'ERR', cancelled: 'CANCELLED' };
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function run(app: FakeApp) {
+function run(app: FakeApp, now?: number) {
     const emitted: Emitted[] = [];
+    const reports: HttpEffectReport[] = [];
     const registry = new InFlightCalls();
-    const handlers = stubEffectHandlers({ emit: (event: string, payload?: EventPayload) => { emitted.push({ event, payload }); } });
-    const bindings: BindingContext = { entity: { id: 'row-1' }, payload: { q: 'cat' } };
+    const handlers = stubEffectHandlers({ emit: (event: string, payload?: EventPayload) => { emitted.push({ event, payload }); }, httpResult: (report: HttpEffectReport) => { reports.push(report); } });
+    const bindings: BindingContext = { entity: { id: 'row-1' }, payload: { q: 'cat' }, ...(now !== undefined ? { now } : {}) };
     const context: EffectContext = { traitName: 'T', state: 'idle', transition: 'idle->idle' };
     const execute = (effect: Parameters<EffectExecutor['execute']>[0]) =>
         new EffectExecutor({ handlers, bindings, context, inFlightCalls: registry, http: app.ports }).execute(effect);
-    return { emitted, execute };
+    return { emitted, reports, execute };
 }
 
 const http = (request: object, options: object = { emit: ALL }, origin = ORIGIN) => ['http', 'GET', origin, '/search', request, options];
 
 describe('http effect (interpreter)', () => {
+    it('passes the dispatch stamp as execution metadata, not an authored request option', async () => {
+        const app = fakeApp({ fetch: replying(200, 'ok') });
+        const kernel = await app.ports.kernel();
+        const starts: string[] = [];
+        app.ports.kernel = async () => ({ ...kernel, httpDriverStart: (callJson, egressJson) => {
+            starts.push(callJson);
+            return kernel.httpDriverStart(callJson, egressJson);
+        } });
+        await run(app, 1440938160000).execute(http({}));
+        expect(starts).toEqual([JSON.stringify({ method: 'GET', origin: ORIGIN, path: '/search', request: {}, nowMs: 1440938160000 })]);
+    });
+    it('evaluates a key expression before dispatch and echoes it', async () => {
+        const app = fakeApp({ fetch: replying(200, 'ok') });
+        const { emitted, execute } = run(app);
+        await execute(http({}, { key: ['str/concat', 'request:', '@payload.q'], emit: ALL }));
+        expect(app.urls).toEqual([`${ORIGIN}/search`]);
+        expect(emitted[0]?.payload?.key).toBe('request:cat');
+    });
+
+    it('rejects keys that evaluate to non-string values before sending', async () => {
+        for (const key of [['+', 1, 2], 17, null, '']) {
+            const app = fakeApp({ fetch: replying(200, 'ok') });
+            const { execute } = run(app);
+            await expect(execute(http({}, { key, emit: ALL }))).rejects.toThrow('http key: key resolved to');
+            expect(app.urls).toEqual([]);
+        }
+    });
+
     it('sends the built request and routes the reply payload to success', async () => {
         const app = fakeApp({ fetch: replying(200, '{"ok":1}', [['Content-Type', 'application/json']]), secrets: { KEY: 'tok' } });
         const { emitted, execute } = run(app);
@@ -46,14 +78,45 @@ describe('http effect (interpreter)', () => {
         const app = fakeApp({ fetch: () => { throw new Error('connection reset'); } });
         const { emitted, execute } = run(app);
         await execute(http({}));
-        expect(emitted).toEqual([{ event: 'ERR', payload: { error: 'connection reset', kind: 'failed', key: null } }]);
+        expect(emitted).toEqual([{ event: 'ERR', payload: { error: 'connection reset', kind: 'failed', key: null, credential: null, phase: null, grantStatus: null, grantBody: null, code: null, reason: null } }]);
+    });
+
+    describe('trace report', () => {
+        const noNetwork = () => { throw new Error('verify has no network'); };
+        const target = `GET ${ORIGIN}/search`;
+        it('a request the transport could not carry reports its target and its routed failure', async () => {
+            const app = fakeApp({ fetch: noNetwork });
+            const { emitted, reports, execute } = run(app);
+            await execute(http({}));
+            expect(emitted.map((e) => e.event)).toEqual(['ERR']);
+            expect(reports).toEqual([{ success: false, target, error: 'verify has no network', routed: 'ERR' }]);
+        });
+        it('a reply reports its target as a success', async () => {
+            const app = fakeApp({ fetch: replying(500, 'down') });
+            const { reports, execute } = run(app);
+            await execute(http({}));
+            expect(reports).toEqual([{ success: true, target }]);
+        });
+        it('a request refused before sending reports its target and its routed failure', async () => {
+            const app = fakeApp({ fetch: noNetwork });
+            const { reports, execute } = run(app);
+            await execute(http({}, { emit: ALL }, 'https://evil.example.com'));
+            expect(reports).toEqual([{ success: false, target: 'GET https://evil.example.com/search', error: 'https://evil.example.com is not in egress', routed: 'ERR' }]);
+        });
+        it('control: a failure with no declared failure route is reported unrouted and still throws', async () => {
+            const app = fakeApp({ fetch: noNetwork });
+            const { emitted, reports, execute } = run(app);
+            await expect(execute(http({}, { emit: { success: 'OK' } }))).rejects.toThrow('verify has no network');
+            expect(emitted).toEqual([]);
+            expect(reports).toEqual([{ success: false, target, error: 'verify has no network' }]);
+        });
     });
 
     it('a request past its timeoutMs routes to failure with kind timeout', async () => {
         const app = fakeApp({ fetch: hangingFetch() });
         const { emitted, execute } = run(app);
         await execute(http({ timeoutMs: 20 }));
-        expect(emitted).toEqual([{ event: 'ERR', payload: { error: 'timed out', kind: 'timeout', key: null } }]);
+        expect(emitted).toEqual([{ event: 'ERR', payload: { error: 'timed out', kind: 'timeout', key: null, credential: null, phase: null, grantStatus: null, grantBody: null, code: null, reason: null } }]);
     });
 
     it('refuses an origin outside egress before sending', async () => {
@@ -61,7 +124,7 @@ describe('http effect (interpreter)', () => {
         const { emitted, execute } = run(app);
         await execute(http({}, { emit: ALL }, 'https://evil.example.com'));
         expect(app.urls).toEqual([]);
-        expect(emitted).toEqual([{ event: 'ERR', payload: { error: 'https://evil.example.com is not in egress', kind: 'refused', key: null } }]);
+        expect(emitted).toEqual([{ event: 'ERR', payload: { error: 'https://evil.example.com is not in egress', kind: 'refused', credential: null, phase: null, grantStatus: null, grantBody: null, code: null, reason: null, key: null } }]);
     });
 
     it('refuses a host that resolves to a private address, and sends to a literal the program listed', async () => {
@@ -78,12 +141,12 @@ describe('http effect (interpreter)', () => {
         expect(b.emitted[0]).toMatchObject({ event: 'OK' });
     });
 
-    it('refuses a named credential the store does not hold', async () => {
+    it('names an unconfigured credential the store does not hold', async () => {
         const app = fakeApp({ fetch: replying(200, 'x') });
         const { emitted, execute } = run(app);
         await execute(http({ auth: { scheme: 'bearer', credential: 'MISSING' } }));
         expect(app.urls).toEqual([]);
-        expect(emitted[0]).toMatchObject({ event: 'ERR', payload: { kind: 'refused' } });
+        expect(emitted[0]).toMatchObject({ event: 'ERR', payload: { kind: 'unconfigured', credential: 'MISSING' } });
     });
 
     it('cancel-call aborts a keyed request and routes to cancelled with { key }', async () => {
@@ -98,6 +161,29 @@ describe('http effect (interpreter)', () => {
         await pending;
         expect(seen[0]?.aborted).toBe(true);
         expect(emitted).toEqual([{ event: 'CANCELLED', payload: { key: 'job-1' } }]);
+    });
+
+    it('a reply that arrives after cancel-call is dropped, though the transport ignored the abort', async () => {
+        let answer: () => void = () => undefined;
+        const ignoring: FakeFetch = () => new Promise((resolve) => { answer = () => resolve(new Response('late', { status: 200 })); });
+        const { emitted, execute } = run(fakeApp({ fetch: ignoring }));
+        const pending = execute(http({}, { key: 'job-1', emit: ALL }));
+        await flush();
+        await flush();
+        await execute(['cancel-call', 'job-1']);
+        await pending;
+        answer();
+        await flush();
+        await flush();
+        expect(emitted).toEqual([{ event: 'CANCELLED', payload: { key: 'job-1' } }]);
+    });
+
+    it('cancel-call of a key with nothing in flight, or of a request that finished, is a no-op', async () => {
+        const { emitted, execute } = run(fakeApp({ fetch: replying(200, 'done') }));
+        await execute(['cancel-call', 'nope']);
+        await execute(http({}, { key: 'job-1', emit: ALL }));
+        await execute(['cancel-call', 'job-1']);
+        expect(emitted).toEqual([{ event: 'OK', payload: expect.objectContaining({ status: 200 }) }]);
     });
 
     it('releases the kernel call when it is cancelled before its final step, and not when it finishes', async () => {
@@ -119,7 +205,7 @@ describe('http effect (interpreter)', () => {
         const app = fakeApp({ fetch: replying(200, 'x') });
         const { emitted, execute } = run(app);
         await execute(http({}, { key: 'job-9', emit: ALL }, 'https://evil.example.com'));
-        expect(emitted).toEqual([{ event: 'ERR', payload: { error: 'https://evil.example.com is not in egress', kind: 'refused', key: 'job-9' } }]);
+        expect(emitted).toEqual([{ event: 'ERR', payload: { error: 'https://evil.example.com is not in egress', kind: 'refused', credential: null, phase: null, grantStatus: null, grantBody: null, code: null, reason: null, key: 'job-9' } }]);
     });
 
     it('control: a keyed request that is not cancelled routes to success', async () => {
@@ -185,5 +271,37 @@ describe('http effect (interpreter)', () => {
             expect(sent.map((s) => s.url)).toEqual([`${ORIGIN}/search`]);
             expect(sent[0].auth).toBe('Bearer cached');
         });
+    });
+});
+
+describe('http effect (server runtime)', () => {
+    function schema(): OrbitalSchema {
+        return {
+            name: 'http-app', version: '1.0.0', egress: [ORIGIN],
+            orbitals: [{
+                name: 'Ask', pages: [],
+                entity: { name: 'Turn', persistence: 'runtime', fields: [{ name: 'id', type: 'string', primaryKey: true }] },
+                traits: [{
+                    name: 'Asker', scope: 'instance', linkedEntity: 'Turn',
+                    stateMachine: {
+                        states: [{ name: 'idle', isInitial: true }],
+                        events: [{ key: 'ASK', name: 'Ask' }, { key: 'ERR', name: 'Err' }, { key: 'OK', name: 'Ok' }],
+                        transitions: [{ from: 'idle', to: 'idle', event: 'ASK', effects: [http({}, { emit: ALL })] }],
+                    },
+                }],
+            }],
+        };
+    }
+    it('lists the http effect and the emit of its failure route among the effect results when the transport has no network', async () => {
+        const runtime = new OrbitalServerRuntime({
+            persistence: new InMemoryPersistence(), debug: false, mode: 'mock',
+            http: { kernel: async () => fakeHttpKernel, fetch: () => { throw new Error('verify has no network'); }, resolve: async () => ({ literal: false, addresses: ['93.184.216.34'] }) },
+        });
+        await runtime.register(schema());
+        const res = await runtime.processOrbitalEvent('Ask', { event: 'ASK', targetTrait: 'Asker' });
+        expect(res.effectResults?.filter((e) => e.effect === 'http' || e.effect === 'emit')).toEqual([
+            { effect: 'http', success: false, target: `GET ${ORIGIN}/search`, error: 'verify has no network', routed: 'ERR' },
+            { effect: 'emit', success: true, target: 'ERR' },
+        ]);
     });
 });

@@ -155,9 +155,7 @@
               {
                 "effects": [
                   [
-                    "call-service",
-                    "page",
-                    "watch",
+                    "browser/tab-watch",
                     {
                       "event": "@config.itemEvent",
                       "fields": {},

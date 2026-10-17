@@ -57,9 +57,10 @@ function scripted(log: string[]): KernelModule {
     setCapabilities(): void {}
     setMessages(): void {}
     lastError(): string { return ''; }
+    osAllows(): boolean { return false; }
     free(): void {}
   }
-  return { Server: Handle };
+  return { Server: Handle, osGlobMatches: () => false, isPublicAddress: () => false };
 }
 
 describe('KernelEngine.resolveRows', () => {

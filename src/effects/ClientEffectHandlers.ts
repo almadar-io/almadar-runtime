@@ -10,6 +10,7 @@
 import { createLogger } from '@almadar/logger';
 import { mockCallService } from './defaultCallService.js';
 import type { PatternConfig, BusEventSource, FieldValue } from '@almadar/core';
+import { readPageFacts } from './page-facts.js';
 import type { EffectHandlers, EventPayload, EntityRow, ServiceParams, PatternProps, BrowserFilePickerOptions, BrowserGeolocationOptions } from '../types.js';
 
 const log = createLogger('almadar:runtime:effects:client');
@@ -245,7 +246,7 @@ export function createClientEffectHandlers(
             if (consumerCallService) return consumerCallService(service, action, params);
             // Mock fallback: the registry-shaped answer every host's mock mode gives, so client-side state
             // machines (offline preview, runtime-verify standalone) advance instead of stalling at null.
-            return mockCallService(service, action, params);
+            return mockCallService(service, action);
         },
 
         renderUI: (slot: string, pattern: PatternConfig | null, props?: PatternProps, priority?: number) => {
@@ -345,6 +346,8 @@ export function createClientEffectHandlers(
             }
             return { endpoint, p256dh, auth };
         },
+
+        browserPageFacts: async (fields) => readPageFacts(fields),
 
         browserGeolocationCurrent: async (options?: BrowserGeolocationOptions) => {
             if (typeof navigator === 'undefined' || !navigator.geolocation) {

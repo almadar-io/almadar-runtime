@@ -47,12 +47,6 @@ describe('a local store answering a call to a browser-only service', () => {
     expect(events.map((e) => e.event)).not.toContain('FAILED');
   });
 
-  it('a browser-only service with no web-hosted implementation fails by name, not as a constructor error', async () => {
-    const events = await emitted(orbital('page', 'watch', { url: 'https://example.com' }));
-    const failed = events.find((e) => e.event === 'FAILED');
-    expect(String(JSON.stringify(failed?.payload))).toContain("Service 'page' is not wired in this browser host");
-  });
-
   it('control: a node service still goes to the node provider', async () => {
     const events = await emitted(orbital('email', 'send', { to: 'a@example.com', subject: 's', body: 'b' }));
     const failed = events.find((e) => e.event === 'FAILED');

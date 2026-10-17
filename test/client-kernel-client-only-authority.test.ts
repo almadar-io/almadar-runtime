@@ -53,7 +53,7 @@ function schema(emit: Record<string, string>): OrbitalSchema {
             stateMachine: {
               states: [{ name: 'idle', isInitial: true }],
               events: [{ key: 'CONVERSE', name: 'Converse' }, { key: 'STEP', name: 'Step' }, { key: 'REPLIED', name: 'Replied' }, { key: 'FAILED', name: 'Failed' }],
-              transitions: [{ from: 'idle', to: 'idle', event: 'CONVERSE', effects: [['call-service', 'llm', 'call-tools', {}, { emit }]] }],
+              transitions: [{ from: 'idle', to: 'idle', event: 'CONVERSE', effects: [['call-service', 'test-svc', 'run', {}, { emit }]] }],
             },
             emits: [{ event: 'STEP', scope: 'external' }, { event: 'REPLIED', scope: 'external' }],
             listens: [{ event: 'SEND', triggers: 'CONVERSE', source: { kind: 'orbital', orbital: 'PageOrbital', trait: 'Chat' } }],

@@ -2,7 +2,7 @@
 // browser's `fetch`: a browser cannot resolve a name, so there is no address check and no pinning — the
 // program's egress list (checked by the driver) and the browser's own CORS bound the call.
 import { describe, it, expect } from 'vitest';
-import type { EventPayload, OrbitalDefinition } from '@almadar/core';
+import type { EventPayload, JsonObject, OrbitalDefinition } from '@almadar/core';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import { buildTraitIndex, runsBrowserDataEffect, runsServerEffect } from '../src/traits/trait-index';
 import { createMemoryCircuitStore } from '../src/evaluation/circuit-store';
@@ -46,14 +46,14 @@ describe('browser http ports', () => {
 
   it('a transport error is an outcome of kind failed', async () => {
     const p = ports(async () => { throw new TypeError('Failed to fetch'); });
-    expect(await runHttpCall(p, call)).toEqual({ error: { error: 'Failed to fetch', kind: 'failed', key: null } });
+    expect(await runHttpCall(p, call)).toEqual({ error: { error: 'Failed to fetch', kind: 'failed', key: null, credential: null, phase: null, grantStatus: null, grantBody: null, code: null, reason: null } });
   });
 
   it('hold no credential: a credential ask fails the call instead of reaching a store', async () => {
     let sends = 0;
     const p = ports(async () => { sends += 1; return new Response('x'); });
     const keyed: HttpCall = { ...call, request: { auth: { scheme: 'bearer', credential: 'KEY' } } };
-    expect(await runHttpCall(p, keyed)).toMatchObject({ error: { kind: 'refused' } });
+    expect(await runHttpCall(p, keyed)).toMatchObject({ error: { kind: 'unconfigured', credential: 'KEY' } });
     expect(sends).toBe(0);
   });
 });
@@ -61,9 +61,9 @@ describe('browser http ports', () => {
 describe('a client-role executor runs a keyless http itself', () => {
   const bindings: BindingContext = { entity: { id: 'row-1' }, payload: {} };
   const context: EffectContext = { traitName: 'T', state: 'idle', transition: 'idle->idle' };
-  const effect = (request: object) => ['http', 'GET', ORIGIN, '/search', request, { emit: { success: 'OK', failure: 'ERR' } }];
+  const effect = (request: JsonObject) => ['http', 'GET', ORIGIN, '/search', request, { emit: { success: 'OK', failure: 'ERR' } }];
 
-  async function runClient(request: object) {
+  async function runClient(request: JsonObject) {
     const emitted: Array<{ event: string; payload: EventPayload | undefined }> = [];
     const collector = new ServerLegCollector();
     const handlers = stubEffectHandlers({ emit: (event: string, payload?: EventPayload) => { emitted.push({ event, payload }); } });
@@ -90,7 +90,7 @@ describe('a client-role executor runs a keyless http itself', () => {
 });
 
 describe('a browser store runs a leg with a keyless http', () => {
-  const orbital = (request: object): OrbitalDefinition => ({
+  const orbital = (request: JsonObject): OrbitalDefinition => ({
     name: 'Feed',
     entity: { name: 'Row', persistence: 'runtime', fields: [{ name: 'id', type: 'string', required: true }] },
     traits: [{

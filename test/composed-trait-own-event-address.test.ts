@@ -46,7 +46,7 @@ function effectEvent(trait: Trait): unknown {
   const init = trait.stateMachine?.transitions.find((t) => t.event === 'INIT');
   const effect = init?.effects?.[0];
   if (!Array.isArray(effect)) throw new Error('INIT effect is not a list');
-  const args = effect[3];
+  const args = effect[1];
   const value = typeof args === 'object' && args !== null && !Array.isArray(args) ? (args as Record<string, unknown>).event : undefined;
   // The runtime keeps `@config.<knob>` live in the effect and reads the knob when it runs.
   return typeof value === 'string' && value.startsWith('@config.') ? trait.config?.[value.slice('@config.'.length)]?.default : value;

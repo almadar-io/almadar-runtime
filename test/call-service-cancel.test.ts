@@ -39,7 +39,7 @@ function app(options: { honourSignal: boolean } = { honourSignal: true }) {
 }
 
 const call = (key: string | undefined, emit: Record<string, string>) =>
-    ['call-service', 'llm', 'generate', {}, { ...(key !== undefined ? { key } : {}), emit }];
+    ['call-service', 'test-svc', 'run', {}, { ...(key !== undefined ? { key } : {}), emit }];
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const ALL = { success: 'OK', failure: 'ERR', cancelled: 'CANCELLED' };
 
@@ -137,7 +137,7 @@ describe('call-service key + cancel-call', () => {
 
     it('evaluates the key expression at call time', async () => {
         const { emitted, run } = app();
-        const pending = run(['call-service', 'llm', 'generate', {}, { key: '@payload.id', emit: ALL }]);
+        const pending = run(['call-service', 'test-svc', 'run', {}, { key: '@payload.id', emit: ALL }]);
         await flush();
         await run(['cancel-call', '@payload.id']);
         await pending;
@@ -146,7 +146,7 @@ describe('call-service key + cancel-call', () => {
 
     it('a key that does not resolve to a string fails the call instead of running it unkeyed', async () => {
         const { emitted, calls, run } = app();
-        await run(['call-service', 'llm', 'generate', {}, { key: '@payload.missing', emit: ALL }]);
+        await run(['call-service', 'test-svc', 'run', {}, { key: '@payload.missing', emit: ALL }]);
         expect(calls).toEqual([]);
         expect(emitted).toHaveLength(1);
         expect(emitted[0].event).toBe('ERR');
@@ -164,7 +164,7 @@ describe('call-service key + cancel-call', () => {
 describe('cancel-call placement', () => {
     it('is a server effect like call-service; control: emit is not', () => {
         expect(runsServerEffect(['cancel-call', 'job-1'])).toBe(true);
-        expect(runsServerEffect(['call-service', 'llm', 'generate'])).toBe(true);
+        expect(runsServerEffect(['call-service', 'test-svc', 'run'])).toBe(true);
         expect(runsServerEffect(['emit', 'E'])).toBe(false);
     });
 
@@ -212,5 +212,36 @@ describe('keyed call-service payloads carry the key (D-A82)', () => {
         plain.calls[0].reject(new Error('boom'));
         await p2;
         expect(plain.emitted).toEqual([{ event: 'ERR', payload: { error: 'boom' } }]);
+    });
+    it('cancels every key of a list, each routing to cancelled with its own key', async () => {
+        const { emitted, calls, run } = app();
+        const first = run(call('job-1', ALL));
+        const second = run(call('job-2', ALL));
+        await flush();
+        await run(['cancel-call', ['job-1', 'job-2']]);
+        await Promise.all([first, second]);
+        expect(calls.map((c) => c.context?.signal?.aborted)).toEqual([true, true]);
+        expect(emitted.map((e) => e.payload).sort((a, b) => String(a?.key).localeCompare(String(b?.key)))).toEqual([{ key: 'job-1' }, { key: 'job-2' }]);
+    });
+
+    it('control: a list cancels only the keys it names', async () => {
+        const { emitted, calls, run } = app();
+        const first = run(call('job-1', ALL));
+        const second = run(call('job-2', ALL));
+        await flush();
+        await run(['cancel-call', ['job-1']]);
+        await first;
+        expect(calls[0].context?.signal?.aborted).toBe(true);
+        expect(calls[1].context?.signal?.aborted).toBe(false);
+        expect(emitted).toEqual([{ event: 'CANCELLED', payload: { key: 'job-1' } }]);
+        calls[1].resolve({});
+        await second;
+    });
+
+    it('an empty list is a no-op and an empty or non-string member is refused', async () => {
+        const { run } = app();
+        await run(['cancel-call', []]);
+        await expect(run(['cancel-call', ['job-1', '']])).rejects.toThrow(/cancel-call/);
+        await expect(run(['cancel-call', ['job-1', 3]])).rejects.toThrow(/cancel-call/);
     });
 });

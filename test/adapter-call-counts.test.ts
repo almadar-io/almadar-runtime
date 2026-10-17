@@ -3,10 +3,11 @@
  * engine and on the kernel host. The JS engine column is the push-down result (one queryPage per fetch, ordered or not (EXEC-FETCH-1), one writeWhere per persist, one writeBatch per batch); the kernel column is the pushed-down result (writeWhere / writeBatch declared by the adapter's capabilities).
  * The kernel suite needs the built `@almadar/kernel` (ALMADAR_KERNEL_DIR) and is skipped without it.
  */
+import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { CountingPersistence, type PersistenceMethod } from '@almadar/db';
 import { InMemoryPersistence } from '@almadar/db/mock';
-import type { OrbitalSchema } from '@almadar/core';
+import { isEntityReferenceAny, type OrbitalSchema } from '@almadar/core';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import type { KernelModule } from '../src/kernel/index.js';
 import { KERNEL_DIR, loadKernel } from './helpers/kernel-module.js';
@@ -69,7 +70,7 @@ const counts = (create: number, update: number, getById: number, list: number, p
 // Totals include the dispatch's own frame reads (JS: readTraitFrame; kernel: readRow/listRows for the bound entity),
 // which the `noop` control isolates; the persist effect's own share is the difference.
 const JS = { noop: counts(0, 0, 0, 0), update: counts(0, 0, 0, 0, { writeWhere: 1 }), create: counts(1, 0, 3, 2), batch: counts(3, 0, 0, 0), fetch: counts(0, 0, 0, 0, { queryPage: 1 }) };
-const KERNEL = { noop: counts(0, 0, 2, 0), update: counts(0, 0, 4, 0, { writeWhere: 1 }), create: counts(0, 0, 4, 0, { writeWhere: 1 }), batch: counts(0, 0, 4, 0, { writeBatch: 1 }), fetch: counts(0, 0, 4, 0, { queryPage: 1 }) };
+const KERNEL = { noop: counts(0, 0, 2, 0), update: counts(0, 0, 4, 0, { writeBatch: 1 }), create: counts(0, 0, 4, 0, { writeBatch: 1 }), batch: counts(0, 0, 4, 0, { writeBatch: 1 }), fetch: counts(0, 0, 4, 0, { queryPage: 1 }) };
 
 describe('adapter calls per dispatch, JS engine (push-down)', () => {
   it('control: an event with no effects reads nothing', async () => expect(await callsFor('noop', {})).toEqual(JS.noop));
@@ -91,3 +92,47 @@ describe.skipIf(KERNEL_DIR === undefined)('adapter calls per dispatch, kernel ho
   it('fetch', async () => expect(await callsFor('fetch', { kernel })).toEqual(KERNEL.fetch));
 });
 
+
+// The twin oracle shared with orbital-server's pushdown_counting (native host): the same verb makes the same push-down calls.
+const TWIN: Record<string, Partial<Record<PersistenceMethod, number>>> = JSON.parse(readFileSync(new URL('./fixtures/adapter-calls.json', import.meta.url), 'utf8')).verbs;
+
+describe.skipIf(KERNEL_DIR === undefined)('adapter calls per dispatch: the wasm host against the shared twin oracle', () => {
+  let kernel: KernelModule;
+  beforeAll(async () => {
+    kernel = await loadKernel();
+  });
+  for (const verb of ['update', 'create', 'batch', 'fetch'] as const) {
+    it(`${verb}: the push-down calls are the oracle's`, async () => {
+      const actual = await callsFor(verb, { kernel });
+      for (const [method, want] of Object.entries(TWIN[verb])) expect(actual[method as PersistenceMethod], method).toBe(want);
+    });
+  }
+});
+
+// `[runtime]` rows live in the kernel's memory: a dispatch over a runtime entity makes no adapter call at all (the same
+// program makes the two frame reads when the entity is persistent). Twin: orbital-core `server_transitions.rs` `runtime_rows`.
+function runtimeProgram(persistence: 'runtime' | 'persistent'): OrbitalSchema {
+  const base = program();
+  const orbital = base.orbitals[0];
+  if (isEntityReferenceAny(orbital.entity)) throw new Error('the counts program has an inline entity');
+  return { ...base, orbitals: [{ ...orbital, entity: { ...orbital.entity, persistence } }] };
+}
+
+async function totalCalls(persistence: 'runtime' | 'persistent', kernel: KernelModule): Promise<number> {
+  const counting = new CountingPersistence(new InMemoryPersistence());
+  const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: counting, engine: 'kernel', kernel });
+  await runtime.register(runtimeProgram(persistence));
+  counting.reset();
+  const response = await runtime.processOrbitalEvent('Main', { event: 'DONE', targetTrait: 'Notes' });
+  expect(response.success).toBe(true);
+  return Object.values(counting.counts().byMethod).reduce((a, b) => a + b, 0);
+}
+
+describe.skipIf(KERNEL_DIR === undefined)('runtime rows live in the kernel (wasm host)', () => {
+  let kernel: KernelModule;
+  beforeAll(async () => {
+    kernel = await loadKernel();
+  });
+  it('a dispatch over a [runtime] entity makes no adapter call', async () => expect(await totalCalls('runtime', kernel)).toBe(0));
+  it('control: the same program over a persistent entity reads its frame from the adapter', async () => expect(await totalCalls('persistent', kernel)).toBeGreaterThan(0));
+});

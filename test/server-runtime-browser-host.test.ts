@@ -63,7 +63,7 @@ function schema(): OrbitalSchema {
                 {
                   from: 'idle', to: 'thinking', event: 'ASK',
                   effects: [[
-                    'call-service', 'llm', 'call-tools', { message: '@payload.message' },
+                    'call-service', 'test-svc', 'run', { message: '@payload.message' },
                     { emit: { success: 'ANSWERED', failure: 'FAILED' } },
                   ]],
                 },

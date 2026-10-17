@@ -27,7 +27,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InMemoryPersistence } from '@almadar/db/mock';
-import { runToolLoop } from '@almadar/integrations';
+import { runScriptedToolLoop, type ScriptedModel } from './helpers/scripted-tool-loop.js';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import type { OrbitalSchema, Trait, TraitRef } from '@almadar/core';
@@ -144,7 +144,7 @@ describe(
         ].map((event) => ({ event })),
       ];
       let turn = 0;
-      const client: Parameters<typeof runToolLoop>[0] = {
+      const client: ScriptedModel = {
         async callWithTools(options) {
           expect(options.tools?.map((tool) => tool.function.name).sort()).toEqual([
             ...tools.flatMap((tool) => 'read' in tool ? [`read__${tool.read}`] : [tool.event.split('.').join('__')]),
@@ -163,7 +163,7 @@ describe(
           return { message: { role: 'assistant', content: calls ? null : 'Created.', ...(calls ? { tool_calls: calls } : {}) }, finishReason: 'stop', usage: null };
         },
       };
-      await runToolLoop(client, host, { messages: [{ role: 'user', content: 'Create a task in my project' }], tools }, { provider: 'scripted', model: 'scripted' });
+      await runScriptedToolLoop(client, host, { messages: [{ role: 'user', content: 'Create a task in my project' }], tools });
       expect(await runtime.persistence.list('Task')).toEqual(expect.arrayContaining([
         expect.objectContaining({ title: 'Assistant created task', projectId: 'project-tools', workspaceId: 'workspace-tools' }),
       ]));

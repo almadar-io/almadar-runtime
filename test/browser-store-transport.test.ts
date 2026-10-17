@@ -104,7 +104,7 @@ describe('openBrowserStoreTransport', () => {
   });
 });
 
-function analyticsSchema(name: string): OrbitalSchema {
+function browserServiceSchema(name: string): OrbitalSchema {
   return {
     name,
     orbitals: [{
@@ -116,7 +116,7 @@ function analyticsSchema(name: string): OrbitalSchema {
           states: [{ name: 'active', isInitial: true }],
           events: [{ key: 'INIT', name: 'INIT' }, { key: 'SENT', name: 'SENT' }, { key: 'NOT_SENT', name: 'NOT_SENT' }],
           transitions: [
-            { from: 'active', to: 'active', event: 'INIT', effects: [['call-service', 'analytics', 'pageview', { endpoint: 'https://c.example/e', path: '/docs' }, { emit: { success: 'SENT', failure: 'NOT_SENT' } }]] },
+            { from: 'active', to: 'active', event: 'INIT', effects: [['call-service', 'test-svc', 'run', { url: 'https://c.example/docs', active: true }, { emit: { success: 'SENT', failure: 'NOT_SENT' } }]] },
             { from: 'active', to: 'active', event: 'SENT', effects: [] },
             { from: 'active', to: 'active', event: 'NOT_SENT', effects: [] },
           ],
@@ -127,23 +127,23 @@ function analyticsSchema(name: string): OrbitalSchema {
   };
 }
 
-describe('a browser leg that calls a browser-only service', () => {
+describe('a browser leg that calls a service', () => {
   it('runs the call through the host\'s callService, with no browser-stored entity', async () => {
     const calls: Array<{ service: string; action: string; params: ServiceParams | undefined }> = [];
     const callService: EffectHandlers['callService'] = async (service, action, params) => {
       calls.push({ service, action, params });
       return { sent: true };
     };
-    const bundled = JSON.parse(JSON.stringify(analyticsSchema(`Site-${Math.random()}`)));
+    const bundled = JSON.parse(JSON.stringify(browserServiceSchema(`Site-${Math.random()}`)));
     const transport = await openBundledBrowserStore(bundled, undefined, callService);
     const response = await transport.send('Site', { event: 'INIT', traits: [{ trait: 'Pageview', from: 'active' }] });
     expect(response.success).toBe(true);
-    expect(calls).toEqual([{ service: 'analytics', action: 'pageview', params: { endpoint: 'https://c.example/e', path: '/docs' } }]);
+    expect(calls).toEqual([{ service: 'test-svc', action: 'run', params: { url: 'https://c.example/docs', active: true } }]);
     expect(response.emittedEvents.map((e) => e.event)).toContain('SENT');
   });
 
   it('control: without a callService a schema with no browser-stored entity is still refused', async () => {
-    const bundled = JSON.parse(JSON.stringify(analyticsSchema(`Site-${Math.random()}`)));
+    const bundled = JSON.parse(JSON.stringify(browserServiceSchema(`Site-${Math.random()}`)));
     await expect(openBundledBrowserStore(bundled)).rejects.toThrow(/no browser-stored entity/);
   });
 });

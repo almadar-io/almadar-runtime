@@ -26,7 +26,7 @@ function makeExecutor(options: { callServiceDelegated?: boolean } = {}) {
 const withEmit = (service: string) => ['call-service', service, 'run', {}, { emit: { success: 'DONE', failure: 'FAILED' } }];
 
 describe('client-role call-service to a browser-only service', () => {
-    it.each(['analytics', 'page'])('%s runs through the client callService and is not delegated to the server', async (service) => {
+    it.each(['analytics'])('%s runs through the client callService and is not delegated to the server', async (service) => {
         const { callService, collector, emit, executor } = makeExecutor();
         await executor.executeWithResults([withEmit(service)]);
         expect(callService).toHaveBeenCalledTimes(1);

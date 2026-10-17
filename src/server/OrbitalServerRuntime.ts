@@ -46,7 +46,7 @@ import type {
 } from "express";
 // Type-only: the VALUE is loaded lazily inside `withRegistrationMutation`
 // via dynamic import — same keep-it-out-of-the-browser-bundle idiom as
-// `createOsHandlers`/`@almadar/server` below.
+// `@almadar/server` below.
 import type { AsyncLocalStorage as BracketAsyncLocalStorage } from "node:async_hooks";
 
 /** One context's hold on the runtime event queue; released while it awaits a service. */
@@ -86,14 +86,6 @@ import { EffectExecutor } from "../effects/EffectExecutor.js";
 import { parseOrbitalTraits } from "../traits/OrbitalTraitParsing.js";
 import type { ServerEffectResult } from "../effects/ServerEffectHandlers.js";
 import { createLogger } from '@almadar/logger';
-// Same treatment for `createOsHandlers` (uses `fs`, `net`, `child_process`).
-// The runtime auto-wires it in the constructor's Node-only branch — guarded
-// by `isNodeEnv()` — and the eval-require keeps the import out of the
-// browser bundle entirely.
-import type {
-  createOsHandlers as CreateOsHandlersFn,
-  OsHandlerResult,
-} from "../effects/createOsHandlers.js";
 import type { createProgramHandlers as CreateProgramHandlersFn } from "../effects/createProgramHandlers.js";
 
 /**
@@ -232,16 +224,19 @@ import type {
   ClientEffectTuple,
   ExternalInput,
   ExternalInputRequest,
+  InboundAnswer,
+  InboundDelivery,
 } from "@almadar/core";
-import { externalInputsOf, readableEntitiesOf } from "@almadar/core";
+import { externalInputsOf, inboundOnlyMessage, inboundOnlyTrait, readableEntitiesOf } from "@almadar/core";
 import { dispatchDeclaredInput } from "../evaluation/declared-input-dispatch.js";
+import { dispatchInbound } from "../evaluation/inbound-dispatch.js";
 import { DispatchVisits, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, resolveDefaultViewer, DEFAULT_VIEWER, isPageReference, type NavItem, type Page, type PageRef,
 } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf } from "@almadar/core/mock";
 import { runServerEffectStage } from "../effects/effect-stage.js";
 import { InFlightCalls } from "../effects/in-flight-calls.js";
 import { defaultCallService, mockCallService } from "../effects/defaultCallService.js";
-import { createHttpPorts, KernelEngine, type HttpPorts, type HttpPortsOptions, type KernelHostPorts, type KernelModule } from "../kernel/index.js";
+import { createHttpPorts, createHttpSecrets, kernelOsCompletions, kernelOsGrants, KernelEngine, type HttpPorts, type HttpPortsOptions, type KernelHostPorts, type KernelModule, type OsGrantPort, type OsHostPort } from "../kernel/index.js";
 export type { KernelModule } from "../kernel/index.js";
 import { installPolicyOwnerGates } from "../entities/policyOwnerGates.js";
 import { MockPersistenceAdapter } from "@almadar/db/mock";
@@ -256,12 +251,6 @@ import {
   type SchemaLoader,
   createUnifiedLoader,
 } from "../entities/loader/index.js";
-// `createOsHandlers` is type-imported at the top of this file and value-
-// loaded via `nodeRequire` inside the constructor's Node-only branch.
-// Removed the value-import here so the dist bundle has no static
-// reference to `../effects/createOsHandlers.js` and its fs/net/child_process
-// imports vanish from the browser-side dependency graph.
-
 // Node-detection helper. Used to guard call sites of express, fs/path/net,
 // and child_process — those modules are stubbed by the package.json `browser`
 // field in browser bundles, so calling them would crash. Browser consumers
@@ -489,6 +478,13 @@ export interface OrbitalServerRuntimeConfig {
    * fails with `HTTP_KERNEL_UNAVAILABLE`.
    */
   http?: Omit<HttpPortsOptions, 'egress'>;
+  /**
+   * Builds the `os` host of the kernel engine from the grant port backed by the kernel (`createNodeOsHost` from
+   * `@almadar/runtime/kernelOsNode`). Absent, every `os` ask is denied, as the native host does with none.
+   */
+  osHost?: (grants: OsGrantPort) => OsHostPort;
+  /** The clock the kernel's `clock` ask is answered from, in epoch milliseconds; absent, the system clock. */
+  clock?: () => number;
 }
 
 /**
@@ -607,6 +603,8 @@ export class OrbitalServerRuntime {
   private tickBindings: TickBinding[] = [];
   /** The kernel behind `engine: 'kernel'`; null on the JS engine and before a program is registered. */
   private kernelEngine: KernelEngine | null = null;
+  /** The `os` handles of the program the kernel runs; closed when that program is replaced, reset or dropped. */
+  private kernelOs: OsHostPort | undefined;
   /** `orbital::trait` → the clients that have it mounted (Runtime Spec Clause 8.3). */
   private readonly mountedBy = new Map<string, Set<string>>();
   // One coalesced clock for every tick this runtime registers — replaces
@@ -622,8 +620,6 @@ export class OrbitalServerRuntime {
   };
   private entitySharingMap: EntitySharingMap = {};
   private eventNamespaceMap: EventNamespaceMap = {};
-  private osHandlers: OsHandlerResult | null = null;
-  private osHandlersPromise: Promise<void> | null = null;
   private programHandlersPromise: Promise<void> | null = null;
   private resolvedSchema: OrbitalSchema | null = null;
 
@@ -723,46 +719,6 @@ export class OrbitalServerRuntime {
       this.persistence = config.persistence || new InMemoryPersistence();
     }
 
-    // OS handlers (fs/net/child_process effects) are wired lazily on the first
-    // event via ensureOsHandlers(). They live in the ESM-only
-    // `../effects/createOsHandlers.js`; the package is `type: module`, so a synchronous
-    // require() of it throws ERR_REQUIRE_ESM in a Node consumer. A dynamic
-    // import() loads it cleanly AND keeps it out of the browser graph
-    // (isNodeEnv-guarded, lazy chunk) — same goal as the old eval-require, but
-    // without the CJS hazard. Default to empty handlers until then.
-    this.osHandlers = { handlers: {}, cleanup: () => {} };
-  }
-
-  /**
-   * Lazily wire the OS-level effect handlers (fs/net/child_process), merging
-   * them UNDER any user-provided handlers. Deferred out of the constructor
-   * because `../effects/createOsHandlers.js` is ESM and `require()`-ing it from a
-   * `type: module` package throws ERR_REQUIRE_ESM — so it is dynamic-import()ed
-   * here on the first event. Node-only, idempotent (single shared load), and a
-   * no-op in the browser (the import never runs behind the isNodeEnv guard).
-   */
-  private async ensureOsHandlers(): Promise<void> {
-    if (!isNodeEnv()) return;
-    if (!this.osHandlersPromise) {
-      this.osHandlersPromise = (async () => {
-        // Literal `.js` specifier: a template literal makes tsup emit a
-        // __glob helper keyed by the source `.ts`, which then misses at dist
-        // runtime (ext resolves to `.js`) and throws "Module not found in
-        // bundle". A literal `import()` resolves the real dist `.js` in Node
-        // and Vite/vitest maps `.js`→`.ts` source automatically.
-        const { createOsHandlers } = (await import('../effects/createOsHandlers.js')) as {
-          createOsHandlers: typeof CreateOsHandlersFn;
-        };
-        this.osHandlers = createOsHandlers({
-          emitEvent: (type, payload) => this.dispatchExternalEvent(type, payload),
-        });
-        this.config.effectHandlers = {
-          ...this.osHandlers.handlers,
-          ...this.config.effectHandlers,
-        };
-      })();
-    }
-    return this.osHandlersPromise;
   }
 
   /**
@@ -1441,21 +1397,24 @@ export class OrbitalServerRuntime {
    * Register a single orbital (sync wrapper for backward compatibility)
    */
   /** The adapters the kernel's I/O is answered with: this runtime's persistence, services and program host. */
-  private httpPorts(): HttpPorts | undefined {
+  private httpPorts(egress: readonly string[] = this.resolvedSchema?.egress ?? []): HttpPorts | undefined {
     const options = this.config.http;
-    return options === undefined ? undefined : createHttpPorts({ ...options, egress: this.resolvedSchema?.egress ?? [] });
+    return options === undefined ? undefined : createHttpPorts({ ...options, egress });
   }
 
-  private kernelPorts(): KernelHostPorts {
-    const http = this.httpPorts();
+  private kernelPorts(egress: readonly string[]): KernelHostPorts {
+    const http = this.httpPorts(egress);
     return {
       ...(http !== undefined ? { http } : {}),
+      ...(this.config.clock !== undefined ? { now: this.config.clock } : {}),
+      ...(this.kernelOs !== undefined ? { os: this.kernelOs } : {}),
+      ...(this.kernelOs !== undefined && this.config.kernel !== undefined ? { osCompletions: kernelOsCompletions(this.config.kernel) } : {}),
       persistence: this.persistence,
       inFlightCalls: this.inFlightCalls,
       callService: (service, action, params, context) => {
         const provider = this.config.effectHandlers?.callService;
         if (provider !== undefined) return provider(service, action, params, context);
-        if (this.config.mode === 'mock') return mockCallService(service, action, params);
+        if (this.config.mode === 'mock') return mockCallService(service, action);
         return defaultCallService(service, action, params, context);
       },
       programEffect: () => this.config.effectHandlers?.programEffect,
@@ -1502,9 +1461,16 @@ export class OrbitalServerRuntime {
       }
     }
     this.kernelEngine?.dispose();
-    this.kernelEngine = KernelEngine.open(kernel, schema, this.kernelPorts());
+    this.kernelOs?.close();
+    this.kernelOs = this.config.osHost?.(kernelOsGrants(kernel, () => this.requireKernelEngine()));
+    this.kernelEngine = KernelEngine.open(kernel, schema, this.kernelPorts(registered.egress ?? []));
     this.kernelEngine.setMessages(this.appLocales, this.messages);
     this.syncTickMount();
+  }
+
+  private requireKernelEngine(): KernelEngine {
+    if (this.kernelEngine === null) throw new Error('OrbitalServerRuntime: an os ask arrived with no kernel program registered');
+    return this.kernelEngine;
   }
 
   private registerOrbital(orbital: OrbitalDefinition): void {
@@ -1792,6 +1758,8 @@ export class OrbitalServerRuntime {
     this.orbitals.clear();
     this.kernelEngine?.dispose();
     this.kernelEngine = null;
+    this.kernelOs?.close();
+    this.kernelOs = undefined;
     this.eventBus.clear();
     this.messages = {};
     this.appLocales = [];
@@ -1804,12 +1772,6 @@ export class OrbitalServerRuntime {
     // partial walk-step payloads stay visible forever.
     if (this.persistence instanceof MockPersistenceAdapter) {
       this.persistence.clearAll();
-    }
-
-    // Clean up OS handlers (close file watchers, intervals, signal listeners)
-    if (this.osHandlers) {
-      this.osHandlers.cleanup();
-      this.osHandlers = null;
     }
 
     this.programHandlersPromise = null;
@@ -1965,6 +1927,7 @@ export class OrbitalServerRuntime {
    */
   resetCircuitState(): void {
     this.kernelEngine?.reset();
+    this.kernelOs?.close();
     for (const registered of this.orbitals.values()) {
       registered.manager.resetAll();
       registered.traitFieldStates.clear();
@@ -2315,6 +2278,31 @@ export class OrbitalServerRuntime {
     return dispatchDeclaredInput(this.resolvedSchema, orbitalName, request, (orbital, req) => this.processOrbitalEvent(orbital, req, onPush));
   }
 
+  /**
+   * An inbound delivery (`/api/hooks/<name>`): the runtime decides whether the name is served, runs
+   * the handler through `processOrbitalEvent` and answers; the host only carries the bytes.
+   */
+  /**
+   * An event that is an inbound hook's is delivered only by `deliverInbound`: the app's own event
+   * route refuses it, as the input channel refuses an event that is no declared input.
+   */
+  refuseInboundOnly(orbitalName: string, request: Pick<OrbitalEventRequest, 'event' | 'targetTrait'>): OrbitalEventResponse | undefined {
+    const trait = this.resolvedSchema ? inboundOnlyTrait(this.resolvedSchema, orbitalName, request.targetTrait, request.event) : undefined;
+    if (trait === undefined) return undefined;
+    return {
+      success: false,
+      transitioned: false,
+      states: {},
+      emittedEvents: [],
+      error: inboundOnlyMessage(trait, request.event),
+      rejections: [{ code: 'inbound-only-event', trait, event: request.event }],
+    };
+  }
+
+  async deliverInbound(name: string, delivery: InboundDelivery, onPush?: (item: PushItem) => void): Promise<InboundAnswer> {
+    return dispatchInbound(this.resolvedSchema, name, delivery, (orbital, req) => this.processOrbitalEvent(orbital, req, onPush), (credential) => (this.httpPorts()?.secrets ?? createHttpSecrets()).get(credential, undefined));
+  }
+
   async processOrbitalEvent(
     orbitalName: string,
     request: OrbitalEventRequest,
@@ -2327,8 +2315,7 @@ export class OrbitalServerRuntime {
     // and reuse the same failure shape already returned above for
     // "orbital not found" / payload-validation failures.
     try {
-    // Wire OS-level + substrate effect handlers before any effect runs.
-    await this.ensureOsHandlers();
+    // Wire substrate effect handlers before any effect runs.
     await this.ensureProgramHandlers();
 
     const registered = await this.resolveRegisteredOrbital(orbitalName);
@@ -3547,6 +3534,11 @@ export class OrbitalServerRuntime {
     router.post(
       "/:orbital/events",
       async (req: Request, res: Response, next: NextFunction) => {
+        const refusal = this.refuseInboundOnly(req.params.orbital as string, req.body as OrbitalEventRequest);
+        if (refusal !== undefined) {
+          res.status(403).json(refusal);
+          return;
+        }
         const wantsStream =
           req.query['stream'] === 'true' ||
           (req.headers['accept'] ?? '').includes('text/event-stream');

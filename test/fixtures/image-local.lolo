@@ -1,0 +1,23 @@
+app image-local [
+  version: "1.0.0",
+  description: "Probe for std-image.",
+  egress: ["https://openrouter.ai", "https://api.openai.com", "http://127.0.0.1:8180"]
+]
+orbital ProbeOrbital {
+  uses Img from "std/behaviors/std-image"
+
+  entity ProbeRun [runtime] {
+    id : string!
+  }
+
+  trait ProbeImage = Img.traits.ImageClient -> ProbeRun {
+    config {
+      provider: local
+      origin: "http://127.0.0.1:8180"
+      basePath: "/v1"
+      model: "flux-schnell"
+    }
+  }
+
+  page "/probe" as ProbePage -> ProbeImage
+}

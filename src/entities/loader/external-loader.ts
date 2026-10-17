@@ -13,7 +13,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Orbital, OrbitalSchema, DeclaredTraitConfig, JsonValue } from "@almadar/core";
 import { OrbitalSchemaSchema } from "@almadar/core";
-import { behaviorRegistryDir, readBehaviorPackage } from "@almadar/core/behavior-package";
+import { BehaviorPackageError, behaviorRegistryDir, readBehaviorPackage } from "@almadar/core/behavior-package";
 
 // ============================================================================
 // Types
@@ -432,8 +432,9 @@ export class ExternalOrbitalLoader {
       const name = importPath
         .slice(importPath.lastIndexOf("/") + 1)
         .replace(/\.orb$/, "");
-      const result = this.resolveBehaviorInRegistries(name);
-      if (result.success) {
+      const prefix = importPath.slice(0, importPath.indexOf("/"));
+      const result = this.resolveBehaviorInRegistries(name, prefix);
+      if (result.success || this.isConfiguredPrefix(prefix)) {
         return result;
       }
     }
@@ -450,13 +451,10 @@ export class ExternalOrbitalLoader {
    * (`behaviorRegistryDir`), resolved once per cache lifetime: clearing the
    * cache re-reads the sources, so an edit is seen by the next resolution.
    */
-  private resolveBehaviorInRegistries(name: string): LoadResult<string> {
-    const roots: string[] = [];
-    if (this.options.stdLibPath) roots.push(path.normalize(this.options.stdLibPath));
-    for (const p of this.options.behaviorsLibPaths) {
-      const norm = path.normalize(p);
-      if (!roots.includes(norm)) roots.push(norm);
-    }
+  private resolveBehaviorInRegistries(name: string, prefix?: string): LoadResult<string> {
+    const roots = this.configuredRoots().filter(
+      (root) => prefix === undefined || packagePrefix(root) === prefix,
+    );
     const target = `${name}.orb`;
     for (const root of roots) {
       let registryRoot = this.registryRoots.get(root);
@@ -475,6 +473,21 @@ export class ExternalOrbitalLoader {
       success: false,
       error: `Behavior not found in registries: ${name} (searched ${roots.length} root(s): ${roots.join(", ")})`,
     };
+  }
+
+  private configuredRoots(): string[] {
+    const roots: string[] = [];
+    if (this.options.stdLibPath) roots.push(path.normalize(this.options.stdLibPath));
+    for (const p of this.options.behaviorsLibPaths) {
+      const norm = path.normalize(p);
+      if (!roots.includes(norm)) roots.push(norm);
+    }
+    return roots;
+  }
+
+  /** Whether a bare import's first segment is the `orb.prefix` of a configured behavior package. */
+  private isConfiguredPrefix(prefix: string): boolean {
+    return this.configuredRoots().some((root) => packagePrefix(root) === prefix);
   }
 
   /** Depth-first recursive search for `target` filename under `dir`, guarded
@@ -719,9 +732,24 @@ export function parseImportPath(importPath: string): { path: string; fragment?: 
  *   <pkg>/node_modules/@almadar-io/behaviors
  *
  * We walk up from `stdLibPath` looking for either layout and return every
- * `behaviors/registry/` directory we find. Callers can override by passing
+ * behavior package root we find. Callers can override by passing
  * `behaviorsLibPaths` explicitly.
  */
+function packagePrefix(root: string): string | undefined {
+  return isBehaviorPackageRoot(root) ? readBehaviorPackage(root).orb.prefix : undefined;
+}
+
+function isBehaviorPackageRoot(dir: string): boolean {
+  if (!fs.existsSync(path.join(dir, "package.json"))) return false;
+  try {
+    readBehaviorPackage(dir);
+    return true;
+  } catch (e) {
+    if (e instanceof BehaviorPackageError) return false;
+    throw e;
+  }
+}
+
 function autoDetectBehaviorsLibPaths(stdLibPath: string | undefined): string[] {
   if (!stdLibPath) return [];
   const found: string[] = [];
@@ -735,7 +763,7 @@ function autoDetectBehaviorsLibPaths(stdLibPath: string | undefined): string[] {
       if (path.basename(parent) === "@almadar" && path.basename(path.dirname(parent)) === "node_modules") {
         const nm = path.dirname(parent);
         const ioPath = path.join(nm, "@almadar-io", "behaviors");
-        if (fs.existsSync(path.join(ioPath, "behaviors", "registry"))) found.push(ioPath);
+        if (isBehaviorPackageRoot(ioPath)) found.push(ioPath);
       }
       // pnpm layout: <…>/.pnpm/@almadar+std@x.y.z/node_modules/@almadar/std
       if (path.basename(parent) === ".pnpm") {
@@ -744,7 +772,7 @@ function autoDetectBehaviorsLibPaths(stdLibPath: string | undefined): string[] {
           for (const entry of fs.readdirSync(pnpmRoot)) {
             if (!entry.startsWith("@almadar-io+behaviors@")) continue;
             const ioPath = path.join(pnpmRoot, entry, "node_modules", "@almadar-io", "behaviors");
-            if (fs.existsSync(path.join(ioPath, "behaviors", "registry"))) found.push(ioPath);
+            if (isBehaviorPackageRoot(ioPath)) found.push(ioPath);
           }
         } catch {
           // unreadable .pnpm dir — skip
@@ -758,7 +786,7 @@ function autoDetectBehaviorsLibPaths(stdLibPath: string | undefined): string[] {
       // atom comes back "not found in registry" for locally-linked runs.
       if (path.basename(dir).endsWith("almadar-std")) {
         const sibling = path.join(parent, path.basename(dir).replace(/almadar-std$/, "almadar-behaviors"));
-        if (fs.existsSync(path.join(sibling, "behaviors", "registry"))) {
+        if (isBehaviorPackageRoot(sibling)) {
           found.push(sibling);
           break;
         }

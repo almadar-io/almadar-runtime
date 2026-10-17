@@ -26,7 +26,6 @@ import type {
     SessionContext,
     MemoryContext,
     TraceContext,
-    IntegrationContext,
     JsonValue,
     OrbitalSchema,
     EventId,
@@ -94,7 +93,7 @@ export interface RuntimeRenderPattern {
  * so `config.fields = ["name", "description"]` and similar authoring shapes
  * flow through the binding context without type widening.
  */
-import type { TraitConfig } from '@almadar/core';
+import type { BrowserPageFacts, PageFactField, TraitConfig } from '@almadar/core';
 import type { RunsOn } from '@almadar/std';
 import { getOperatorRunsOn, getStdEffectOperators } from '@almadar/std/registry';
 export type ConfigContext = TraitConfig;
@@ -220,7 +219,7 @@ export interface TraitDefinition {
 export interface ServiceCallContext {
     principal?: string;
     role?: string;
-    /** The running app, lent for this call as the caller (`llm call-tools`). */
+    /** The running app, lent for this call as the caller (`page watch`). */
     host?: ServiceHostPorts;
     /** Aborted when `cancel-call` cancels this call; a provider stops its work on it. */
     signal?: AbortSignal;
@@ -236,6 +235,14 @@ export interface ServiceCallContext {
 export interface ServiceMessageRoute {
     event: string;
     source?: BusEventSource;
+}
+
+/** What one `http` effect came to: the `<METHOD> <origin><path>` it addressed and, on failure, the declared `emit.failure` event the program routed it to. */
+export interface HttpEffectReport {
+    success: boolean;
+    target: string;
+    error?: string;
+    routed?: string;
 }
 
 export interface EffectHandlers {
@@ -325,6 +332,9 @@ export interface EffectHandlers {
      * the instant a real async persistence backend (Firestore) was wired in.
      */
     set: (entityId: string, field: string, value: FieldValue) => void | Promise<void>;
+
+    /** Report the outcome of an `http` effect to the host's effect trace. */
+    httpResult?: (report: HttpEffectReport) => void;
 
     /** Call an external service. `context` carries the caller's identity
      * (the same viewer entity ACL enforces against) so role-gated services
@@ -483,33 +493,6 @@ export interface EffectHandlers {
     /** Left-to-right behavior pipeline. Compile-time only. */
     pipeBehaviors?: <T>(seed: T, ...steps: Array<PipeStep<T, T>>) => T;
 
-    // OS trigger handlers (server-side only)
-    //
-    // Each handler may accept an optional `emit` config — when present, the
-    // handler fires `emit.on_message` in place of the hardcoded event name
-    // (e.g. `OS_FILE_MODIFIED`). Hardcoded fallback is preserved so existing
-    // schemas without `emit:` keep working.
-    /** Watch file system for changes matching glob pattern */
-    osWatchFiles?: (
-        glob: string,
-        options: { recursive?: boolean; debounce?: number },
-        emit?: OsEmitConfig,
-    ) => void;
-    /** Monitor a process by name */
-    osWatchProcess?: (name: string, subcommand?: string, emit?: OsEmitConfig) => void;
-    /** Monitor a port for open/close */
-    osWatchPort?: (port: number, protocol: string, emit?: OsEmitConfig) => void;
-    /** Intercept HTTP responses matching pattern */
-    osWatchHttp?: (urlPattern: string, method?: string, emit?: OsEmitConfig) => void;
-    /** Register a cron schedule */
-    osWatchCron?: (expression: string, emit?: OsEmitConfig) => void;
-    /** Register an OS signal handler */
-    osWatchSignal?: (signal: string, emit?: OsEmitConfig) => void;
-    /** Watch an environment variable for changes */
-    osWatchEnv?: (variable: string, emit?: OsEmitConfig) => void;
-    /** Configure debounce for an OS event type */
-    osDebounce?: (ms: number, eventType: string) => void;
-
     // === Browser device handlers (client-side only) ===
     //
     // User-initiated, async device APIs. The executor wraps each in
@@ -525,6 +508,18 @@ export interface EffectHandlers {
     browserClipboardWrite?: (text: string) => Promise<{ text: string }>;
     /** browser/geolocation-current — resolves with the position inside `result` */
     browserGeolocationCurrent?: (options?: BrowserGeolocationOptions) => Promise<BrowserGeolocationPosition>;
+    /**
+     * browser/page-facts — reads the requested facts in the order given and resolves with the flat facts
+     * (`PAGE_FACTS_SHAPE`). No page resolves `available: false`; a getter that throws rejects, which is not no-page.
+     */
+    browserPageFacts?: (fields: readonly PageFactField[]) => Promise<BrowserPageFacts>;
+    /**
+     * browser/prompt — the on-device model's raw reply text for `text` under the JSON Schema text; rejects with an
+     * `OnDeviceModelFailure` (`unconfigured`, `unavailable` or `failed`), and stops on an aborted `signal`.
+     */
+    browserPrompt?: (text: string, schemaText: string, key: string | null, signal?: AbortSignal) => Promise<string>;
+    /** browser/embed — one vector per text, in input order; rejects as `browserPrompt` does. */
+    browserEmbed?: (texts: readonly string[], key: string | null, signal?: AbortSignal) => Promise<number[][]>;
     /** browser/push-subscribe — resolves with the flat Web Push subscription credentials inside `result` */
     browserPushSubscribe?: () => Promise<{ endpoint: string; p256dh: string; auth: string }>;
 
@@ -535,6 +530,12 @@ export interface EffectHandlers {
     // handler makes the effect fail explicitly.
     // The caller is the dispatch's viewer (`principal`/`role`), bound per stage like `callService`'s.
     programEffect?: (op: ProgramEffectName, args: readonly JsonValue[], context?: Pick<ServiceCallContext, 'principal' | 'role'>) => Promise<ProgramEffectOutcome>;
+
+    // === Agent ports (server-side only) ===
+    // `program/inputs`, `program/dispatch` and `persist/read-named` run over the host ports lent to this
+    // dispatch: the running app as the dispatch's viewer (declared inputs, the input channel, the rows the
+    // viewer may read). Bound per stage, like `callService`'s. An absent handler fails the effect explicitly.
+    agentPorts?: () => ServiceHostPorts | undefined;
 }
 
 /**
@@ -565,13 +566,6 @@ export type PersistBatchSummary = {
     totalCount: number;
 };
 
-
-/**
- * Author-configured `emit:` block threaded into `os/watch-*` handlers.
- * Narrower than @almadar/core's `EmitConfig` — only the keys streaming
- * operators meaningfully fire.
- */
-export type OsEmitConfig = Pick<import('@almadar/core').EmitConfig, 'on_message' | 'failure'>;
 
 // ============================================================================
 // Browser Device Handler Types (client host path)
@@ -818,7 +812,6 @@ export interface EvaluationContextExtensions {
     session?: SessionContext;
     memory?: MemoryContext;
     trace?: TraceContext;
-    integration?: IntegrationContext;
 }
 
 // ============================================================================

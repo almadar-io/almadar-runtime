@@ -1,11 +1,13 @@
 // createProgramHandlers against the real `orb`: program/read then program/eval through the executor.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeValue, EntityRow } from '@almadar/core';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 import { EffectExecutor } from '../src/index.js';
 import { createProgramHandlers } from '../src/effects/createProgramHandlers.js';
+import { installedWorkspaceHost, uninstallWorkspaceHost } from '@almadar/integrations/program';
+import { KERNEL_DIR } from './helpers/kernel-module.js';
 
 const ORB = process.env['ORBITAL_BIN'] ?? join(process.env['HOME'] ?? '', 'bin', 'orb');
 const TMP_ROOT = join(import.meta.dirname, '.tmp-program-handlers');
@@ -92,5 +94,39 @@ describe.skipIf(!hasOrb)('program handlers (real orb) through the executor', () 
         const [failure] = payloads('FAILED');
         expect(failure).toMatchObject({ errors: [{ code: 'PROGRAM_NAME_INVALID' }] });
         expect(existsSync(join(cwd, 'orbitals'))).toBe(false);
+    });
+});
+
+describe.skipIf(!hasOrb || KERNEL_DIR === undefined)('program/eval into a workspace runs std-workspace on the kernel', () => {
+    afterEach(() => uninstallWorkspaceHost());
+
+    async function evaluated(cwd: string, principal: string | undefined) {
+        const handlers = createProgramHandlers({ cwd, orbBin: ORB });
+        const read = await handlers.programEffect?.('program/read', [VALID], undefined);
+        if (read === undefined || !read.ok) throw new Error('program/read failed');
+        const program = { ...(read.result as Record<string, RuntimeValue>), name: 'HelloApp' };
+        return { handlers, out: await handlers.programEffect?.('program/eval', [program, { workspace: 'app-1' }], principal === undefined ? undefined : { principal }) };
+    }
+
+    it('writes the validated program into the caller\'s workspace repository and snapshots it', async () => {
+        mkdirSync(TMP_ROOT, { recursive: true });
+        const cwd = mkdtempSync(join(TMP_ROOT, 'p-'));
+        const { handlers, out } = await evaluated(cwd, 'user-a');
+        expect(out).toMatchObject({ ok: true, result: { behavior: './workspaces/user-a/app-1/orbitals/HelloApp' } });
+        expect(existsSync(join(cwd, 'workspaces/user-a/app-1/orbitals/HelloApp.orb'))).toBe(true);
+        expect(existsSync(join(cwd, 'workspaces/user-a/app-1/.git'))).toBe(true);
+        const history = await (await installedWorkspaceHost()!.open('app-1', { principal: 'user-a' })).listSnapshots();
+        expect(history.map((h) => h.reason)).toContain('program/eval HelloApp');
+        const value = { behavior: './workspaces/user-a/app-1/orbitals/HelloApp' };
+        expect(await handlers.programEffect?.('behavior/source', [value], { principal: 'user-b' })).toMatchObject({ ok: false, error: expect.stringMatching(/another user's workspace/) });
+        expect(await handlers.programEffect?.('behavior/source', [value], { principal: 'user-a' })).toMatchObject({ ok: true });
+    });
+
+    it('control: a workspace eval without a signed-in caller fails and writes nothing', async () => {
+        mkdirSync(TMP_ROOT, { recursive: true });
+        const cwd = mkdtempSync(join(TMP_ROOT, 'p-'));
+        const { out } = await evaluated(cwd, undefined);
+        expect(out).toMatchObject({ ok: false, error: expect.stringMatching(/signed-in/) });
+        expect(existsSync(join(cwd, 'workspaces/app-1'))).toBe(false);
     });
 });

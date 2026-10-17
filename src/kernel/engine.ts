@@ -57,6 +57,11 @@ export class KernelEngine {
     this.handle.free();
   }
 
+  /** `OsGrants::allows` over the grants of the program this kernel runs. */
+  osAllows(requirementJson: string): boolean {
+    return this.handle.osAllows(requirementJson);
+  }
+
   /** The current state of a trait instance, `''` when it has none. */
   stateOf(traitName: string, entityId?: string): string {
     return this.handle.getState(traitName, entityId);

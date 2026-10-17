@@ -93,8 +93,7 @@ export class TickScheduler {
 
   /**
    * Register a cron-scheduled tick (`ticks { ... every "0 9 * * *" }`).
-   * Fires at most once per matching calendar minute — the same dedup shape
-   * `os/watch-cron` uses. Throws if `expression` isn't a valid 5-field cron
+   * Fires at most once per matching calendar minute. Throws if `expression` isn't a valid 5-field cron
    * string; callers on a path the compiler has already validated (e.g.
    * generated code) won't hit this, but a raw runtime value might.
    */

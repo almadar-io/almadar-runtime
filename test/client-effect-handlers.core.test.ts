@@ -5,6 +5,11 @@ import { mockServiceAnswer } from '@almadar/core/mock';
 import type { BusEventSource } from '@almadar/core';
 import { mockCallService } from '../src/effects/defaultCallService.js';
 
+vi.mock('@almadar/core/mock', async (importOriginal) => {
+    const { withTestService } = await import('./helpers/test-service-mock.js');
+    return withTestService(await importOriginal<typeof import('@almadar/core/mock')>());
+});
+
 // Coverage for the two behaviors folded in from @almadar/ui's copy that had
 // no prior test anywhere (docs/Almadar_Runtime_Stateless_Stateful_PLAN.md §4.2):
 // emit forwarding `source`, and the `liveEntity`-backed `set`.
@@ -60,20 +65,20 @@ describe('createClientEffectHandlers — callService mock fallback', () => {
     });
 
     it('answers with the registry-shaped mock the server path gives (one mock source)', async () => {
-        const params = { amount: 100, currency: 'usd' };
-        const expected = mockServiceAnswer('stripe', 'createPaymentIntent', params);
-        if (!expected.ok) throw new Error('control: stripe.createPaymentIntent is in the registry');
-        expect(await make().callService('stripe', 'createPaymentIntent', params)).toEqual(expected.value);
-        expect(await mockCallService('stripe', 'createPaymentIntent', params)).toEqual(expected.value);
+        const params = { url: 'https://hooks.example.com/in', event: 'ORDER_PLACED' };
+        const expected = mockServiceAnswer('test-svc', 'run');
+        if (!expected.ok) throw new Error('control: test-svc.run is in the test registry');
+        expect(await make().callService('test-svc', 'run', params)).toEqual(expected.value);
+        expect(await mockCallService('test-svc', 'run')).toEqual(expected.value);
     });
 
     it('refuses a service the registry does not declare, as the server mock does', async () => {
         await expect(make().callService('payments', 'charge', { amount: 100 })).rejects.toThrow('Unknown service: payments');
-        await expect(mockCallService('payments', 'charge', { amount: 100 })).rejects.toThrow('Unknown service: payments');
+        await expect(mockCallService('payments', 'charge')).rejects.toThrow('Unknown service: payments');
     });
 
     it('refuses an action the service does not declare', async () => {
-        await expect(make().callService('stripe', 'charge', {})).rejects.toThrow('No mock response for action: charge');
+        await expect(make().callService('test-svc', 'charge', {})).rejects.toThrow('No mock response for action: charge');
     });
 
     it('runs the consumer-supplied handler instead of the mock when provided', async () => {

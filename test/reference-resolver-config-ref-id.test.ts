@@ -101,7 +101,7 @@ describe('ReferenceResolver — id-primary config-reference resolution', () => {
     const resolver = new ReferenceResolver({ basePath: '.', skipExternalLoading: true });
     // The default-form trait was renamed DefaultForm -> DefaultFormV2; the
     // knob default was authored in binding form and must STAY a binding —
-    // the render channel keys on the @trait. prefix (std-service-email
+    // the render channel keys on the @trait. prefix (service-wrapper
     // blank-boot class).
     const referenced: Trait = {
       id: 'trait_df' as TraitId,

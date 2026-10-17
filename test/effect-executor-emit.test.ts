@@ -401,7 +401,7 @@ describe('emit: — call-service', () => {
             throw new Error('Rigger /render returned 502: part has no pixels');
         });
         const results = await executor.executeWithResults([
-            ['call-service', 'rigger', 'render', { preset: 'walk' }, { emit: { success: 'RENDER_DONE', failure: 'RENDER_FAILED' } }],
+            ['call-service', 'test-svc', 'run', { preset: 'walk' }, { emit: { success: 'RENDER_DONE', failure: 'RENDER_FAILED' } }],
             ['set', '@entity.after', true],
         ]);
         const failureCalls = emit.mock.calls.filter(([e]) => e === 'RENDER_FAILED');
@@ -417,7 +417,7 @@ describe('emit: — call-service', () => {
             throw { code: 'VALIDATION_ERROR', message: 'preset: expected string' };
         });
         await executor.executeWithResults([
-            ['call-service', 'rigger', 'pose', { preset: null }, { emit: { success: 'POSE_DONE', failure: 'POSE_FAILED' } }],
+            ['call-service', 'test-svc', 'run', { preset: null }, { emit: { success: 'POSE_DONE', failure: 'POSE_FAILED' } }],
         ]);
         const failureCalls = emit.mock.calls.filter(([e]) => e === 'POSE_FAILED');
         expect(failureCalls).toHaveLength(1);
@@ -430,7 +430,7 @@ describe('emit: — call-service', () => {
             throw new Error('boom');
         });
         await expect(executor.execute([
-            'call-service', 'rigger', 'render', {}, { emit: { success: 'RENDER_DONE' } },
+            'call-service', 'test-svc', 'run', {}, { emit: { success: 'RENDER_DONE' } },
         ])).rejects.toThrow('boom');
     });
 });
