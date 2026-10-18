@@ -4,15 +4,11 @@
  * host (`useBrowserStore`) and compiled static clients both open it here.
  */
 import type { BrowserTabPort, MessageCatalogs, OnDeviceModelPorts, OrbitalDefinition, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, RuntimeValue } from '@almadar/core';
-import type { PersistenceAdapter } from '@almadar/core';
-import { applyRowAccess, externalInputsOf, inlineTraitRefs, orbitalInlineEntities, parseOrbitalSchema, readableEntitiesOf, storesRowsInBrowser } from '@almadar/core';
+import { applyRowAccess, externalInputsOf, orbitalInlineEntities, parseOrbitalSchema, readableEntitiesOf, storesRowsInBrowser } from '@almadar/core';
 import { entityAccessPolicies } from '@almadar/core/mock';
 import type { ServerEffectStageDeps } from '../effects/effect-stage.js';
 import type { HttpPorts } from '../kernel/http-exchange.js';
-import { KernelEngine } from '../kernel/engine.js';
-import type { KernelHostPorts } from '../kernel/host.js';
 import type { KernelModule } from '../kernel/wire.js';
-import { InFlightCalls } from '../effects/in-flight-calls.js';
 import { dispatchDeclaredInput } from './declared-input-dispatch.js';
 import { IndexedDbPersistence } from '@almadar/db/browser';
 import { InMemoryPersistence } from '@almadar/db/mock';
@@ -21,9 +17,7 @@ import type { DeferredCallOutcome } from '../kernel/host.js';
 import { seedBrowserStore } from '../entities/seedBrowserStore.js';
 import type { EventTransport } from '../server/EventTransport.js';
 import { buildTraitIndex } from '../traits/trait-index.js';
-import { routeByEntity } from './routed-persistence.js';
-import { createMemoryCircuitStore } from './circuit-store.js';
-import { createLocalStoreTransport } from './local-store-transport.js';
+import { createLocalStoreTransport, localStorePersistence, openLocalKernel } from './local-store-transport.js';
 import { tickEventKey } from '../traits/StateMachineCore.js';
 import { createTickScheduler, type TickHandle } from '../time/TickScheduler.js';
 import { createLogger } from '@almadar/logger';
@@ -56,9 +50,9 @@ export async function openBrowserStore(
 export interface BrowserStoreTransportOptions {
   databaseName: string;
   schema: OrbitalSchema;
+  /** The initialised `@almadar/kernel` module the store's legs run on. */
+  kernel: KernelModule;
   factory?: IDBFactory;
-  /** The requesting client relays every emit itself (a compiled client). */
-  clientRelays?: boolean;
   /** The viewer's locale: picks the entity's rows for it when the store is first seeded. */
   locale?: string;
   /** Answers the program's calls to browser-only services (the client's web-hosted integrations). */
@@ -75,32 +69,29 @@ export async function openBrowserStoreTransport(options: BrowserStoreTransportOp
     throw new Error(`openBrowserStoreTransport: schema "${options.schema.name}" declares no browser-stored entity`);
   }
   // Legs that only call browser-only services keep no rows of their own.
-  const persistence = stored ?? new InMemoryPersistence();
-  const traitIndex = buildTraitIndex(options.schema.orbitals);
-  const store = createMemoryCircuitStore(Array.from(traitIndex.byName.values(), (e) => e.traitDef));
+  const persistence = localStorePersistence(options.schema, stored ?? new InMemoryPersistence());
   return createLocalStoreTransport({
-    traitIndex,
-    persistence,
-    store,
-    schema: options.schema,
-    ...(options.clientRelays !== undefined ? { clientRelays: options.clientRelays } : {}),
-    ...(options.callService !== undefined ? { callService: options.callService } : {}),
-    ...(options.http !== undefined ? { http: options.http } : {}),
-    ...(options.messages !== undefined ? { messages: options.messages } : {}),
+    kernelEngine: openLocalKernel({
+      kernel: options.kernel,
+      schema: options.schema,
+      persistence,
+      ...(options.callService !== undefined ? { callService: options.callService } : {}),
+      ...(options.http !== undefined ? { http: options.http } : {}),
+      ...(options.messages !== undefined ? { messages: options.messages } : {}),
+    }),
   });
 }
 
 /**
- * A compiled client's bundled `browserSchema.json`, parsed by this runtime's own
- * core (the client's core may predate the browser-storage fields). A compiled
- * client relays every emit itself, as it does a compiled server's reply.
+ * A compiled client's bundled `browserSchema.json`, parsed by this runtime's own core (the client's core may predate
+ * the browser-storage fields), served on the kernel like any local host.
  */
-export function openBundledBrowserStore(bundled: RuntimeValue, locale?: string, callService?: EffectHandlers['callService'], messages?: MessageCatalogs, http?: HttpPorts): Promise<EventTransport> {
+export function openBundledBrowserStore(bundled: RuntimeValue, kernel: KernelModule, locale?: string, callService?: EffectHandlers['callService'], messages?: MessageCatalogs, http?: HttpPorts): Promise<EventTransport> {
   const schema = parseOrbitalSchema(bundled);
   return openBrowserStoreTransport({
     databaseName: browserStoreName(schema.name, locale),
     schema,
-    clientRelays: true,
+    kernel,
     ...(locale !== undefined ? { locale } : {}),
     ...(callService !== undefined ? { callService } : {}),
     ...(http !== undefined ? { http } : {}),
@@ -117,11 +108,9 @@ export interface BrowserHostOptions {
   http?: HttpPorts;
   /** The on-device model and embedder `browser/prompt` and `browser/embed` ask (the host plugs its Prompt API and embedder in here). */
   onDevice?: OnDeviceModelPorts;
-  /** Which engine decides execution; `'kernel'` (needs `kernel`) runs the wasm kernel and answers its I/O, `'js'` (the default) is the interpreter. */
-  engine?: 'js' | 'kernel';
-  /** The initialised `@almadar/kernel` module; required when `engine` is `'kernel'`. */
-  kernel?: KernelModule;
-  /** The browser's tabs for the `browser/tab-*` effects (kernel engine only); absent, a tab ask fails `unavailable`. */
+  /** The initialised `@almadar/kernel` module the program runs on; this host answers its I/O. */
+  kernel: KernelModule;
+  /** The browser's tabs for the `browser/tab-*` effects; absent, a tab ask fails `unavailable`. */
   tabs?: BrowserTabPort;
   factory?: IDBFactory;
   locale?: string;
@@ -135,30 +124,6 @@ export interface BrowserHost extends EventTransport {
   onInputDispatched(listener: InputDispatchListener): () => void;
   /** Stop the program's ticks. */
   close(): void;
-}
-
-/**
- * What the kernel's I/O is answered with in a browser host: its rows, its `call-service` provider, its tabs, `http` and
- * on-device model. The host has no bus to a requesting tab, so a running call's live messages have no delivery path here.
- */
-function kernelPorts(
-  options: BrowserHostOptions,
-  persistence: PersistenceAdapter,
-  servicePorts: NonNullable<ServerEffectStageDeps['servicePorts']>,
-  deferred: () => ((call: DeferredCallOutcome) => void) | undefined,
-): KernelHostPorts {
-  return {
-    persistence,
-    callService: (service, action, params, context) => options.callService(service, action, params, context),
-    programEffect: () => undefined,
-    inFlightCalls: new InFlightCalls(),
-    servicePorts,
-    deliverLive: () => undefined,
-    deferCallOutcome: deferred,
-    ...(options.http !== undefined ? { http: options.http } : {}),
-    ...(options.onDevice !== undefined ? { onDevice: options.onDevice } : {}),
-    ...(options.tabs !== undefined ? { tabs: options.tabs } : {}),
-  };
 }
 
 /** The host runs the program's ticks (LOLO §11): each firing is one `runTick` request in the host's queue. */
@@ -181,17 +146,10 @@ function refuseUnhostedTicks(traitIndex: ReturnType<typeof buildTraitIndex>): vo
  * by `callService`. The host holds the circuit state itself.
  */
 export async function openBrowserHost(options: BrowserHostOptions): Promise<BrowserHost> {
-  if (options.engine === 'kernel' && options.kernel === undefined) {
-    throw new Error("openBrowserHost: engine 'kernel' needs the initialised @almadar/kernel module (options.kernel)");
-  }
   const browserStore = await openBrowserStore(options.databaseName, options.schema.orbitals, options.factory, options.locale);
-  // The interpreter keeps a runtime entity's rows in its own frames; the kernel reads and writes every entity through one store.
-  const persistence = options.engine === 'kernel'
-    ? routeByEntity(new Set(options.schema.orbitals.flatMap(orbitalInlineEntities).filter(storesRowsInBrowser).map((entity) => entity.name)), browserStore ?? new InMemoryPersistence(), new InMemoryPersistence())
-    : browserStore ?? new InMemoryPersistence();
+  const persistence = localStorePersistence(options.schema, browserStore ?? new InMemoryPersistence());
   const traitIndex = buildTraitIndex(options.schema.orbitals);
   refuseUnhostedTicks(traitIndex);
-  const store = createMemoryCircuitStore(Array.from(traitIndex.byName.values(), (e) => e.traitDef));
   const { schema } = options;
   let transport: EventTransport | undefined;
   const listeners = new Set<InputDispatchListener>();
@@ -284,11 +242,18 @@ export async function openBrowserHost(options: BrowserHostOptions): Promise<Brow
     };
   };
   let deferred: ((call: DeferredCallOutcome) => void) | undefined;
-  const kernelEngine = options.engine === 'kernel' && options.kernel !== undefined
-    ? KernelEngine.open(options.kernel, { ...schema, orbitals: inlineTraitRefs(schema.orbitals) }, kernelPorts(options, persistence, servicePorts, () => deferred))
-    : undefined;
-  kernelEngine?.setTickMount(Array.from(traitIndex.byName.values(), (entry) => entry.traitDef.name));
-  const local = createLocalStoreTransport({ traitIndex, persistence, store, schema, callService: options.callService, servicePorts, outsideEventQueue, ...(kernelEngine !== undefined ? { kernelEngine } : {}), ...(options.http !== undefined ? { http: options.http } : {}), ...(options.onDevice !== undefined ? { onDevice: options.onDevice } : {}) });
+  const kernelEngine = openLocalKernel({
+    kernel: options.kernel,
+    schema,
+    persistence,
+    callService: options.callService,
+    servicePorts,
+    deferCallOutcome: () => deferred,
+    ...(options.http !== undefined ? { http: options.http } : {}),
+    ...(options.onDevice !== undefined ? { onDevice: options.onDevice } : {}),
+    ...(options.tabs !== undefined ? { tabs: options.tabs } : {}),
+  });
+  const local = createLocalStoreTransport({ kernelEngine, outsideEventQueue });
   transport = local;
   // A follow-on call's outcome runs as a dispatch of its own, in the background lane, and shows in open views.
   deferred = (call) => {

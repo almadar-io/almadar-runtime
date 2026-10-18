@@ -106,7 +106,6 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
       databaseName: `kernel-${Math.random()}`,
       schema: program(),
       callService: async () => null,
-      engine: 'kernel',
       kernel,
       tabs: chromeTabPort(chrome.tabs, chrome.runtime, (pattern, url) => kernel.tabUrlMatches(pattern, url)),
       ...extra,
@@ -208,7 +207,7 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
       ],
     };
     const databaseName = `kernel-mixed-${Math.random()}`;
-    const host = await openBrowserHost({ databaseName, schema: stored, callService: async () => null, engine: 'kernel', kernel });
+    const host = await openBrowserHost({ databaseName, schema: stored, callService: async () => null, kernel });
     expect((await host.send('Notes', { event: 'SAVE', targetTrait: 'Saver' })).success).toBe(true);
     expect((await host.send('Clocks', { event: 'BUMP', targetTrait: 'Counter' })).success).toBe(true);
     const reopened = await IndexedDbPersistence.open({ databaseName, entityTypes: ['Note'] });
@@ -235,7 +234,7 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
         pages: [],
       }],
     };
-    const host = await openBrowserHost({ databaseName: `kernel-tick-${Math.random()}`, schema: ticking, callService: async () => null, engine: 'kernel', kernel });
+    const host = await openBrowserHost({ databaseName: `kernel-tick-${Math.random()}`, schema: ticking, callService: async () => null, kernel });
     const response = await host.send('Clock', { event: tickEventKey('beat'), runTick: { trait: 'Pulse', tick: 'beat' }, targetTrait: 'Pulse' });
     expect(response.emittedEvents.map((e) => e.event)).toEqual(['PULSED']);
     host.close();
@@ -265,7 +264,6 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
       databaseName: `kernel-paint-${Math.random()}`,
       schema: painter([{ event: 'INIT', effects: [say('first')] }, { event: 'GO', effects: [say('second')] }]),
       callService: async () => null,
-      engine: 'kernel',
       kernel,
     });
     await host.send('Board', { event: 'INIT', targetTrait: 'Painter' });
@@ -285,7 +283,6 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
         { event: 'GO', effects: [compare('=', ['list'])] },
       ]),
       callService: async () => null,
-      engine: 'kernel',
       kernel,
     });
     const nonEmpty = await host.send('Board', { event: 'INIT', targetTrait: 'Painter' });
@@ -295,7 +292,4 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
     host.close();
   });
 
-  it('the kernel engine needs the kernel module', async () => {
-    await expect(openBrowserHost({ databaseName: 'x', schema: program(), callService: async () => null, engine: 'kernel' })).rejects.toThrow(/kernel/);
-  });
 });

@@ -255,8 +255,8 @@ describe('Phase 4: EffectExecutor (shared effect dispatch)', () => {
                 calls.callService.push([service, action, params]);
                 return { success: true };
             },
-            renderUI: (slot, pattern, props, priority) => {
-                calls.renderUI.push([slot, pattern, props, priority]);
+            renderUI: (slot, pattern) => {
+                calls.renderUI.push([slot, pattern]);
             },
             navigate: (path, params) => {
                 calls.navigate.push([path, params]);

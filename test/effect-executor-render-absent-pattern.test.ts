@@ -21,6 +21,6 @@ describe('EffectExecutor render-ui with an absent pattern', () => {
     const context: EffectContext = { traitName: 'T', state: 'idle', transition: 'idle->idle' };
     const executor = new EffectExecutor({ handlers, bindings, context });
     await executor.execute(['render-ui', 'modal']);
-    expect(calls).toEqual([['modal', null, undefined, undefined]]);
+    expect(calls).toEqual([['modal', null]]);
   });
 });

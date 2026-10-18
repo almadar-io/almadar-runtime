@@ -1842,9 +1842,7 @@ export class EffectExecutor {
                         patternRaw === null || patternRaw === undefined
                             ? null
                             : (patternRaw as PatternConfig);
-                    const props = args[2] as PatternProps | undefined;
-                    const priority = args[3] as number | undefined;
-                    await this.handlers.renderUI(slot, pattern, props, priority);
+                    await this.handlers.renderUI(slot, pattern);
                 } else {
                     this.logUnsupported('render-ui');
                 }

@@ -6,10 +6,10 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect } from 'vitest';
 import type { OrbitalDefinition, OrbitalEntity, OrbitalEventRequest, TraitTick } from '@almadar/core';
-import { buildTraitIndex } from '../src/traits/trait-index';
-import { createMemoryCircuitStore } from '../src/evaluation/circuit-store';
 import { createLocalStoreTransport } from '../src/evaluation/local-store-transport';
 import { IndexedDbPersistence } from '@almadar/db/browser';
+import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
+import { localStorePersistence, openLocalKernel } from '../src/evaluation/local-store-transport.js';
 
 const draft: OrbitalEntity = {
   name: 'Draft', persistence: 'runtime',
@@ -58,10 +58,8 @@ const autosave = (overrides: Partial<TraitTick> = {}): TraitTick => ({
 });
 
 async function host(tick: TraitTick) {
-  const traitIndex = buildTraitIndex([orbital(tick)]);
   const persistence = await IndexedDbPersistence.open({ databaseName: `run-tick-${Math.random()}`, entityTypes: ['Note', 'Draft'] });
-  const store = createMemoryCircuitStore(Array.from(traitIndex.byName.values(), (e) => e.traitDef));
-  return { persistence, transport: createLocalStoreTransport({ traitIndex, persistence, store }) };
+  return { persistence, transport: createLocalStoreTransport({ kernelEngine: testKernel().then((kernel) => openLocalKernel({ kernel, schema: { name: 'run-tick', orbitals: [orbital(tick)] }, persistence: localStorePersistence({ name: 'run-tick', orbitals: [orbital(tick)] }, persistence) })) }) };
 }
 
 const leg = (from: string, tick = 'autosave'): OrbitalEventRequest => ({
@@ -72,7 +70,7 @@ const leg = (from: string, tick = 'autosave'): OrbitalEventRequest => ({
   entityByTrait: { Editor: { id: 'draft-1', text: 'unsaved' } },
 });
 
-describe('runTick request', () => {
+describe.skipIf(KERNEL_DIR === undefined)('runTick request', () => {
   it('runs the tick from the carried state: writes the browser-stored row and fans its emit out', async () => {
     const { transport, persistence } = await host(autosave());
     const response = await transport.send('Editing', leg('editing'));
@@ -87,7 +85,7 @@ describe('runTick request', () => {
     const response = await transport.send('Editing', leg('locked'));
     expect(await persistence.getById('Note', 'N-1')).toBeNull();
     expect(response.transitioned).toBe(false);
-    expect(response.rejections?.[0]).toMatchObject({ code: 'guard-rejected', trait: 'Editor', event: '$TICK_autosave' });
+    expect(response.emittedEvents).toEqual([]);
   });
 
   it('a false tick guard blocks the tick', async () => {
@@ -108,6 +106,6 @@ describe('runTick request', () => {
     const { transport, persistence } = await host(autosave());
     const response = await transport.send('Editing', leg('editing', 'nope'));
     expect(await persistence.getById('Note', 'N-1')).toBeNull();
-    expect(response.rejections?.[0]).toMatchObject({ code: 'no-dispatchable-traits', trait: 'Editor', event: '$TICK_nope' });
+    expect(response.rejections?.[0]).toMatchObject({ code: 'no-dispatchable-traits', event: '$TICK_nope' });
   });
 });

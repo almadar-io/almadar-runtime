@@ -7,6 +7,7 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, afterEach } from 'vitest';
 import type { EventPayload, OrbitalSchema, ServiceParams } from '@almadar/core';
 import { openBrowserHost, type BrowserHost } from '../src/evaluation/browser-store-transport';
+import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
 
 const program: OrbitalSchema = {
   name: 'Midcall',
@@ -41,10 +42,10 @@ function slow() {
   };
 }
 
-describe('openBrowserHost: state while a call is in flight', () => {
+describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost: state while a call is in flight', () => {
   it('a request served during the call sees the state the transition entered', async () => {
     const provider = slow();
-    const host = await openBrowserHost({ databaseName: `midcall-${Math.random()}`, schema: program, callService: provider.callService });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: `midcall-${Math.random()}`, schema: program, callService: provider.callService });
     hosts.push(host);
     await host.send('Midcall', { event: 'INIT', targetTrait: 'Runner', payload: {} });
     const go = host.send('Midcall', { event: 'GO', payload: {} });

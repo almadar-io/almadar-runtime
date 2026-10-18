@@ -70,6 +70,4 @@ export interface KernelModule extends KernelEvaluatorExports {
   osCompletionEvent(siteJson: string, key: string, outcomeJson: string): string;
   /** Whether the Chrome match pattern matches the URL: the one rule a browser-tab host filters tabs with. */
   tabUrlMatches(pattern: string, url: string): boolean;
-  /** `credential_admin::seed_plan_json`: the declared credentials a `store`-source boot copies from the env, as `[{ service, envVar }]` JSON. */
-  credentialSeedPlan(declaredJson: string, heldJson: string, presentJson: string): string;
 }

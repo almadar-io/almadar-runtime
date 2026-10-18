@@ -6,8 +6,10 @@ import { pathToFileURL } from 'node:url';
 import { installKernelEvaluator } from '@almadar/core';
 import type { HttpKernel } from './http-exchange.js';
 import type { KernelModule } from './wire.js';
+import type { CredentialSeedKernel } from '../host/credentials/seed.js';
 
-export interface LoadedKernel extends KernelModule, HttpKernel {
+/** The whole server kernel as Node loads it: the shared module plus the server-only exports the client build omits. */
+export interface LoadedKernel extends KernelModule, HttpKernel, CredentialSeedKernel {
   initSync(input: { module: Uint8Array }): object;
   installLanguage(bundleJson: string): void;
 }
@@ -21,7 +23,7 @@ export interface LoadKernelOptions {
  * Loads the kernel and installs the language data the installed packages declare (the operator table that
  * routes `program/*` and the other host effects), as `orb` reads it. The first install in a process wins.
  */
-export async function loadKernelModule(kernelDir: string, options: LoadKernelOptions = {}): Promise<KernelModule> {
+export async function loadKernelModule(kernelDir: string, options: LoadKernelOptions = {}): Promise<LoadedKernel> {
   return loadKernel(kernelDir, options);
 }
 

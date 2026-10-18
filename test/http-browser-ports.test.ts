@@ -4,14 +4,15 @@
 import { describe, it, expect } from 'vitest';
 import type { EventPayload, JsonObject, OrbitalDefinition } from '@almadar/core';
 import { InMemoryPersistence } from '@almadar/db/mock';
-import { buildTraitIndex, runsBrowserDataEffect, runsServerEffect } from '../src/traits/trait-index';
-import { createMemoryCircuitStore } from '../src/evaluation/circuit-store';
+import { runsBrowserDataEffect, runsServerEffect } from '../src/traits/trait-index';
 import { createLocalStoreTransport } from '../src/evaluation/local-store-transport';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 import { EffectExecutor, type BindingContext, type EffectContext } from '../src/index.js';
 import { createBrowserHttpPorts, runHttpCall, type HttpCall, type HttpPorts } from '../src/kernel/http-exchange.js';
 import { ServerLegCollector } from '../src/effects/server-leg.js';
 import { fakeHttpKernel } from './helpers/fake-http-kernel.js';
+import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
+import { localStorePersistence, openLocalKernel } from '../src/evaluation/local-store-transport.js';
 
 const ORIGIN = 'https://api.example.com';
 const call: HttpCall = { method: 'GET', origin: ORIGIN, path: '/search', request: { query: { q: 'a' } } };
@@ -20,7 +21,7 @@ function ports(browserFetch: (url: string, init: RequestInit) => Promise<Respons
   return createBrowserHttpPorts({ kernel: async () => fakeHttpKernel, egress, fetch: browserFetch });
 }
 
-describe('browser http ports', () => {
+describe.skipIf(KERNEL_DIR === undefined)('browser http ports', () => {
   it('send a keyless call through the driver with the browser fetch, without resolving the host', async () => {
     const seen: Array<{ url: string; redirect: string | undefined }> = [];
     const p = ports(async (url, init) => {
@@ -58,7 +59,7 @@ describe('browser http ports', () => {
   });
 });
 
-describe('a client-role executor runs a keyless http itself', () => {
+describe.skipIf(KERNEL_DIR === undefined)('a client-role executor runs a keyless http itself', () => {
   const bindings: BindingContext = { entity: { id: 'row-1' }, payload: {} };
   const context: EffectContext = { traitName: 'T', state: 'idle', transition: 'idle->idle' };
   const effect = (request: JsonObject) => ['http', 'GET', ORIGIN, '/search', request, { emit: { success: 'OK', failure: 'ERR' } }];
@@ -89,7 +90,7 @@ describe('a client-role executor runs a keyless http itself', () => {
   });
 });
 
-describe('a browser store runs a leg with a keyless http', () => {
+describe.skipIf(KERNEL_DIR === undefined)('a browser store runs a leg with a keyless http', () => {
   const orbital = (request: JsonObject): OrbitalDefinition => ({
     name: 'Feed',
     entity: { name: 'Row', persistence: 'runtime', fields: [{ name: 'id', type: 'string', required: true }] },
@@ -109,12 +110,7 @@ describe('a browser store runs a leg with a keyless http', () => {
   });
 
   async function load(def: OrbitalDefinition, httpPorts: HttpPorts | undefined) {
-    const traitIndex = buildTraitIndex([def]);
-    const store = createMemoryCircuitStore(Array.from(traitIndex.byName.values(), (e) => e.traitDef));
-    const transport = createLocalStoreTransport({
-      traitIndex, persistence: new InMemoryPersistence(), store,
-      ...(httpPorts !== undefined ? { http: httpPorts } : {}),
-    });
+    const transport = createLocalStoreTransport({ kernelEngine: testKernel().then((kernel) => openLocalKernel({ kernel, schema: { name: 'http', orbitals: [def], egress: [ORIGIN] }, persistence: localStorePersistence({ name: 'http', orbitals: [def], egress: [ORIGIN] }, new InMemoryPersistence()), ...(httpPorts !== undefined ? { http: httpPorts } : {}) })) });
     const response = await transport.send('Feed', { event: 'LOAD', targetTrait: 'Loader' });
     return response.emittedEvents.map((e) => ({ event: e.event, payload: e.payload }));
   }
@@ -122,7 +118,7 @@ describe('a browser store runs a leg with a keyless http', () => {
   it('sends the call through the supplied browser ports and routes the reply to success', async () => {
     const urls: string[] = [];
     const events = await load(orbital({ query: { q: 'a' } }), ports(async (url) => { urls.push(url); return new Response('ok', { status: 201 }); }));
-    expect(urls).toEqual([`${ORIGIN}/x`]);
+    expect(urls).toEqual([`${ORIGIN}/x?q=a`]);
     expect(events).toEqual([{ event: 'GOT', payload: expect.objectContaining({ status: 201, body: 'ok' }) }]);
   });
 
@@ -133,7 +129,7 @@ describe('a browser store runs a leg with a keyless http', () => {
   });
 });
 
-describe('the run-site predicates over http (twin of orbital-core runs_browser_data_effect / sexpr_runs_server_effect)', () => {
+describe.skipIf(KERNEL_DIR === undefined)('the run-site predicates over http (twin of orbital-core runs_browser_data_effect / sexpr_runs_server_effect)', () => {
   const keyless = ['http', 'GET', ORIGIN, '/x', { query: { q: 'a' } }];
   const keyed = ['http', 'GET', ORIGIN, '/x', { auth: { scheme: 'bearer', credential: '@config.key' } }];
 

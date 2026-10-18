@@ -6,11 +6,11 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect } from 'vitest';
 import type { OrbitalDefinition, OrbitalEntity } from '@almadar/core';
-import { buildTraitIndex } from '../src/traits/trait-index';
-import { createMemoryCircuitStore } from '../src/evaluation/circuit-store';
 import { createLocalStoreTransport } from '../src/evaluation/local-store-transport';
 import { IndexedDbPersistence } from '@almadar/db/browser';
 import { seedBrowserStore } from '../src/entities/seedBrowserStore';
+import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
+import { localStorePersistence, openLocalKernel } from '../src/evaluation/local-store-transport.js';
 
 const invoice: OrbitalEntity = {
   name: 'Invoice', persistence: 'persistent', collection: 'invoices', local: true,
@@ -37,14 +37,12 @@ const orbital: OrbitalDefinition = {
 };
 
 async function host() {
-  const traitIndex = buildTraitIndex([orbital]);
   const persistence = await IndexedDbPersistence.open({ databaseName: `e2e-${Math.random()}`, entityTypes: ['Invoice'] });
   await seedBrowserStore(persistence, [invoice]);
-  const store = createMemoryCircuitStore(Array.from(traitIndex.byName.values(), (e) => e.traitDef));
-  return { persistence, transport: createLocalStoreTransport({ traitIndex, persistence, store }) };
+  return { persistence, transport: createLocalStoreTransport({ kernelEngine: testKernel().then((kernel) => openLocalKernel({ kernel, schema: { name: 'e2e', orbitals: [orbital] }, persistence: localStorePersistence({ name: 'e2e', orbitals: [orbital] }, persistence) })) }) };
 }
 
-describe('browser-stored entity end to end', () => {
+describe.skipIf(KERNEL_DIR === undefined)('browser-stored entity end to end', () => {
   it('a fetch returns the written-out rows from the browser store', async () => {
     const { transport } = await host();
     const response = await transport.send('Books', { event: 'LOAD', targetTrait: 'InvoiceList' });

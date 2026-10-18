@@ -7,6 +7,7 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, afterEach } from 'vitest';
 import type { OrbitalSchema } from '@almadar/core';
 import { openBrowserHost, type BrowserHost } from '../src/evaluation/browser-store-transport';
+import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
 
 const program: OrbitalSchema = {
   name: 'Batches',
@@ -32,9 +33,9 @@ const program: OrbitalSchema = {
 const hosts: BrowserHost[] = [];
 afterEach(() => hosts.splice(0).forEach((h) => h.close()));
 
-describe('openBrowserHost: persist batch', () => {
+describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost: persist batch', () => {
   it('reports what it wrote, so a second batch in the same cascade is delivered too', async () => {
-    const host = await openBrowserHost({ databaseName: `batches-${Math.random()}`, schema: program, callService: async () => ({}) });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: `batches-${Math.random()}`, schema: program, callService: async () => ({}) });
     hosts.push(host);
     await host.send('Batches', { event: 'INIT', targetTrait: 'Saver', payload: {} });
     const res = await host.send('Batches', { event: 'GO', payload: {} });

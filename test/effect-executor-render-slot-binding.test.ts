@@ -32,3 +32,16 @@ describe('EffectExecutor render-ui slot bound to a knob', () => {
     expect(await paintedSlots({ entity: { id: 'e1' }, config: {} }, '@config.detailSlot')).toEqual({ slots: [], failed: true });
   });
 });
+
+describe('EffectExecutor render-ui arguments (G-CROSS-257)', () => {
+  it('hands the handler the slot and the pattern only', async () => {
+    const calls: Array<Parameters<NonNullable<EffectHandlers['renderUI']>>> = [];
+    const renderUI: EffectHandlers['renderUI'] = (...args) => {
+      calls.push(args);
+    };
+    const handlers = stubEffectHandlers({ emit: vi.fn(), renderUI });
+    const executor = new EffectExecutor({ handlers, bindings: { entity: { id: 'e1' } }, context: { traitName: 'T', state: 'idle', transition: 'idle->idle' } });
+    await executor.execute(['render-ui', 'main', { type: 'typography', content: 'x' }]);
+    expect(calls).toEqual([['main', { type: 'typography', content: 'x' }]]);
+  });
+});

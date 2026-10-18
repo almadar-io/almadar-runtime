@@ -1,13 +1,21 @@
 import { loadKernelModule } from '../../src/kernel/load-node.js';
 import type { KernelModule } from '../../src/kernel/index.js';
+import type { LoadedKernel } from '../../src/kernel/load-node.js';
 import type { KernelServerClass } from '../../src/kernel/wire.js';
 
 /** The directory of the built `@almadar/kernel` package (the one holding `pkg/`); kernel suites skip without it. */
 export const KERNEL_DIR: string | undefined = process.env.ALMADAR_KERNEL_DIR;
 
-export function loadKernel(): Promise<KernelModule> {
+export function loadKernel(): Promise<LoadedKernel> {
   if (KERNEL_DIR === undefined) throw new Error('ALMADAR_KERNEL_DIR is not set');
   return loadKernelModule(KERNEL_DIR);
+}
+
+let loaded: Promise<KernelModule> | undefined;
+
+/** The built kernel, loaded once per test file. */
+export function testKernel(): Promise<KernelModule> {
+  return (loaded ??= loadKernel());
 }
 
 /** The built native kernel add-on (`kernel.node`); the native-engine suites skip without it. */
@@ -28,7 +36,6 @@ export function stubKernelModule(Server: KernelServerClass, overrides: Partial<O
     osDeferringOps: () => '[]',
     osCompletionEvent: () => 'null',
     tabUrlMatches: () => false,
-    credentialSeedPlan: unexpected('credentialSeedPlan'),
     evaluateMany: unexpected('evaluateMany'),
     evaluateGuards: unexpected('evaluateGuards'),
     evaluateTraced: unexpected('evaluateTraced'),

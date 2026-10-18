@@ -174,13 +174,6 @@ export {
   type EffectExecutorOptions,
 } from "./effects/EffectExecutor.js";
 
-// Client Effect Handlers Factory
-export {
-  createClientEffectHandlers,
-  type CreateClientEffectHandlersOptions,
-  type ClientEventBus,
-  type SlotSetter,
-} from "./effects/ClientEffectHandlers.js";
 
 // Client-role server leg (P3) and the one event transport (P5)
 export { ServerLegCollector, type EffectDelegate, type DelegateTarget } from "./effects/server-leg.js";
@@ -212,22 +205,14 @@ export {
   type TraitSnapshot,
 } from "./evaluation/circuit-store.js";
 
-// Client role (P4) — the JS twin of orbital-client's `ClientKernel` +
-// orbital-core's `dispatch_with_server_leg`/`apply_server_response`/
-// `already_delivered_from`.
-export {
-  alreadyDeliveredFrom,
-  applyOrbitalEventResponse,
-  createClientKernel,
-  dispatchWithServerLeg,
-  postServerLeg,
-  type ClientDispatch,
-  type ClientKernel,
-  type ClientKernelOpts,
-  type ClientKernelOutcome,
-  type ClientDispatchHooks,
-  type ClientRoleOpts,
-} from "./evaluation/client-role.js";
+// The client-kernel contract `@almadar/ui`'s kernel client implements.
+export type {
+  ClientDispatchHooks,
+  ClientKernel,
+  ClientKernelOutcome,
+  ClientMountHooks,
+  ClientMountOutcome,
+} from "./evaluation/client-kernel.js";
 export { TraitMountError } from "./evaluation/trait-mount-error.js";
 
 // Re-export types for server modules (for type-only imports in client code)
@@ -252,7 +237,7 @@ export { collectDeclaredConfigDefaults, collectDeclaredEntityDefaults, normalize
 // `[persistent: x, local]` entities: the browser store seed rule and the
 // transports that run their data in-process (the adapters live in `@almadar/db`).
 export { seedBrowserStore } from "./entities/seedBrowserStore.js";
-export { createLocalStoreTransport } from "./evaluation/local-store-transport.js";
+export { createLocalStoreTransport, localStorePersistence, openLocalKernel, type LocalKernelOptions } from "./evaluation/local-store-transport.js";
 export { dispatchDeclaredInput } from "./evaluation/declared-input-dispatch.js";
 export { dispatchInbound } from "./evaluation/inbound-dispatch.js";
 export { createChannelTransport, holdUntilServed, serveChannel, type ChannelMessage, type ChannelTransportOptions, type ServedChannel, type TransportChannel } from "./server/channel-transport.js";

@@ -1296,7 +1296,7 @@ export async function runServerEffectStage(
     },
 
     // Client-side effects - collect for forwarding to client
-    renderUI: async (slot, pattern, props, priority) => {
+    renderUI: async (slot, pattern) => {
       // Relation-option injection (server-side, mirrors compiled codegen):
       // fieldsContract patterns with relation-typed fields get relationsData
       // read from the persistence adapter before the effect ships.
@@ -1324,7 +1324,7 @@ export async function runServerEffectStage(
         entityRowId: typeof entityRow?.id === 'string' ? entityRow.id : undefined,
         entityIsObject: entityRow !== null,
       });
-      pushClientEffect(['render-ui', slot, pattern, props ?? null, priority ?? null]);
+      pushClientEffect(['render-ui', slot, pattern]);
     },
     navigate: (path, params, crumb) => {
       if (crumb !== undefined) {

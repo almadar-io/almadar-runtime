@@ -6,9 +6,9 @@
 import { describe, it, expect } from 'vitest';
 import type { OrbitalDefinition } from '@almadar/core';
 import { InMemoryPersistence } from '@almadar/db/mock';
-import { buildTraitIndex } from '../src/traits/trait-index';
-import { createMemoryCircuitStore } from '../src/evaluation/circuit-store';
 import { createLocalStoreTransport } from '../src/evaluation/local-store-transport';
+import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
+import { localStorePersistence, openLocalKernel } from '../src/evaluation/local-store-transport.js';
 
 const orbital: OrbitalDefinition = {
   name: 'Main',
@@ -29,12 +29,10 @@ const orbital: OrbitalDefinition = {
 };
 
 function host() {
-  const traitIndex = buildTraitIndex([orbital]);
-  const store = createMemoryCircuitStore([...traitIndex.byName.values()].map((e) => e.traitDef));
-  return createLocalStoreTransport({ traitIndex, store, persistence: new InMemoryPersistence() });
+  return createLocalStoreTransport({ kernelEngine: testKernel().then((kernel) => openLocalKernel({ kernel, schema: { name: 'payload', orbitals: [orbital] }, persistence: localStorePersistence({ name: 'payload', orbitals: [orbital] }, new InMemoryPersistence()) })) });
 }
 
-describe('@payload is the event\'s own', () => {
+describe.skipIf(KERNEL_DIR === undefined)('@payload is the event\'s own', () => {
   it('an event reads its own payload', async () => {
     const response = await host().send('Main', { event: 'PICK', targetTrait: 'Picker', payload: { row: 'r1' } });
     expect(response.entityByTrait?.Picker).toMatchObject({ picked: 'r1' });

@@ -4,6 +4,7 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, afterEach } from 'vitest';
 import type { EventPayload, OrbitalSchema, OrbitalEventResponse, ServiceParams } from '@almadar/core';
 import { openBrowserHost, type BrowserHost } from '../src/evaluation/browser-store-transport';
+import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
 
 const counter = { name: 'Counter', persistence: 'runtime' as const, fields: [{ name: 'id', type: 'string' as const, required: true }] };
 
@@ -51,10 +52,10 @@ function slowProvider() {
   };
 }
 
-describe('openBrowserHost: call-service releases the queue', () => {
+describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost: call-service releases the queue', () => {
   it('serves a view request and a cancel-call while a slow call is in flight, then routes the call to cancelled', async () => {
     const provider = slowProvider();
-    const host = await openBrowserHost({ databaseName: db(), schema: program, callService: provider.callService });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program, callService: provider.callService });
     hosts.push(host);
     await host.send('Cancellable', { event: 'INIT', targetTrait: 'Worker', payload: {} });
     const call = host.send('Cancellable', { event: 'CALL', payload: {} });
@@ -71,7 +72,7 @@ describe('openBrowserHost: call-service releases the queue', () => {
 
   it('control: without a cancel-call the call completes and routes to success', async () => {
     const provider = slowProvider();
-    const host = await openBrowserHost({ databaseName: db(), schema: program, callService: provider.callService });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program, callService: provider.callService });
     hosts.push(host);
     await host.send('Cancellable', { event: 'INIT', targetTrait: 'Worker', payload: {} });
     const call = host.send('Cancellable', { event: 'CALL', payload: {} });
@@ -82,7 +83,7 @@ describe('openBrowserHost: call-service releases the queue', () => {
 
   it('control: non-I/O steps stay serialized — a request made while another runs waits its turn', async () => {
     const order: string[] = [];
-    const host = await openBrowserHost({
+    const host = await openBrowserHost({ kernel: await testKernel(),
       databaseName: db(),
       schema: program,
       callService: async () => ({}),
@@ -97,7 +98,7 @@ describe('openBrowserHost: call-service releases the queue', () => {
 
   it('edge: a call-service re-takes the queue before its transition continues — a request queued meanwhile runs first, not interleaved', async () => {
     const provider = slowProvider();
-    const host = await openBrowserHost({ databaseName: db(), schema: program, callService: provider.callService });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program, callService: provider.callService });
     hosts.push(host);
     await host.send('Cancellable', { event: 'INIT', targetTrait: 'Worker', payload: {} });
     const finished: string[] = [];
@@ -136,10 +137,10 @@ const twoState: OrbitalSchema = {
   }],
 };
 
-describe('openBrowserHost: a call result after another turn moved the trait', () => {
+describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost: a call result after another turn moved the trait', () => {
   it('is handled from the committed state, so the trait can take new work', async () => {
     const provider = slowProvider();
-    const host = await openBrowserHost({ databaseName: db(), schema: twoState, callService: provider.callService });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: twoState, callService: provider.callService });
     hosts.push(host);
     await host.send('Busy', { event: 'INIT', targetTrait: 'Judge', payload: {} });
     const call = host.send('Busy', { event: 'CALL', payload: {} });
@@ -155,7 +156,7 @@ describe('openBrowserHost: a call result after another turn moved the trait', ()
 
   it('control: an uncancelled call finishes from where it started', async () => {
     const provider = slowProvider();
-    const host = await openBrowserHost({ databaseName: db(), schema: twoState, callService: provider.callService });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: twoState, callService: provider.callService });
     hosts.push(host);
     await host.send('Busy', { event: 'INIT', targetTrait: 'Judge', payload: {} });
     const call = host.send('Busy', { event: 'CALL', payload: {} });

@@ -8,6 +8,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import type { EventPayload, OrbitalSchema, OrbitalEventRequest, TraitTick } from '@almadar/core';
 import { asTraitId, isInlineTrait } from '@almadar/core';
 import { openBrowserHost, type BrowserHost } from '../src/evaluation/browser-store-transport';
+import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
 
 const counter = { name: 'Counter', persistence: 'runtime' as const, fields: [{ name: 'id', type: 'string' as const, required: true }, { name: 'n', type: 'number' as const, default: 0 }] };
 
@@ -45,9 +46,9 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const hosts: BrowserHost[] = [];
 afterEach(() => hosts.splice(0).forEach((h) => h.close()));
 
-describe('openBrowserHost ticks', () => {
+describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost ticks', () => {
   it('fires a tick as its own request and shows its result to listening views', async () => {
-    const host = await openBrowserHost({ databaseName: db(), schema: program([{ name: 'finish', interval: 20, guard: ['=', '@state', 'idle'], effects: [['emit', 'FINISH']] }]), callService: slow });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program([{ name: 'finish', interval: 20, guard: ['=', '@state', 'idle'], effects: [['emit', 'FINISH']] }]), callService: slow });
     hosts.push(host);
     const seen: Array<{ request: OrbitalEventRequest; emitted: string[] }> = [];
     host.onInputDispatched((_o, request, response) => seen.push({ request, emitted: response.emittedEvents.map((e) => e.event) }));
@@ -59,7 +60,7 @@ describe('openBrowserHost ticks', () => {
   });
 
   it('a view request is served between firings, not after the whole loop', async () => {
-    const host = await openBrowserHost({ databaseName: db(), schema: program([{ name: 'step', interval: 10, guard: ['<', '@entity.n', 20], effects: [['emit', 'STEP']] }]), callService: slow });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program([{ name: 'step', interval: 10, guard: ['<', '@entity.n', 20], effects: [['emit', 'STEP']] }]), callService: slow });
     hosts.push(host);
     let steps = 0;
     host.onInputDispatched((_o, _request, response) => { if (response.emittedEvents.some((e) => e.event === 'STEP')) steps++; });
@@ -73,7 +74,7 @@ describe('openBrowserHost ticks', () => {
   });
 
   it('a view request waits for at most the background step that is running, never for queued background work', async () => {
-    const host = await openBrowserHost({ databaseName: db(), schema: program([{ name: 'step', interval: 5, guard: ['<', '@entity.n', 50], effects: [['emit', 'STEP']] }]), callService: slow });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program([{ name: 'step', interval: 5, guard: ['<', '@entity.n', 50], effects: [['emit', 'STEP']] }]), callService: slow });
     hosts.push(host);
     await host.send('Loop', { event: 'INIT', targetTrait: 'Stepper', payload: {} });
     await wait(200);
@@ -83,7 +84,7 @@ describe('openBrowserHost ticks', () => {
   });
 
   it('control: a tick whose guard does not hold does not fire', async () => {
-    const host = await openBrowserHost({ databaseName: db(), schema: program([{ name: 'finish', interval: 20, guard: ['=', '@state', 'done'], effects: [['emit', 'FINISH']] }]), callService: slow });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program([{ name: 'finish', interval: 20, guard: ['=', '@state', 'done'], effects: [['emit', 'FINISH']] }]), callService: slow });
     hosts.push(host);
     const seen: string[] = [];
     host.onInputDispatched((_o, request) => seen.push(request.event));
@@ -93,7 +94,7 @@ describe('openBrowserHost ticks', () => {
   });
 
   it('a tick runs every effect kind, not only emits: its set writes the trait frame', async () => {
-    const host = await openBrowserHost({ databaseName: db(), schema: program([{ name: 'bump', interval: 20, guard: ['=', '@entity.n', 0], effects: [['set', '@entity.n', 7]] }]), callService: slow });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program([{ name: 'bump', interval: 20, guard: ['=', '@entity.n', 0], effects: [['set', '@entity.n', 7]] }]), callService: slow });
     hosts.push(host);
     const frames: Array<number | undefined> = [];
     host.onInputDispatched((_o, _request, response) => frames.push(Number(response.entityByTrait?.Stepper?.n)));
@@ -103,7 +104,7 @@ describe('openBrowserHost ticks', () => {
   });
 
   it('edge: close stops the ticks', async () => {
-    const host = await openBrowserHost({ databaseName: db(), schema: program([{ name: 'step', interval: 10, effects: [['emit', 'STEP']] }]), callService: async () => ({}) });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program([{ name: 'step', interval: 10, effects: [['emit', 'STEP']] }]), callService: async () => ({}) });
     let steps = 0;
     host.onInputDispatched(() => { steps++; });
     await host.send('Loop', { event: 'INIT', targetTrait: 'Stepper', payload: {} });
@@ -115,7 +116,7 @@ describe('openBrowserHost ticks', () => {
   });
 });
 
-describe('openBrowserHost ticks: listeners', () => {
+describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost ticks: listeners', () => {
   const clockProgram: OrbitalSchema = {
     name: 'Clocked',
     orbitals: [{
@@ -143,7 +144,7 @@ describe('openBrowserHost ticks: listeners', () => {
   };
 
   it('a tick emit reaches the traits that listen for it, as the event they map it to', async () => {
-    const host = await openBrowserHost({ databaseName: db(), schema: clockProgram, callService: slow });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: clockProgram, callService: slow });
     hosts.push(host);
     const worker: Array<string | undefined> = [];
     host.onInputDispatched((_o, _request, response) => worker.push(response.states.Worker));
@@ -165,7 +166,7 @@ describe('openBrowserHost ticks: listeners', () => {
         ],
       }],
     };
-    const host = await openBrowserHost({ databaseName: db(), schema: compiled, callService: slow });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: compiled, callService: slow });
     hosts.push(host);
     const workerStates: Array<string | undefined> = [];
     host.onInputDispatched((_o, _request, response) => workerStates.push(response.states.Worker));
@@ -175,7 +176,7 @@ describe('openBrowserHost ticks: listeners', () => {
 
   it('control: an emit no trait listens for and the ticker does not handle dispatches nothing', async () => {
     const quiet: OrbitalSchema = { ...clockProgram, name: 'Quiet', orbitals: [{ ...clockProgram.orbitals[0], traits: [clockProgram.orbitals[0].traits[0]] }] };
-    const host = await openBrowserHost({ databaseName: db(), schema: quiet, callService: slow });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: quiet, callService: slow });
     hosts.push(host);
     const reached: string[] = [];
     host.onInputDispatched((_o, _request, response) => reached.push(...Object.keys(response.states)));

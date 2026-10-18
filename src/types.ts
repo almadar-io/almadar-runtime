@@ -423,12 +423,7 @@ export interface EffectHandlers {
      * May be async: the server runtime injects relation option data
      * (relationsData) read from the persistence adapter before pushing —
      * the interpreter's mirror of codegen's build-time relationsData. */
-    renderUI?: (
-        slot: string,
-        pattern: PatternConfig | null,
-        props?: PatternProps,
-        priority?: number
-    ) => void | Promise<void>;
+    renderUI?: (slot: string, pattern: PatternConfig | null) => void | Promise<void>;
 
     /** Navigate to a route (client only). `crumb` labels the navigation-stack
      * entry the client pushes for the target page (from the effect's

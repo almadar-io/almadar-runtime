@@ -1,10 +1,11 @@
-// `openBrowserHost({ onDevice })`: the extension worker plugs its model and embedder in here. A prompt waits with the
+// `openBrowserHost({ kernel: await testKernel(), onDevice })`: the extension worker plugs its model and embedder in here. A prompt waits with the
 // host's queue released, a `cancel-call` from another request aborts it by key, and a host with no model fails
 // `unconfigured` through the program's own failure route.
 import 'fake-indexeddb/auto';
 import { describe, it, expect, afterEach } from 'vitest';
 import type { OnDeviceModelPort, OrbitalSchema, OrbitalEventResponse } from '@almadar/core';
 import { openBrowserHost, type BrowserHost } from '../src/evaluation/browser-store-transport';
+import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
 
 const counter = { name: 'Counter', persistence: 'runtime' as const, fields: [{ name: 'id', type: 'string' as const, required: true }] };
 const events = ['ASK', 'EMBED', 'CANCEL', 'PING', 'REPLIED', 'EMBEDDED', 'FAILED', 'STOPPED'];
@@ -48,13 +49,13 @@ function slowModel() {
 }
 
 async function open(onDevice?: Parameters<typeof openBrowserHost>[0]['onDevice']): Promise<BrowserHost> {
-  const host = await openBrowserHost({ databaseName: db(), schema: program, callService: async () => null, ...(onDevice !== undefined ? { onDevice } : {}) });
+  const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program, callService: async () => null, ...(onDevice !== undefined ? { onDevice } : {}) });
   hosts.push(host);
   await host.send('OnDevice', { event: 'INIT', targetTrait: 'Asker', payload: {} });
   return host;
 }
 
-describe('openBrowserHost: on-device model', () => {
+describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost: on-device model', () => {
   it('answers a prompt with the plugged-in model and routes the reply with the key', async () => {
     const model: OnDeviceModelPort = { availability: async () => 'available', prompt: async () => '{"ok":1}' };
     const host = await open({ model });

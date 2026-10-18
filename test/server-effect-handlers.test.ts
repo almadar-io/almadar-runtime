@@ -38,23 +38,6 @@ function seeded(rows = 3) {
     return p;
 }
 
-describe('createClientEffectHandlers.emit — payload is NOT re-wrapped', () => {
-    it('emits payload directly so subscribers can read @payload.X bindings', async () => {
-        const { createClientEffectHandlers } = await import('../src/effects/ClientEffectHandlers.js');
-        const bus = makeBus();
-        const h = createClientEffectHandlers({
-            eventBus: bus,
-            slotSetter: { addPattern: () => {}, clearSlot: () => {} },
-        });
-        h.emit!('ListItemLoaded', { data: [{ id: '1' }] } as never);
-        const out = bus.events.find((e) => e.event === 'UI:ListItemLoaded');
-        expect(out).toBeDefined();
-        // Must be the raw { data: [...] } — NOT { payload: { data: [...] } }.
-        const p = out!.payload as { data?: EntityRow[]; payload?: EventPayload };
-        expect(Array.isArray(p.data)).toBe(true);
-        expect(p.payload).toBeUndefined();
-    });
-});
 
 describe('InMemoryPersistence — seed + list + crud', () => {
     it('seed + list returns the rows that were seeded', async () => {
@@ -193,9 +176,9 @@ describe('createServerEffectHandlers — render-ui/navigate capture (Part G1)', 
         const exec = new EffectExecutor({ handlers, bindings, context });
         const renderEffect: Effect = ['render-ui', 'main', { type: 'card' }];
         await exec.executeAll([renderEffect]);
-        expect(clientEffects).toEqual([['render-ui', 'main', { type: 'card' }, null, null]]);
+        expect(clientEffects).toEqual([['render-ui', 'main', { type: 'card' }]]);
         expect(clientEffectsByTrait).toEqual([
-            { traitName: 'ListItemViewer', effect: ['render-ui', 'main', { type: 'card' }, null, null] },
+            { traitName: 'ListItemViewer', effect: ['render-ui', 'main', { type: 'card' }] },
         ]);
     });
 

@@ -854,8 +854,8 @@ export function createServerEffectHandlers(
       }
     },
 
-    renderUI: (slot, pattern, props, priority) => {
-      pushClientEffect(["render-ui", slot, pattern, props ?? null, priority ?? null]);
+    renderUI: (slot, pattern) => {
+      pushClientEffect(["render-ui", slot, pattern]);
     },
 
     navigate: (path, params, crumb) => {

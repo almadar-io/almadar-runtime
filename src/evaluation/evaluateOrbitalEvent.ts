@@ -565,9 +565,6 @@ export async function evaluateOrbitalEvent(
   // The scope a trait last committed under in THIS request is its address for
   // every later delivery.
   const scopeByTrait = new Map<string, string | undefined>();
-  // A row a step minted mid-arm (persist create): later READS use it, the
-  // state machine stays addressed where the event came in.
-  const rowByTrait = new Map<string, string>();
   const stepEntityId = (traitName: string, entry: IndexedTrait, forwarded: string | undefined): string | undefined =>
     forwarded ??
     (scopeByTrait.has(traitName) ? scopeByTrait.get(traitName) : undefined) ??
@@ -611,7 +608,7 @@ export async function evaluateOrbitalEvent(
     }
 
     const currentEntityId = stepEntityId(item.trait, entry, item.entityId);
-    let rowId = rowByTrait.get(item.trait) ?? currentEntityId;
+    const rowId = currentEntityId;
     const readFrame = (): Promise<EntityRow> => readTraitFrame(persistence, frames, entry, rowId);
 
     const visitFrame = await readFrame();
@@ -689,21 +686,6 @@ export async function evaluateOrbitalEvent(
           if (item.onPage || activeTraits?.has(item.trait) === true) {
             clientEffects.push(...itemClientEffects);
             clientEffectsByTrait.push(...itemClientEffectsByTrait);
-          }
-          // A step's `persist create` on a row that had none mints the real
-          // id — every read from here on uses it; the state stays addressed
-          // where the event came in. A `[shared]` entity's frame is the one
-          // working instance its traits share: a create records a row, it
-          // never re-addresses that instance.
-          if (rowId === undefined && !entry.isSharedEntity) {
-            const created = effectResults.slice(effectStart).find(
-              (r) => r.effect === 'persist' && r.action === 'create' && r.entityType === entry.entity.name && r.success,
-            );
-            const createdId = (created?.data as EntityRow | undefined)?.id;
-            if (typeof createdId === 'string') {
-              rowId = createdId;
-              rowByTrait.set(item.trait, createdId);
-            }
           }
           return {
             effectResults: [{

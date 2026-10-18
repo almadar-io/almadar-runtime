@@ -7,6 +7,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import type { EventPayload, OrbitalSchema, ServiceParams } from '@almadar/core';
 import { isInlineTrait } from '@almadar/core';
 import { openBrowserHost, type BrowserHost } from '../src/evaluation/browser-store-transport';
+import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
 
 const program: OrbitalSchema = {
   name: 'Recall',
@@ -34,7 +35,7 @@ const program: OrbitalSchema = {
 const hosts: BrowserHost[] = [];
 afterEach(() => hosts.splice(0).forEach((h) => h.close()));
 
-describe('openBrowserHost: cancel a call, then call again under the same key', () => {
+describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost: cancel a call, then call again under the same key', () => {
   it('the new call answers and the trait reaches done; both requests complete', async () => {
     const calls: number[] = [];
     const callService = (_s: string, _a: string, params?: ServiceParams, context?: { signal?: AbortSignal }) =>
@@ -43,7 +44,7 @@ describe('openBrowserHost: cancel a call, then call again under the same key', (
         const timer = setTimeout(() => resolve({ n: Number(params?.n) }), 60);
         context?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')); });
       });
-    const host = await openBrowserHost({ databaseName: `recall-${Math.random()}`, schema: program, callService });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: `recall-${Math.random()}`, schema: program, callService });
     hosts.push(host);
     await host.send('Recall', { event: 'INIT', targetTrait: 'Judge', payload: {} });
     const ask = host.send('Recall', { event: 'ASK', payload: {} });
@@ -57,6 +58,7 @@ describe('openBrowserHost: cancel a call, then call again under the same key', (
     expect(after).toBe('served');
   });
 
+
   it('a cancelled call\'s request does not run on after the cancel until it holds the host again', async () => {
     const order: string[] = [];
     const callService = (_s: string, _a: string, params?: ServiceParams, context?: { signal?: AbortSignal }) =>
@@ -65,7 +67,7 @@ describe('openBrowserHost: cancel a call, then call again under the same key', (
         const timer = setTimeout(() => resolve({ n: Number(params?.n) }), 80);
         context?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')); });
       });
-    const host = await openBrowserHost({ databaseName: `recall-${Math.random()}`, schema: program, callService });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: `recall-${Math.random()}`, schema: program, callService });
     hosts.push(host);
     await host.send('Recall', { event: 'INIT', targetTrait: 'Judge', payload: {} });
     const ask = host.send('Recall', { event: 'ASK', payload: {} }).then(() => order.push('ask done'));
@@ -78,7 +80,7 @@ describe('openBrowserHost: cancel a call, then call again under the same key', (
   });
 });
 
-describe('openBrowserHost: a view request cancels a call a tick started', () => {
+describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost: a view request cancels a call a tick started', () => {
   const judge = program.orbitals[0].traits[0];
   if (!isInlineTrait(judge)) throw new Error('fixture: the Judge trait is inline');
   const ticking: OrbitalSchema = {
@@ -95,13 +97,13 @@ describe('openBrowserHost: a view request cancels a call a tick started', () => 
         const timer = setTimeout(() => resolve({ n: Number(params?.n) }), 80);
         context?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')); });
       });
-    const host = await openBrowserHost({ databaseName: `recall-tick-${Math.random()}`, schema: ticking, callService });
+    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: `recall-tick-${Math.random()}`, schema: ticking, callService });
     hosts.push(host);
-    await host.send('RecallTick', { event: 'INIT', targetTrait: 'Judge', payload: {} });
+    await host.send(program.orbitals[0].name, { event: 'INIT', targetTrait: 'Judge', payload: {} });
     await new Promise((r) => setTimeout(r, 60));
-    const switched = await Promise.race([host.send('RecallTick', { event: 'SWITCH', payload: {} }).then((r) => r.states.Judge), new Promise((r) => setTimeout(() => r('stuck'), 2000))]);
+    const switched = await Promise.race([host.send(program.orbitals[0].name, { event: 'SWITCH', payload: {} }).then((r) => r.states.Judge), new Promise((r) => setTimeout(() => r('stuck'), 2000))]);
     expect(switched).toBe('done');
-    const served = await Promise.race([host.send('RecallTick', { event: 'PING', payload: {} }).then(() => 'served'), new Promise((r) => setTimeout(() => r('host stuck'), 1000))]);
+    const served = await Promise.race([host.send(program.orbitals[0].name, { event: 'PING', payload: {} }).then(() => 'served'), new Promise((r) => setTimeout(() => r('host stuck'), 1000))]);
     expect(served).toBe('served');
     expect(calls).toEqual([1, 2]);
   });
