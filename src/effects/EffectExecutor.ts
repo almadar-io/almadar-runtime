@@ -1827,7 +1827,10 @@ export class EffectExecutor {
             case 'render-ui':
             case 'render': {
                 if (this.handlers.renderUI) {
-                    const slot = args[0] as string;
+                    const slot = args[0];
+                    if (typeof slot !== 'string' || slot === '') {
+                        throw new Error(`render-ui: the slot must name a slot, got ${String(slot)}`);
+                    }
                     // The render-ui SExpr's pattern slot carries either a
                     // resolved `PatternConfig` (post-interpolation) or `null`
                     // when the trait is clearing the slot. Anything else is

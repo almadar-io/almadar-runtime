@@ -19,7 +19,7 @@ const sendTrait: Trait = {
     events: [{ key: 'GO', name: 'GO' }],
     transitions: [{
       from: 'idle', to: 'idle', event: 'GO',
-      effects: [['call-service', 'knowledge', 'status', {},
+      effects: [['call-service', 'hosting', 'status', {},
         { emit: { success: 'SENT', failure: 'SEND_FAILED' } }]],
     }],
   },
@@ -43,7 +43,7 @@ async function fire(runtime: OrbitalServerRuntime) {
   return res.emittedEvents;
 }
 
-afterEach(() => unregisterServiceProvider('knowledge'));
+afterEach(() => unregisterServiceProvider('hosting'));
 
 describe('call-service on the runtime path', () => {
   it('a provider failure fires the declared failure route, not success', async () => {
@@ -62,12 +62,12 @@ describe('call-service on the runtime path', () => {
     const events = await fire(runtime);
     const failed = events.find((e) => e.event === 'SEND_FAILED');
     expect(failed).toBeDefined();
-    expect(JSON.stringify(failed?.payload)).toContain('Unknown integration: knowledge');
+    expect(JSON.stringify(failed?.payload)).toContain('Unknown integration: hosting');
     expect(events.map((e) => e.event)).not.toContain('SENT');
   });
 
   it('control: a registered service answers with no host handler', async () => {
-    registerServiceProvider('knowledge', async () => ({ id: 'reg-1' }));
+    registerServiceProvider('hosting', async () => ({ id: 'reg-1' }));
     const runtime = new OrbitalServerRuntime({ mode: 'real', debug: false });
     const sent = (await fire(runtime)).find((e) => e.event === 'SENT');
     expect(sent?.payload).toMatchObject({ id: 'reg-1' });

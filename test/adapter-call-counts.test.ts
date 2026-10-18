@@ -137,7 +137,7 @@ describe.skipIf(KERNEL_DIR === undefined)('the frame row of a persistent entity 
   });
 
   async function frameReads(persistence: 'persistent' | 'runtime'): Promise<number> {
-    const doc: { schema: OrbitalSchema } = JSON.parse(readFileSync(new URL('../../../tools/kernel-bench/fixtures/scenarios/emit-fanout.json', import.meta.url), 'utf8'));
+    const doc: { schema: OrbitalSchema } = JSON.parse(readFileSync(new URL('./fixtures/scenarios/emit-fanout.json', import.meta.url), 'utf8'));
     const orbital = doc.schema.orbitals[0];
     if (isEntityReferenceAny(orbital.entity)) throw new Error('emit-fanout has an inline entity');
     const schema: OrbitalSchema = { ...doc.schema, orbitals: [{ ...orbital, entity: { ...orbital.entity, persistence } }] };

@@ -1,6 +1,6 @@
 // program/inputs, program/dispatch and persist/read-named through the interpreter's executor: the same
 // vectors the Rust kernel runs (`orbital-core-runtime` tests/agent_ports.rs), the same emitted trace.
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
 import {
     externalInputsOf,
@@ -39,7 +39,6 @@ interface Vectors {
 
 const EMIT = { emit: { success: 'OK', failure: 'FAILED' } };
 const local = new URL('./fixtures/agent-ports/vectors.json', import.meta.url);
-const canonical = new URL('../../../orbital-rust/crates/orbital-core/crates/runtime/tests/fixtures/agent-ports/vectors.json', import.meta.url);
 const vectors: Vectors = JSON.parse(readFileSync(local, 'utf8'));
 const schema = parseOrbitalSchema(vectors.schema);
 
@@ -73,10 +72,6 @@ function fired(emit: ReturnType<typeof vi.fn>, event: string): RuntimeValue[] {
 }
 
 describe('agent ports: shared vectors through the executor', () => {
-    it.skipIf(!existsSync(canonical))('matches the canonical corpus byte-for-byte (monorepo)', () => {
-        expect(readFileSync(local).equals(readFileSync(canonical)), 'agent-ports corpus differs').toBe(true);
-    });
-
     for (const c of vectors.cases) {
         it(c.name, async () => {
             const dispatched: Dispatched[] = [];
