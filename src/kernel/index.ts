@@ -12,6 +12,7 @@ export type {
   IoReplyWire,
   IoRequestWire,
   KernelModule,
+  KernelServerClass,
   KernelServerHandle,
   PendingRequestWire,
   ResolveProgressWire,

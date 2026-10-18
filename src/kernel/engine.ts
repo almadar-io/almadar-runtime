@@ -3,7 +3,7 @@
  * (`@almadar/kernel`, WebAssembly) decides every execution step; this host answers the I/O it asks for
  * and nothing else. The continuation of a stopped dispatch never leaves the wasm instance.
  */
-import { isEntityReferenceAny, type EventPayload, type MessageCatalogs, type OrbitalEventRequest, type OrbitalEventResponse, type OrbitalSchema, type RowQueryPage, type RowSetRef, type UserContext } from '@almadar/core';
+import { installKernelEvaluator, isEntityReferenceAny, type EventPayload, type MessageCatalogs, type OrbitalEventRequest, type OrbitalEventResponse, type OrbitalSchema, type RowQueryPage, type RowSetRef, type UserContext } from '@almadar/core';
 import { decodeProgress, decodeResolveProgress } from './decode.js';
 import { answerRequest, declareCapabilities, type KernelAnswerScope, type KernelHostPorts } from './host.js';
 import type { IoReplyWire, KernelModule, KernelServerHandle } from './wire.js';
@@ -18,24 +18,35 @@ export class KernelEngine {
     private readonly schemaJson: string,
     private readonly ports: KernelHostPorts,
     private readonly entityTypes: readonly string[] = [],
+    private readonly store?: Readonly<Record<string, string>>,
   ) {
-    this.handle = new kernel.Server(schemaJson);
+    installKernelEvaluator(kernel);
+    this.handle = this.openServer();
     this.declare();
   }
 
+  /** A server over the host's ports, or over the kernel's own store when `store` selects one (native add-on only). */
+  private openServer(): KernelServerHandle {
+    if (this.store === undefined) return new this.kernel.Server(this.schemaJson);
+    const withStore = this.kernel.Server.withStore;
+    if (withStore === undefined) throw new Error("a kernel store needs the native add-on (engine: 'native'); this kernel module has none");
+    return withStore.call(this.kernel.Server, this.schemaJson, JSON.stringify(this.store));
+  }
+
   private declare(): void {
+    if (this.store !== undefined) return;
     const handle = this.handle;
     declareCapabilities(this.ports.persistence, (entityType, queryJson, writeJson) => handle.setCapabilities(entityType, queryJson, writeJson), this.entityTypes);
   }
 
-  static open(kernel: KernelModule, schema: OrbitalSchema, ports: KernelHostPorts): KernelEngine {
-    return new KernelEngine(kernel, JSON.stringify(schema), ports, schema.orbitals.flatMap((orbital) => (isEntityReferenceAny(orbital.entity) ? [] : [orbital.entity.name])));
+  static open(kernel: KernelModule, schema: OrbitalSchema, ports: KernelHostPorts, store?: Readonly<Record<string, string>>): KernelEngine {
+    return new KernelEngine(kernel, JSON.stringify(schema), ports, schema.orbitals.flatMap((orbital) => (isEntityReferenceAny(orbital.entity) ? [] : [orbital.entity.name])), store);
   }
 
   /** A fresh kernel on the same program: every trait back at its initial state. */
   reset(): void {
     this.handle.free();
-    this.handle = new this.kernel.Server(this.schemaJson);
+    this.handle = this.openServer();
     this.declare();
     this.handle.setTickMount(JSON.stringify(this.tickMount));
     this.handle.setMessages(JSON.stringify(this.messages.locales), JSON.stringify(this.messages.catalogs));

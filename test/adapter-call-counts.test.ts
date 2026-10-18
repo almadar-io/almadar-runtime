@@ -70,7 +70,7 @@ const counts = (create: number, update: number, getById: number, list: number, p
 // Totals include the dispatch's own frame reads (JS: readTraitFrame; kernel: readRow/listRows for the bound entity),
 // which the `noop` control isolates; the persist effect's own share is the difference.
 const JS = { noop: counts(0, 0, 0, 0), update: counts(0, 0, 0, 0, { writeWhere: 1 }), create: counts(1, 0, 3, 2), batch: counts(3, 0, 0, 0), fetch: counts(0, 0, 0, 0, { queryPage: 1 }) };
-const KERNEL = { noop: counts(0, 0, 2, 0), update: counts(0, 0, 4, 0, { writeBatch: 1 }), create: counts(0, 0, 4, 0, { writeBatch: 1 }), batch: counts(0, 0, 4, 0, { writeBatch: 1 }), fetch: counts(0, 0, 4, 0, { queryPage: 1 }) };
+const KERNEL = { noop: counts(0, 0, 1, 0), update: counts(0, 0, 2, 0, { writeBatch: 1 }), create: counts(0, 0, 2, 0, { writeBatch: 1 }), batch: counts(0, 0, 2, 0, { writeBatch: 1 }), fetch: counts(0, 0, 1, 0, { queryPage: 1 }) };
 
 describe('adapter calls per dispatch, JS engine (push-down)', () => {
   it('control: an event with no effects reads nothing', async () => expect(await callsFor('noop', {})).toEqual(JS.noop));
@@ -85,7 +85,7 @@ describe.skipIf(KERNEL_DIR === undefined)('adapter calls per dispatch, kernel ho
   beforeAll(async () => {
     kernel = await loadKernel();
   });
-  it('control: an event with no effects costs only the two frame reads', async () => expect(await callsFor('noop', { kernel })).toEqual(KERNEL.noop));
+  it('control: an event with no effects costs only the one frame read', async () => expect(await callsFor('noop', { kernel })).toEqual(KERNEL.noop));
   it('persist update', async () => expect(await callsFor('update', { kernel })).toEqual(KERNEL.update));
   it('persist create', async () => expect(await callsFor('create', { kernel })).toEqual(KERNEL.create));
   it('persist batch of 3', async () => expect(await callsFor('batch', { kernel })).toEqual(KERNEL.batch));
@@ -135,4 +135,35 @@ describe.skipIf(KERNEL_DIR === undefined)('runtime rows live in the kernel (wasm
   });
   it('a dispatch over a [runtime] entity makes no adapter call', async () => expect(await totalCalls('runtime', kernel)).toBe(0));
   it('control: the same program over a persistent entity reads its frame from the adapter', async () => expect(await totalCalls('persistent', kernel)).toBeGreaterThan(0));
+});
+
+// A persistent entity's frame row is asked of the adapter once per dispatch, however many steps read it. Twin: orbital-core
+// `server_transitions.rs` `runtime_rows` (the same oracle file).
+describe.skipIf(KERNEL_DIR === undefined)('the frame row of a persistent entity is read once per dispatch (wasm host)', () => {
+  let kernel: KernelModule;
+  beforeAll(async () => {
+    kernel = await loadKernel();
+  });
+
+  async function frameReads(persistence: 'persistent' | 'runtime'): Promise<number> {
+    const doc: { schema: OrbitalSchema } = JSON.parse(readFileSync(new URL('../../almadar-parity/fixtures/scenarios/emit-fanout.json', import.meta.url), 'utf8'));
+    const orbital = doc.schema.orbitals[0];
+    if (isEntityReferenceAny(orbital.entity)) throw new Error('emit-fanout has an inline entity');
+    const schema: OrbitalSchema = { ...doc.schema, orbitals: [{ ...orbital, entity: { ...orbital.entity, persistence } }] };
+    const counting = new CountingPersistence(new InMemoryPersistence());
+    const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: counting, engine: 'kernel', kernel });
+    await runtime.register(schema);
+    counting.reset();
+    const response = await runtime.processOrbitalEvent('Main', { event: 'GO', targetTrait: 'Src' });
+    expect(response.success).toBe(true);
+    expect(response.states.Sink).toBe('done');
+    return counting.counts().byMethod.getById;
+  }
+
+  it('emit-fanout go over a persistent entity asks the adapter once', async () => {
+    const oracle: { emitFanoutPersistent: { frameReads: number } } = JSON.parse(readFileSync(new URL('./fixtures/adapter-calls.json', import.meta.url), 'utf8'));
+    expect(await frameReads('persistent')).toBe(oracle.emitFanoutPersistent.frameReads);
+  });
+
+  it('control: the same program over a runtime entity asks it never', async () => expect(await frameReads('runtime')).toBe(0));
 });

@@ -1,8 +1,7 @@
 import type { OrbitalSchema, UserContext } from '@almadar/core';
-import { personaFromIdentityRow } from '@almadar/core';
+import { applyRowAccess, checkMutationAccess, personaFromIdentityRow } from '@almadar/core';
 import { entityAccessPoliciesByStoreKey } from '@almadar/core/mock';
 import type { MockPersistenceAdapter } from '@almadar/db/mock';
-import { applyRowAccess, checkMutationAccess } from '@almadar/evaluator/entityAccess';
 
 /**
  * Install the schema's access policies as the seeder's owner gates — the one
@@ -20,18 +19,18 @@ export function installPolicyOwnerGates(
   adapter.setOwnerGate((storeKey, candidateRow) => {
     const user = viewer();
     if (!user) return true;
-    return checkMutationAccess(candidateRow, policiesByStore.get(storeKey)?.create, { user });
+    return checkMutationAccess('create', candidateRow, policiesByStore.get(storeKey)?.create, { user }, storeKey);
   });
   // A row without a usable identity id fails closed rather than evaluating as anonymous.
   adapter.setOwnerCandidateGate((storeKey, candidateRow, candidateIdentityRow) => {
     const persona = personaFromIdentityRow(candidateIdentityRow);
     if (!persona) return false;
-    return checkMutationAccess(candidateRow, policiesByStore.get(storeKey)?.create, { user: persona });
+    return checkMutationAccess('create', candidateRow, policiesByStore.get(storeKey)?.create, { user: persona }, storeKey);
   });
   adapter.setOwnerReadGate((storeKey, candidateRow, candidateIdentityRow) => {
     const read = policiesByStore.get(storeKey)?.read;
     const persona = personaFromIdentityRow(candidateIdentityRow);
     if (read === undefined || !persona) return false;
-    return applyRowAccess([candidateRow], read, undefined, { user: persona }).length === 1;
+    return applyRowAccess([candidateRow], read, undefined, { user: persona }, storeKey).length === 1;
   });
 }

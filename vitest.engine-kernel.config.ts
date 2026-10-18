@@ -15,6 +15,7 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     exclude: ['test/kernel-engine.test.ts', 'test/baked/**'],
     globals: true,
+    setupFiles: ['./test/helpers/kernel-evaluator.setup.ts'],
     testTimeout: 20000,
     hookTimeout: 20000,
   },

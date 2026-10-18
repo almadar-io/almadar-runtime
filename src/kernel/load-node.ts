@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { installKernelEvaluator } from '@almadar/core';
 import type { HttpKernel } from './http-exchange.js';
 import type { KernelModule } from './wire.js';
 
@@ -37,6 +38,7 @@ async function loadKernel(kernelDir: string, options: LoadKernelOptions): Promis
   loaded.initSync({ module: await readFile(join(kernelDir, 'pkg/orbital_wasm_bg.wasm')) });
   const { readLanguageBundle } = await import('@almadar/core/language-data');
   loaded.installLanguage(JSON.stringify(readLanguageBundle(options.languageFrom ?? process.cwd())));
+  installKernelEvaluator(loaded);
   return loaded;
 }
 
@@ -69,5 +71,6 @@ export async function loadNativeKernelModule(addonPath: string, options: LoadKer
   const loaded: LoadedKernel = createRequire(import.meta.url)(addonPath);
   const { readLanguageBundle } = await import('@almadar/core/language-data');
   loaded.installLanguage(JSON.stringify(readLanguageBundle(options.languageFrom ?? process.cwd())));
+  installKernelEvaluator(loaded);
   return loaded;
 }

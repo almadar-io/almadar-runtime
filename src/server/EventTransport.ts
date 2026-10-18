@@ -160,9 +160,16 @@ function isDispatchPushEnvelope(value: ServerPushEnvelope): value is ServerPushE
 }
 
 interface SharedPushChannel {
-  source: EventSource;
+  source: EventSource | undefined;
   subscribers: Set<(envelope: ServerPushEnvelope) => void>;
+  closed: boolean;
 }
+
+/** `EventSource.readyState` of a connection the browser gave up on (a refused stream is not retried by the browser). */
+const EVENT_SOURCE_CLOSED = 2;
+
+/** How long a ticketed channel waits before it mints a new ticket and reopens. */
+const REOPEN_DELAY_MS = 1000;
 
 /**
  * One shared EventSource per events URL, fanned out to every subscriber.
@@ -188,39 +195,67 @@ function parseFrameNumber(id: string): FrameNumber | undefined {
 /** The last numbered frame each tab applied, per push endpoint (`<events url>|<clientId>`): a reopened channel resumes after it and drops replays. */
 const lastFrameByClient = new Map<string, FrameNumber>();
 
-function acquirePushChannel(url: string, resumeKey: string | undefined, subscriber: (envelope: ServerPushEnvelope) => void): () => void {
-  let channel = pushChannels.get(url);
+/**
+ * The shared channel for `key`, opened on the URL `resolveUrl` gives. The URL carries a single-use stream ticket, so when the server ends the stream a fresh URL is minted and
+ * the channel opens again: the browser will not retry a refused stream.
+ */
+function acquirePushChannel(
+  key: string,
+  resolveUrl: () => Promise<string>,
+  resumeKey: string | undefined,
+  subscriber: (envelope: ServerPushEnvelope) => void,
+): () => void {
+  let channel = pushChannels.get(key);
   if (channel === undefined) {
-    const source = new EventSource(url);
-    const created: SharedPushChannel = { source, subscribers: new Set() };
-    source.onmessage = (ev: MessageEvent<string>) => {
-      let parsed: ServerPushEnvelope;
+    const created: SharedPushChannel = { source: undefined, subscribers: new Set(), closed: false };
+    const open = async (): Promise<void> => {
+      let url: string;
       try {
-        parsed = JSON.parse(ev.data) as ServerPushEnvelope;
+        url = await resolveUrl();
       } catch (err) {
-        log.warn('push:parse-failed', { error: err instanceof Error ? err.message : String(err) });
+        log.error('push:open-failed', { error: err instanceof Error ? err.message : String(err) });
         return;
       }
-      const number = ev.lastEventId ? parseFrameNumber(ev.lastEventId) : undefined;
-      if (number !== undefined && resumeKey !== undefined) {
-        const seen = lastFrameByClient.get(resumeKey);
-        if (seen !== undefined && seen.boot === number.boot && number.n <= seen.n) return;
-        lastFrameByClient.set(resumeKey, number);
-      }
-      for (const sub of created.subscribers) sub(parsed);
+      if (created.closed) return;
+      const source = new EventSource(url);
+      created.source = source;
+      source.onmessage = (ev: MessageEvent<string>) => {
+        let parsed: ServerPushEnvelope;
+        try {
+          parsed = JSON.parse(ev.data) as ServerPushEnvelope;
+        } catch (err) {
+          log.warn('push:parse-failed', { error: err instanceof Error ? err.message : String(err) });
+          return;
+        }
+        const number = ev.lastEventId ? parseFrameNumber(ev.lastEventId) : undefined;
+        if (number !== undefined && resumeKey !== undefined) {
+          const seen = lastFrameByClient.get(resumeKey);
+          if (seen !== undefined && seen.boot === number.boot && number.n <= seen.n) return;
+          lastFrameByClient.set(resumeKey, number);
+        }
+        for (const sub of created.subscribers) sub(parsed);
+      };
+      source.onerror = () => {
+        log.warn('push:connection-error', { channel: key });
+        if (source.readyState === EVENT_SOURCE_CLOSED && !created.closed) {
+          created.source = undefined;
+          setTimeout(() => {
+            if (!created.closed) void open();
+          }, REOPEN_DELAY_MS);
+        }
+      };
     };
-    source.onerror = () => {
-      log.warn('push:connection-error', { url });
-    };
-    pushChannels.set(url, created);
+    pushChannels.set(key, created);
+    void open();
     channel = created;
   }
   channel.subscribers.add(subscriber);
   return () => {
     channel.subscribers.delete(subscriber);
     if (channel.subscribers.size === 0) {
-      channel.source.close();
-      pushChannels.delete(url);
+      channel.closed = true;
+      channel.source?.close();
+      pushChannels.delete(key);
     }
   };
 }
@@ -273,26 +308,27 @@ export function createHttpTransport(options: HttpTransportOptions): EventTranspo
   // behavior — orbital names alone are not unique across a catalog.
   let behavior: string | undefined;
 
-  /** One subscriber on this server's shared push channel, addressed by `params` (plus the access token). */
+  /** One subscriber on this server's shared push channel, addressed by `params`. */
   const openPushChannel = (params: Record<string, string>, subscriber: (envelope: ServerPushEnvelope) => void): (() => void) => {
     if (typeof EventSource === 'undefined') return () => {};
-    let release: (() => void) | undefined;
-    let cancelled = false;
-    void (async () => {
-      const token = getAccessToken ? await getAccessToken() : undefined;
-      if (cancelled) return;
-      const search = new URLSearchParams(params);
-      if (token) search.set('access_token', token);
-      const eventsUrl = deriveEventsUrl(serverUrl);
-      const resumeKey = params['clientId'] !== undefined ? `${eventsUrl}|${params['clientId']}` : undefined;
+    const eventsUrl = deriveEventsUrl(serverUrl);
+    const resumeKey = params['clientId'] !== undefined ? `${eventsUrl}|${params['clientId']}` : undefined;
+    const withResume = (search: URLSearchParams): string => {
       const seen = resumeKey !== undefined ? lastFrameByClient.get(resumeKey) : undefined;
       if (seen !== undefined) search.set('since', `${seen.boot}-${seen.n}`);
-      release = acquirePushChannel(`${eventsUrl}?${search.toString()}`, resumeKey, subscriber);
-    })();
-    return () => {
-      cancelled = true;
-      release?.();
+      return `${eventsUrl}?${search.toString()}`;
     };
+    // A browser EventSource cannot send a header and a token in the URL leaks into logs, so the stream opens with a
+    // single-use ticket minted with the bearer; a ticket is spent by its connection, hence a fresh one per reopen.
+    const key = `${eventsUrl}?${new URLSearchParams(params).toString()}`;
+    const resolveUrl = async (): Promise<string> => {
+      const reply = await fetchFn(`${eventsUrl}/ticket`, { method: 'POST', headers: await authHeaders(getAccessToken) });
+      if (!reply.ok) throw new Error(`the server refused a stream ticket: ${reply.status}`);
+      const body: { ticket?: string } = await reply.json();
+      if (typeof body.ticket !== 'string' || body.ticket.length === 0) throw new Error('the server sent no stream ticket');
+      return withResume(new URLSearchParams({ ...params, ticket: body.ticket }));
+    };
+    return acquirePushChannel(key, resolveUrl, resumeKey, subscriber);
   };
 
   return {

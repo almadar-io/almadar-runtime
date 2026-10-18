@@ -1,3 +1,5 @@
+import type { KernelEvaluatorExports } from '@almadar/core';
+
 /**
  * The server-role kernel's wire is `@almadar/core/kernel-wire` (generated from orbital-core `embed::wire`);
  * re-exported here for the kernel module's callers. Only the `Server` class surface lives in this file.
@@ -42,9 +44,20 @@ export interface KernelServerHandle {
   free(): void;
 }
 
+/** The `Server` constructor of a kernel module. `withStore` exists on the native add-on only. */
+export interface KernelServerClass {
+  new (resolvedSchemaJson: string): KernelServerHandle;
+  /**
+   * A server that answers its own row asks from the store `envJson` (a JSON object of environment variables:
+   * `DATA_BACKEND`, `NODE_ENV`, `DATABASE_URL`, `COUCHDB_URL`, the Firebase variables) selects, so the host is asked
+   * only for the rest. Absent on the wasm module, which has no sockets.
+   */
+  withStore?(resolvedSchemaJson: string, envJson: string): KernelServerHandle;
+}
+
 /** An initialised `@almadar/kernel` module: what `OrbitalServerRuntime({ engine: 'kernel' })` is handed. */
-export interface KernelModule {
-  Server: new (resolvedSchemaJson: string) => KernelServerHandle;
+export interface KernelModule extends KernelEvaluatorExports {
+  Server: KernelServerClass;
   /** Whether the absolute `glob` matches `path`, as the one-grant matcher `os/glob` filters with. */
   osGlobMatches(glob: string, path: string): boolean;
   /** `is_public_address`: the rule an outbound host name must pass. */

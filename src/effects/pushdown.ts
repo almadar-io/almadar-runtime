@@ -21,7 +21,7 @@ import {
   type RequiredFields,
   type WritePlan,
 } from '@almadar/db/pushdown';
-import { accessDeniedMessage, applyRowAccess, rowAccess, type AccessBindings } from '@almadar/evaluator/entityAccess';
+import { accessDeniedMessage, applyRowAccess, rowAccess, type AccessBindings } from '@almadar/core';
 import type { PersistBatchSummary } from '../types.js';
 import { duplicateIdFailure, notFoundFailure } from './persist-failure.js';
 import { resolveRowSetFromRows, resolveRowSetFromStore } from './row-set-resolve.js';
@@ -79,7 +79,7 @@ export async function resolveRowSetFromPersistence(
   if (compiled.kind === 'query' && persistence.queryPage) {
     return resolveRowSetFromStore({ queryPage: persistence.queryPage.bind(persistence) }, ref, compiled.policy);
   }
-  const readable = applyRowAccess(await persistence.list(ref.entityType), readPolicy, undefined, bindings);
+  const readable = applyRowAccess(await persistence.list(ref.entityType), readPolicy, undefined, bindings, ref.entityType);
   return resolveRowSetFromRows(readable, ref);
 }
 

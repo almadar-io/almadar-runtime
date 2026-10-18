@@ -127,3 +127,23 @@ describe('GET /:orbital/entities/:entityType', () => {
     expect(body.rows).toEqual([]);
   });
 });
+
+describe('the API views the router answers from', () => {
+  it('lists, describes and reads rows of a registered orbital', async () => {
+    const runtime = new OrbitalServerRuntime();
+    await runtime.register(schema);
+    await runtime.persistence.create('Note', { title: 'Root' });
+    expect(runtime.listOrbitalSummaries()).toEqual([{ name: 'Notes', entity: 'Note', traits: ['noteList'] }]);
+    const info = await runtime.describeOrbital('Notes');
+    expect(info?.traits).toEqual([{ name: 'noteList', currentState: undefined, states: ['browsing'], events: [] }]);
+    const rows = await runtime.entityRows('Notes', 'Note');
+    expect(rows?.some((row: EntityRow) => row.title === 'Root')).toBe(true);
+  });
+
+  it('control: an orbital that is not registered has no description and no rows', async () => {
+    const runtime = new OrbitalServerRuntime();
+    await runtime.register(schema);
+    expect(await runtime.describeOrbital('Missing')).toBeUndefined();
+    expect(await runtime.entityRows('Missing', 'Note')).toBeUndefined();
+  });
+});

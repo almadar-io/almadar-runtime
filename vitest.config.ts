@@ -7,6 +7,7 @@ export default defineConfig({
             'src/**/__tests__/**/*.test.ts',
         ],
         globals: true,
+        setupFiles: ['./test/helpers/kernel-evaluator.setup.ts'],
         // The SSE suites (`sse-stream`, `sse-incremental`) boot a real Express
         // server and drive a live event stream. Their bodies run in ~1.4-4.2s,
         // which fits vitest's 5s default only when they run alone — with two

@@ -28,6 +28,7 @@ class FakeEventSource {
   onmessage: ((e: MessageEvent) => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
+  readyState = 1;
   constructor(public url: string) {
     FakeEventSource.instances.push(this);
   }
@@ -38,6 +39,15 @@ class FakeEventSource {
     this.onmessage?.({ data: JSON.stringify(data), lastEventId } as MessageEvent);
   }
 }
+
+/** A server that hands out `tkt-1`, `tkt-2`, … to every ticket request. */
+function ticketFetch() {
+  let issued = 0;
+  return vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () =>
+    new Response(JSON.stringify({ ticket: `tkt-${++issued}` }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  );
+}
+
 
 describe('deriveCarriesCircuitState', () => {
   it('stateful topology carries no circuit state', () => {
@@ -154,9 +164,10 @@ describe('createHttpTransport push subscribe', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opens the sibling /events channel with the caller-supplied params and the access token', async () => {
+  it('opens the sibling /events channel with the caller-supplied params and a ticket minted with the access token', async () => {
     const getAccessToken = vi.fn(async () => 'id-token-1');
-    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', getAccessToken });
+    const fetchMock = ticketFetch();
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', getAccessToken, fetch: fetchMock });
     const onPush = vi.fn();
 
     const unsubscribe = transport.subscribe!(onPush, { clientId: 'tab-1' });
@@ -165,13 +176,17 @@ describe('createHttpTransport push subscribe', () => {
     const url = new URL(FakeEventSource.instances[0].url);
     expect(url.pathname).toBe('/api/events');
     expect(url.searchParams.get('clientId')).toBe('tab-1');
-    expect(url.searchParams.get('access_token')).toBe('id-token-1');
+    expect(url.searchParams.get('ticket')).toBe('tkt-1');
+    expect(url.searchParams.has('access_token')).toBe(false);
+    const mint = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit?];
+    expect(String(mint[0])).toBe('https://api.test/api/events/ticket');
+    expect(headerOf(mint, 'Authorization')).toBe('Bearer id-token-1');
 
     unsubscribe();
   });
 
   it('delivers a bus-type push message to onPush as an EmittedEvent and ignores non-bus messages', async () => {
-    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', fetch: ticketFetch() });
     const onPush = vi.fn();
 
     // Distinct `clientId` per test — `acquirePushChannel` shares one
@@ -191,7 +206,7 @@ describe('createHttpTransport push subscribe', () => {
   });
 
   it('an origin push (a running request\'s live message) is delivered as origin', async () => {
-    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', fetch: ticketFetch() });
     const onPush = vi.fn();
     const unsubscribe = transport.subscribe!(onPush, { clientId: 'test-origin-push' });
     await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -201,7 +216,7 @@ describe('createHttpTransport push subscribe', () => {
   });
 
   it('a host dispatch (a follow-on call\'s outcome the server ran) reaches subscribeHostDispatches on the same channel', async () => {
-    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', fetch: ticketFetch() });
     const onPush = vi.fn();
     const onDispatch = vi.fn();
     const unsubscribeBus = transport.subscribe!(onPush, { clientId: 'test-host-dispatch' });
@@ -217,7 +232,7 @@ describe('createHttpTransport push subscribe', () => {
   });
 
   it('control: a bus push never reaches a host-dispatch subscriber', async () => {
-    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', fetch: ticketFetch() });
     const onDispatch = vi.fn();
     const unsubscribe = transport.subscribeHostDispatches!(onDispatch, { clientId: 'test-host-dispatch-control' });
     await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -227,7 +242,7 @@ describe('createHttpTransport push subscribe', () => {
   });
 
   it('a reopened channel asks for the numbered frames after the last one this tab saw', async () => {
-    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', fetch: ticketFetch() });
     const first = transport.subscribeHostDispatches!(vi.fn(), { clientId: 'test-resume' });
     await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
     FakeEventSource.instances[0].emit({ type: 'dispatch', orbitalName: 'App', request: { event: 'A' }, response: { success: true, transitioned: false, states: {}, emittedEvents: [] } }, 'boot1-7');
@@ -240,7 +255,7 @@ describe('createHttpTransport push subscribe', () => {
   });
 
   it('a replayed frame this tab already applied is dropped', async () => {
-    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', fetch: ticketFetch() });
     const onDispatch = vi.fn();
     const unsubscribe = transport.subscribeHostDispatches!(onDispatch, { clientId: 'test-dedupe' });
     await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -253,7 +268,7 @@ describe('createHttpTransport push subscribe', () => {
   });
 
   it('edge: a frame from a restarted server (new boot id) is applied even with a lower number', async () => {
-    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', fetch: ticketFetch() });
     const onDispatch = vi.fn();
     const unsubscribe = transport.subscribeHostDispatches!(onDispatch, { clientId: 'test-reboot' });
     await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -265,7 +280,7 @@ describe('createHttpTransport push subscribe', () => {
   });
 
   it('control: unnumbered frames (peer pushes) are always delivered', async () => {
-    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', fetch: ticketFetch() });
     const onPush = vi.fn();
     const unsubscribe = transport.subscribe!(onPush, { clientId: 'test-unnumbered' });
     await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -276,7 +291,7 @@ describe('createHttpTransport push subscribe', () => {
   });
 
   it('closes the EventSource once the last subscriber unsubscribes', async () => {
-    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals' });
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', fetch: ticketFetch() });
     const unsubscribeA = transport.subscribe!(vi.fn(), { clientId: 'test-close-on-last-unsubscribe' });
     const unsubscribeB = transport.subscribe!(vi.fn(), { clientId: 'test-close-on-last-unsubscribe' });
     await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -330,5 +345,60 @@ describe('createInProcessTransport', () => {
     const transport = createInProcessTransport(vi.fn(), { carriesCircuitState: true });
     const result = await transport.register(schema);
     expect(result.carriesCircuitState).toBe(true);
+  });
+});
+
+describe('createHttpTransport push subscribe, ticket handling', () => {
+  beforeEach(() => {
+    vi.stubGlobal('EventSource', FakeEventSource);
+    FakeEventSource.instances = [];
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  function mintingFetch(tickets: string[], status = 200) {
+    return vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () =>
+      new Response(JSON.stringify({ ticket: tickets.shift() }), { status, headers: { 'Content-Type': 'application/json' } }),
+    );
+  }
+
+  it('mints a ticket with the bearer and opens the channel with it, never putting the access token in the URL', async () => {
+    const fetchMock = mintingFetch(['tkt-1']);
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', getAccessToken: async () => 'id-token-1', fetch: fetchMock });
+    const unsubscribe = transport.subscribe!(vi.fn(), { clientId: 'ticket-open' });
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    const call = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit?];
+    expect(String(call[0])).toBe('https://api.test/api/events/ticket');
+    expect(call[1]?.method).toBe('POST');
+    expect(headerOf(call, 'Authorization')).toBe('Bearer id-token-1');
+    const url = new URL(FakeEventSource.instances[0].url);
+    expect(url.searchParams.get('ticket')).toBe('tkt-1');
+    expect(url.searchParams.get('clientId')).toBe('ticket-open');
+    expect(url.searchParams.has('access_token')).toBe(false);
+    unsubscribe();
+  });
+
+  it('control: a refused ticket opens no stream', async () => {
+    const fetchMock = mintingFetch([], 401);
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', getAccessToken: async () => 'bad', fetch: fetchMock });
+    const unsubscribe = transport.subscribe!(vi.fn(), { clientId: 'ticket-refused' });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(FakeEventSource.instances).toHaveLength(0);
+    unsubscribe();
+  });
+
+  it('a stream the server ended is reopened with a fresh ticket, since a ticket is single use', async () => {
+    const fetchMock = mintingFetch(['tkt-a', 'tkt-b']);
+    const transport = createHttpTransport({ serverUrl: 'https://api.test/api/orbitals', getAccessToken: async () => 't', fetch: fetchMock });
+    const unsubscribe = transport.subscribe!(vi.fn(), { clientId: 'ticket-reopen' });
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    FakeEventSource.instances[0].readyState = 2;
+    FakeEventSource.instances[0].onerror?.();
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(2), { timeout: 3000 });
+    expect(new URL(FakeEventSource.instances[1].url).searchParams.get('ticket')).toBe('tkt-b');
+    unsubscribe();
   });
 });

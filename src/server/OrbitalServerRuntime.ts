@@ -289,6 +289,20 @@ export type PushItem =
 /**
  * Registered orbital with runtime state
  */
+/** One registered orbital as the API lists it. */
+export interface OrbitalSummary {
+  name: string;
+  entity: string | undefined;
+  traits: string[];
+}
+
+/** One registered orbital as the API describes it: its entity and each trait's current state, states and events. */
+export interface OrbitalInfo {
+  name: string;
+  entity: Entity;
+  traits: { name: string; currentState: string | undefined; states: string[]; events: string[] }[];
+}
+
 export interface RegisteredOrbital {
   schema: OrbitalDefinition;
   /** Resolved entity (never a string ref at runtime) */
@@ -2234,6 +2248,42 @@ export class OrbitalServerRuntime {
     return registered;
   }
 
+  /** The registered orbitals as `GET /` lists them. */
+  listOrbitalSummaries(): OrbitalSummary[] {
+    return Array.from(this.orbitals.entries()).map(([name, reg]) => ({
+      name,
+      entity: reg.entity?.name,
+      traits: (reg.traits || []).map((t) => t.name),
+    }));
+  }
+
+  /** One orbital as `GET /:orbital` describes it, awaiting an in-flight swap first (G-RUNTIME-038); `undefined` when it is not registered. */
+  async describeOrbital(orbitalName: string): Promise<OrbitalInfo | undefined> {
+    const registered = await this.resolveRegisteredOrbital(orbitalName);
+    if (!registered) return undefined;
+    const states: Record<string, string> = {};
+    for (const [name, state] of registered.manager.getAllStates()) {
+      states[name] = state.currentState;
+    }
+    return {
+      name: orbitalName,
+      entity: registered.entity,
+      traits: registered.traits.map((t) => ({
+        name: t.name,
+        currentState: states[t.name],
+        states: (t.stateMachine?.states || []).map((s) => s.name),
+        events: [...new Set((t.stateMachine?.transitions || []).map((tr) => tr.event))],
+      })),
+    };
+  }
+
+  /** An entity's full row set as `GET /:orbital/entities/:entityType` answers it (verification and tooling only); `undefined` when the orbital is not registered. */
+  async entityRows(orbitalName: string, entityType: string): Promise<EntityRow[] | undefined> {
+    const registered = await this.resolveRegisteredOrbital(orbitalName);
+    if (!registered) return undefined;
+    return this.persistence.list(entityType);
+  }
+
   /** The program's declared external inputs: what an outside client may send which trait. */
   listExternalInputs(): ExternalInput[] {
     return this.resolvedSchema ? externalInputsOf(this.resolvedSchema) : [];
@@ -3418,14 +3468,7 @@ export class OrbitalServerRuntime {
 
     // List orbitals
     router.get("/", (_req: Request, res: Response) => {
-      const orbitals = Array.from(this.orbitals.entries()).map(
-        ([name, reg]) => ({
-          name,
-          entity: reg.entity?.name,
-          traits: (reg.traits || []).map((t) => t.name),
-        }),
-      );
-      res.json({ success: true, orbitals });
+      res.json({ success: true, orbitals: this.listOrbitalSummaries() });
     });
 
     // Declared external inputs (before `/:orbital`, which would capture "inputs").
@@ -3457,33 +3500,12 @@ export class OrbitalServerRuntime {
     // Get orbital info
     router.get("/:orbital", async (req: Request, res: Response, next: NextFunction) => {
       try {
-      const orbitalName = req.params.orbital as string;
-      // Await an in-flight swap before the 404 (G-RUNTIME-038) — a state
-      // fetch racing a select/reload must not error against the emptied map.
-      const registered = await this.resolveRegisteredOrbital(orbitalName);
-      if (!registered) {
-        res.status(404).json({ success: false, error: "Orbital not found" });
-        return;
-      }
-
-      const states: Record<string, string> = {};
-      for (const [name, state] of registered.manager.getAllStates()) {
-        states[name] = state.currentState;
-      }
-
-      res.json({
-        success: true,
-        orbital: {
-          name: orbitalName,
-          entity: registered.entity,
-          traits: registered.traits.map((t) => ({
-            name: t.name,
-            currentState: states[t.name],
-            states: (t.stateMachine?.states || []).map((s) => s.name),
-            events: [...new Set((t.stateMachine?.transitions || []).map((tr) => tr.event))],
-          })),
-        },
-      });
+        const orbital = await this.describeOrbital(req.params.orbital as string);
+        if (!orbital) {
+          res.status(404).json({ success: false, error: "Orbital not found" });
+          return;
+        }
+        res.json({ success: true, orbital });
       } catch (error) {
         next(error);
       }
@@ -3497,18 +3519,14 @@ export class OrbitalServerRuntime {
     // sibling references, which the runtime's own `onDelete: restrict` then
     // rejects — see `@almadar-io/verify`'s `driver/tick.ts` `listEntityRows`.
     router.get("/:orbital/entities/:entityType", (req: Request, res: Response, next: NextFunction) => {
-      const orbitalName = req.params.orbital as string;
       const entityType = req.params.entityType as string;
-      // Same mid-swap await as GET /:orbital (G-RUNTIME-038).
-      this.resolveRegisteredOrbital(orbitalName)
-        .then((registered) => {
-          if (!registered) {
+      this.entityRows(req.params.orbital as string, entityType)
+        .then((rows) => {
+          if (!rows) {
             res.status(404).json({ success: false, error: "Orbital not found" });
             return;
           }
-          return this.persistence.list(entityType).then((rows) => {
-            res.json({ success: true, entityType, rows });
-          });
+          res.json({ success: true, entityType, rows });
         })
         .catch(next);
     });

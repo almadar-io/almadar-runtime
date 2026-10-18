@@ -5,9 +5,8 @@
  */
 import type { BrowserTabPort, MessageCatalogs, OnDeviceModelPorts, OrbitalDefinition, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, RuntimeValue } from '@almadar/core';
 import type { PersistenceAdapter } from '@almadar/core';
-import { externalInputsOf, inlineTraitRefs, orbitalInlineEntities, parseOrbitalSchema, readableEntitiesOf, storesRowsInBrowser } from '@almadar/core';
+import { applyRowAccess, externalInputsOf, inlineTraitRefs, orbitalInlineEntities, parseOrbitalSchema, readableEntitiesOf, storesRowsInBrowser } from '@almadar/core';
 import { entityAccessPolicies } from '@almadar/core/mock';
-import { applyRowAccess } from '@almadar/evaluator/entityAccess';
 import type { ServerEffectStageDeps } from '../effects/effect-stage.js';
 import type { HttpPorts } from '../kernel/http-exchange.js';
 import { KernelEngine } from '../kernel/engine.js';
@@ -280,7 +279,7 @@ export async function openBrowserHost(options: BrowserHostOptions): Promise<Brow
           return response;
         });
       },
-      read: async (entity) => applyRowAccess(await persistence.list(entity), entityAccessPolicies(schema, entity)?.read, undefined, { user }),
+      read: async (entity) => applyRowAccess(await persistence.list(entity), entityAccessPolicies(schema, entity)?.read, undefined, { user }, entity),
       message,
     };
   };
