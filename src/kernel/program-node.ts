@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import type { EmittedEvent, EntityRow, EventPayload, OrbitalSchema, UserContext } from '@almadar/core';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import { InFlightCalls } from '../effects/in-flight-calls.js';
+import { resolveOrbBinary } from '../host/program/index.js';
 import { KernelEngine } from './engine.js';
 import type { KernelHostPorts } from './host.js';
 import type { KernelModule } from './wire.js';
@@ -61,11 +62,10 @@ export function emitPayload<T>(run: ProgramRun, event: string, read: (payload: E
 }
 
 /**
- * `orb resolve`: the program with every `uses` flattened, as the kernel engine takes it. `orb` is the binary to run:
- * `ALMADAR_ORB`, else the one on `PATH`. Name it when a project-local `node_modules/.bin/orb` of an older
- * `@almadar/orb` would shadow the installed one.
+ * `orb resolve`: the program with every `uses` flattened, as the kernel engine takes it. `orb` is the binary to run,
+ * by default the one `resolveOrbBinary` picks.
  */
-export async function resolveProgramFile(path: string, cwd: string = dirname(resolve(path)), orb: string = process.env.ALMADAR_ORB ?? 'orb'): Promise<OrbitalSchema> {
+export async function resolveProgramFile(path: string, cwd: string = dirname(resolve(path)), orb: string = resolveOrbBinary()): Promise<OrbitalSchema> {
   const absolute = resolve(path);
   return new Promise<OrbitalSchema>((done, fail) => {
     const child = spawn(orb, ['resolve', absolute], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });

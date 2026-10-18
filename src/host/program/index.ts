@@ -77,13 +77,15 @@ export interface ProgramHostOptions {
 const BinPackageSchema = z.object({ bin: z.union([z.string(), z.record(z.string())]).optional() });
 
 /**
- * The installed `orb` binary: `ORBITAL_BIN`, then the local `~/bin/orbital`
- * under `ALMADAR_DEV=1` (the published launcher can lag the subcommand surface),
- * then the `@almadar/orb` npm package's bin, then `orb` on PATH.
+ * The one `orb` binary resolver every host uses: the configured binary (`ORBITAL_BIN`, then `ALMADAR_ORB`; a
+ * path that does not exist is skipped), then the local `~/bin/orbital` under `ALMADAR_DEV=1` (the published
+ * launcher can lag the subcommand surface), then the `@almadar/orb` npm package's bin, then `orb` on PATH.
  */
 export function resolveOrbBinary(): string {
-  const override = process.env['ORBITAL_BIN'];
-  if (override && existsSync(override)) return override;
+  for (const name of ['ORBITAL_BIN', 'ALMADAR_ORB']) {
+    const configured = process.env[name];
+    if (configured && existsSync(configured)) return configured;
+  }
   if (process.env['ALMADAR_DEV'] === '1') {
     const local = join(process.env['HOME'] ?? '', 'bin', 'orbital');
     if (existsSync(local)) return local;
