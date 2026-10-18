@@ -1190,7 +1190,8 @@ export class EffectExecutor {
                 if (typeof args[0] === 'string' && (args[0] as string).startsWith('@entity.')) {
                     const path = args[0] as string;
                     field = path.slice('@entity.'.length);
-                    value = args[1] as FieldValue;
+                    // A binding that resolved to nothing reads as null (the kernel's rule).
+                    value = args[1] === undefined ? null : (args[1] as FieldValue);
                     emitCfg = this.extractEmitConfig(args[2]);
                     entityId = typeof entity?.['id'] === 'string' ? (entity['id'] as string) : undefined;
                     // Auto-seed entity.id from @payload.id when the trait's
