@@ -95,24 +95,24 @@ describe('credential-status / credential-forget (interpreter)', () => {
             const held = app(undefined, { KEY: 'app-token' });
             const probe = run(held, viewer);
             await probe.execute(['credential-status', { credential: 'KEY', scope: 'app' }, ROUTES]);
-            expect(probe.emitted).toEqual([{ event: 'OK', payload: { connected: true } }]);
+            expect(probe.emitted).toEqual([{ event: 'OK', payload: { connected: true, label: '' } }]);
             expect(held.urls).toEqual([]);
         }
         const held = app(undefined, { [userCredentialKey('u1', 'KEY')]: 'user-token' });
         const probe = run(held, member);
         await probe.execute(['credential-status', { credential: 'KEY', scope: 'app' }, ROUTES]);
-        expect(probe.emitted).toEqual([{ event: 'OK', payload: { connected: false } }]);
+        expect(probe.emitted).toEqual([{ event: 'OK', payload: { connected: false, label: '' } }]);
     });
 
     it('app status treats an authoritative empty value as disconnected without changing user presence', async () => {
         const held = app(undefined, { KEY: '', [userCredentialKey('u1', 'KEY')]: '' });
         const scopedApp = run(held, member);
         await scopedApp.execute(['credential-status', { credential: 'KEY', scope: 'app' }, ROUTES]);
-        expect(scopedApp.emitted).toEqual([{ event: 'OK', payload: { connected: false } }]);
+        expect(scopedApp.emitted).toEqual([{ event: 'OK', payload: { connected: false, label: '' } }]);
         for (const selection of ['KEY', { credential: 'KEY', scope: 'user' }]) {
             const user = run(held, member);
             await user.execute(['credential-status', selection, ROUTES]);
-            expect(user.emitted).toEqual([{ event: 'OK', payload: { connected: true } }]);
+            expect(user.emitted).toEqual([{ event: 'OK', payload: { connected: true, label: '' } }]);
         }
         expect(held.secrets.held.get('KEY')).toBe('');
     });
@@ -121,7 +121,7 @@ describe('credential-status / credential-forget (interpreter)', () => {
         const held = app(undefined, { KEY: 'app-token', [userCredentialKey('u1', 'KEY')]: 'first-user' });
         const second = run(held, { id: 'u2', role: 'member' });
         await second.execute(['credential-status', { credential: 'KEY', scope: 'user' }, ROUTES]);
-        expect(second.emitted).toEqual([{ event: 'OK', payload: { connected: false } }]);
+        expect(second.emitted).toEqual([{ event: 'OK', payload: { connected: false, label: '' } }]);
         const anonymous = run(held);
         await anonymous.execute(['credential-status', { credential: 'KEY', scope: 'user' }, ROUTES]);
         expect(anonymous.emitted).toEqual([{ event: 'BAD', payload: { error: 'credential-status: nobody is signed in' } }]);
@@ -159,17 +159,17 @@ describe('credential-status / credential-forget (interpreter)', () => {
         const held = app(undefined, { tok_name: 'app-wide', [userCredentialKey('u1', 'tok_name')]: 'mine' });
         const a = run(held, member);
         await a.execute(['credential-status', 'tok_name', ROUTES]);
-        expect(a.emitted).toEqual([{ event: 'OK', payload: { connected: true } }]);
+        expect(a.emitted).toEqual([{ event: 'OK', payload: { connected: true, label: '' } }]);
         const b = run(held, { id: 'u2', role: 'member' });
         await b.execute(['credential-status', 'tok_name', ROUTES]);
-        expect(b.emitted).toEqual([{ event: 'OK', payload: { connected: false } }]);
+        expect(b.emitted).toEqual([{ event: 'OK', payload: { connected: false, label: '' } }]);
     });
 
     it('forget drops only the viewer\'s credential and reports not connected', async () => {
         const held = app(undefined, { tok_name: 'app-wide', [userCredentialKey('u1', 'tok_name')]: 'mine' });
         const { emitted, execute } = run(held, member);
         await execute(['credential-forget', 'tok_name', ROUTES]);
-        expect(emitted).toEqual([{ event: 'OK', payload: { connected: false } }]);
+        expect(emitted).toEqual([{ event: 'OK', payload: { connected: false, label: '' } }]);
         expect([...held.secrets.held.keys()]).toEqual(['tok_name']);
     });
 
@@ -259,8 +259,8 @@ describe('kernel host answers', () => {
     it('credentialStatus and credentialForget act on the principal\'s credential only', async () => {
         const a = app(undefined, { tok: 'app-wide', [userCredentialKey('u1', 'tok')]: 'mine' });
         const answer = host(a);
-        expect(await answer({ kind: 'credentialStatus', name: 'tok', principal: 'u1' })).toEqual({ kind: 'credentialStatus', result: { ok: true } });
-        expect(await answer({ kind: 'credentialStatus', name: 'tok', principal: 'u2' })).toEqual({ kind: 'credentialStatus', result: { ok: false } });
+        expect(await answer({ kind: 'credentialStatus', name: 'tok', principal: 'u1' })).toEqual({ kind: 'credentialStatus', result: { ok: { connected: true } } });
+        expect(await answer({ kind: 'credentialStatus', name: 'tok', principal: 'u2' })).toEqual({ kind: 'credentialStatus', result: { ok: { connected: false } } });
         expect(await answer({ kind: 'credentialForget', name: 'tok', principal: 'u1' })).toEqual({ kind: 'credentialForget', result: { ok: null } });
         expect([...a.secrets.held.keys()]).toEqual(['tok']);
     });

@@ -64,15 +64,27 @@ describe('kernel host http', () => {
   it('app credential status treats missing and empty values as disconnected, while user presence is unchanged', async () => {
     const app = fakeApp({ fetch: replying(200, 'x'), secrets: { KEY: '' } });
     const h = host(app);
-    expect(await h.answer({ kind: 'credentialStatus', name: 'KEY' })).toEqual({ kind: 'credentialStatus', result: { ok: false } });
+    expect(await h.answer({ kind: 'credentialStatus', name: 'KEY' })).toEqual({ kind: 'credentialStatus', result: { ok: { connected: false } } });
     expect(await h.answer({ kind: 'secret', name: 'KEY' })).toEqual({ kind: 'secret', result: { ok: '' } });
-    expect(await h.answer({ kind: 'credentialStatus', name: 'MISSING' })).toEqual({ kind: 'credentialStatus', result: { ok: false } });
+    expect(await h.answer({ kind: 'credentialStatus', name: 'MISSING' })).toEqual({ kind: 'credentialStatus', result: { ok: { connected: false } } });
     await h.answer({ kind: 'secretSet', name: 'KEY', value: '', ttlMs: 1000, principal: 'u1' });
-    expect(await h.answer({ kind: 'credentialStatus', name: 'KEY', principal: 'u1' })).toEqual({ kind: 'credentialStatus', result: { ok: true } });
+    expect(await h.answer({ kind: 'credentialStatus', name: 'KEY', principal: 'u1' })).toEqual({ kind: 'credentialStatus', result: { ok: { connected: true } } });
     expect(await h.answer({ kind: 'secret', name: 'KEY', principal: 'u1' })).toEqual({ kind: 'secret', result: { ok: '' } });
-    expect(await h.answer({ kind: 'credentialStatus', name: 'KEY', principal: 'u2' })).toEqual({ kind: 'credentialStatus', result: { ok: false } });
+    expect(await h.answer({ kind: 'credentialStatus', name: 'KEY', principal: 'u2' })).toEqual({ kind: 'credentialStatus', result: { ok: { connected: false } } });
     expect(app.secrets.held.get('KEY')).toBe('');
     expect(app.urls).toEqual([]);
+  });
+
+  it('credential status hands the host its label beside connected, and a value or an unconnected credential never carries one', async () => {
+    const app = fakeApp({ fetch: replying(200, 'x'), secrets: { KEY: 'refresh-token-SECRET', EMPTY: '' } });
+    const labels = new Map([['KEY', 'ada@example.com'], ['EMPTY', 'stale@example.com']]);
+    app.secrets.label = async (name) => labels.get(name);
+    const h = host(app);
+    const labeled = await h.answer({ kind: 'credentialStatus', name: 'KEY' });
+    expect(labeled).toEqual({ kind: 'credentialStatus', result: { ok: { connected: true, label: 'ada@example.com' } } });
+    expect(JSON.stringify(labeled)).not.toContain('refresh-token-SECRET');
+    expect(await h.answer({ kind: 'credentialStatus', name: 'EMPTY' })).toEqual({ kind: 'credentialStatus', result: { ok: { connected: false } } });
+    expect(await h.answer({ kind: 'credentialStatus', name: 'MISSING' })).toEqual({ kind: 'credentialStatus', result: { ok: { connected: false } } });
   });
 
   it('answers a request with the reply, headers as pairs and a text body', async () => {

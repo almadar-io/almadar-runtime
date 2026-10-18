@@ -275,8 +275,8 @@ describe('oauth-authorize (interpreter)', () => {
         await inner.answer({ ask: 'metadataPut', issuer: 'https://idp.example.com', metadata: META }, undefined);
         const probe = harness({ oauth: recordingPort(inner, asks), user: member });
         await probe.execute([...authorize]);
-        expect(probe.emitted).toEqual([{ event: 'OK', payload: { authUrl: 'https://idp.example.com/authorize?state=S', state: 'S', key: null } }]);
-        expect(asks.map((a) => a.ask)).toEqual(['metadataGet', 'pendingPut']);
+        expect(probe.emitted).toEqual([{ event: 'OK', payload: { authUrl: 'https://idp.example.com/authorize?state=S', state: 'S', code: '', key: null } }]);
+        expect(asks.map((a) => a.ask)).toEqual(['metadataGet', 'pendingPut', 'consent']);
         const put = asks[1];
         expect(put).toMatchObject({ ask: 'pendingPut', ttlMs: 600_000, grant: { verifier: 'V' } });
         expect(probe.log[1]).toBe(`build:client-id:${base64Standard(new Uint8Array(32).fill(7))}:${base64Standard(new Uint8Array(32).fill(7))}:2`);
@@ -287,9 +287,41 @@ describe('oauth-authorize (interpreter)', () => {
         const asks: OAuthAsk[] = [];
         const probe = harness({ oauth: recordingPort(createOAuthPort({ secrets: memorySecrets() }), asks), secrets: {} });
         await probe.execute(['oauth-authorize', { ...CLIENT, mode: 'mock' }, { redirectUri: 'u', scope: ['openid'] }, ROUTES]);
-        expect(probe.emitted).toEqual([{ event: 'OK', payload: { authUrl: 'https://mock/authorize?state=M', state: 'M', key: null } }]);
+        expect(probe.emitted).toEqual([{ event: 'OK', payload: { authUrl: 'https://mock/authorize?state=M', state: 'M', code: '', key: null } }]);
         expect(probe.log).toEqual(['plan', `mock:${base64Standard(new Uint8Array(16).fill(7))}`]);
         expect(asks).toMatchObject([{ ask: 'pendingPut', ttlMs: Number.MAX_SAFE_INTEGER, grant: { scopes: ['openid'] } }]);
+    });
+
+    it('a host that opens the consent page hands the code back beside the url and state', async () => {
+        const asks: OAuthAsk[] = [];
+        const consents: Array<{ authUrl: string; state: string; redirectUri: string }> = [];
+        const inner = createOAuthPort({ secrets: memorySecrets(), consent: async (request) => { consents.push(request); return 'CODE-FROM-BROWSER'; } });
+        await inner.answer({ ask: 'metadataPut', issuer: 'https://idp.example.com', metadata: META }, undefined);
+        const probe = harness({ oauth: recordingPort(inner, asks), user: member });
+        await probe.execute([...authorize]);
+        expect(probe.emitted).toEqual([{ event: 'OK', payload: { authUrl: 'https://idp.example.com/authorize?state=S', state: 'S', code: 'CODE-FROM-BROWSER', key: null } }]);
+        expect(consents).toEqual([{ authUrl: 'https://idp.example.com/authorize?state=S', state: 'S', redirectUri: 'https://app/cb' }]);
+    });
+
+    it('control: a declined consent is no code, a failing window is store-unavailable, and a mock authorization asks nobody', async () => {
+        const declined = createOAuthPort({ secrets: memorySecrets(), consent: async () => null });
+        await declined.answer({ ask: 'metadataPut', issuer: 'https://idp.example.com', metadata: META }, undefined);
+        const a = harness({ oauth: declined, user: member });
+        await a.execute([...authorize]);
+        expect(a.emitted).toMatchObject([{ event: 'OK', payload: { code: '' } }]);
+
+        const broken = createOAuthPort({ secrets: memorySecrets(), consent: async () => { throw new Error('window closed'); } });
+        await broken.answer({ ask: 'metadataPut', issuer: 'https://idp.example.com', metadata: META }, undefined);
+        const b = harness({ oauth: broken, user: member });
+        await b.execute([...authorize]);
+        expect(b.emitted).toMatchObject([{ event: 'BAD', payload: { reason: 'store-unavailable' } }]);
+
+        const asks: OAuthAsk[] = [];
+        const never = createOAuthPort({ secrets: memorySecrets(), consent: async () => 'MUST-NOT-APPEAR' });
+        const c = harness({ oauth: recordingPort(never, asks), secrets: {} });
+        await c.execute(['oauth-authorize', { ...CLIENT, mode: 'mock' }, { redirectUri: 'u', scope: ['openid'] }, ROUTES]);
+        expect(asks.map((x) => x.ask)).toEqual(['pendingPut']);
+        expect(c.emitted).toMatchObject([{ event: 'OK', payload: { code: '' } }]);
     });
 
     it('fails metadata-invalid when discovery has not run, and unconfigured-client without the client id', async () => {

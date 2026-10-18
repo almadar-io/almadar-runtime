@@ -60,6 +60,7 @@ function isReplyOf(request: OAuthAsk, reply: OAuthReply): boolean {
     case 'mockTokenPut': return reply.reply === 'done';
     case 'mockTokenRefresh': case 'mockTokenRevoke': return reply.reply === 'flag';
     case 'mockTokenCheck': return reply.reply === 'mockToken';
+    case 'consent': return reply.reply === 'code';
   }
 }
 
@@ -83,7 +84,7 @@ export async function oauthAuthorizePayload(
   if (planned.mode === 'mock') {
     if (kernel.oauthAuthorizeMockBuild === undefined) throw new Error('oauth-authorize: this kernel build cannot run it');
     const mock = objectOf(parsed(kernel.oauthAuthorizeMockBuild(JSON.stringify(planned.plan ?? null), base64Standard(ports.random(16)))), 'the authorization');
-    return keepGrant(ports, kernel, mock, MOCK_PENDING_TTL_MS, principal, echoed);
+    return keepGrant(ports, kernel, mock, MOCK_PENDING_TTL_MS, principal, echoed, false);
   }
   const slot = objectOf(planned.clientId, 'the client id slot');
   if (typeof slot.name !== 'string') throw new Error('the client id slot is malformed');
@@ -113,11 +114,11 @@ export async function oauthAuthorizePayload(
     if (!isOAuthReason(reason)) throw new Error('the oauth failure is malformed');
     throw failureOf(kernel, reason);
   }
-  return keepGrant(ports, kernel, objectOf(built.ok, 'the authorization'), PENDING_GRANT_TTL_MS, principal, echoed);
+  return keepGrant(ports, kernel, objectOf(built.ok, 'the authorization'), PENDING_GRANT_TTL_MS, principal, echoed, true);
 }
 
-/** Hand the pending grant to the host and report the URL and state. */
-async function keepGrant(ports: HttpPorts, kernel: HttpKernel, ok: JsonObject, ttlMs: number, principal: string | undefined, key: string | null): Promise<OAuthAuthorizePayload> {
+/** Hand the pending grant to the host and report the URL and state; a real authorization then asks the host for the person's consent, which answers the code it returned (none on a host that asks no one). */
+async function keepGrant(ports: HttpPorts, kernel: HttpKernel, ok: JsonObject, ttlMs: number, principal: string | undefined, key: string | null, consent: boolean): Promise<OAuthAuthorizePayload> {
   const grant = objectOf(ok.grant, 'the pending grant');
   if (typeof ok.authUrl !== 'string' || typeof ok.state !== 'string') throw new Error('the authorization is malformed');
   const scopes = Array.isArray(grant.scopes) ? grant.scopes.flatMap((scope) => (typeof scope === 'string' ? [scope] : [])) : [];
@@ -138,7 +139,12 @@ async function keepGrant(ports: HttpPorts, kernel: HttpKernel, ok: JsonObject, t
     },
     principal,
   );
-  return { authUrl: ok.authUrl, state: ok.state, key };
+  let code = '';
+  if (consent) {
+    const reply = await ask(ports, kernel, { ask: 'consent', authUrl: ok.authUrl, state: ok.state, redirectUri: String(grant.redirectUri) }, principal);
+    code = reply.reply === 'code' ? (reply.code ?? '') : '';
+  }
+  return { authUrl: ok.authUrl, state: ok.state, code, key };
 }
 
 /** `oauth-connection-status` / `oauth-connection-forget`: store first, then caller (the legacy order). */

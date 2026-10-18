@@ -598,6 +598,8 @@ export function decodeOAuthAsk(value: JsonValue | undefined): OAuthAsk {
       return { ask: 'mockTokenRevoke', token: oauthText(ask, 'token') };
     case 'mockTokenCheck':
       return { ask: 'mockTokenCheck', accessToken: oauthText(ask, 'accessToken') };
+    case 'consent':
+      return { ask: 'consent', authUrl: oauthText(ask, 'authUrl'), state: oauthText(ask, 'state'), redirectUri: oauthText(ask, 'redirectUri') };
     default:
       throw new Error(`driver oauth ask "${String(ask.ask)}" is unknown`);
   }

@@ -408,7 +408,11 @@ function random(ports: KernelHostPorts, request: Extract<IoRequestWire, { kind: 
 async function credentialStatus(ports: KernelHostPorts, request: Extract<IoRequestWire, { kind: 'credentialStatus' }>): Promise<IoAnswerWire> {
   const store = ports.http?.secrets;
   if (store === undefined) return { kind: 'credentialStatus', result: { error: HTTP_UNAVAILABLE } };
-  return { kind: 'credentialStatus', result: await settle(async () => credentialStatusConnected(await store.get(request.name, request.principal), request.principal)) };
+  return { kind: 'credentialStatus', result: await settle(async () => {
+    const connected = credentialStatusConnected(await store.get(request.name, request.principal), request.principal);
+    const label = connected ? await store.label?.(request.name, request.principal) : undefined;
+    return { connected, ...(label !== undefined ? { label } : {}) };
+  }) };
 }
 
 async function credentialForget(ports: KernelHostPorts, request: Extract<IoRequestWire, { kind: 'credentialForget' }>): Promise<IoAnswerWire> {

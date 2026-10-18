@@ -1251,6 +1251,15 @@ export class OrbitalServerRuntime {
     this.preprocessedCache.clear();
   }
 
+  /** Tells the store each server-persisted entity's declared `[persistent: tbl]` collection, so its rows live under that name (EXEC-STORE-1). */
+  private bindDeclaredCollections(entities: readonly Entity[]): void {
+    for (const entity of entities) {
+      if (entity.name && entity.collection && entity.local !== true && entity.persistence !== 'runtime') {
+        this.persistence.bindCollection?.(entity.name, entity.collection);
+      }
+    }
+  }
+
   /**
    * Register a single orbital
    */
@@ -1291,6 +1300,8 @@ export class OrbitalServerRuntime {
     for (const other of this.orbitals.values()) {
       other.traitIndex = undefined;
     }
+
+    this.bindDeclaredCollections(entity === undefined ? [] : [entity]);
 
     // A browser-stored entity seeds by the browser store's own rule: its
     // `instances`, else mock rows only when it declares `mock`.
@@ -1347,6 +1358,10 @@ export class OrbitalServerRuntime {
         }
       }
     }
+
+    this.bindDeclaredCollections(
+      (orbital.auxiliaryEntities ?? []).filter((ref): ref is Entity => typeof ref !== 'string' && !isEntityCall(ref)),
+    );
 
     // Gap #22 — register + mock-seed auxiliary entities. These are imported
     // atom entities surfaced when a trait reference omits the `-> Entity`

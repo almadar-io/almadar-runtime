@@ -1,5 +1,6 @@
 export { KernelEngine, evaluateOnKernel, kernelRequest, type KernelEvaluation } from './engine.js';
-export { createOAuthPort, type OAuthPortOptions } from './oauth-port.js';
+export { createOAuthPort, type OAuthConsentRequest, type OAuthPortOptions } from './oauth-port.js';
+export { createExtensionHttpPorts, type ExtensionHttpPortsOptions, type SignedInCredential } from './extension-ports.js';
 export { kernelOsCompletions, kernelOsGrants } from './os-port.js';
 export type { OsDesktopKind, OsCompletionEvent, OsCompletionMatchers, OsCompletionPort, OsFsMode, OsGrantKernel, OsGrantMatchers, OsGrantPort, OsHostPort, OsNetKind, OsRequirement, OsStdioKind, OsSysKind } from './os-port.js';
 export { oauthAuthorizePayload, oauthConnectionPayload, OAuthEffectFailure } from './oauth-effects.js';
@@ -38,6 +39,7 @@ export {
   type HttpPorts,
   type HttpPortsOptions,
   type HttpSecrets,
+  type HttpSecretsHost,
   type OAuthAuthorizeKernel,
   type OAuthPort,
   type HttpOutcome,

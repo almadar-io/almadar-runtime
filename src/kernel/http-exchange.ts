@@ -3,7 +3,7 @@
  * (`@almadar/kernel`, wasm) produced. Both the kernel host (`host.ts`) and the interpreter (`EffectExecutor`)
  * call it; nothing here builds a request, frames a stream or shapes a payload — the wasm exports do.
  */
-import { credentialStatusConnected, credentialStorageKey, resolveCredentialStatusIdentity, isJsonObject, type HttpCall, type HttpFailurePayload, type HttpOAuthFailureCode, type HttpOAuthFailureReason, type HttpStreamEvent, type JsonObject, type JsonValue, type RuntimeValue } from '@almadar/core';
+import { credentialStatusConnected, credentialStorageKey, resolveCredentialStatusIdentity, isJsonObject, type CredentialPayload, type HttpCall, type HttpFailurePayload, type HttpOAuthFailureCode, type HttpOAuthFailureReason, type HttpStreamEvent, type JsonObject, type JsonValue, type RuntimeValue } from '@almadar/core';
 import { deliverBeacon, type BeaconDeliveryPorts } from '@almadar/analytics';
 import type { CredentialStore } from '@almadar/integrations';
 import { untilAborted } from '../effects/in-flight-calls.js';
@@ -60,8 +60,10 @@ export interface HttpSecrets {
   rotate?(name: string, value: string, principal?: string): Promise<void>;
   /** Drop the credential, the minted value and the stored one. */
   forget(name: string, principal?: string): Promise<void>;
-  /** Keep `value` as the credential until it is forgotten, creating it when absent (an OAuth connection's tokens): unlike `rotate` it needs no existing entry. */
-  persist?(name: string, value: string, principal?: string): Promise<void>;
+  /** Keep `value` as the credential until it is forgotten, creating it when absent (an OAuth connection's tokens): unlike `rotate` it needs no existing entry. `label` is a non-secret account name stored beside it, never the value. */
+  persist?(name: string, value: string, principal?: string, label?: string): Promise<void>;
+  /** The non-secret account label stored beside the credential; absent when its row carries none. */
+  label?(name: string, principal?: string): Promise<string | undefined>;
   /** Keep a one-use value (a pending OAuth grant) where every instance of the deployment can take it: the credential store's adapter when it shares one-use values, else the minted tier. */
   hold?(name: string, value: string, ttlMs: number, principal?: string): Promise<void>;
   /** Remove and return a held or minted value in one step, the single read of a one-use value. */
@@ -193,8 +195,26 @@ export class HttpEffectFailure extends Error {
 /** The service label a kernel-persisted credential (an OAuth connection) carries in the credential store. */
 const PERSISTED_SERVICE = 'kernel';
 
-/** In-process secrets: minted values with an expiry, then the credential store the integrations already read. */
-export function createHttpSecrets(now: () => number = Date.now): HttpSecrets {
+/** Where the secrets' durable credentials live: the store a host installed, and how a name resolves through it. */
+export interface HttpSecretsHost {
+  store(): Promise<CredentialStore | null>;
+  resolve(name: string, principal: string | undefined): Promise<string | undefined>;
+}
+
+/** The credential store the host installed through `@almadar/integrations`, with its environment fallback. */
+const installedSecretsHost: HttpSecretsHost = {
+  async store() {
+    const { getEffectiveCredentialStore } = await import('@almadar/integrations');
+    return getEffectiveCredentialStore();
+  },
+  async resolve(name, principal) {
+    const { resolveCredentialRef } = await import('@almadar/integrations');
+    return resolveCredentialRef(name, undefined, principal);
+  },
+};
+
+/** In-process secrets: minted values with an expiry, then the credential store the host holds (by default the one the integrations already read). */
+export function createHttpSecrets(now: () => number = Date.now, host: HttpSecretsHost = installedSecretsHost): HttpSecrets {
   type Minted = Map<string, { value: string; expiresAt: number }>;
   const environmentMinted: Minted = new Map();
   const storeMinted = new WeakMap<CredentialStore, Minted>();
@@ -209,42 +229,37 @@ export function createHttpSecrets(now: () => number = Date.now): HttpSecrets {
   const slot = (name: string, principal: string | undefined): string => credentialStorageKey({ name, ...(principal !== undefined ? { principal } : {}) });
   return {
     async get(name, principal) {
-      const { getEffectiveCredentialStore, resolveCredentialRef } = await import('@almadar/integrations');
-      const minted = cacheFor(getEffectiveCredentialStore());
+      const minted = cacheFor(await host.store());
       const key = slot(name, principal);
       const held = minted.get(key);
       if (held !== undefined) {
         if (held.expiresAt > now()) return held.value;
         minted.delete(key);
       }
-      return resolveCredentialRef(name, undefined, principal);
+      return host.resolve(name, principal);
     },
     async set(name, value, ttlMs, principal) {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
-      const minted = cacheFor(getEffectiveCredentialStore());
+      const minted = cacheFor(await host.store());
       const key = slot(name, principal);
       if (ttlMs <= 0) minted.delete(key);
       else minted.set(key, { value, expiresAt: now() + ttlMs });
     },
     async rotate(name, value, principal) {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
-      const store = getEffectiveCredentialStore();
+      const store = await host.store();
       if (store === null) throw new Error('this host keeps no credential store to rotate into');
       const stored = store.entries(principal).find((entry) => entry.envVar === name);
       if (stored === undefined) throw new Error(`credential ${name} is not in the credential store`);
       cacheFor(store).delete(slot(name, principal));
       await store.set(stored.service, name, value, principal);
     },
-    async persist(name, value, principal) {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
-      const store = getEffectiveCredentialStore();
+    async persist(name, value, principal, label) {
+      const store = await host.store();
       if (store === null || !store.enabled) throw new Error('this host keeps no credential store to persist into');
       cacheFor(store).delete(slot(name, principal));
-      await store.set(PERSISTED_SERVICE, name, value, principal);
+      await store.set(PERSISTED_SERVICE, name, value, principal, label);
     },
     async hold(name, value, ttlMs, principal) {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
-      const store = getEffectiveCredentialStore();
+      const store = await host.store();
       const minted = cacheFor(store);
       const key = slot(name, principal);
       if (store !== null && store.sharesDerived) {
@@ -256,8 +271,7 @@ export function createHttpSecrets(now: () => number = Date.now): HttpSecrets {
       else minted.set(key, { value, expiresAt: now() + ttlMs });
     },
     async take(name, principal) {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
-      const store = getEffectiveCredentialStore();
+      const store = await host.store();
       if (store !== null && store.sharesDerived) {
         const shared = await store.takeDerived(name, principal, now());
         if (shared !== undefined) return shared;
@@ -269,14 +283,15 @@ export function createHttpSecrets(now: () => number = Date.now): HttpSecrets {
       minted.delete(key);
       return held.expiresAt > now() ? held.value : undefined;
     },
+    async label(name, principal) {
+      return (await host.store())?.label(name, principal);
+    },
     async durable() {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
-      const store = getEffectiveCredentialStore();
+      const store = await host.store();
       return store !== null && store.enabled;
     },
     async forget(name, principal) {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
-      const store = getEffectiveCredentialStore();
+      const store = await host.store();
       const minted = cacheFor(store);
       const key = slot(name, principal);
       minted.delete(key);
@@ -383,9 +398,11 @@ export async function credentialStatusPayload(
   ports: Pick<HttpPorts, 'secrets'>,
   credential: RuntimeValue | undefined,
   principal: string | undefined,
-): Promise<{ connected: boolean }> {
+): Promise<CredentialPayload> {
   const identity = resolveCredentialStatusIdentity(credential, principal);
-  return { connected: credentialStatusConnected(await ports.secrets.get(identity.name, identity.principal), identity.principal) };
+  const connected = credentialStatusConnected(await ports.secrets.get(identity.name, identity.principal), identity.principal);
+  const label = connected ? ((await ports.secrets.label?.(identity.name, identity.principal)) ?? '') : '';
+  return { connected, label };
 }
 
 /** `credential-forget`: drops the signed-in viewer's credential; `{ connected: false }`. */
@@ -393,11 +410,11 @@ export async function credentialForgetPayload(
   ports: Pick<HttpPorts, 'secrets'>,
   credential: RuntimeValue | undefined,
   principal: string | undefined,
-): Promise<{ connected: false }> {
+): Promise<{ connected: false; label: string }> {
   const who = signedIn('credential-forget', principal);
   const name = credentialName('credential-forget', credential);
   await ports.secrets.forget(name, who);
-  return { connected: false };
+  return { connected: false, label: '' };
 }
 
 async function systemResolve(host: string): Promise<ResolvedHost> {
@@ -787,7 +804,7 @@ function settledAnswer(kind: 'secret' | 'secretSet' | 'secretRotate' | 'random',
 /** The reply the port answered, checked to be one of the closed reply variants. */
 export function checkOAuthReply(reply: OAuthReply): OAuthReply {
   switch (reply.reply) {
-    case 'done': case 'flag': case 'taken': case 'row': case 'subject': case 'metadata': case 'millis': case 'mockToken':
+    case 'done': case 'flag': case 'taken': case 'row': case 'subject': case 'metadata': case 'millis': case 'mockToken': case 'code':
       return reply;
   }
 }

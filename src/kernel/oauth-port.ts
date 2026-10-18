@@ -10,11 +10,20 @@ import { isJsonObject, type JsonObject, type JsonValue } from '@almadar/core';
 import type { OAuthAsk, OAuthConnectionRow, OAuthPendingGrant, OAuthProvider, OAuthReply } from '@almadar/core/kernel-wire';
 import type { HttpSecrets, OAuthPort } from './http-exchange.js';
 
+/** What the person's consent page is opened with. */
+export interface OAuthConsentRequest {
+  authUrl: string;
+  state: string;
+  redirectUri: string;
+}
+
 export interface OAuthPortOptions {
   /** The host's credentials (read per ask when a function: a host installs them at boot). */
   secrets: HttpSecrets | (() => HttpSecrets);
   /** The host clock in epoch milliseconds. */
   now?: () => number;
+  /** Opens the consent page for the person and answers the authorization code it returned, `null` when they declined; absent, the host asks no one. */
+  consent?: (request: OAuthConsentRequest) => Promise<string | null>;
 }
 
 /**
@@ -173,6 +182,8 @@ export function createOAuthPort(options: OAuthPortOptions): OAuthPort {
           return { reply: 'done' };
         case 'clock':
           return { reply: 'millis', value: now() };
+        case 'consent':
+          return { reply: 'code', code: options.consent === undefined ? null : await options.consent({ authUrl: ask.authUrl, state: ask.state, redirectUri: ask.redirectUri }) };
         case 'mockTokenPut':
           mockTokens.set(ask.accessToken, { refresh: ask.refreshToken, expiresAt: ask.expiresAtMs, provider: ask.provider });
           mockRefresh.set(ask.refreshToken, { access: ask.accessToken, provider: ask.provider });

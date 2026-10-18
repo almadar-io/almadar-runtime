@@ -17,6 +17,7 @@ export function routeByEntity(storedEntities: ReadonlySet<string>, stored: Persi
     delete: (entityType, id) => of(entityType).delete(entityType, id),
     getById: (entityType, id) => of(entityType).getById(entityType, id),
     list: (entityType) => of(entityType).list(entityType),
+    bindCollection: (entityType, collection) => of(entityType).bindCollection?.(entityType, collection),
     queryPage: (entityType: string, query: RowQuery): Promise<RowQueryPage> =>
       pushedDown(of(entityType).queryPage, 'queryPage', entityType).call(of(entityType), entityType, query),
     queryIds: (entityType: string, query: RowQuery): Promise<RowIdPage> =>
