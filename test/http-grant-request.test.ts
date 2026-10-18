@@ -395,7 +395,8 @@ describe.skipIf(KERNEL_DIR === undefined)('grantRequest on the real wasm HTTP dr
       { max: 0, on: ['5xx'], scheduleMs: [] }, { max: 1.5, on: ['5xx'], scheduleMs: [1] },
       { max: 4294967296, on: ['5xx'], backoffMs: 1 }, { max: 1, on: [], scheduleMs: [1] },
       { max: 1, on: ['4xx'], scheduleMs: [1] }, { max: 1, on: ['FAILED'], scheduleMs: [1] },
-      { max: 1, on: [408], scheduleMs: [1] }, { max: 1, on: ['failed'], scheduleMs: [1], extra: true },
+      { max: 1, on: [99], scheduleMs: [1] }, { max: 1, on: [600], scheduleMs: [1] }, { max: 1, on: [408.5], scheduleMs: [1] },
+      { max: 1, on: ['failed'], scheduleMs: [1], extra: true },
     ];
     for (const retry of invalid) {
       const f = await fixture();
