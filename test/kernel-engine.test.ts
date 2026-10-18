@@ -1,5 +1,5 @@
 /**
- * The kernel-backed engine (`OrbitalServerRuntime({ engine: 'kernel' })`, `evaluateOrbitalEvent`'s `kernel`
+ * The kernel-backed engine (`OrbitalServerRuntime`, `evaluateOrbitalEvent`'s `kernel`
  * dep): the Rust kernel decides every step, this package answers the I/O it asks for. Needs the built
  * `@almadar/kernel` (ALMADAR_KERNEL_DIR); the suite is skipped without it.
  */
@@ -103,7 +103,7 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel engine', () => {
   });
 
   const open = async (schema: OrbitalSchema, config: ConstructorParameters<typeof OrbitalServerRuntime>[0] = {}): Promise<OrbitalServerRuntime> => {
-    const runtime = new OrbitalServerRuntime({ mode: 'real', engine: 'kernel', kernel, ...config });
+    const runtime = new OrbitalServerRuntime({ mode: 'real', kernel, ...config });
     await runtime.register(schema);
     return runtime;
   };
@@ -178,12 +178,12 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel engine', () => {
     expect(response.error).toMatch(/locale "fr"/);
   });
 
-  it('resetCircuitState returns the kernel to boot (no trait instance until its next dispatch)', async () => {
+  it('resetCircuitState returns the kernel to boot (every trait back at its initial state, EXEC-SEED-6)', async () => {
     const runtime = await open(notes());
     await runtime.processOrbitalEvent('Main', { event: 'SAVE', targetTrait: 'Draft' });
     expect(runtime.getState('Main', 'Draft')).toMatchObject({ currentState: 'saved' });
     runtime.resetCircuitState();
-    expect(runtime.getState('Main', 'Draft')).toBeUndefined();
+    expect(runtime.getState('Main', 'Draft')).toMatchObject({ currentState: 'editing' });
     // The circuit restarts from `editing`; the rows are not the circuit's, so re-creating d1 is a duplicate (EXEC-STEP-8).
     const again = await runtime.processOrbitalEvent('Main', { event: 'SAVE', targetTrait: 'Draft' });
     expect(again.states).toEqual({ Draft: 'failed' });
@@ -234,12 +234,16 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel engine', () => {
   it('refuses a program whose traits are still references (the kernel takes an orb-resolved program)', async () => {
     const schema = notes();
     schema.orbitals[0].traits.push({ ref: 'Elsewhere.traits.Other' });
-    const runtime = new OrbitalServerRuntime({ mode: 'real', engine: 'kernel', kernel });
+    const runtime = new OrbitalServerRuntime({ mode: 'real', kernel });
     await expect(runtime.register(schema)).rejects.toThrow(/orb-resolved program.*"Elsewhere.traits.Other"/);
   });
 
-  it("refuses engine 'kernel' without the module", () => {
-    expect(() => new OrbitalServerRuntime({ engine: 'kernel' })).toThrow(/@almadar\/kernel/);
+  it('loads the installed @almadar/kernel itself when the host passes no module', async () => {
+    const runtime = new OrbitalServerRuntime({ mode: 'real' });
+    await runtime.register(notes());
+    const response = await runtime.processOrbitalEvent('Main', { event: 'SAVE', targetTrait: 'Draft' });
+    expect(response.success).toBe(true);
+    expect(response.states).toEqual({ Draft: 'saved' });
   });
 
   describe('host answers', () => {

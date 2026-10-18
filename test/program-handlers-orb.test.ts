@@ -6,7 +6,7 @@ import type { RuntimeValue, EntityRow } from '@almadar/core';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 import { EffectExecutor } from '../src/index.js';
 import { createProgramHandlers } from '../src/effects/createProgramHandlers.js';
-import { installedWorkspaceHost, uninstallWorkspaceHost } from '@almadar/integrations/program';
+import { installedWorkspaceHost, uninstallWorkspaceHost } from '../src/host/program/index.js';
 import { KERNEL_DIR } from './helpers/kernel-module.js';
 
 const ORB = process.env['ORBITAL_BIN'] ?? join(process.env['HOME'] ?? '', 'bin', 'orb');

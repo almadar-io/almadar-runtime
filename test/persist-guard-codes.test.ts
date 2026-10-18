@@ -1,6 +1,6 @@
 /**
- * persist update/delete under a declared @update/@delete policy, one fixture (`@almadar-io/parity`
- * `fixtures/effect-codes/persist-guard-codes.json`, mirrored into `test/baked/`), run on a capable adapter (the
+ * persist update/delete under a declared @update/@delete policy, one fixture (orbital-core
+ * `tests/baked/effect-codes/persist-guard-codes.json`, mirrored into `test/baked/`), run on a capable adapter (the
  * policy rides the write as its guard) and on a plain one (the policy is read-then-checked): identical results.
  */
 import { describe, expect, it } from 'vitest';

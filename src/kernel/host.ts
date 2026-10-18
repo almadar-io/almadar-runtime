@@ -24,6 +24,7 @@ import {
 import { issuePayload } from '../effects/EffectExecutor.js';
 import { untilAborted, type InFlightCalls } from '../effects/in-flight-calls.js';
 import type { EffectHandlers, ServiceCallContext } from '../types.js';
+import { isProgramEffect } from '../host/program/effects.js';
 import { readPageFacts } from '../effects/page-facts.js';
 import { embedOnDevice, OnDeviceModelFailure, promptOnDevice } from '../effects/on-device-model.js';
 import { base64Standard, checkOAuthReply, sendBeaconRequest, sendHttp, streamHttp, systemRandom, type CredentialAdminPort, type Exchange, type HttpPorts } from './http-exchange.js';
@@ -214,7 +215,6 @@ async function substrate(
     }
   }
   if (handler === undefined) return failure(`no program host configured for ${request.op}`);
-  const { isProgramEffect } = await import('@almadar/integrations/program');
   if (!isProgramEffect(request.op)) return failure(`no program host configured for ${request.op}`);
   try {
     const user = scope.user;

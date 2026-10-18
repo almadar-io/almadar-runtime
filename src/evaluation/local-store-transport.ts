@@ -12,7 +12,7 @@ import type { KernelEngine } from '../kernel/engine.js';
 import { createInProcessTransport, type EventTransport } from '../server/EventTransport.js';
 import type { TraitIndex } from '../traits/trait-index.js';
 import { InFlightCalls } from '../effects/in-flight-calls.js';
-import { browserLegCallService } from '../effects/defaultCallService.js';
+import { defaultCallService } from '../effects/defaultCallService.js';
 import { onDeviceHandlers } from '../effects/on-device-model.js';
 import type { CircuitStore } from './circuit-store.js';
 import { createIndexStageRunner } from './stage-runner.js';
@@ -79,7 +79,7 @@ export function createLocalStoreTransport(options: LocalStoreTransportOptions): 
         frames: store.frames,
         manager: store.manager,
         ...(options.schema !== undefined ? { schema: options.schema } : {}),
-        extraEffectHandlers: { callService: options.callService ?? browserLegCallService, ...(options.onDevice !== undefined ? onDeviceHandlers(options.onDevice) : {}) },
+        extraEffectHandlers: { callService: options.callService ?? defaultCallService, ...(options.onDevice !== undefined ? onDeviceHandlers(options.onDevice) : {}) },
         ...(options.servicePorts !== undefined ? { servicePorts: options.servicePorts } : {}),
         ...(options.outsideEventQueue !== undefined ? { outsideEventQueue: options.outsideEventQueue } : {}),
         ...(options.http !== undefined ? { http: options.http } : {}),

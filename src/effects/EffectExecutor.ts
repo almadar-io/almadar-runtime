@@ -36,7 +36,7 @@ import { omitFrameFields,
 import { RESERVED_FIELD_NAMES } from '@almadar/core/mock';
 import { JsonValueSchema, agentPortPayload, rowSetMarker, runAgentPort } from '@almadar/core';
 import type { AgentPortOperator } from '@almadar/core';
-import type { ProgramEffectName } from '@almadar/integrations/program';
+import type { ProgramEffectName } from '../host/program/effects.js';
 import type { FieldValue, SExpr, Orbital, OrbitalDefinition, OrbitalSchema, ProgramValidationIssue, TraitConfig, RuntimeValue, EntityField, Entity, JsonValue } from '@almadar/core';
 import type { ComposeBehaviorsInput, EventWiringEntry } from './composition/index.js';
 import { createLogger, setNamespaceLevel } from '@almadar/logger';

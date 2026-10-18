@@ -1,7 +1,7 @@
 /**
  * `ServerEffectResult.code` on a persist update/delete: `no-row-key` when no row key resolves,
  * `not-found` when the keyed row is absent. One fixture, read by this suite and by orbital-core's
- * `tests/persist_effect_codes.rs` (canonical source `@almadar-io/parity` `fixtures/effect-codes`,
+ * `tests/persist_effect_codes.rs` (canonical source orbital-core `tests/baked/effect-codes`,
  * mirrored into `test/baked/`).
  */
 import { describe, expect, it } from 'vitest';

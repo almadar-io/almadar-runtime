@@ -3,7 +3,7 @@
  * profile's credential store (the server host's encrypted rows, kept in `chrome.storage`) for every secret the kernel
  * asks. A program names a credential and the kernel resolves it here; no value is ever answered to the program.
  */
-import type { CredentialStore } from '@almadar/integrations';
+import type { CredentialStore } from '../host/credentials/store.js';
 import { createBrowserHttpPorts, createHttpSecrets, type BrowserHttpPortsOptions, type HttpPorts } from './http-exchange.js';
 import { createOAuthPort } from './oauth-port.js';
 

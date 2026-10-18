@@ -56,35 +56,18 @@ interface EventQueueHold {
 }
 import { identitySourceOf, resolveViewer, type VerifiedUser } from "@almadar/auth";
 import { EventBus } from "../events/EventBus.js";
-import type { EffectDispatch } from "../evaluation/dispatch-memory.js";
 import { eventRouteKey } from "../events/identity/routing.js";
 import { stampEmitSource } from "../events/emit-stamp.js";
-import {
-  evaluateOrbitalEvent,
-  readTraitFrame,
-  collectListenerTargets,
-  deliveryOf,
-  freshDeliveryGuardBindings,
-  type EvaluateEffectRunner,
-  type EvaluateOrbitalEventDeps,
-  type WorklistItem,
-} from "../evaluation/evaluateOrbitalEvent.js";
-import { MountLifecycle } from "../evaluation/mount-lifecycle.js";
-import { buildTraitIndexForOrbital, type TraitIndex } from "../traits/trait-index.js";
+import { evaluateOnKernel } from "../kernel/engine.js";
 import { createTickScheduler, type TickHandle, type TickScheduler } from "../time/TickScheduler.js";
 import { isValidCronExpression } from "../time/cron.js";
 import { parseDurationString } from "../time/duration.js";
 import {
-  StateMachineManager,
   LIFECYCLE_EVENTS,
   UNMOUNT_EVENT,
-  findInitialState,
-  processTick,
   tickEventKey,
 } from "../traits/StateMachineCore.js";
-import { EffectExecutor } from "../effects/EffectExecutor.js";
 import { parseOrbitalTraits } from "../traits/OrbitalTraitParsing.js";
-import type { ServerEffectResult } from "../effects/ServerEffectHandlers.js";
 import { createLogger } from '@almadar/logger';
 import type { createProgramHandlers as CreateProgramHandlersFn } from "../effects/createProgramHandlers.js";
 
@@ -148,23 +131,8 @@ const xOrbitalLog = createLogger("almadar:runtime:cross-orbital");
 const persistLog = createLogger("almadar:runtime:persist");
 const registerLog = createLogger("almadar:runtime:register");
 
-/**
- * Relay hop cap — a circuit breaker for pathological cross-orbital listen
- * cycles (orbital A emits → orbital B relays → A re-emits …). The visited
- * set already bounds work to distinct
- * (orbital, trait, triggers, from-state) keys; this caps worst-case
- * latency, the same rationale as the composition's cascade cap
- * (G-RUNTIME-027).
- */
-const CROSS_ORBITAL_RELAY_CAP = 500;
 import { setupSSE, sendSSEEvent, sendSSEDone, closeSSE } from './sse.js';
-import {
-  interpolateProps,
-  createContextFromBindings,
-} from "../evaluation/BindingResolver.js";
-import { evaluateGuard } from "@almadar/evaluator";
 import type {
-  TraitDefinition,
   TraitState,
   EffectHandlers,
   EntityRow,
@@ -183,23 +151,15 @@ import type {
   MessageCatalogs,
   OrbitalDefinition,
   Entity,
-  EntityField,
-  RelationEntityField,
-  EntityId,
   Trait,
   TraitTick,
   TraitConfig,
   BusEventSource,
-  SExpr,
-  RuntimeValue,
   UserContext,
-  RawUserClaims,
   ServiceHostPorts,
 } from "@almadar/core";
 import { entityAccessPolicies } from "@almadar/core/mock";
 import { orbitalInlineEntities, RowSetRefSchema, type RowQueryPage } from "@almadar/core";
-import { resolveRowSetFromPersistence } from "../effects/pushdown.js";
-import { applyRowAccess } from "@almadar/evaluator/entityAccess";
 
 // Single upstream owner (`@almadar/core`'s `types/bus.ts`) — both execution
 // paths (this runtime and orbital-shell-typescript's generated handlers,
@@ -215,12 +175,10 @@ export type {
   ClientNavigateBackTuple,
   TransitionRejection,
 } from "@almadar/core";
-import { inlineTraitRefs, themeDataKey, traitsEmbeddedByEffects } from "@almadar/core";
-import { appNavItems, sigilThemeKey } from "../evaluation/render-sigils.js";
+import { applyRowAccess, inlineTraitRefs, installKernelEvaluator } from "@almadar/core";
 import type {
   OrbitalEventRequest,
   OrbitalEventResponse,
-  ClientEffectByTrait,
   ClientEffectTuple,
   ExternalInput,
   ExternalInputRequest,
@@ -230,10 +188,9 @@ import type {
 import { externalInputsOf, inboundOnlyMessage, inboundOnlyTrait, readableEntitiesOf } from "@almadar/core";
 import { dispatchDeclaredInput } from "../evaluation/declared-input-dispatch.js";
 import { dispatchInbound } from "../evaluation/inbound-dispatch.js";
-import { DispatchVisits, isEntityCall, buildResolvedTraitConfigs, collectCallsiteCaptureChildren, normalizeUserContext, personaFromIdentityRow, resolveDefaultViewer, DEFAULT_VIEWER, isPageReference, type NavItem, type Page, type PageRef,
+import { isEntityCall, normalizeUserContext, personaFromIdentityRow, resolveDefaultViewer, DEFAULT_VIEWER
 } from "@almadar/core";
 import { ownerFieldsFromSchema, identityEntityName, identityEntitiesOf } from "@almadar/core/mock";
-import { runServerEffectStage } from "../effects/effect-stage.js";
 import { InFlightCalls } from "../effects/in-flight-calls.js";
 import { defaultCallService, mockCallService } from "../effects/defaultCallService.js";
 import { createHttpPorts, createHttpSecrets, kernelOsCompletions, kernelOsGrants, KernelEngine, type HttpPorts, type HttpPortsOptions, type KernelHostPorts, type KernelModule, type OsGrantPort, type OsHostPort } from "../kernel/index.js";
@@ -317,31 +274,6 @@ export interface RegisteredOrbital {
    * unwrapped to its inline form.
    */
   configByTrait: Map<string, TraitConfig>;
-  manager: StateMachineManager;
-  /** The client's mount, followed from each leg's `_awaitingInit` (see `mount-lifecycle.ts`). */
-  mount: MountLifecycle<WorklistItem>;
-  entityData: Map<string, EntityRow>; // entityId -> data
-  /**
-   * Per-trait scalar state set by `(set @entity.X Y)`. Mirrors compiled's
-   * `state.fields`. The trait's `@entity` binding is a three-layer merge:
-   * declared entity field defaults < persistence entityData < this map.
-   * Mutated only by the `set` effect handler.
-   *
-   * For a `[shared]` linked entity the map is keyed `$shared::<entityName>`
-   * instead of the trait name — ONE frame across every bound trait, the
-   * server half of the client hook's `sharedKeyByTraitName` groups. Without
-   * it a writer trait's `(set @entity.X …)` was invisible to a sibling's
-   * effect interpolation (the chat thread's refetch filter read "" while the
-   * composer held the open channel).
-   */
-  traitFieldStates: Map<string, EntityRow>;
-  /**
-   * Lazily built evaluation index (`traitIndexFor`), cached on the
-   * registration. Invalidated whenever another orbital registers — a late
-   * registrant's entities must appear in already-built indexes'
-   * cross-orbital `linkedEntity` resolution.
-   */
-  traitIndex?: TraitIndex;
 }
 
 // `OrbitalEventRequest` — event sent from client to server — is owned by
@@ -479,12 +411,10 @@ export interface OrbitalServerRuntimeConfig {
    */
   mockOwnerFields?: string[];
   /**
-   * Which engine decides execution. `'js'` (the default) is this package's interpreter; `'kernel'` runs the
-   * Rust kernel through WebAssembly (`kernel` below) and answers its I/O with this runtime's persistence,
-   * service and program-host adapters. Chosen per runtime; nothing switches it implicitly.
+   * The initialised `@almadar/kernel` module that decides execution and whose I/O this runtime answers with its
+   * persistence, service and program-host adapters. Absent, the runtime loads the installed `@almadar/kernel` itself
+   * (`loadInstalledKernel`) when a program is first registered.
    */
-  engine?: 'js' | 'kernel';
-  /** The initialised `@almadar/kernel` module (`loadKernelModule` in Node); required when `engine` is `'kernel'`. */
   kernel?: KernelModule;
   /**
    * What the `http` effect runs on: the kernel's request driver (`loadHttpKernel`), and optionally the secret store,
@@ -615,7 +545,7 @@ export class OrbitalServerRuntime {
    *  visibility replaces. */
   public readonly persistence: PersistenceAdapter;
   private tickBindings: TickBinding[] = [];
-  /** The kernel behind `engine: 'kernel'`; null on the JS engine and before a program is registered. */
+  /** The kernel running the registered program; null before a program is registered. */
   private kernelEngine: KernelEngine | null = null;
   /** The `os` handles of the program the kernel runs; closed when that program is replaced, reset or dropped. */
   private kernelOs: OsHostPort | undefined;
@@ -637,11 +567,6 @@ export class OrbitalServerRuntime {
   private programHandlersPromise: Promise<void> | null = null;
   private resolvedSchema: OrbitalSchema | null = null;
 
-  /** App-level theme key from the schema's `theme "<key>"` header — the
-   *  `@currentTheme` fallback between an orbital's own `theme` and
-   *  `DEFAULT_THEME_KEY`. Set at registration, before the orbital loops
-   *  (`resolvedSchema` is assigned only after them). */
-  private appThemeKey: string | undefined;
   /** The program's declared `locales`, in declared order; the first is the default. */
   private appLocales: readonly string[] = [];
   /** Merged message catalogs of every registered program (keys are behavior-qualified). */
@@ -657,28 +582,6 @@ export class OrbitalServerRuntime {
    */
   private readonly tickRelayPending = new Map<string, LiveBroadcastItem>();
   private tickRelayTimer: ReturnType<typeof setInterval> | null = null;
-  /**
-   * Trait name -> resolved `TraitConfig`, computed once per `register()` via
-   * `buildResolvedTraitConfigs` (`@almadar/core`). An embedded sub-trait's
-   * OWN declared config schema (`registered.traits` / `collectDeclaredConfigDefaults`)
-   * carries `@config.X` forwards verbatim — this map chains those through to
-   * the trait that actually embeds it (see `embedded-trait-config.ts` for the
-   * full rationale). Used as a fallback layer in `buildBindingContext` behind
-   * `declaredDefaults` and ahead of `callSiteOverride`.
-   */
-  private resolvedTraitConfigs: Record<string, TraitConfig> = {};
-  /**
-   * Referrer trait name → the DIRECT children (via `@trait.X`) that need
-   * their lifecycle transition re-run under the referrer's `callsitePayload`
-   * whenever the referrer's own transition fires — computed once per
-   * `register()` via `@almadar/core`'s `collectCallsiteCaptureChildren`
-   * (merged across every orbital in the schema, same flattening
-   * `resolvedTraitConfigs` uses). See `rerenderCallsiteCaptureChildren`.
-   */
-  private callsiteCaptureChildrenByTrait: ReadonlyMap<string, ReadonlySet<string>> = new Map();
-  /** Embedded child → the payload its composer last composed it with (sticky `@callsitePayload`). */
-  private composedCallsitePayloads = new Map<string, EventPayload>();
-
   constructor(config: OrbitalServerRuntimeConfig = {}) {
     this.config = {
       mode: 'mock', // Default to mock mode for preview
@@ -692,9 +595,6 @@ export class OrbitalServerRuntime {
       defaultUser: config.defaultUser ?? DEFAULT_VIEWER,
     };
     this.viewerNamedByHost = config.defaultUser !== undefined;
-    if (config.engine === 'kernel' && config.kernel === undefined) {
-      throw new Error("OrbitalServerRuntime: engine 'kernel' needs the initialised @almadar/kernel module (config.kernel)");
-    }
     this.eventBus = new EventBus();
 
     // Initialize loader only if a fully-configured one was handed in, or if
@@ -877,10 +777,11 @@ export class OrbitalServerRuntime {
   }
 
   private async doRegister(schema: OrbitalSchema, options: RegisterOptions): Promise<void> {
+    // The policy gates the mock seeder installs evaluate on the kernel from the first seeded row.
+    installKernelEvaluator(await this.kernelModule());
     if (this.config.debug) {
       registerLog.debug('register:schema', { name: schema.name });
     }
-    this.appThemeKey = themeDataKey(schema.theme) || undefined;
     this.appLocales = schema.locales ?? [];
     for (const [locale, catalog] of Object.entries(options.messages ?? {})) {
       this.messages[locale] = { ...this.messages[locale], ...catalog };
@@ -937,14 +838,12 @@ export class OrbitalServerRuntime {
 
     // Set up scheduled ticks
     this.setupTicks();
-    this.openKernel(executed);
+    await this.openKernel(executed);
 
     // Stash the post-preprocessing schema so HTTP layers (e.g. a playground
     // server's /api/schema handler) can serve the fully-resolved copy instead
     // of re-reading the raw .orb from disk. See getResolvedSchema().
     this.resolvedSchema = schema;
-    this.resolvedTraitConfigs = buildResolvedTraitConfigs(executed);
-    this.callsiteCaptureChildrenByTrait = this.buildCallsiteCaptureChildrenByTrait(executed);
     this.flushPendingOwnerRestamp();
   }
 
@@ -995,53 +894,6 @@ export class OrbitalServerRuntime {
       persistence: identity.persistence,
       identity: true,
     });
-  }
-
-  /**
-   * Merge `collectCallsiteCaptureChildren` across every orbital in the
-   * schema into ONE flat referrer-trait-name → children map — same
-   * flattening `resolvedTraitConfigs` uses, safe because trait names are
-   * unique within one running schema (the compose/resolve pipeline already
-   * relies on that for `configByTrait` and `resolvedTraitConfigs`).
-   */
-  private buildCallsiteCaptureChildrenByTrait(
-    schema: OrbitalSchema,
-  ): ReadonlyMap<string, ReadonlySet<string>> {
-    const merged = new Map<string, ReadonlySet<string>>();
-    for (const orbital of schema.orbitals) {
-      for (const [referrer, children] of collectCallsiteCaptureChildren(orbital)) {
-        merged.set(referrer, children);
-      }
-    }
-    return merged;
-  }
-
-  /**
-   * Register an OrbitalSchema synchronously (for backward compatibility).
-   * Note: This version doesn't wait for instance seeding to complete.
-   * Use async register() for guaranteed instance seeding.
-   */
-  registerSync(schema: OrbitalSchema): void {
-    if (this.config.debug) {
-      registerLog.debug('register:schema-sync', { name: schema.name });
-    }
-    this.appThemeKey = themeDataKey(schema.theme) || undefined;
-
-    // Before the loop — see the note in register(): seeding is eager.
-    this.prepareMockSeeding(schema);
-
-    for (const orbital of schema.orbitals) {
-      this.registerOrbital(orbital);
-    }
-
-    // Set up scheduled ticks
-    this.setupTicks();
-    this.openKernel(schema);
-
-    this.resolvedSchema = schema;
-    this.resolvedTraitConfigs = buildResolvedTraitConfigs(schema);
-    this.callsiteCaptureChildrenByTrait = this.buildCallsiteCaptureChildrenByTrait(schema);
-    this.flushPendingOwnerRestamp();
   }
 
   /**
@@ -1266,40 +1118,14 @@ export class OrbitalServerRuntime {
   private async registerOrbitalAsync(orbital: OrbitalDefinition): Promise<void> {
     // Trait unwrap + config-by-trait + entity resolution — shared with the
     // stateless per-request transition path, see OrbitalTraitParsing.ts.
-    const { traits: traitDefs, inlineTraits, configByTrait, entity } = parseOrbitalTraits(orbital);
-
-    const manager = new StateMachineManager(traitDefs, {
-      contextExtensions: this.config.contextExtensions,
-    }, this.transitionFanout);
-
-    // Bind each trait's call-site config to the manager so `@config.X`
-    // resolves inside guard expressions at runtime. The orbital's
-    // `configByTrait` map was just built above from the trait-ref
-    // wrapper config blocks; thread those through to the SMM so
-    // mode-aware guards (e.g. std-modal's "OPEN requires row when
-    // mode=edit") work end-to-end on the runtime path. No-op for
-    // traits with no call-site config supplied.
-    for (const [traitName, traitConfig] of configByTrait) {
-      manager.setTraitConfig(traitName, traitConfig);
-    }
+    const { inlineTraits, configByTrait, entity } = parseOrbitalTraits(orbital);
 
     this.orbitals.set(orbital.name, {
       schema: orbital,
       entity,
       traits: inlineTraits,
       configByTrait,
-      manager,
-      entityData: new Map(),
-      traitFieldStates: new Map(),
-      mount: new MountLifecycle<WorklistItem>(),
     });
-
-    // A newly registered orbital's entities must appear in every
-    // already-built evaluation index's cross-orbital `linkedEntity`
-    // resolution — drop the caches so the next use rebuilds.
-    for (const other of this.orbitals.values()) {
-      other.traitIndex = undefined;
-    }
 
     this.bindDeclaredCollections(entity === undefined ? [] : [entity]);
 
@@ -1422,9 +1248,6 @@ export class OrbitalServerRuntime {
     }
   }
 
-  /**
-   * Register a single orbital (sync wrapper for backward compatibility)
-   */
   /** The adapters the kernel's I/O is answered with: this runtime's persistence, services and program host. */
   private httpPorts(egress: readonly string[] = this.resolvedSchema?.egress ?? []): HttpPorts | undefined {
     const options = this.config.http;
@@ -1477,15 +1300,22 @@ export class OrbitalServerRuntime {
     this.liveBroadcastSink?.({ event: site.event, payload, source: stamp, originClientId, target: 'origin' });
   }
 
-  /** (Re)open the kernel on the program just registered; a no-op on the JS engine. */
-  private openKernel(registered: OrbitalSchema): void {
-    const { engine, kernel } = this.config;
-    if (engine !== 'kernel' || kernel === undefined) return;
+  /** The kernel module this runtime runs on: the one the host handed in, else the installed `@almadar/kernel`. */
+  private async kernelModule(): Promise<KernelModule> {
+    if (this.config.kernel !== undefined) return this.config.kernel;
+    const { loadInstalledKernel } = await import('../kernel/load-node.js');
+    this.config.kernel = await loadInstalledKernel();
+    return this.config.kernel;
+  }
+
+  /** (Re)open the kernel on the program just registered. */
+  private async openKernel(registered: OrbitalSchema): Promise<void> {
+    const kernel = await this.kernelModule();
     const schema: OrbitalSchema = { ...registered, orbitals: inlineTraitRefs(registered.orbitals) };
     for (const orbital of schema.orbitals) {
       for (const trait of orbital.traits ?? []) {
         if (typeof trait === 'object' && 'ref' in trait && !('stateMachine' in trait)) {
-          throw new Error(`OrbitalServerRuntime: engine 'kernel' takes an orb-resolved program, but trait "${trait.ref}" of orbital "${orbital.name}" is still a reference`);
+          throw new Error(`OrbitalServerRuntime: the kernel takes an orb-resolved program, but trait "${trait.ref}" of orbital "${orbital.name}" is still a reference`);
         }
       }
     }
@@ -1502,17 +1332,6 @@ export class OrbitalServerRuntime {
     return this.kernelEngine;
   }
 
-  private registerOrbital(orbital: OrbitalDefinition): void {
-    // Create a synchronous version by using a promise that we don't await
-    // For truly async registration, use the async register() method
-    this.registerOrbitalAsync(orbital).catch((err) => {
-      registerLog.error('register:failed', {
-        name: orbital.name,
-        error: err instanceof Error ? err : String(err),
-      });
-    });
-  }
-
   /**
    * Set up scheduled ticks for all traits
    */
@@ -1526,7 +1345,7 @@ export class OrbitalServerRuntime {
         if (!trait.ticks || trait.ticks.length === 0) continue;
 
         for (const tick of trait.ticks) {
-          this.registerTick(orbitalName, trait.name, tick, registered);
+          this.registerTick(orbitalName, trait.name, tick);
         }
       }
     }
@@ -1543,7 +1362,6 @@ export class OrbitalServerRuntime {
     orbitalName: string,
     traitName: string,
     tick: RuntimeTraitTick,
-    registered: RegisteredOrbital,
   ): void {
     // A cron-shaped string ("0 9 * * *") schedules on calendar matches, not
     // a fixed millisecond delay — route it to the scheduler's cron mode
@@ -1559,7 +1377,7 @@ export class OrbitalServerRuntime {
         });
       }
       const handle = this.tickScheduler.addCron(tick.interval, () => {
-        void this.executeTick(orbitalName, traitName, tick, registered);
+        void this.executeTick(orbitalName, traitName, tick);
       });
       this.tickBindings.push({ orbitalName, traitName, tick, handle });
       return;
@@ -1590,7 +1408,7 @@ export class OrbitalServerRuntime {
     }
 
     const handle = this.tickScheduler.add(intervalMs, () => {
-      void this.executeTick(orbitalName, traitName, tick, registered);
+      void this.executeTick(orbitalName, traitName, tick);
     });
 
     this.tickBindings.push({
@@ -1601,122 +1419,8 @@ export class OrbitalServerRuntime {
     });
   }
 
-  /**
-   * Execute a tick for all applicable entities
-   */
-  private async executeTick(
-    orbitalName: string,
-    traitName: string,
-    tick: RuntimeTraitTick,
-    registered: RegisteredOrbital,
-  ): Promise<void> {
-    if (this.kernelEngine !== null) {
-      await this.executeKernelTick(orbitalName, traitName, tick);
-      return;
-    }
-    // Mount-scoped by default: an unmounted trait's tick is paused, not fired (Runtime Spec Clause 8.3).
-    if (tick.runsInBackground !== true && !this.isTraitMounted(orbitalName, traitName)) return;
-    const entityType = registered.entity.name;
-    const emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }> = [];
-    const now = Date.now();
-
-    try {
-      const ticking = this.traitIndexFor(registered).byName.get(traitName);
-      if (ticking === undefined) return;
-      const entities = await this.persistence.list(entityType);
-
-      if (this.config.debug && entities.length > 0) {
-        effectLog.debug('tick:processing', () => ({
-          orbital: orbitalName,
-          trait: traitName,
-          tick: tick.name,
-          entityCount: entities.length,
-        }));
-      }
-
-      for (const entity of entities) {
-        const fired = processTick({
-          traitState: { traitName, currentState: registered.manager.getState(traitName)?.currentState ?? findInitialState(ticking.traitDef), previousState: null, lastEvent: null, context: {} },
-          trait: ticking.traitDef,
-          tick,
-          entityData: entity,
-          payload: {},
-          config: ticking.config,
-          // A tick has no request user; only a dev host's ambient persona.
-          user: this.config.defaultUser,
-          now,
-          ...(this.config.contextExtensions !== undefined ? { contextExtensions: this.config.contextExtensions } : {}),
-        });
-        if (!fired.executed) {
-          if (this.config.debug) {
-            effectLog.debug('tick:not-fired', () => ({
-              tick: tick.name,
-              entityId: typeof entity.id === 'string' ? entity.id : undefined,
-            }));
-          }
-          continue;
-        }
-
-        if (fired.effects.length > 0) {
-          const fetchedData: { [entityType: string]: EntityRow | EntityRow[] } = {};
-          const clientEffects: ClientEffectTuple[] = [];
-          const tickEffectResults: ServerEffectResult[] = [];
-          await this.executeEffects(
-            registered,
-            traitName,
-            fired.effects,
-            {}, // No payload for ticks
-            entity,
-            entity.id as string,
-            emittedEvents,
-            fetchedData,
-            clientEffects,
-            tickEffectResults,
-            this.config.defaultUser,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            now,
-          );
-
-          if (this.config.debug) {
-            effectLog.debug('tick:effects-executed', () => ({
-              tick: tick.name,
-              entityId: typeof entity.id === 'string' ? entity.id : undefined,
-            }));
-          }
-        }
-      }
-
-      // The tick ran its effects directly (never entering the composition),
-      // so its emits saw no in-band fan-out — relay them to every orbital's
-      // matching listeners, this orbital's included (the deleted bus
-      // fan-out's role for tick emits).
-      if (emittedEvents.length > 0) {
-        this.enqueueEvent(async (queueHold) => {
-          await this.relayEmittedEvents(orbitalName, emittedEvents, {
-            includeSourceOrbital: true,
-            visited: new DispatchVisits(),
-            queueHold,
-          });
-        }).catch((error: Error) => {
-          effectLog.error('tick:relay-error', {
-            tick: tick.name,
-            error: error.message,
-          });
-        });
-      }
-    } catch (error) {
-      effectLog.error('tick:execute-error', {
-        tick: tick.name,
-        error: error instanceof Error ? error : String(error),
-      });
-    }
-  }
-
-  /** A tick on the kernel engine: the host owns the timer, the kernel decides whether and over which rows it fires. */
-  private async executeKernelTick(orbitalName: string, traitName: string, tick: RuntimeTraitTick): Promise<void> {
+  /** A tick: the host owns the timer, the kernel decides whether and over which rows it fires. */
+  private async executeTick(orbitalName: string, traitName: string, tick: RuntimeTraitTick): Promise<void> {
     const response = await this.processOrbitalEvent(orbitalName, {
       event: tickEventKey(tick.name),
       runTick: { trait: traitName, tick: tick.name },
@@ -1957,12 +1661,6 @@ export class OrbitalServerRuntime {
   resetCircuitState(): void {
     this.kernelEngine?.reset();
     this.kernelOs?.close();
-    for (const registered of this.orbitals.values()) {
-      registered.manager.resetAll();
-      registered.traitFieldStates.clear();
-      registered.entityData.clear();
-      registered.mount = new MountLifecycle<WorklistItem>();
-    }
   }
 
   /**
@@ -2128,16 +1826,15 @@ export class OrbitalServerRuntime {
 
   /**
    * `reference` resolved for `user` against the store as it is now: the rows that still match its query and the
-   * viewer's `@read`, in the reference's order, `total` re-counted. The kernel engine resolves through its server
-   * resolve flight, the JS engine through the store push-down; both apply the same rule. A client reaches it with
+   * viewer's `@read`, in the reference's order, `total` re-counted. The kernel resolves through its server
+   * resolve flight. A client reaches it with
    * `POST /:orbital/../resolve-rows` as the signed-in viewer.
    */
   async resolveRows(reference: RowSetRef, user: UserContext): Promise<RowQueryPage> {
     const schema = this.resolvedSchema;
     const owner = schema?.orbitals.find((orbital) => orbitalInlineEntities(orbital).some((entity) => entity.name === reference.entityType));
     if (schema === null || owner === undefined) throw new Error(`${reference.entityType}: no registered orbital declares this entity`);
-    if (this.kernelEngine !== null) return this.kernelEngine.resolveRows(reference, { orbital: owner.name, user });
-    return resolveRowSetFromPersistence(this.persistence, reference, entityAccessPolicies(schema, reference.entityType)?.read, { user }, new Set<string>());
+    return this.requireKernelEngine().resolveRows(reference, { orbital: owner.name, user });
   }
 
   async getIdentityRoster(): Promise<UserContext[]> {
@@ -2154,72 +1851,6 @@ export class OrbitalServerRuntime {
   // ==========================================================================
   // Event Processing
   // ==========================================================================
-
-  /**
-   * `traitFieldStates` key for one trait: its own name, or — when its linked
-   * entity is `[shared]` — `$shared::<entityName>` so every trait bound to
-   * that entity reads/writes ONE frame. The server twin of the client hook's
-   * `sharedKeyByTraitName` (useTraitStateMachine): without it, a sibling
-   * trait's effect interpolation (a fetch filter reading
-   * `@entity.activeChannel`) never saw the writer's `(set …)`.
-   */
-  private sharedFieldKey(registered: RegisteredOrbital, traitName: string): string {
-    const trait = registered.traits.find((t) => t.name === traitName);
-    const linked = trait?.linkedEntity ?? registered.entity.name;
-    return this.isSharedEntity(registered, linked) ? `$shared::${linked}` : traitName;
-  }
-
-  /** Resolve an entity name to its declared `shared` flag: the orbital's own
-   *  entity, its auxiliary entities, then other registered orbitals' primary
-   *  entities (cross-orbital binds like a membership rail in the chat page). */
-  private isSharedEntity(registered: RegisteredOrbital, entityName: string): boolean {
-    if (registered.entity.name === entityName) return registered.entity.shared === true;
-    for (const aux of registered.schema.auxiliaryEntities ?? []) {
-      if (typeof aux === 'object' && !isEntityCall(aux) && aux.name === entityName) {
-        return aux.shared === true;
-      }
-    }
-    for (const other of this.orbitals.values()) {
-      if (other.entity.name === entityName) return other.entity.shared === true;
-    }
-    return false;
-  }
-
-  /** Resolve an entity by name the same way `isSharedEntity` does: the
-   *  orbital's own entity, its auxiliary entities, then other registered
-   *  orbitals' primary entities (cross-orbital binds like a membership rail
-   *  in the chat page). The one entity-resolution walk shared by every
-   *  field-level lookup (`intrinsicFieldNames`, `entityFieldsFor`) so a new
-   *  lookup never grows a second copy of this walk. */
-  private resolveEntityByName(registered: RegisteredOrbital, entityName: string): Entity | undefined {
-    if (registered.entity.name === entityName) return registered.entity;
-    for (const aux of registered.schema.auxiliaryEntities ?? []) {
-      if (typeof aux === 'object' && !isEntityCall(aux) && aux.name === entityName) {
-        return aux;
-      }
-    }
-    for (const other of this.orbitals.values()) {
-      if (other.entity.name === entityName) return other.entity;
-    }
-    return undefined;
-  }
-
-  /** Names of an entity's `@intrinsic` fields — trait-owned view state
-   *  (`ChatMessage.activeChannel`, `ChannelMember.pendingChannelId`, …) that
-   *  is NEVER a persisted column. */
-  private intrinsicFieldNames(registered: RegisteredOrbital, entityName: string): string[] {
-    return this.entityFieldsFor(registered, entityName)
-      .filter((field): field is EntityField & { name: string } => field.intrinsic === true && typeof field.name === 'string')
-      .map((field) => field.name);
-  }
-
-  /** Full declared field list for an entity — the schema source `persist
-   *  create`'s required-column check reads (`EffectExecutor.
-   *  resolveEntityFields`), via the same `resolveEntityByName` walk
-   *  `intrinsicFieldNames` uses. */
-  private entityFieldsFor(registered: RegisteredOrbital, entityName: string): EntityField[] {
-    return this.resolveEntityByName(registered, entityName)?.fields ?? [];
-  }
 
   /**
    * Process an event for an orbital — the stateful host's thin shell over
@@ -2277,8 +1908,9 @@ export class OrbitalServerRuntime {
     const registered = await this.resolveRegisteredOrbital(orbitalName);
     if (!registered) return undefined;
     const states: Record<string, string> = {};
-    for (const [name, state] of registered.manager.getAllStates()) {
-      states[name] = state.currentState;
+    for (const trait of registered.traits) {
+      const currentState = this.kernelEngine?.stateOf(trait.name) ?? '';
+      if (currentState !== '') states[trait.name] = currentState;
     }
     return {
       name: orbitalName,
@@ -2471,12 +2103,7 @@ export class OrbitalServerRuntime {
       event: request.event,
       payload: JSON.stringify(request.payload ?? null),
       entityId: request.entityId,
-      traitStates: JSON.stringify(
-        Array.from(registered.manager.getAllStates().entries()).map(([traitName, state]) => ({
-          traitName,
-          currentState: state.currentState,
-        })),
-      ),
+      traitStates: JSON.stringify(registered.traits.map((trait) => ({ traitName: trait.name, currentState: this.kernelEngine?.stateOf(trait.name) ?? '' }))),
     }));
     xOrbitalLog.info('processOrbitalEvent:enter', () => ({
       orbital: orbitalName,
@@ -2523,31 +2150,15 @@ export class OrbitalServerRuntime {
     // set only scopes which renders come back (`_activeTraits`, read by the
     // composition). Leaving on-page listeners to the client left this
     // host's held state stale (G-RUNTIME-042).
-    const response = await evaluateOrbitalEvent(
-      this.makeEvaluateDeps(registered, { viewer, onPush, originClientId: request.clientId, queueHold, ...(request.locale !== undefined ? { locale: request.locale } : {}) }),
+    const response = await evaluateOnKernel(
+      { engine: this.requireKernelEngine(), orbital: registered.schema.name, outsideEventQueue: <T,>(work: () => Promise<T>): Promise<T> => this.outsideEventQueue(queueHold, work) },
       serverRequest,
+      viewer,
+      request.locale,
     );
 
     // The kernel's cascade already crosses orbitals: there is nothing for the host to relay.
-    if (this.kernelEngine !== null) {
-      this.publishKernelResponse(response, onPush, request.clientId);
-      return response;
-    }
-
-    // Cross-orbital listens relay: the composition's in-band fan-out
-    // covered THIS orbital's listeners; a listener registered under a
-    // different orbital gets the emit here (the deleted bus fan-out's
-    // only load-bearing role). Awaited — the old bus handlers were
-    // fire-and-forget, which let a relayed persist land after the
-    // response.
-    await this.relayEmittedEvents(orbitalName, response.emittedEvents, {
-      includeSourceOrbital: false,
-      visited: new DispatchVisits(),
-      queueHold,
-      into: response,
-      ...(viewer !== undefined ? { viewer } : {}),
-    });
-
+    this.publishKernelResponse(response, onPush, request.clientId);
     return response;
   }
 
@@ -2568,112 +2179,6 @@ export class OrbitalServerRuntime {
       onPush?.({ type: 'event', data: emitted });
     }
     for (const effect of response.clientEffects ?? []) onPush?.({ type: 'effect', data: effect });
-  }
-
-  /**
-   * Build the composition deps for one registered orbital — the stateful
-   * session shape: long-lived manager + frames, the server effect stage
-   * (relation trio + live broadcast), and the per-request viewer/push/
-   * origin context. The stage runner also re-runs JSX-hoisted
-   * callsite-capture children under each step's payload (see
-   * `rerenderCallsiteCaptureChildren`).
-   */
-  private makeEvaluateDeps(
-    registered: RegisteredOrbital,
-    context: {
-      viewer?: UserContext;
-      onPush?: (item: PushItem) => void;
-      originClientId?: string;
-      /** The event-queue hold this composition runs under; absent outside the queue (ticks). */
-      queueHold?: EventQueueHold;
-      /** The requesting viewer's locale (`OrbitalEventRequest.locale`). */
-      locale?: string;
-    },
-  ): EvaluateOrbitalEventDeps {
-    const runEffects: EvaluateEffectRunner = async (traitName, args) => {
-      const originClientId = args.originClientId ?? context.originClientId;
-      await this.executeEffects(
-        registered,
-        traitName,
-        args.effects,
-        args.payload,
-        args.entityData,
-        args.entityId,
-        args.emittedEvents,
-        args.fetchedData,
-        args.clientEffects,
-        args.effectResults,
-        context.viewer,
-        args.clientEffectsByTrait,
-        context.onPush,
-        originClientId,
-        undefined,
-        args.now,
-        args.dispatch,
-        args.firing,
-        context.queueHold,
-        args.locale,
-        args.followOn,
-        args.fetchedRefs,
-      );
-      await this.rerenderCallsiteCaptureChildren(
-        registered,
-        traitName,
-        args.payload ?? {},
-        args.entityData,
-        args.entityId,
-        args.emittedEvents,
-        args.fetchedData,
-        args.clientEffects,
-        args.effectResults,
-        context.viewer,
-        args.clientEffectsByTrait,
-        context.onPush,
-        originClientId,
-        args.now,
-        new Set(),
-        false,
-        context.queueHold,
-        args.locale,
-        this.composedByEffects(registered, traitName, args.effects),
-      );
-    };
-    return {
-      traitIndex: this.traitIndexFor(registered),
-      manager: registered.manager,
-      persistence: this.persistence,
-      frames: registered.traitFieldStates,
-      mount: registered.mount,
-      runEffects,
-      // This host holds every trait's state and runs every listener itself:
-      // an explicit empty mask, so the composition's request-shape mask (for
-      // a host that holds no state) never silences a target's own listens.
-      relayMask: new Set<string>(),
-      ...(this.kernelEngine !== null
-        ? { kernel: { engine: this.kernelEngine, orbital: registered.schema.name, outsideEventQueue: <T,>(work: () => Promise<T>): Promise<T> => this.outsideEventQueue(context.queueHold, work) } }
-        : {}),
-      ...(context.viewer !== undefined ? { user: context.viewer } : {}),
-      ...(context.locale !== undefined ? { locale: context.locale } : {}),
-      ...(context.originClientId !== undefined ? { originClientId: context.originClientId } : {}),
-      ...(this.config.contextExtensions !== undefined ? { contextExtensions: this.config.contextExtensions } : {}),
-      ...(this.config.debug !== undefined ? { debug: this.config.debug } : {}),
-      logContext: { orbitalName: registered.schema.name },
-    };
-  }
-
-  /**
-   * The orbital's evaluation index, built lazily on first use (by then
-   * every orbital is registered, so cross-orbital `linkedEntity`
-   * resolution sees the full registry) and cached on the registration.
-   */
-  private traitIndexFor(registered: RegisteredOrbital): TraitIndex {
-    if (registered.traitIndex === undefined) {
-      registered.traitIndex = buildTraitIndexForOrbital(
-        registered.schema,
-        [...this.orbitals.values()].filter((other) => other !== registered).map((other) => other.schema),
-      );
-    }
-    return registered.traitIndex;
   }
 
   /**
@@ -2733,722 +2238,6 @@ export class OrbitalServerRuntime {
     } finally {
       hold.release = await this.acquireEventQueue();
       hold.held = true;
-    }
-  }
-
-  /**
-   * Cross-orbital listens relay — the host half of the circuit the
-   * per-orbital composition cannot see: a listener registered under a
-   * DIFFERENT orbital than the emitter's. Each match runs the listener's
-   * `triggers` event through the listener's own orbital composition
-   * (targeted delivery — the same shape the deleted bus fan-out posted,
-   * minus its blanket `originClientId` skip: G-RUNTIME-031). Recursion is
-   * bounded by a per-entry visited set (distinct
-   * orbital/trait/triggers/from keys, mirroring the composition's own
-   * cascade visited-set) plus a hop cap. MUST only run holding the event
-   * queue.
-   *
-   * @param sourceOrbital The orbital whose composition produced `emits`,
-   *   or undefined for external producers (os/substrate handlers). The
-   *   source orbital is skipped unless `includeSourceOrbital` — its own
-   *   listeners already ran in-band (composition emits), or the caller
-   *   explicitly wants them (ticks, which never enter the composition).
-   */
-  private async relayEmittedEvents(
-    sourceOrbital: string | undefined,
-    emits: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>,
-    opts: {
-      includeSourceOrbital: boolean;
-      visited: DispatchVisits;
-      /** The requesting viewer; ticks and external producers have none and run as the default user. */
-      viewer?: UserContext;
-      /** The event-queue hold the relay runs under (each hop's service calls may release it). */
-      queueHold?: EventQueueHold;
-      /** The requesting response: each relay hop's renders, rows and states
-       *  fold into it so the requester sees the work its event caused. */
-      into?: OrbitalEventResponse;
-    },
-  ): Promise<void> {
-    const queue = [...emits];
-    let hops = 0;
-    while (queue.length > 0) {
-      const emitted = queue.shift();
-      if (emitted === undefined) break;
-      // The composition already fanned an emit out within the orbital that
-      // produced it; skip THAT orbital (the emit's own), not the request's —
-      // a relay hop's answer must still reach the requesting orbital.
-      const producedIn = emitted.source?.orbital ?? sourceOrbital;
-      let delivered = false;
-      for (const [orbitalName, registered] of this.orbitals) {
-        if (orbitalName === producedIn && !opts.includeSourceOrbital) continue;
-        const delivery = deliveryOf(emitted);
-        const traitIndex = this.traitIndexFor(registered);
-        for (const target of collectListenerTargets(
-          traitIndex,
-          emitted.source,
-          emitted.event,
-          emitted.payload,
-          undefined,
-          {
-            guardBindings: freshDeliveryGuardBindings(delivery, (listener) => {
-              const entry = traitIndex.byName.get(listener);
-              return registered.manager.getState(listener)?.currentState ??
-                (entry !== undefined ? findInitialState(entry.traitDef) : '');
-            }),
-          },
-        )) {
-          const from = registered.manager.getState(target.listenerTrait)?.currentState ??
-            findInitialState(target.entry.traitDef);
-          const frame = await readTraitFrame(this.persistence, registered.traitFieldStates, target.entry, undefined);
-          const relayTrait = `${orbitalName}\u0000${target.listenerTrait}`;
-          if (opts.visited.has(relayTrait, target.triggers, from, target.payload, frame)) continue;
-          if (hops >= CROSS_ORBITAL_RELAY_CAP) {
-            xOrbitalLog.warn('relay:truncated', { event: emitted.event, hops });
-            return;
-          }
-          opts.visited.add(relayTrait, target.triggers, from, target.payload, frame);
-          hops += 1;
-          try {
-            const response = await evaluateOrbitalEvent(
-              {
-                ...this.makeEvaluateDeps(registered, {
-                  viewer: opts.viewer ?? this.config.defaultUser,
-                  ...(opts.queueHold !== undefined ? { queueHold: opts.queueHold } : {}),
-                  ...(emitted.source?.originClientId !== undefined ? { originClientId: emitted.source.originClientId } : {}),
-                }),
-                seedDelivery: delivery,
-              },
-              {
-                event: target.triggers,
-                ...(target.triggersId !== undefined ? { eventId: target.triggersId } : {}),
-                ...(target.payload !== undefined ? { payload: target.payload } : {}),
-                targetTrait: target.listenerTrait,
-              },
-            );
-            delivered = true;
-            queue.push(...response.emittedEvents);
-            if (opts.into !== undefined) foldRelayHop(opts.into, response);
-          } catch (error) {
-            // One listener's failure must not strand the remaining relay
-            // (the old bus fan-out's handlers were independent too).
-            xOrbitalLog.error('relay:error', {
-              orbital: orbitalName,
-              trait: target.listenerTrait,
-              event: target.triggers,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-      }
-      // The requester's own entry: the client fold must not run these listeners again.
-      if (delivered) emitted.source = { ...(emitted.source ?? {}), dispatched: true };
-    }
-  }
-
-  /**
-   * Entry point for events produced OUTSIDE any orbital's composition —
-   * the OS effect handlers (fs/net/child_process watchers) and the agent
-   * substrate handlers (the deleted bus's last producers). Fans the event
-   * out to every registered orbital's matching listeners. Runs on the
-   * event queue; errors are logged, never thrown at the producer.
-   */
-  private dispatchExternalEvent(event: string, payload?: EventPayload): void {
-    this.enqueueEvent(async (queueHold) => {
-      await this.relayEmittedEvents(
-        undefined,
-        [{ event, ...(payload !== undefined ? { payload } : {}) }],
-        { includeSourceOrbital: true, visited: new DispatchVisits(), queueHold },
-      );
-    }).catch((error: Error) => {
-      xOrbitalLog.error('dispatchExternalEvent:error', {
-        event,
-        error: error.message,
-      });
-    });
-  }
-
-
-  /**
-   * Execute effects from a transition
-   */
-  private async executeEffects(
-    registered: RegisteredOrbital,
-    traitName: string,
-    effects: RuntimeValue[],
-    payload: EventPayload | undefined,
-    entityData: EntityRow,
-    entityId: string | undefined,
-    emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>,
-    fetchedData: { [entityType: string]: EntityRow | EntityRow[] },
-    clientEffects: ClientEffectTuple[],
-    effectResults: ServerEffectResult[],
-    /** Already-normalized viewer (see `processOrbitalEvent`'s `viewer`). */
-    user?: UserContext,
-    clientEffectsByTrait?: ClientEffectByTrait[],
-    onPush?: (item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void,
-    /** Per-request originating client (from `OrbitalEventRequest.clientId`); absent for ticks. Carried through to persist-envelope broadcast items so the sink can exclude the origin. */
-    originClientId?: string,
-    /**
-     * The composing effect's triggering payload, when `traitName` is an
-     * embedded child (`@trait.X`) being re-run under its embedder's
-     * transition. Surfaced on the binding context as `@callsitePayload.<field>`
-     * — see `BindingContext.callsitePayload`. Absent for a trait's own,
-     * non-embedded execution.
-     */
-    callsitePayload?: EventPayload,
-    /** The dispatch's `now` stamp. */
-    now?: number,
-    /** The transition being run, for post-commit `state` and the dispatch roots. */
-    dispatch?: EffectDispatch,
-    /** The firing transition's event and from-state, stamped on each client effect. */
-    firing?: { event: string; fromState: string },
-    /** The event-queue hold these effects run under; absent outside the queue (ticks). */
-    queueHold?: EventQueueHold,
-    /** The requesting viewer's locale; absent (ticks, a request without one) → the stage's `defaultLocale`. */
-    locale?: string,
-    /** A follow-on step of the dispatch: its calls do not hold the request (`ServerEffectStageArgs.followOn`). */
-    followOn?: boolean,
-    /** Pages fetched by reference (`deliver: ids`) land here; the response's `dataRefs`. */
-    fetchedRefs?: { [entityType: string]: RowSetRef },
-  ): Promise<void> {
-    if (callsitePayload !== undefined) this.composedCallsitePayloads.set(traitName, callsitePayload);
-    const capture = callsitePayload ?? this.composedCallsitePayloads.get(traitName);
-    const framesBefore = clientEffectsByTrait?.length ?? 0;
-    const sigilPages = appNavItems([...this.orbitals.values()].map((reg) => reg.schema));
-    const sigilTheme = sigilThemeKey(registered.schema.theme, this.appThemeKey);
-
-    await runServerEffectStage(
-      {
-        persistence: this.persistence,
-        frames: registered.traitFieldStates,
-        frameKeyFor: (t) => this.sharedFieldKey(registered, t),
-        orbitalName: registered.schema.name,
-        orbitalId: registered.schema.id,
-        irTraits: registered.traits,
-        entity: registered.entity,
-        configByTrait: registered.configByTrait,
-        resolvedTraitConfigs: this.resolvedTraitConfigs,
-        resolvedSchema: this.resolvedSchema,
-        registeredOrbitals: this.orbitals.values(),
-        getTraitState: (t) => registered.manager.getState(t),
-        intrinsicFieldNames: (type) => this.intrinsicFieldNames(registered, type),
-        entityFieldsFor: (type) => this.entityFieldsFor(registered, type),
-        validateRelationCardinality: (type, data) => this.validateRelationCardinality(type, data),
-        enforceOnDeleteRules: (type, id) => this.enforceOnDeleteRules(type, id),
-        hasOnDeleteRules: (type) => this.hasOnDeleteRules(type),
-        populateRelations: (entities, type, include) => this.populateRelations(registered, entities, type, include),
-        sigilPages,
-        sigilTheme,
-        extraEffectHandlers: this.config.effectHandlers,
-        outsideEventQueue: (work) => this.outsideEventQueue(queueHold, work),
-        inFlightCalls: this.inFlightCalls,
-        ...(this.httpPorts() !== undefined ? { http: this.httpPorts() } : {}),
-        servicePorts: (caller, user, message) => this.servicePorts(caller, user, message),
-        deliverEmit: (event, eventPayload, stamp, fromPersistSuccess) => {
-          // Observability tap, NOT circuit routing (W4): the runtime's own
-          // fan-out is the composition's in-band loop + the host's
-          // cross-orbital relay — nothing inside the runtime subscribes to
-          // the bus anymore. The emit still fires here because the bus is
-          // the public firehose (`getEventBus().onAny`) tests and
-          // diagnostics observe the circuit through (including tick emits,
-          // which have no response to read).
-          this.eventBus.emit(event, eventPayload, stamp, eventRouteKey(event, stamp.eventId));
-          if (fromPersistSuccess) {
-            this.liveBroadcastSink?.({ event, payload: eventPayload, source: stamp, originClientId, target: 'peers' });
-          }
-        },
-        deliverLive: (event, eventPayload, stamp) => {
-          this.eventBus.emit(event, eventPayload, stamp, eventRouteKey(event, stamp.eventId));
-          this.liveBroadcastSink?.({ event, payload: eventPayload, source: stamp, originClientId, target: 'origin' });
-        },
-        liveBroadcastSinkWired: this.liveBroadcastSink !== null,
-        // Only a host that can deliver a host-run dispatch to the tab defers; otherwise the call holds the request.
-        ...(this.hostDispatchSink !== null ? { deferCallOutcome: (call: { traitName: string; event: string; payload: EventPayload | undefined; entityId: string | undefined; originClientId: string | undefined }) => this.runDeferredOutcome(registered.schema.name, {
-          event: call.event,
-          ...(call.payload !== undefined ? { payload: call.payload } : {}),
-          targetTrait: call.traitName,
-          ...(call.entityId !== undefined ? { entityId: call.entityId } : {}),
-          ...(call.originClientId !== undefined ? { clientId: call.originClientId } : {}),
-          ...(user !== undefined ? { user } : {}),
-          ...(locale !== undefined ? { locale } : {}),
-        }) } : {}),
-        debug: this.config.debug,
-        mockMode: this.config.mode === 'mock',
-        contextExtensions: this.config.contextExtensions,
-        messages: this.messages,
-        ...(this.appLocales[0] !== undefined ? { defaultLocale: this.appLocales[0] } : {}),
-      },
-      { traitName, effects, payload, entityData, entityId, emittedEvents, fetchedData, ...(fetchedRefs !== undefined ? { fetchedRefs } : {}), clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, callsitePayload: capture, ...(locale !== undefined ? { locale } : {}), ...(now !== undefined ? { now } : {}), ...(dispatch !== undefined ? { dispatch } : {}), ...(firing !== undefined ? { firing } : {}), ...(followOn === true ? { followOn } : {}) },
-    );
-    if (capture !== undefined && clientEffectsByTrait !== undefined) {
-      for (const frame of clientEffectsByTrait.slice(framesBefore)) {
-        if (frame.traitName === traitName) frame.callsitePayload = capture;
-      }
-    }
-  }
-
-  /**
-   * Re-run a JSX-hoisted inline child trait's (`@trait.X`) lifecycle
-   * transition under `callsitePayload` — the payload of the transition that
-   * just composed it — so its `@callsitePayload.<field>` captures reflect
-   * the composing event instead of staying frozen at whatever the child
-   * captured at its own mount-time INIT (a child renders once at mount and
-   * never again on its own).
-   *
-   * `this.callsiteCaptureChildrenByTrait` (built at `register()` via
-   * `@almadar/core`'s `collectCallsiteCaptureChildren`) gives `traitName`'s
-   * DIRECT children that need this — either because the child itself
-   * captures, or because it is a pass-through to a capturing descendant.
-   * The child's lifecycle event (INIT/LOAD/$MOUNT) is re-dispatched
-   * TARGETED at just that trait, from its CURRENT state, only when that
-   * arm stays in the state (`repaintLifecycleEvent` — a repaint never moves
-   * the child; otherwise only its descendants are visited), then its effects run through the SAME `executeEffects` used
-   * everywhere else, with `payload: {}` (a lifecycle event carries none)
-   * and `callsitePayload` set so `@callsitePayload.*` resolves — pushing
-   * into the SAME `clientEffects`/`clientEffectsByTrait`/`effectResults`
-   * so the child's refreshed frame reaches the sidecar under its own trait
-   * name. Recurses into the child's own entry in the same map (still under
-   * the SAME `callsitePayload` — the capture resolves up the embed chain to
-   * the nearest transition that actually has one) for grandchildren;
-   * `visited` guards against a malformed embed graph cycling on itself.
-   * Never goes through `processOrbitalEvent` (that would be re-entrant) —
-   * calls this internal executor directly, exactly like every other
-   * transition's effects.
-   */
-  /** The callsite-capture children some fired effects of `traitName` compose (core `traitsEmbeddedByEffects`). */
-  private composedByEffects(registered: RegisteredOrbital, traitName: string, effects: RuntimeValue[]): ReadonlySet<string> | undefined {
-    const irTrait = this.traitIndexFor(registered).byName.get(traitName)?.irTrait;
-    return irTrait === undefined ? undefined : traitsEmbeddedByEffects(irTrait, effects);
-  }
-
-  private async rerenderCallsiteCaptureChildren(
-    registered: RegisteredOrbital,
-    traitName: string,
-    callsitePayload: EventPayload,
-    entityData: EntityRow,
-    entityId: string | undefined,
-    emittedEvents: Array<{ event: string; payload?: EventPayload; source?: BusEventSource }>,
-    fetchedData: { [entityType: string]: EntityRow | EntityRow[] },
-    clientEffects: ClientEffectTuple[],
-    effectResults: ServerEffectResult[],
-    user: UserContext | undefined,
-    clientEffectsByTrait: ClientEffectByTrait[] | undefined,
-    onPush: ((item: { type: 'event'; data: { event: string; payload?: EventPayload; source?: BusEventSource } } | { type: 'effect'; data: ClientEffectTuple }) => void) | undefined,
-    originClientId: string | undefined,
-    now: number | undefined,
-    visited: Set<string> = new Set(),
-    /** Walking through a child that was not repainted: its children keep the payload they were last composed with. */
-    keepComposed = false,
-    queueHold?: EventQueueHold,
-    locale?: string,
-    /** The children the firing transition composes; the others keep their last payload. Top level only. */
-    composedBy?: ReadonlySet<string>,
-  ): Promise<void> {
-    const children = this.callsiteCaptureChildrenByTrait.get(traitName);
-    if (!children || children.size === 0) return;
-    for (const childName of children) {
-      if (composedBy !== undefined && !composedBy.has(childName)) continue;
-      if (visited.has(childName)) continue;
-      visited.add(childName);
-      const composedWith = keepComposed ? this.composedCallsitePayloads.get(childName) ?? callsitePayload : callsitePayload;
-      const lifecycleEvent = registered.manager.repaintLifecycleEvent(childName);
-      const [entry] = lifecycleEvent === undefined
-        ? []
-        : registered.manager.sendEvent(lifecycleEvent, {}, entityData, undefined, undefined, childName, user);
-      if (!entry || !entry.result.executed) {
-        await this.rerenderCallsiteCaptureChildren(
-          registered, childName, composedWith, entityData, entityId, emittedEvents, fetchedData,
-          clientEffects, effectResults, user, clientEffectsByTrait, onPush, originClientId, now, visited, true, queueHold, locale,
-        );
-        continue;
-      }
-      xOrbitalLog.debug('callsite-capture-child:rerender', () => ({
-        referrer: traitName,
-        child: childName,
-        lifecycleEvent,
-        callsitePayload: JSON.stringify(composedWith),
-      }));
-      await this.executeEffects(
-        registered,
-        childName,
-        entry.result.effects,
-        {},
-        entityData,
-        entityId,
-        emittedEvents,
-        fetchedData,
-        clientEffects,
-        effectResults,
-        user,
-        clientEffectsByTrait,
-        onPush,
-        originClientId,
-        composedWith,
-        now,
-        undefined,
-        undefined,
-        queueHold,
-        locale,
-      );
-      await this.rerenderCallsiteCaptureChildren(
-        registered,
-        childName,
-        composedWith,
-        entityData,
-        entityId,
-        emittedEvents,
-        fetchedData,
-        clientEffects,
-        effectResults,
-        user,
-        clientEffectsByTrait,
-        onPush,
-        originClientId,
-        now,
-        visited,
-        keepComposed,
-        queueHold,
-        locale,
-        // Below a repainted child, only what its repainted transition composes.
-        this.composedByEffects(registered, childName, entry.result.effects),
-      );
-    }
-  }
-
-  // ==========================================================================
-  // Relation Population
-  // ==========================================================================
-
-  /**
-   * Populate relation fields on entities
-   *
-   * For each field in `include`, find the relation field configuration and
-   * fetch the related entity, attaching it to the parent entity.
-   *
-   * @param entities - Entities to populate
-   * @param entityType - Entity type name
-   * @param include - Relation field names to populate
-   */
-  /**
-   * Validate that relation field values match their declared cardinality.
-   * Called before create/update to ensure data integrity.
-   */
-  private validateRelationCardinality(
-    entityType: string,
-    data: EntityRow,
-  ): void {
-    // Find the entity schema
-    for (const [, registered] of this.orbitals) {
-      if (registered.entity.name !== entityType) continue;
-
-      for (const field of registered.entity.fields ?? []) {
-        if (field.type !== 'relation') continue;
-        if (field.name === undefined) continue;
-        const fieldName = field.name;
-        const value = data[fieldName];
-        if (value === undefined || value === null) continue;
-
-        const cardinality = field.relation?.cardinality || 'one';
-
-        if (cardinality === 'one' || cardinality === 'many-to-one') {
-          if (Array.isArray(value)) {
-            throw new Error(
-              `Cardinality violation: ${entityType}.${fieldName} has cardinality '${cardinality}' but received an array. Expected a single string ID.`
-            );
-          }
-        } else if (cardinality === 'many' || cardinality === 'many-to-many' || cardinality === 'one-to-many') {
-          if (typeof value === 'string') {
-            data[fieldName] = [value];
-          } else if (Array.isArray(value)) {
-            const nonStrings = value.filter((v) => typeof v !== 'string');
-            if (nonStrings.length > 0) {
-              throw new Error(
-                `Cardinality violation: ${entityType}.${fieldName} has cardinality '${cardinality}' but array contains non-string values.`
-              );
-            }
-          }
-        }
-      }
-      break;
-    }
-  }
-
-  private hasOnDeleteRules(entityType: string): boolean {
-    for (const [, registered] of this.orbitals) {
-      for (const field of registered.entity.fields ?? []) {
-        if (field.type === 'relation' && field.relation?.entity === entityType) return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Enforce onDelete rules for relation fields pointing to the entity being deleted.
-   * Scans all registered entities for relation fields targeting the given entity type,
-   * finds records referencing the ID being deleted, and applies cascade/nullify/restrict.
-   */
-  private async enforceOnDeleteRules(
-    entityType: string,
-    deletedId: string,
-  ): Promise<void> {
-    for (const [, registered] of this.orbitals) {
-      const entity = registered.entity;
-      const fields = entity.fields ?? [];
-
-      for (const field of fields) {
-        if (field.type !== 'relation') continue;
-        if (field.relation?.entity !== entityType) continue;
-        if (field.name === undefined) continue;
-        const fieldName = field.name;
-
-        const onDelete = field.relation.onDelete || 'restrict';
-        const referringEntityType = entity.name;
-
-        const allRecords = await this.persistence.list(referringEntityType);
-        const affectedRecords = allRecords.filter(record => {
-          const fkValue = record[fieldName];
-          if (typeof fkValue === 'string') return fkValue === deletedId;
-          if (Array.isArray(fkValue)) return fkValue.includes(deletedId);
-          return false;
-        });
-
-        if (affectedRecords.length === 0) continue;
-
-        switch (onDelete) {
-          case 'restrict':
-            throw new Error(
-              `Cannot delete ${entityType} ${deletedId}: ${affectedRecords.length} ${referringEntityType} record(s) reference it via ${field.name}. Rule: restrict.`
-            );
-
-          case 'cascade':
-            for (const record of affectedRecords) {
-              const recordId = record.id as string;
-              if (recordId) {
-                await this.persistence.delete(referringEntityType, recordId);
-              }
-            }
-            if (this.config.debug) {
-              persistLog.debug('cascade-delete', {
-                count: affectedRecords.length,
-                entityType: referringEntityType,
-              });
-            }
-            break;
-
-          case 'nullify':
-            for (const record of affectedRecords) {
-              const recordId = record.id as string;
-              if (recordId && field.name !== undefined) {
-                const fieldName = field.name;
-                const update: EntityRow = {};
-                const fkValue = record[fieldName];
-                if (Array.isArray(fkValue)) {
-                  update[fieldName] = fkValue.filter((id) => id !== deletedId);
-                } else {
-                  update[fieldName] = null;
-                }
-                await this.persistence.update(referringEntityType, recordId, update);
-              }
-            }
-            if (this.config.debug) {
-              persistLog.debug('nullify', {
-                field: field.name,
-                count: affectedRecords.length,
-                entityType: referringEntityType,
-              });
-            }
-            break;
-        }
-      }
-    }
-  }
-
-  private async populateRelations(
-    registered: RegisteredOrbital,
-    entities: EntityRow[],
-    entityType: string,
-    include: string[],
-    depth: number = 0,
-    visited: Set<string> = new Set(),
-  ): Promise<void> {
-    // Circular reference protection: stop if depth exceeded or entity type already visited
-    const maxDepth = 2;
-    if (depth >= maxDepth || visited.has(entityType)) {
-      if (this.config.debug) {
-        persistLog.debug('populate:skip', {
-          entityType,
-          depth,
-          visited: visited.has(entityType),
-        });
-      }
-      return;
-    }
-    visited.add(entityType);
-    // EntityField.name is optional in @almadar/core 7+ (Rust IR parity); only
-    // named top-level fields carry FK metadata.
-    const entityFields = this.entityFieldsFor(registered, entityType).filter(
-      (f): f is typeof f & { name: string } => typeof f.name === 'string' && f.name.length > 0,
-    );
-
-    if (entityFields.length === 0) {
-      if (this.config.debug) {
-        persistLog.warn('populate:no-entity-def', { entityType });
-      }
-      return;
-    }
-
-    // Process each include field
-    for (const includeField of include) {
-      // Find the relation field (check both "fieldName" and "fieldNameId" patterns)
-      const relationField = entityFields.find((f): f is RelationEntityField & { name: string } => {
-        if (f.type !== 'relation') return false;
-        // Match "company" against "company" or "companyId"
-        return f.name === includeField ||
-               f.name === `${includeField}Id` ||
-               f.name.replace(/Id$/, '') === includeField;
-      });
-
-      if (!relationField?.relation?.entity) {
-        if (this.config.debug) {
-          persistLog.warn('populate:no-relation-field', { includeField, entityType });
-        }
-        continue;
-      }
-
-      const foreignKeyField = relationField.name;
-      // Id-primary: prefer `relation.entityId` resolved against the
-      // registered orbitals' entity ids, falling back to the `entity` name
-      // string when the id is absent or unindexed (transition-period
-      // tolerance) — never throw on an unindexed id.
-      let relatedEntityType = relationField.relation.entity;
-      if (relationField.relation.entityId) {
-        for (const registered of this.orbitals.values()) {
-          if (registered.entity.id === relationField.relation.entityId) {
-            relatedEntityType = registered.entity.name;
-            break;
-          }
-        }
-      }
-      const cardinality = relationField.relation.cardinality || 'one';
-
-      // Collect all foreign key IDs to batch fetch
-      // Handles both single ID (string) and array of IDs (string[]) for many cardinalities
-      const foreignKeyIds = new Set<string>();
-      for (const entity of entities) {
-        const fkValue = entity[foreignKeyField];
-        if (fkValue && typeof fkValue === 'string') {
-          foreignKeyIds.add(fkValue);
-        } else if (Array.isArray(fkValue)) {
-          for (const id of fkValue) {
-            if (id && typeof id === 'string') {
-              foreignKeyIds.add(id);
-            }
-          }
-        }
-      }
-
-      if (foreignKeyIds.size === 0) continue;
-
-      // Batch fetch all related entities
-      const relatedEntities = new Map<string, EntityRow>();
-      for (const fkId of foreignKeyIds) {
-        try {
-          const related = await this.persistence.getById(relatedEntityType, fkId);
-          if (related) {
-            relatedEntities.set(fkId, related);
-          }
-        } catch (error) {
-          if (this.config.debug) {
-            persistLog.error('populate:fetch-related-error', {
-              entityType: relatedEntityType,
-              error: error instanceof Error ? error : String(error),
-            });
-          }
-        }
-      }
-
-      // Attach related entities to parent entities
-      // Use the base name without "Id" suffix for the populated field
-      const populatedFieldName = includeField.endsWith('Id')
-        ? includeField.slice(0, -2)
-        : includeField;
-
-      // Self-referential relations (target entity === source entity, e.g.
-      // ThreadPost.replies : [ThreadPost]) hydrate as a TREE of shallow clones:
-      // every descendant is loaded, and a branch ends where an id repeats one
-      // of its ancestors, so the payload has no shared or circular references
-      // (live store rows here made `res.json()` throw → 500).
-      const isSelfRef = relatedEntityType === entityType;
-      const idsOf = (value: EntityRow[string]): string[] => {
-        if (typeof value === 'string') return [value];
-        const ids: string[] = [];
-        if (Array.isArray(value)) for (const id of value) if (typeof id === 'string') ids.push(id);
-        return ids;
-      };
-      const selfTree = isSelfRef && cardinality !== 'one' && cardinality !== 'many-to-one';
-      if (selfTree) {
-        let frontier = [...relatedEntities.values()];
-        while (frontier.length > 0) {
-          const next: EntityRow[] = [];
-          for (const row of frontier) {
-            for (const id of idsOf(row[foreignKeyField])) {
-              if (relatedEntities.has(id)) continue;
-              const loaded = await this.persistence.getById(relatedEntityType, id);
-              if (loaded) {
-                relatedEntities.set(id, loaded);
-                next.push(loaded);
-              }
-            }
-          }
-          frontier = next;
-        }
-      }
-      const hydrateClone = (id: string, ancestors: ReadonlySet<string>): EntityRow | undefined => {
-        const related = relatedEntities.get(id);
-        if (!related) return undefined;
-        const copy: EntityRow = { ...related };
-        if (selfTree) {
-          const lineage = new Set(ancestors).add(id);
-          copy[foreignKeyField] = idsOf(related[foreignKeyField])
-            .filter((childId) => !lineage.has(childId))
-            .map((childId) => hydrateClone(childId, lineage))
-            .filter((child): child is EntityRow => child !== undefined);
-        } else if (isSelfRef) {
-          copy[foreignKeyField] = [];
-        }
-        return copy;
-      };
-
-      for (const entity of entities) {
-        const fkValue = entity[foreignKeyField];
-        const lineage = new Set(typeof entity.id === 'string' ? [entity.id] : []);
-        // Population attaches related EntityRow objects to the entity at runtime.
-        // This mutates beyond the EntityRow type, so we use Object.defineProperty.
-        if (cardinality === 'one' || cardinality === 'many-to-one') {
-          if (typeof fkValue === 'string' && relatedEntities.has(fkValue)) {
-            Object.defineProperty(entity, populatedFieldName, {
-              value: hydrateClone(fkValue, lineage),
-              writable: true, enumerable: true, configurable: true,
-            });
-          }
-        } else {
-          const fkIds = idsOf(fkValue).filter((id) => !lineage.has(id) && relatedEntities.has(id));
-          if (Array.isArray(fkValue) || fkIds.length > 0) {
-            Object.defineProperty(entity, populatedFieldName, {
-              value: fkIds.map((id) => hydrateClone(id, lineage)).filter((child): child is EntityRow => child !== undefined),
-              writable: true, enumerable: true, configurable: true,
-            });
-          }
-        }
-      }
-
-      if (this.config.debug) {
-        persistLog.debug('populate:done', {
-          field: populatedFieldName,
-          count: entities.length,
-          entityType,
-        });
-      }
     }
   }
 
@@ -3646,28 +2435,16 @@ export class OrbitalServerRuntime {
     if (!registered) return undefined;
 
     const kernel = this.kernelEngine;
-    if (kernel !== null) {
-      const stateOf = (name: string): TraitState | undefined => {
-        const currentState = kernel.stateOf(name);
-        return currentState === '' ? undefined : { traitName: name, currentState, previousState: null, lastEvent: null, context: {} };
-      };
-      if (traitName) return stateOf(traitName);
-      const states: Record<string, TraitState> = {};
-      for (const trait of registered.traits) {
-        const state = stateOf(trait.name);
-        if (state !== undefined) states[trait.name] = state;
-      }
-      return states;
-    }
-
-    if (traitName) {
-      return registered.manager.getState(traitName);
-    }
-
-    // Return all states for the orbital
+    if (kernel === null) return undefined;
+    const stateOf = (name: string): TraitState | undefined => {
+      const currentState = kernel.stateOf(name);
+      return currentState === '' ? undefined : { traitName: name, currentState, previousState: null, lastEvent: null, context: {} };
+    };
+    if (traitName) return stateOf(traitName);
     const states: Record<string, TraitState> = {};
-    for (const [name, state] of registered.manager.getAllStates()) {
-      states[name] = state;
+    for (const trait of registered.traits) {
+      const state = stateOf(trait.name);
+      if (state !== undefined) states[trait.name] = state;
     }
     return states;
   }
@@ -3738,25 +2515,6 @@ export function createOrbitalServerRuntime(
 // stateless `@almadar-io/playground-runtime` path can reuse the exact same
 // `listens {}` matching predicate for its own cross-orbital cascade instead
 // of a second, divergent copy — see that module's doc comment.
-
-/** Fold one cross-orbital relay hop's results into the requesting response. */
-function foldRelayHop(into: OrbitalEventResponse, hop: OrbitalEventResponse): void {
-  if (hop.clientEffects !== undefined && hop.clientEffects.length > 0) {
-    into.clientEffects = [...(into.clientEffects ?? []), ...hop.clientEffects];
-  }
-  if (hop.clientEffectsByTrait !== undefined && hop.clientEffectsByTrait.length > 0) {
-    into.clientEffectsByTrait = [...(into.clientEffectsByTrait ?? []), ...hop.clientEffectsByTrait];
-  }
-  if (hop.entityByTrait !== undefined) {
-    into.entityByTrait = { ...(into.entityByTrait ?? {}), ...hop.entityByTrait };
-  }
-  into.states = { ...into.states, ...hop.states };
-  // The relay delivered these to every listener this host holds; a client's
-  // client-only listeners (LOLO §7) run them on the client.
-  for (const emitted of hop.emittedEvents) {
-    into.emittedEvents.push({ ...emitted, source: { ...(emitted.source ?? {}), dispatched: true } });
-  }
-}
 
 declare global {
   namespace Express {

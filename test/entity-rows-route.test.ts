@@ -135,7 +135,7 @@ describe('the API views the router answers from', () => {
     await runtime.persistence.create('Note', { title: 'Root' });
     expect(runtime.listOrbitalSummaries()).toEqual([{ name: 'Notes', entity: 'Note', traits: ['noteList'] }]);
     const info = await runtime.describeOrbital('Notes');
-    expect(info?.traits).toEqual([{ name: 'noteList', currentState: undefined, states: ['browsing'], events: [] }]);
+    expect(info?.traits).toEqual([{ name: 'noteList', currentState: 'browsing', states: ['browsing'], events: [] }]);
     const rows = await runtime.entityRows('Notes', 'Note');
     expect(rows?.some((row: EntityRow) => row.title === 'Root')).toBe(true);
   });

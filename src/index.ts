@@ -38,6 +38,7 @@ export type {
   TransitionObserver,
   RollbackCause,
   EvaluationContextExtensions,
+  ServiceCallContext,
 } from "./types.js";
 
 // Constants
@@ -346,3 +347,8 @@ export type {
 export * from "./ui/index.js";
 
 export { AwaitingRegistry } from './evaluation/awaiting.js';
+
+// Host ports: the encrypted credential store a host installs and the `call-service` providers it plugs in.
+export * from "./host/credentials/index.js";
+export { registerServiceProvider, unregisterServiceProvider, registeredServices, callRegisteredService, ServiceCallError, type ServiceCallErrorCode, type ServiceProvider } from "./host/service-provider.js";
+export { callServiceByMode, defaultCallService, mockCallService } from "./effects/defaultCallService.js";

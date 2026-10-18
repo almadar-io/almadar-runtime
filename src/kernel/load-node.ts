@@ -1,7 +1,7 @@
 /** Node-only: load and initialise `@almadar/kernel` from its package directory (the one with `pkg/`). */
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { installKernelEvaluator } from '@almadar/core';
 import type { HttpKernel } from './http-exchange.js';
@@ -23,6 +23,17 @@ export interface LoadKernelOptions {
  */
 export async function loadKernelModule(kernelDir: string, options: LoadKernelOptions = {}): Promise<KernelModule> {
   return loadKernel(kernelDir, options);
+}
+
+let installedKernel: Promise<LoadedKernel> | undefined;
+
+/**
+ * The kernel of the `@almadar/kernel` package this host installs, loaded once per process with the language data
+ * the packages under `languageFrom` declare. A host with no package installed rejects, never falls back.
+ */
+export function loadInstalledKernel(languageFrom?: string): Promise<LoadedKernel> {
+  installedKernel ??= loadKernel(dirname(dirname(createRequire(import.meta.url).resolve('@almadar/kernel'))), languageFrom === undefined ? {} : { languageFrom });
+  return installedKernel;
 }
 
 /**

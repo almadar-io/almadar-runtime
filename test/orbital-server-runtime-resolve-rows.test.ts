@@ -119,7 +119,7 @@ describe('the kernel engine resolves through its resolve flight', () => {
       free(): void {}
     }
     const kernel: KernelModule = { Server: Handle, osGlobMatches: () => false, isPublicAddress: () => false };
-    const runtime = new OrbitalServerRuntime({ persistence: new InMemoryPersistence(), debug: false, engine: 'kernel', kernel });
+    const runtime = new OrbitalServerRuntime({ persistence: new InMemoryPersistence(), debug: false, kernel });
     await runtime.register(schema(true));
     const page = await runtime.resolveRows(reference(['a1']), ALICE);
     expect(page).toEqual({ rows: [{ id: 'a1' }], total: 7 });

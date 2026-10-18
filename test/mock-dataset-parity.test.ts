@@ -1,6 +1,6 @@
 /**
  * The JS half of the shared seeded mock-dataset vector (canonical source:
- * `@almadar-io/parity` `fixtures/mock-seed/dataset.seeded.json`, mirrored here and into
+ * orbital-core `tests/baked/mock-seed/dataset.seeded.json`, mirrored here and into
  * orbital-core by the pattern-sync bake). The runtime, the compiled apps' `MockDataService`
  * (a facade over this store) and orbital-core's seeder must all produce these rows.
  */

@@ -584,8 +584,7 @@ export function createServerEffectHandlers(
         if (consumerCallService) {
           result = await consumerCallService(service, action, params, identity());
         } else {
-          // No host handler: the same @almadar/integrations provider compiled
-          // apps use, configured from the env (a missing key is a named failure).
+          // No host handler: the default call-service answer (a service with no provider is a named failure).
           result = await defaultCallService(service, action, params, identity());
         }
         record({

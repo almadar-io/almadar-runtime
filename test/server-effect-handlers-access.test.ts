@@ -160,7 +160,7 @@ describe('persist honours the declared mutation directives', () => {
     const effectResults: ServerEffectResult[] = [];
     const p = seeded();
     const boom = new Error('backend unavailable');
-    vi.spyOn(p, 'create').mockRejectedValueOnce(boom);
+    vi.spyOn(p, 'writeWhere').mockRejectedValueOnce(boom);
     const h = createServerEffectHandlers({
       persistence: p,
       eventBus: bus,

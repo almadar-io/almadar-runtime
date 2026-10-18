@@ -1,10 +1,10 @@
 // The language trio's server effects (behavior/catalog|describe|source, program/read|print|eval):
 // the executor arm hands the JSON args to the injected program host (whose `runProgramEffect` owns
-// argument parsing — tested in @almadar/integrations) and reports through emit.success /
+// argument parsing — tested in test/host-program-host.test.ts) and reports through emit.success /
 // emit.failure. A missing host or non-JSON args are an explicit failure, never silence.
 import { describe, it, expect, vi } from 'vitest';
 import type { JsonValue, RuntimeValue } from '@almadar/core';
-import type { ProgramEffectName, ProgramEffectOutcome } from '@almadar/integrations/program';
+import type { ProgramEffectName, ProgramEffectOutcome } from '../src/host/program/index.js';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 import {
     EffectExecutor,

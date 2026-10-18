@@ -2,7 +2,7 @@
 // secret ask, the build's provisioned credentials back it up for the app-wide slot only, a Google connection keeps the
 // host's Firebase credential with its account label, and a program is only ever told whether a credential is held and as whom.
 import { describe, expect, it } from 'vitest';
-import { CredentialStore, type CredentialPersistence } from '@almadar/integrations';
+import { CredentialStore, type CredentialPersistence } from '../src/host/credentials/index.js';
 import type { EntityRow } from '@almadar/core';
 import { createExtensionHttpPorts } from '../src/kernel/extension-ports.js';
 import { credentialForgetPayload, credentialStatusPayload } from '../src/kernel/http-exchange.js';

@@ -1,67 +1,20 @@
 /**
- * The runtime's own `call-service` provider when the host injects none: the
- * same @almadar/integrations manager compiled apps use, configured from the
- * env on first use. Loaded lazily and server-only (the browser build maps
- * @almadar/integrations away), so a client bundle never pulls provider SDKs.
+ * The runtime's own `call-service` answerer when the host injects none: the services a host plugged in with
+ * `registerServiceProvider`. A call to a service nobody plugged in fails by name, so the trait's declared failure event fires.
  */
 import type { EventPayload, ServiceParams } from '@almadar/core';
 import { mockServiceAnswer } from '@almadar/core/mock';
-import { isBrowserOnlyService } from '@almadar/core/patterns';
-import type { IntegrationCallContext } from '@almadar/integrations';
+import { callRegisteredService } from '../host/service-provider.js';
+import type { CredentialModeControl } from '../host/credentials/scope.js';
+import type { EffectHandlers, ServiceCallContext } from '../types.js';
 
-type ServiceCall = (
+export function defaultCallService(
   service: string,
   action: string,
   params: ServiceParams | undefined,
-  context?: IntegrationCallContext,
-) => Promise<EventPayload | null>;
-
-let loaded: Promise<ServiceCall> | null = null;
-
-async function load(): Promise<ServiceCall> {
-  const { RuntimeIntegrationManager } = await import('@almadar/integrations/runtime');
-  const manager = new RuntimeIntegrationManager();
-  manager.configureFromEnv();
-  const factory = manager.getFactory();
-  return async (service, action, params, context) => {
-    const result = await factory.execute(service, action, params ?? {}, context);
-    if (!result.success) throw result.error ?? new Error(`${service}.${action} failed`);
-    return result.data == null ? null : (result.data as EventPayload);
-  };
-}
-
-/** Calls `service.action` through @almadar/integrations; throws its error on failure. */
-export async function defaultCallService(
-  service: string,
-  action: string,
-  params: ServiceParams | undefined,
-  context?: IntegrationCallContext,
+  context?: ServiceCallContext,
 ): Promise<EventPayload | null> {
-  loaded ??= load();
-  return (await loaded)(service, action, params, context);
-}
-
-let loadedBrowser: Promise<ServiceCall> | null = null;
-
-async function loadBrowser(): Promise<ServiceCall> {
-  const { BROWSER_SERVICES, createBrowserCallService, webBrowserServices } = await import('@almadar/integrations/browser');
-  return createBrowserCallService(webBrowserServices(BROWSER_SERVICES));
-}
-
-/**
- * The call-service provider of a browser leg (a local store, no server): a browser-only service is
- * answered by the web-hosted browser integrations, since the node integrations
- * (`@almadar/integrations/runtime`) do not exist in a browser; any other service takes the default.
- */
-export async function browserLegCallService(
-  service: string,
-  action: string,
-  params: ServiceParams | undefined,
-  context?: IntegrationCallContext,
-): Promise<EventPayload | null> {
-  if (!isBrowserOnlyService(service)) return defaultCallService(service, action, params, context);
-  loadedBrowser ??= loadBrowser();
-  return (await loadedBrowser)(service, action, params, context);
+  return callRegisteredService(service, action, params, context);
 }
 
 /**
@@ -75,4 +28,10 @@ export async function mockCallService(
   const answer = mockServiceAnswer(service, action);
   if (!answer.ok) throw new Error(answer.message);
   return answer.value;
+}
+
+/** `call-service` for a host with a mock/real switch: the registry-shaped mock answer in `mock` mode, the registered services in `real`. */
+export function callServiceByMode(control: CredentialModeControl): NonNullable<EffectHandlers['callService']> {
+  return (service, action, params, context) =>
+    control.mode === 'mock' ? mockCallService(service, action) : defaultCallService(service, action, params, context);
 }

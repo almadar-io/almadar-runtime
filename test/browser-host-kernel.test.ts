@@ -4,7 +4,7 @@
 import 'fake-indexeddb/auto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { EventPayload, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
-import { chromeTabPort, type ChromeRuntimeApi, type ChromeTabsApi, type PageMessage, type PageReply } from '@almadar/integrations/browser';
+import { chromeTabPort, type ChromeRuntimeApi, type ChromeTabsApi, type PageMessage, type PageReply } from '../src/host/chrome/index.js';
 import { IndexedDbPersistence } from '@almadar/db/browser';
 import { tickEventKey } from '../src/traits/StateMachineCore';
 import { openBrowserHost, type BrowserHost } from '../src/evaluation/browser-store-transport';

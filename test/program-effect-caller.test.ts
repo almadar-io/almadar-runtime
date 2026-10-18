@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import type { OrbitalSchema } from '@almadar/core';
-import type { ProgramCallContext } from '@almadar/integrations/program';
+import type { ProgramCallContext } from '../src/host/program/index.js';
 
 function schema(): OrbitalSchema {
   return {

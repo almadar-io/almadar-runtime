@@ -3,7 +3,7 @@
  *
  * Backs the language trio's effects (behavior/catalog|describe|source,
  * program/read|print|eval) with the one host implementation in
- * `@almadar/integrations/program`, which runs the installed `orb` from the
+ * `host/program`, which runs the installed `orb` from the
  * project directory. Its workspaces are `std-workspace` run by the kernel
  * (`kernelWorkspaceHost`). Wired by OrbitalServerRuntime
  * (lazy import, merged under user handlers).
@@ -13,7 +13,7 @@
  * @packageDocumentation
  */
 
-import { installedWorkspaceHost, installWorkspaceHost, runProgramEffect } from '@almadar/integrations/program';
+import { installedWorkspaceHost, installWorkspaceHost, runProgramEffect } from '../host/program/index.js';
 import { kernelWorkspaceHost, workspaceBucketFromEnv, workspacesRoot } from '../kernel/workspace-node.js';
 import type { EffectHandlers } from '../types.js';
 

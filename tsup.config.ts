@@ -14,13 +14,22 @@ export default defineConfig({
     kernelProgram: 'src/kernel/program-node.ts',
     // The program host's workspaces: std-workspace run by the kernel (Node only).
     kernelWorkspace: 'src/kernel/workspace-node.ts',
+    // The `http` effect's default fetch (undici), Node only: the browser field maps it away so no browser bundle reaches undici.
+    pinnedFetchNode: 'src/kernel/pinned-fetch-node.ts',
+    // The credential store and its scope (browser-safe; a Node host adds AsyncLocalStorage tenant scopes).
+    credentials: 'src/host/credentials/index.ts',
+    // The raw ports of a Chrome-extension host (tabs, credential rows) and the page-side content script.
+    chrome: 'src/host/chrome/index.ts',
+    chromeContent: 'src/host/chrome/content.ts',
+    // Node-only host ports: the program host (spawns `orb`) and the development master key.
+    hostNode: 'src/host/node.ts',
     // Renderer-agnostic UI contract. Any UI library (React, Web Components,
     // etc.) imports this surface and implements the framework-specific slot
     // manager / component registry on top of it.
     'ui/index': 'src/ui/index.ts',
     // Node-only module: separate entry so dist emits a standalone
     // `createProgramHandlers.js` file that OrbitalServerRuntime loads via dynamic import().
-    // It spawns `orb` through @almadar/integrations/program.
+    // It spawns `orb` through the program host.
     createProgramHandlers: 'src/effects/createProgramHandlers.ts',
     // Lightweight seeded PRNG exposed for downstream tooling that needs
     // deterministic mock values without pulling in @faker-js/faker.

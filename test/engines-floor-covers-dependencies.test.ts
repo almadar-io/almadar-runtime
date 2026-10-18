@@ -1,6 +1,6 @@
 /**
  * The Node range this package declares must run every package it loads at run
- * time. `@almadar/llm` moved to undici 8 (Node >= 22.19) while this package still
+ * time. A dependency moved to undici 8 (Node >= 22.19) while this package still
  * tested Node 20, which failed only on the Node 20 CI leg, far from the cause.
  */
 import { existsSync, readFileSync } from 'node:fs';

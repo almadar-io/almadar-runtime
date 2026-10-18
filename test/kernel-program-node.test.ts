@@ -95,6 +95,25 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel program host', () => {
     });
   });
 
+  describe('std-llm usage report', () => {
+    const generate = async (reply: Record<string, JsonValue>): Promise<ProgramRun> => {
+      const t = transport(200, JSON.stringify(reply));
+      return (await startFile('vision-lmstudio', t.http)).dispatch('VisionOrbital', 'LLM_GENERATE', { userPrompt: 'hi' });
+    };
+    const usage = (run: ProgramRun): JsonValue => emitPayload(run, 'LLM_USAGE_REPORTED', (payload) => ({ provider: payload.provider ?? null, model: payload.model ?? null, action: payload.action ?? null, inputTokens: payload.inputTokens ?? null, outputTokens: payload.outputTokens ?? null }));
+
+    it('reports the provider, the model and the tokens the provider reported', async () => {
+      const run = await generate({ choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 12, completion_tokens: 5 } });
+      expect(usage(run)).toEqual({ provider: 'lmstudio', model: 'qwen/qwen3.8-27b', action: 'generate', inputTokens: 12, outputTokens: 5 });
+    });
+
+    it('control: a reply with no usage reports the counts absent, not zero, while the result keeps its zero', async () => {
+      const run = await generate({ choices: [{ message: { content: 'ok' } }] });
+      expect(usage(run)).toEqual({ provider: 'lmstudio', model: 'qwen/qwen3.8-27b', action: 'generate', inputTokens: null, outputTokens: null });
+      expect(emitPayload(run, 'LLM_GENERATE_RESULT', (payload) => payload.usage)).toEqual({ promptTokens: 0, completionTokens: 0, totalTokens: 0 });
+    });
+  });
+
   describe('std-llm extract maxTokens', () => {
     const extract = async (maxTokens: number | undefined): Promise<JsonValue> => {
       const t = transport(200, JSON.stringify({ choices: [{ message: { content: '{"a":1}' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }));

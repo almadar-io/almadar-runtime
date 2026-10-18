@@ -38,7 +38,7 @@ import type {
     OrbitalDefinition,
     RowSetRef,
 } from '@almadar/core';
-import type { ProgramEffectName, ProgramEffectOutcome } from '@almadar/integrations/program';
+import type { ProgramEffectName, ProgramEffectOutcome } from './host/program/index.js';
 import type {
     ComposeBehaviorsInput,
     ComposeBehaviorsResult,
@@ -525,8 +525,8 @@ export interface EffectHandlers {
 
     // === Program host handler (server-side only) ===
     // Backs the language trio's effects (behavior/catalog|describe|source,
-    // program/read|print|eval). `@almadar/integrations/program`'s
-    // `runProgramEffect` owns argument parsing and the `orb` call; an absent
+    // program/read|print|eval). The program host's
+    // `runProgramEffect` (`host/program`) owns argument parsing and the `orb` call; an absent
     // handler makes the effect fail explicitly.
     // The caller is the dispatch's viewer (`principal`/`role`), bound per stage like `callService`'s.
     programEffect?: (op: ProgramEffectName, args: readonly JsonValue[], context?: Pick<ServiceCallContext, 'principal' | 'role'>) => Promise<ProgramEffectOutcome>;

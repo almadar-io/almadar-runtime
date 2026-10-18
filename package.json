@@ -13,18 +13,22 @@
     "./dist/kernelOsNode.js": false,
     "./dist/kernelProgram.js": false,
     "./dist/kernelWorkspace.js": false,
+    "./dist/pinnedFetchNode.js": false,
     "./dist/createProgramHandlers.js": false,
-    "@almadar/integrations/program": false,
-    "@almadar/integrations": false,
-    "@almadar/integrations/runtime": false,
     "async_hooks": false,
+    "crypto": false,
+    "dgram": false,
+    "dns/promises": false,
+    "os": false,
+    "tty": false,
     "child_process": false,
     "fs": false,
     "fs/promises": false,
     "http": false,
     "net": false,
     "path": false,
-    "url": false
+    "url": false,
+    "./dist/hostNode.js": false
   },
   "exports": {
     ".": {
@@ -41,6 +45,26 @@
       "types": "./dist/kernel.d.ts",
       "import": "./dist/kernel.js",
       "require": "./dist/kernel.js"
+    },
+    "./credentials": {
+      "types": "./dist/credentials.d.ts",
+      "import": "./dist/credentials.js",
+      "require": "./dist/credentials.js"
+    },
+    "./chrome": {
+      "types": "./dist/chrome.d.ts",
+      "import": "./dist/chrome.js",
+      "require": "./dist/chrome.js"
+    },
+    "./chromeContent": {
+      "types": "./dist/chromeContent.d.ts",
+      "import": "./dist/chromeContent.js",
+      "require": "./dist/chromeContent.js"
+    },
+    "./hostNode": {
+      "types": "./dist/hostNode.d.ts",
+      "import": "./dist/hostNode.js",
+      "require": "./dist/hostNode.js"
     },
     "./kernelNode": {
       "types": "./dist/kernelNode.d.ts",
@@ -116,10 +140,11 @@
     "@almadar/core": "^10.128.0",
     "@almadar/db": "^0.1.5",
     "@almadar/evaluator": "^2.61.0",
-    "@almadar/integrations": "^2.58.0",
+    "@almadar/kernel": "^18.0.0",
     "@almadar/logger": "^1.18.0",
     "@almadar/std": "^16.255.0",
-    "undici": "^6.27.0"
+    "undici": "^6.27.0",
+    "zod": "^3.23.0"
   },
   "peerDependencies": {
     "express": "^5.0.0"

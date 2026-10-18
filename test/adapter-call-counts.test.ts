@@ -55,7 +55,7 @@ async function callsFor(verb: Verb, engine: { kernel?: KernelModule }): Promise<
   const memory = new InMemoryPersistence();
   await memory.create('Note', { id: 'n1', title: 'seed' });
   const counting = new CountingPersistence(memory);
-  const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: counting, ...(engine.kernel !== undefined ? { engine: 'kernel' as const, kernel: engine.kernel } : {}) });
+  const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: counting, ...(engine.kernel !== undefined ? { kernel: engine.kernel } : {}) });
   await runtime.register(program());
   counting.reset();
   const response = await runtime.processOrbitalEvent('Main', { event: event[verb], targetTrait: 'Notes' });
@@ -67,18 +67,9 @@ const counts = (create: number, update: number, getById: number, list: number, p
   create, update, delete: 0, getById, list, countRows: 0, query: 0, listPage: 0, queryPage: 0, queryIds: 0, writeWhere: 0, writeBatch: 0, ...pushed,
 });
 
-// Totals include the dispatch's own frame reads (JS: readTraitFrame; kernel: readRow/listRows for the bound entity),
+// Totals include the dispatch's own frame reads (readRow/listRows for the bound entity),
 // which the `noop` control isolates; the persist effect's own share is the difference.
-const JS = { noop: counts(0, 0, 0, 0), update: counts(0, 0, 0, 0, { writeWhere: 1 }), create: counts(1, 0, 3, 2), batch: counts(3, 0, 0, 0), fetch: counts(0, 0, 0, 0, { queryPage: 1 }) };
 const KERNEL = { noop: counts(0, 0, 1, 0), update: counts(0, 0, 2, 0, { writeBatch: 1 }), create: counts(0, 0, 2, 0, { writeBatch: 1 }), batch: counts(0, 0, 2, 0, { writeBatch: 1 }), fetch: counts(0, 0, 1, 0, { queryPage: 1 }) };
-
-describe('adapter calls per dispatch, JS engine (push-down)', () => {
-  it('control: an event with no effects reads nothing', async () => expect(await callsFor('noop', {})).toEqual(JS.noop));
-  it('persist update', async () => expect(await callsFor('update', {})).toEqual(JS.update));
-  it('persist create', async () => expect(await callsFor('create', {})).toEqual(JS.create));
-  it('persist batch of 3', async () => expect(await callsFor('batch', {})).toEqual(JS.batch));
-  it('fetch', async () => expect(await callsFor('fetch', {})).toEqual(JS.fetch));
-});
 
 describe.skipIf(KERNEL_DIR === undefined)('adapter calls per dispatch, kernel host (push-down)', () => {
   let kernel: KernelModule;
@@ -120,7 +111,7 @@ function runtimeProgram(persistence: 'runtime' | 'persistent'): OrbitalSchema {
 
 async function totalCalls(persistence: 'runtime' | 'persistent', kernel: KernelModule): Promise<number> {
   const counting = new CountingPersistence(new InMemoryPersistence());
-  const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: counting, engine: 'kernel', kernel });
+  const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: counting, kernel });
   await runtime.register(runtimeProgram(persistence));
   counting.reset();
   const response = await runtime.processOrbitalEvent('Main', { event: 'DONE', targetTrait: 'Notes' });
@@ -146,12 +137,12 @@ describe.skipIf(KERNEL_DIR === undefined)('the frame row of a persistent entity 
   });
 
   async function frameReads(persistence: 'persistent' | 'runtime'): Promise<number> {
-    const doc: { schema: OrbitalSchema } = JSON.parse(readFileSync(new URL('../../almadar-parity/fixtures/scenarios/emit-fanout.json', import.meta.url), 'utf8'));
+    const doc: { schema: OrbitalSchema } = JSON.parse(readFileSync(new URL('../../../tools/kernel-bench/fixtures/scenarios/emit-fanout.json', import.meta.url), 'utf8'));
     const orbital = doc.schema.orbitals[0];
     if (isEntityReferenceAny(orbital.entity)) throw new Error('emit-fanout has an inline entity');
     const schema: OrbitalSchema = { ...doc.schema, orbitals: [{ ...orbital, entity: { ...orbital.entity, persistence } }] };
     const counting = new CountingPersistence(new InMemoryPersistence());
-    const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: counting, engine: 'kernel', kernel });
+    const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: counting, kernel });
     await runtime.register(schema);
     counting.reset();
     const response = await runtime.processOrbitalEvent('Main', { event: 'GO', targetTrait: 'Src' });

@@ -51,32 +51,32 @@ function program(): OrbitalSchema {
 }
 
 let seq = 0;
-async function run(event: string, kernel?: KernelModule) {
+async function run(event: string, kernel: KernelModule) {
   initializeFirebase();
   const store = new FirestorePersistence({ root: `batch-tests-${Date.now()}/run-${++seq}`, firestore: firestoreRows(getFirestore()) });
   await store.create('Note', { id: 'n1', title: 'seed' });
   await store.create('Note', { id: 'n2', title: 'seed' });
-  const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: store, ...(kernel !== undefined ? { engine: 'kernel' as const, kernel } : {}) });
+  const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: store, kernel });
   await runtime.register(program());
   const response = await runtime.processOrbitalEvent('Main', { event, targetTrait: 'Notes' });
   const persist = response.effectResults?.find((r) => r.effect === 'persist');
   return { rows: await store.list('Note'), persist, events: response.emittedEvents.map((e) => e.event), response };
 }
 
-/** The JS interpreter reports `success: false` but fires the success route and carries no `code` (G-RUNTIME-089); the kernel host fires `failure` with the typed code (EXEC-STEP-8). */
-function suite(kernel: () => KernelModule | undefined, coded: boolean): void {
-  const code = (value: string) => (coded ? { code: value } : {});
+/** A failed batch fires `failure` with the typed code (EXEC-STEP-8). */
+function suite(kernel: () => KernelModule): void {
+  const code = (value: string) => ({ code: value });
   const title = (rows: { id?: unknown; title?: unknown }[], id: string) => rows.find((r) => r.id === id)?.title;
   it('a batch creating a taken id fails duplicate-id at index 0 and fires failure', async () => {
     const { rows, persist, events } = await run('TAKEN', kernel());
     expect(persist).toMatchObject({ success: false, ...code('duplicate-id') });
-    if (coded) expect(events).toEqual(['FAILED']);
+    expect(events).toEqual(['FAILED']);
     expect(title(rows, 'n1')).toBe('seed');
   });
   it('a batch updating a missing row fails not-found and creates nothing', async () => {
     const { rows, persist, events } = await run('MISSING', kernel());
     expect(persist).toMatchObject({ success: false, ...code('not-found') });
-    if (coded) expect(events).toEqual(['FAILED']);
+    expect(events).toEqual(['FAILED']);
     expect(rows.find((r) => r.id === 'nope')).toBeUndefined();
   });
   it('an earlier op that applied is rolled back by a later failure', async () => {
@@ -93,12 +93,10 @@ function suite(kernel: () => KernelModule | undefined, coded: boolean): void {
   });
 }
 
-describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('persist batch on Firestore, JS engine', () => suite(() => undefined, false));
-
 describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST || KERNEL_DIR === undefined)('persist batch on Firestore, kernel host', () => {
   let kernel: KernelModule;
   beforeAll(async () => {
     kernel = await loadKernel();
   });
-  suite(() => kernel, true);
+  suite(() => kernel);
 });

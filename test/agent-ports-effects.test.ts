@@ -39,7 +39,7 @@ interface Vectors {
 
 const EMIT = { emit: { success: 'OK', failure: 'FAILED' } };
 const local = new URL('./fixtures/agent-ports/vectors.json', import.meta.url);
-const canonical = new URL('../../almadar-parity/fixtures/agent-ports/vectors.json', import.meta.url);
+const canonical = new URL('../../../orbital-rust/crates/orbital-core/crates/runtime/tests/fixtures/agent-ports/vectors.json', import.meta.url);
 const vectors: Vectors = JSON.parse(readFileSync(local, 'utf8'));
 const schema = parseOrbitalSchema(vectors.schema);
 

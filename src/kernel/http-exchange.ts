@@ -5,7 +5,8 @@
  */
 import { credentialStatusConnected, credentialStorageKey, resolveCredentialStatusIdentity, isJsonObject, type CredentialPayload, type HttpCall, type HttpFailurePayload, type HttpOAuthFailureCode, type HttpOAuthFailureReason, type HttpStreamEvent, type JsonObject, type JsonValue, type RuntimeValue } from '@almadar/core';
 import { deliverBeacon, type BeaconDeliveryPorts } from '@almadar/analytics';
-import type { CredentialStore } from '@almadar/integrations';
+import { getEffectiveCredentialStore, getModeControl, resolveCredentialRef } from '../host/credentials/scope.js';
+import type { CredentialStore } from '../host/credentials/store.js';
 import { untilAborted } from '../effects/in-flight-calls.js';
 import { decodeHttpRequest, decodeOAuthAsk } from './decode.js';
 import type { HttpBody, HttpFailureWire, HttpRequestWire, HttpResponseWire, IoRequestWire } from './wire.js';
@@ -151,7 +152,7 @@ export interface HttpPortsOptions {
   random?: RandomSource;
   egress: readonly string[];
   secrets?: HttpSecrets;
-  /** Defaults to the installed credential store and mode flag of `@almadar/integrations`. */
+  /** Defaults to the installed credential store and mode flag. */
   credentials?: CredentialAdminPort;
   fetch?: PinnedFetch;
   resolve?: (host: string) => Promise<ResolvedHost>;
@@ -201,19 +202,17 @@ export interface HttpSecretsHost {
   resolve(name: string, principal: string | undefined): Promise<string | undefined>;
 }
 
-/** The credential store the host installed through `@almadar/integrations`, with its environment fallback. */
+/** The credential store the host installed, with its environment fallback. */
 const installedSecretsHost: HttpSecretsHost = {
   async store() {
-    const { getEffectiveCredentialStore } = await import('@almadar/integrations');
     return getEffectiveCredentialStore();
   },
   async resolve(name, principal) {
-    const { resolveCredentialRef } = await import('@almadar/integrations');
     return resolveCredentialRef(name, undefined, principal);
   },
 };
 
-/** In-process secrets: minted values with an expiry, then the credential store the host holds (by default the one the integrations already read). */
+/** In-process secrets: minted values with an expiry, then the credential store the host holds (by default the one the host installed). */
 export function createHttpSecrets(now: () => number = Date.now, host: HttpSecretsHost = installedSecretsHost): HttpSecrets {
   type Minted = Map<string, { value: string; expiresAt: number }>;
   const environmentMinted: Minted = new Map();
@@ -300,43 +299,36 @@ export function createHttpSecrets(now: () => number = Date.now, host: HttpSecret
   };
 }
 
-/** The credential store and mode flag the host installed through `@almadar/integrations`, as the kernel's raw asks. */
+/** The credential store and mode flag the host installed, as the kernel's raw asks. */
 export function createCredentialAdminPort(): CredentialAdminPort {
   return {
     async list() {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
       const store = getEffectiveCredentialStore();
       if (store === null) return null;
       return { enabled: store.enabled, entries: store.entries().map((entry) => ({ service: entry.service, name: entry.envVar })) };
     },
     async read(name) {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
       return getEffectiveCredentialStore()?.resolve(name) ?? null;
     },
     async write(service, name, value) {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
       const store = getEffectiveCredentialStore();
       if (store === null) throw new Error('this host keeps no credential store');
       await store.set(service, name, value);
     },
     async remove(name) {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
       const store = getEffectiveCredentialStore();
       if (store === null) throw new Error('this host keeps no credential store');
       return store.remove(name);
     },
     async rotate() {
-      const { getEffectiveCredentialStore } = await import('@almadar/integrations');
       const store = getEffectiveCredentialStore();
       if (store === null) throw new Error('this host keeps no credential store');
       return store.rotate();
     },
     async mode() {
-      const { getModeControl } = await import('@almadar/integrations');
       return getModeControl()?.mode ?? null;
     },
     async setMode(mode) {
-      const { getModeControl } = await import('@almadar/integrations');
       const control = getModeControl();
       if (control === null) throw new Error('No integration manager is installed on this host');
       if (mode !== 'mock' && mode !== 'real') throw new Error(`mode must be "mock" or "real", got "${mode}"`);
@@ -426,22 +418,8 @@ async function systemResolve(host: string): Promise<ResolvedHost> {
 }
 
 const pinnedFetch: PinnedFetch = async (url, init, address) => {
-  const { Agent, fetch: undiciFetch } = await import('undici');
-  const dispatcher = new Agent({
-    ...(init.signal !== undefined ? { headersTimeout: 0, bodyTimeout: 0 } : {}),
-    connect: {
-      lookup: (_host, options, callback) => {
-        const family = address.includes(':') ? 6 : 4;
-        if (options.all === true) callback(null, [{ address, family }]);
-        else callback(null, address, family);
-      },
-    },
-  });
-  try {
-    return await undiciFetch(url, { ...init, dispatcher });
-  } finally {
-    void dispatcher.close();
-  }
+  const { pinnedFetchNode } = await import('./pinned-fetch-node.js');
+  return pinnedFetchNode(url, init, address);
 };
 
 export function createHttpPorts(options: HttpPortsOptions): HttpPorts {

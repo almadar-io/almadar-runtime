@@ -9,8 +9,8 @@ This repo is one submodule of the Almadar monorepo (natural language → `.orb` 
 - **Path in the monorepo:** `packages/almadar-runtime`
 - **Kind:** TypeScript package — the JS runtime interpreter (runtime execution path)
 - **Published:** publicly, to npm as `@almadar/runtime`
-- **Upstream (this repo imports them):** `@almadar/core`, `@almadar/evaluator`, `@almadar/integrations`, `@almadar/logger`, `@almadar/std`
-- **Downstream (they import this repo):** `@almadar/ui`, `@almadar/server`, `@almadar-io/parity`, `@almadar/mobile`, `@almadar-io/verify`, `@almadar-io/ljuba`, `@almadar-io/runtime-verify-tool`, `@almadar-io/playground-runtime`, `@almadar-io/agent-trace`, `@almadar/sdk`, `@almadar-io/rabit`, `kflow-nata`, `@almadar-io/tools`
+- **Upstream (this repo imports them):** `@almadar/analytics`, `@almadar/auth`, `@almadar/core`, `@almadar/db`, `@almadar/evaluator`, `@almadar/logger`, `@almadar/std`
+- **Downstream (they import this repo):** `@almadar/ui`, `@almadar/server`, `@almadar-io/verify`, `@almadar-io/ljuba`, `@almadar-io/runtime-verify-tool`, `@almadar-io/playground-runtime`, `@almadar/sdk`, `@almadar-io/tools`, `@almadar-io/asset-workflow`, `@almadar-io/hosting`, `@almadar-io/extension-verify-tool`
 - **Reference doc (monorepo only):** `docs/Almadar_Runtime.md`
 
 ## Check — "done" means this is green

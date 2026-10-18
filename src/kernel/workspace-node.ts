@@ -7,8 +7,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { EventPayload } from '@almadar/core';
-import type { IntegrationCallContext } from '@almadar/integrations';
-import { workspaceOwnerSegment, type WorkspaceHost, type WorkspacePort } from '@almadar/integrations/program';
+import type { ServiceCallContext } from '../types.js';
+import { workspaceOwnerSegment, type WorkspaceHost, type WorkspacePort } from '../host/program/index.js';
 import { emitPayload, KernelProgram, resolveProgramFile, type KernelProgramOptions, type ProgramRun } from './program-node.js';
 
 /** Workspaces kept in a bucket through `std-storage` over SigV4 (Google Cloud Storage's S3 interoperability endpoint with HMAC keys). */
@@ -126,7 +126,7 @@ export function kernelWorkspaceHost(options: KernelWorkspaceHostOptions): Worksp
 
   return {
     root,
-    async open(workspace: string, context: IntegrationCallContext): Promise<WorkspacePort> {
+    async open(workspace: string, context: ServiceCallContext): Promise<WorkspacePort> {
       const principal = context.principal;
       if (principal === undefined || principal === '') throw new Error('A workspace needs a signed-in caller');
       return {

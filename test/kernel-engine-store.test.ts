@@ -87,7 +87,7 @@ describe('KernelEngine over the kernel store', () => {
 });
 
 describe.skipIf(NATIVE_ADDON === undefined)('the native add-on with its own store', () => {
-  const notes: OrbitalSchema = JSON.parse(readFileSync(fileURLToPath(new URL('../../../orbital-rust/crates/orbital-wasm/tests/fixtures/stored/notes.schema.json', import.meta.url)), 'utf8'));
+  const notes: OrbitalSchema = JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/notes.schema.json', import.meta.url)), 'utf8'));
 
   it('a persist dispatch finishes with no row ever asked of the host', async () => {
     const program = await KernelProgram.open(notes, { engine: 'native', ...(NATIVE_ADDON !== undefined ? { nativeAddon: NATIVE_ADDON } : {}), store: env });

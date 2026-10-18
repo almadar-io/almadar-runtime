@@ -71,7 +71,7 @@ async function run(event: string, kernel?: KernelModule) {
   await memory.create('Note', { id: 'n1', title: 'seed', tone: 'warm' });
   await memory.create('Note', { id: 'n2', title: 'seed' });
   const counting = new CountingPersistence(memory);
-  const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: counting, ...(kernel !== undefined ? { engine: 'kernel' as const, kernel } : {}) });
+  const runtime = new OrbitalServerRuntime({ mode: 'real', persistence: counting, ...(kernel !== undefined ? { kernel } : {}) });
   await runtime.register(program());
   counting.reset();
   const response = await runtime.processOrbitalEvent('Main', { event, targetTrait: 'Notes' });
@@ -87,14 +87,14 @@ function suite(kernel: () => KernelModule | undefined): void {
     expect([persist?.success, persist?.code]).toEqual([false, 'duplicate-id']);
     expect(events).toContain('FAILED');
     expect(rows.find((r) => r.id === 'n1')).toEqual({ id: 'n1', title: 'seed', tone: 'warm' });
-    expect(counts.writeWhere).toBe(1);
+    expect(counts.writeBatch).toBe(1);
     expect(counts.create).toBe(0);
   });
   it('control: a create on a free id is pushed and stored', async () => {
     const { rows, persist, counts } = await run('FRESH', kernel());
     expect(persist?.success).toBe(true);
     expect(rows.find((r) => r.id === 'n9')).toMatchObject({ title: 'new' });
-    expect(counts.writeWhere).toBe(1);
+    expect(counts.writeBatch).toBe(1);
     expect(counts.create).toBe(0);
   });
   it('an upsert on a taken id replaces the whole row in one write', async () => {
@@ -103,7 +103,7 @@ function suite(kernel: () => KernelModule | undefined): void {
     const row = rows.find((r) => r.id === 'n1');
     expect(row).toMatchObject({ title: 'swapped' });
     expect(row?.tone).toBeUndefined();
-    expect(counts.writeWhere).toBe(1);
+    expect(counts.writeBatch).toBe(1);
     expect(counts.update + counts.create).toBe(0);
   });
   it('control: an upsert on a free id creates it', async () => {
@@ -133,8 +133,6 @@ function suite(kernel: () => KernelModule | undefined): void {
     expect(counts.create).toBe(0);
   });
 }
-
-describe('create is strict and upsert replaces, JS engine', () => suite(() => undefined));
 
 describe.skipIf(KERNEL_DIR === undefined)('create is strict and upsert replaces, kernel host', () => {
   let kernel: KernelModule;

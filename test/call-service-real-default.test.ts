@@ -2,10 +2,11 @@
  * `call-service` reaches a real provider on the runtime path, and its outcome
  * picks the declared route: a provider failure fires `emit.failure` (the stage
  * used to swallow the error and emit SUCCESS), and with no host handler in
- * real mode the call goes to @almadar/integrations configured from the env,
- * so a missing key is a named failure, never a silent success.
+ * real mode the call goes to the service a host plugged in (`registerServiceProvider`);
+ * a service nobody plugged in is a named failure, never a silent success.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { registerServiceProvider, unregisterServiceProvider } from '../src/host/service-provider.js';
 import type { OrbitalSchema, Trait } from '@almadar/core';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 
@@ -42,14 +43,7 @@ async function fire(runtime: OrbitalServerRuntime) {
   return res.emittedEvents;
 }
 
-const KEY_VARS = ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_PROJECT_ID', 'FIREBASE_SERVICE_ACCOUNT_PATH'];
-const saved = Object.fromEntries(KEY_VARS.map((k) => [k, process.env[k]]));
-afterEach(() => {
-  for (const [k, v] of Object.entries(saved)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
-});
+afterEach(() => unregisterServiceProvider('knowledge'));
 
 describe('call-service on the runtime path', () => {
   it('a provider failure fires the declared failure route, not success', async () => {
@@ -63,14 +57,20 @@ describe('call-service on the runtime path', () => {
     expect(events).not.toContain('SENT');
   });
 
-  it('with no host handler, real mode calls @almadar/integrations; a missing key is a named failure', async () => {
-    for (const k of KEY_VARS) delete process.env[k];
+  it('with no host handler, real mode calls the registered service; one nobody plugged in is a named failure', async () => {
     const runtime = new OrbitalServerRuntime({ mode: 'real', debug: false });
     const events = await fire(runtime);
     const failed = events.find((e) => e.event === 'SEND_FAILED');
     expect(failed).toBeDefined();
-    expect(JSON.stringify(failed?.payload)).toContain('Integration not configured: knowledge');
+    expect(JSON.stringify(failed?.payload)).toContain('Unknown integration: knowledge');
     expect(events.map((e) => e.event)).not.toContain('SENT');
+  });
+
+  it('control: a registered service answers with no host handler', async () => {
+    registerServiceProvider('knowledge', async () => ({ id: 'reg-1' }));
+    const runtime = new OrbitalServerRuntime({ mode: 'real', debug: false });
+    const sent = (await fire(runtime)).find((e) => e.event === 'SENT');
+    expect(sent?.payload).toMatchObject({ id: 'reg-1' });
   });
 
   it('control: a host handler result is the success payload', async () => {

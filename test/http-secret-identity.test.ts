@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { CredentialStore, installCredentialStore, runWithCredentialScope, uninstallCredentialStore, type CredentialPersistence } from '@almadar/integrations';
+import { CredentialStore, installCredentialStore, runWithCredentialScope, uninstallCredentialStore, type CredentialPersistence } from '../src/host/credentials/index.js';
 import type { EntityRow, PersistenceAdapter } from '@almadar/core';
 import { createHttpSecrets } from '../src/kernel/http-exchange.js';
 import { createOAuthPort } from '../src/kernel/oauth-port.js';
