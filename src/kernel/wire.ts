@@ -43,6 +43,8 @@ export interface KernelServerHandle {
   setCapabilities(entityType: string, queryJson: string, writeJson: string): void;
   setMessages(localesJson: string, catalogsJson: string): void;
   lastError(): string;
+  /** A server holding this one's registered program and none of its session (a stateless request's kernel). */
+  fork(): KernelServerHandle;
   free(): void;
 }
 

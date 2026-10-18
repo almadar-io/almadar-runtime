@@ -66,7 +66,7 @@ import {
   LIFECYCLE_EVENTS,
   UNMOUNT_EVENT,
   tickEventKey,
-} from "../traits/StateMachineCore.js";
+} from "../traits/state-book.js";
 import { parseOrbitalTraits } from "../traits/OrbitalTraitParsing.js";
 import { createLogger } from '@almadar/logger';
 import type { createProgramHandlers as CreateProgramHandlersFn } from "../effects/createProgramHandlers.js";
@@ -198,16 +198,7 @@ export type { KernelModule } from "../kernel/index.js";
 import { installPolicyOwnerGates } from "../entities/policyOwnerGates.js";
 import { MockPersistenceAdapter } from "@almadar/db/mock";
 import { seedBrowserStore } from "../entities/seedBrowserStore.js";
-import {
-  preprocessSchema,
-  type PreprocessedSchema,
-  type EntitySharingMap,
-  type EventNamespaceMap,
-} from "../traits/UsesIntegration.js";
-import {
-  type SchemaLoader,
-  createUnifiedLoader,
-} from "../entities/loader/index.js";
+import type * as ProgramHostModule from "../host/node.js";
 // Node-detection helper. Used to guard call sites of express, fs/path/net,
 // and child_process — those modules are stubbed by the package.json `browser`
 // field in browser bundles, so calling them would crash. Browser consumers
@@ -319,14 +310,8 @@ export interface HostDispatchItem {
  * Loader configuration for resolving `uses` imports
  */
 export interface LoaderConfig {
-  /** Base path for schema files */
+  /** Where `orb` resolves a registered program's imports from, when no `programHost` names it. */
   basePath: string;
-  /** Standard library path (filesystem or URL) */
-  stdLibPath?: string;
-  /** Scoped package paths */
-  scopedPaths?: Record<string, string>;
-  /** Custom loader instance (overrides basePath/stdLibPath) */
-  loader?: SchemaLoader;
 }
 
 /**
@@ -355,22 +340,8 @@ export interface OrbitalServerRuntimeConfig {
   mockSeed?: number;
   /** Number of mock records to generate per entity */
   mockSeedCount?: number;
-  /**
-   * Loader configuration for resolving `uses` imports.
-   * Required when using `registerWithPreprocess` or `autoPreprocess`.
-   */
+  /** Where a registered program with imports is resolved from (`orb resolve`). */
   loaderConfig?: LoaderConfig;
-  /**
-   * Automatically preprocess schemas on register() to resolve `uses` imports.
-   * Requires `loaderConfig` to be set.
-   * Default: false
-   */
-  autoPreprocess?: boolean;
-  /**
-   * Apply event namespacing to imported traits.
-   * Default: true
-   */
-  namespaceEvents?: boolean;
   /**
    * Additional fields to spread onto every EvaluationContext.
    * Use this to inject module contexts (e.g., { agent: AgentContext }).
@@ -481,13 +452,19 @@ import { InMemoryPersistence, stampSeedTimestamps } from '@almadar/db/mock';
  * Mirrors the compiled path's `DEFAULT_<TRAIT>_CONFIG` constant
  * emitted by `backend.rs` Solution-1.
  */
-function needsPreprocessing(schema: OrbitalSchema): boolean {
+/** A program with imports registered where `orb` cannot run (a browser): resolve it first (`orb resolve`). */
+export class UnresolvedProgramError extends Error {
+  constructor(schemaName: string) {
+    super(`program "${schemaName}" has unresolved imports and this host cannot run orb: register its resolved form (orb resolve)`);
+    this.name = 'UnresolvedProgramError';
+  }
+}
+
+/** A resolved program keeps its `uses` declarations; only a trait still carried as a bare reference is unresolved. */
+function needsResolving(schema: OrbitalSchema): boolean {
   for (const orbital of schema.orbitals) {
-    if (orbital.uses && orbital.uses.length > 0) {
-      return true;
-    }
     for (const t of orbital.traits ?? []) {
-      if (typeof t === 'object' && 'ref' in t && t.ref.includes('.')) {
+      if (typeof t === 'object' && 'ref' in t && t.ref.includes('.') && t._resolved === undefined) {
         return true;
       }
     }
@@ -555,15 +532,11 @@ export class OrbitalServerRuntime {
   // "one setInterval per tick" with a single accumulator loop so ticks due
   // in the same pass fire together instead of on independent timers.
   private readonly tickScheduler: TickScheduler = createTickScheduler();
-  private loader: SchemaLoader | null = null;
-  private preprocessedCache = new Map<string, PreprocessedSchema>();
   private readonly transitionObservers = new Set<TransitionObserver>();
   private readonly transitionFanout: TransitionObserver = {
     onTransition: (trace) => { for (const o of this.transitionObservers) o.onTransition(trace); },
     onRollback: (trace) => { for (const o of this.transitionObservers) o.onRollback?.(trace); },
   };
-  private entitySharingMap: EntitySharingMap = {};
-  private eventNamespaceMap: EventNamespaceMap = {};
   private programHandlersPromise: Promise<void> | null = null;
   private resolvedSchema: OrbitalSchema | null = null;
 
@@ -585,8 +558,6 @@ export class OrbitalServerRuntime {
   constructor(config: OrbitalServerRuntimeConfig = {}) {
     this.config = {
       mode: 'mock', // Default to mock mode for preview
-      autoPreprocess: false,
-      namespaceEvents: true,
       ...config,
       // `@user` is never Null. A host that named no viewer (no ALMADAR_PERSONA,
       // no auth yet) otherwise renders every `viewerName: @user.name` blank, so
@@ -596,21 +567,6 @@ export class OrbitalServerRuntime {
     };
     this.viewerNamedByHost = config.defaultUser !== undefined;
     this.eventBus = new EventBus();
-
-    // Initialize loader only if a fully-configured one was handed in, or if
-    // stdLibPath is explicitly set. Otherwise leave null so ensureLoader()
-    // can lazily construct one with the auto-detected @almadar/std path —
-    // passing only basePath here would build a loader without stdLibPath
-    // and then short-circuit ensureLoader's proper lookup.
-    if (config.loaderConfig?.loader) {
-      this.loader = config.loaderConfig.loader;
-    } else if (config.loaderConfig?.stdLibPath) {
-      this.loader = createUnifiedLoader({
-        basePath: config.loaderConfig.basePath,
-        stdLibPath: config.loaderConfig.stdLibPath,
-        scopedPaths: config.loaderConfig.scopedPaths,
-      });
-    }
 
     // Use MockPersistenceAdapter for mock mode, otherwise use provided or InMemoryPersistence
     if (this.config.mode === 'mock' && !config.persistence) {
@@ -656,62 +612,6 @@ export class OrbitalServerRuntime {
       })();
     }
     return this.programHandlersPromise;
-  }
-
-  /**
-   * Lazily construct a default loader when the caller didn't provide one
-   * but `register()` needs to preprocess. Looks for `@almadar/std` in the
-   * nearest `node_modules` so cross-orbital `std/behaviors/<name>` imports
-   * resolve to the tiered registry on disk.
-   *
-   * Node only — browsers should receive already-preprocessed schemas from
-   * their server.
-   */
-  private async ensureLoader(): Promise<void> {
-    if (this.loader) return;
-    if (typeof process === 'undefined' || !process.versions?.node) {
-      // Not Node — can't read the filesystem. Bail silently; the caller's
-      // debug log in register() explains the skip.
-      return;
-    }
-    try {
-      const [{ fileURLToPath }, path, fs] = await Promise.all([
-        import('node:url'),
-        import('node:path'),
-        import('node:fs'),
-      ]);
-      // Use ESM resolution (import.meta.resolve) because @almadar/std's
-      // exports field only declares the `import` condition, which createRequire
-      // (CJS conditions) can't match. Walk up from the resolved main entry
-      // to the package root — robust against `exports` restrictions that
-      // don't expose `./package.json` directly.
-      const mainEntryUrl = import.meta.resolve('@almadar/std');
-      const mainEntry = fileURLToPath(mainEntryUrl);
-      let stdLibPath = path.dirname(mainEntry);
-      while (stdLibPath !== path.dirname(stdLibPath)) {
-        if (fs.existsSync(path.join(stdLibPath, 'package.json'))) {
-          const pkg = JSON.parse(
-            fs.readFileSync(path.join(stdLibPath, 'package.json'), 'utf-8'),
-          ) as { name?: string };
-          if (pkg.name === '@almadar/std') break;
-        }
-        stdLibPath = path.dirname(stdLibPath);
-      }
-      const basePath =
-        this.config.loaderConfig?.basePath ?? process.cwd();
-      this.loader = createUnifiedLoader({
-        basePath,
-        stdLibPath,
-        scopedPaths: this.config.loaderConfig?.scopedPaths,
-      });
-      if (this.config.debug) {
-        registerLog.debug('loader:constructed', { basePath, stdLibPath });
-      }
-    } catch (err) {
-      if (this.config.debug) {
-        registerLog.warn('loader:construct-failed', { error: err instanceof Error ? err : String(err) });
-      }
-    }
   }
 
   // ==========================================================================
@@ -787,41 +687,9 @@ export class OrbitalServerRuntime {
       this.messages[locale] = { ...this.messages[locale], ...catalog };
     }
 
-    // Auto-preprocess if the schema has unresolved imports and we have (or
-    // can construct) a loader. This replaces the old autoPreprocess flag,
-    // which was off by default and led to silent failures when a consumer
-    // forgot to enable it.
-    if (needsPreprocessing(schema)) {
-      await this.ensureLoader();
-      if (this.loader) {
-        if (this.config.debug) {
-          registerLog.debug('register:auto-preprocessing', { name: schema.name });
-        }
-        const result = await preprocessSchema(schema, {
-          basePath: this.config.loaderConfig?.basePath || process.cwd(),
-          stdLibPath: this.config.loaderConfig?.stdLibPath,
-          scopedPaths: this.config.loaderConfig?.scopedPaths,
-          loader: this.loader,
-          namespaceEvents: this.config.namespaceEvents,
-        });
-        if (!result.success) {
-          throw new Error(
-            `Schema preprocessing failed: ${result.errors.join('; ')}`,
-          );
-        }
-        schema = result.data.schema;
-        this.entitySharingMap = {
-          ...this.entitySharingMap,
-          ...result.data.entitySharing,
-        };
-        this.eventNamespaceMap = {
-          ...this.eventNamespaceMap,
-          ...result.data.eventNamespaces,
-        };
-      } else if (this.config.debug) {
-        registerLog.warn('register:no-loader', { name: schema.name });
-      }
-    }
+    // A program with imports is resolved by `orb`, the one resolver, from the configured base path; a host with
+    // no `orb` to run (a browser) registers only resolved programs.
+    if (needsResolving(schema)) schema = await this.resolveWithOrb(schema);
 
     // BEFORE the loop: registerOrbital seeds each entity eagerly
     // (MockPersistenceAdapter.registerEntity -> seed), so owner columns, the
@@ -968,139 +836,13 @@ export class OrbitalServerRuntime {
     await this.register(schema, { messages, lazy });
   }
 
-  /**
-   * Register an OrbitalSchema with preprocessing to resolve `uses` imports.
-   *
-   * This method:
-   * 1. Loads all external orbitals referenced in `uses` declarations
-   * 2. Expands entity/trait/page references to inline definitions
-   * 3. Builds entity sharing and event namespace maps
-   * 4. Caches the preprocessed result
-   * 5. Registers the resolved schema
-   *
-   * @param schema - Schema with potential `uses` declarations
-   * @param options - Optional preprocessing options
-   * @returns Preprocessing result with entity sharing info
-   *
-   * @example
-   * ```typescript
-   * const runtime = new OrbitalServerRuntime({
-   *   loaderConfig: {
-   *     basePath: '/schemas',
-   *     stdLibPath: '/std',
-   *   },
-   * });
-   *
-   * const result = await runtime.registerWithPreprocess(schema);
-   * if (result.success) {
-   *   console.log('Registered with', Object.keys(result.entitySharing).length, 'orbitals');
-   * }
-   * ```
-   */
-  async registerWithPreprocess(
-    schema: OrbitalSchema,
-    options?: { sourcePath?: string }
-  ): Promise<{
-    success: boolean;
-    entitySharing?: EntitySharingMap;
-    eventNamespaces?: EventNamespaceMap;
-    warnings?: string[];
-    errors?: string[];
-  }> {
-    // Check if preprocessing is possible
-    if (!this.loader && !this.config.loaderConfig) {
-      return {
-        success: false,
-        errors: ['Loader not configured. Set loaderConfig in OrbitalServerRuntimeConfig.'],
-      };
-    }
-
-    // Ensure loader is initialized
-    if (!this.loader && this.config.loaderConfig) {
-      this.loader = this.config.loaderConfig.loader ?? createUnifiedLoader({
-        basePath: this.config.loaderConfig.basePath,
-        stdLibPath: this.config.loaderConfig.stdLibPath,
-        scopedPaths: this.config.loaderConfig.scopedPaths,
-      });
-    }
-
-    // Check cache
-    const cacheKey = `${schema.name}:${schema.version || '1.0.0'}`;
-    const cached = this.preprocessedCache.get(cacheKey);
-    if (cached) {
-      if (this.config.debug) {
-        registerLog.debug('preprocess:cache-hit', { name: schema.name });
-      }
-      this.register(cached.schema);
-      this.entitySharingMap = { ...this.entitySharingMap, ...cached.entitySharing };
-      this.eventNamespaceMap = { ...this.eventNamespaceMap, ...cached.eventNamespaces };
-      return {
-        success: true,
-        entitySharing: cached.entitySharing,
-        eventNamespaces: cached.eventNamespaces,
-        warnings: cached.warnings,
-      };
-    }
-
-    if (this.config.debug) {
-      registerLog.debug('preprocess:start', { name: schema.name });
-    }
-
-    // Preprocess schema
-    const result = await preprocessSchema(schema, {
-      basePath: this.config.loaderConfig?.basePath || '.',
-      stdLibPath: this.config.loaderConfig?.stdLibPath,
-      scopedPaths: this.config.loaderConfig?.scopedPaths,
-      loader: this.loader!,
-      namespaceEvents: this.config.namespaceEvents,
-    });
-
-    if (!result.success) {
-      return {
-        success: false,
-        errors: result.errors,
-      };
-    }
-
-    // Cache the result
-    this.preprocessedCache.set(cacheKey, result.data);
-
-    // Store sharing maps
-    this.entitySharingMap = { ...this.entitySharingMap, ...result.data.entitySharing };
-    this.eventNamespaceMap = { ...this.eventNamespaceMap, ...result.data.eventNamespaces };
-
-    // Register the preprocessed schema
-    this.register(result.data.schema);
-
-    return {
-      success: true,
-      entitySharing: result.data.entitySharing,
-      eventNamespaces: result.data.eventNamespaces,
-      warnings: result.data.warnings,
-    };
-  }
-
-  /**
-   * Get entity sharing information for registered orbitals.
-   * Useful for determining entity isolation and collection names.
-   */
-  getEntitySharing(): EntitySharingMap {
-    return { ...this.entitySharingMap };
-  }
-
-  /**
-   * Get event namespace mapping for registered orbitals.
-   * Useful for debugging cross-orbital event routing.
-   */
-  getEventNamespaces(): EventNamespaceMap {
-    return { ...this.eventNamespaceMap };
-  }
-
-  /**
-   * Clear the preprocessing cache.
-   */
-  clearPreprocessCache(): void {
-    this.preprocessedCache.clear();
+  /** A program with imports resolved by `orb` from the configured base path (Node only: the one resolver is the compiler). */
+  private async resolveWithOrb(schema: OrbitalSchema): Promise<OrbitalSchema> {
+    if (!isNodeEnv()) throw new UnresolvedProgramError(schema.name);
+    const { programResolveSchema } = (await import('../host/node.js')) as typeof ProgramHostModule;
+    const cwd = this.config.programHost?.cwd ?? this.config.loaderConfig?.basePath ?? process.cwd();
+    if (this.config.debug) registerLog.debug('register:resolve-with-orb', { name: schema.name, cwd });
+    return programResolveSchema(schema, { cwd, ...(this.config.programHost?.orbBin !== undefined ? { orbBin: this.config.programHost.orbBin } : {}) });
   }
 
   /** Tells the store each server-persisted entity's declared `[persistent: tbl]` collection, so its rows live under that name (EXEC-STORE-1). */

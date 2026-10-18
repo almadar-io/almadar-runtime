@@ -37,6 +37,7 @@ export function stubKernelModule(Server: KernelServerClass, overrides: Partial<O
     osCompletionEvent: () => 'null',
     tabUrlMatches: () => false,
     evaluateMany: unexpected('evaluateMany'),
+    resolveValues: unexpected('resolveValues'),
     evaluateGuards: unexpected('evaluateGuards'),
     evaluateTraced: unexpected('evaluateTraced'),
     traceEffects: unexpected('traceEffects'),

@@ -1,7 +1,7 @@
 // Runtime Spec Clause 8.3: a server tick fires only while a client has its trait mounted, unless it runs in the background.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { UNMOUNT_EVENT } from '../src/traits/StateMachineCore.js';
+import { UNMOUNT_EVENT } from '../src/traits/state-book.js';
 import type { OrbitalSchema, Trait } from '@almadar/core';
 
 function schema(): OrbitalSchema {

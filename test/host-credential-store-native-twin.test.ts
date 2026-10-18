@@ -61,7 +61,7 @@ describe('credential store native twin', () => {
     const store = new CredentialStore(new Rows(fixture.rows), fixture.masterKey, undefined);
     await store.warm();
     expect(store.resolve('GITHUB_TOKEN')).toBeUndefined();
-    expect(store.resolve('STRIPE_KEY')).toBe('sk_test_alpha-1234');
+    expect(store.resolve('STRIPE_KEY')).toBe(fixture.resolves.find((r) => r.name === 'STRIPE_KEY')?.value);
   });
 
   it('opens the rows the native store writes (the fixed-IV seals it reproduces byte for byte)', async () => {

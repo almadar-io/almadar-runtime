@@ -1,8 +1,8 @@
 /**
- * CircuitStore (P2) — snapshot/restore round-trip, subscribe/notify.
+ * CircuitStore — snapshot/restore round-trip, subscribe/notify; the state book it holds.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createMemoryCircuitStore } from '../src/index.js';
+import { createMemoryCircuitStore, StateBook } from '../src/index.js';
 import type { TraitDefinition } from '../src/index.js';
 
 function trait(name: string): TraitDefinition {
@@ -17,24 +17,24 @@ describe('CircuitStore — snapshot/restore', () => {
   it('round-trips state + frame back to the pre-dispatch value', () => {
     const store = createMemoryCircuitStore([trait('T')]);
     store.frames.set('T', { count: 1 });
-    store.manager.seedState('T', 'idle');
+    store.states.seedState('T', 'idle');
 
     const snap = store.snapshot('T');
-    store.manager.commitState('T', 'busy', undefined, 'GO');
+    store.states.seedState('T', 'busy');
     store.frames.set('T', { count: 2 });
 
-    expect(store.manager.getState('T')?.currentState).toBe('busy');
+    expect(store.states.getState('T')?.currentState).toBe('busy');
     expect(store.frames.get('T')).toEqual({ count: 2 });
 
     store.restore('T', undefined, snap, undefined, 'server-rejected');
 
-    expect(store.manager.getState('T')?.currentState).toBe('idle');
+    expect(store.states.getState('T')?.currentState).toBe('idle');
     expect(store.frames.get('T')).toEqual({ count: 1 });
   });
 
   it('restores an absent frame back to absent (never invents a row)', () => {
     const store = createMemoryCircuitStore([trait('T')]);
-    store.manager.seedState('T', 'idle');
+    store.states.seedState('T', 'idle');
     const snap = store.snapshot('T');
 
     store.frames.set('T', { count: 99 });
@@ -71,7 +71,7 @@ describe('CircuitStore — subscribe/notify', () => {
     const unsubscribe = store.subscribe(listener);
 
     expect(store.getVersion()).toBe(0);
-    store.manager.seedState('T', 'busy'); // a raw manager write — no auto-notify
+    store.states.seedState('T', 'busy'); // a raw book write — no auto-notify
     expect(listener).not.toHaveBeenCalled();
     expect(store.getVersion()).toBe(0);
 
@@ -83,5 +83,62 @@ describe('CircuitStore — subscribe/notify', () => {
     store.notify();
     expect(listener).toHaveBeenCalledTimes(1);
     expect(store.getVersion()).toBe(2);
+  });
+});
+
+describe('StateBook — the states the kernel reports', () => {
+  const lifecycle: TraitDefinition = {
+    name: 'L',
+    states: [{ name: 'idle', isInitial: true }, { name: 'shown' }],
+    transitions: [
+      { from: 'idle', to: 'shown', event: 'INIT', effects: [['render-ui', 'main', { type: 'typography', content: 'x' }]] },
+      { from: 'shown', to: 'shown', event: 'INIT', effects: [['render-ui', 'main', { type: 'typography', content: 'y' }]] },
+    ],
+  };
+
+  it('reads the initial state until a state is recorded, then the recorded one', () => {
+    const book = new StateBook([trait('T')]);
+    expect(book.getState('T')?.currentState).toBe('idle');
+    book.seedState('T', 'busy');
+    expect(book.getState('T')).toMatchObject({ currentState: 'busy', previousState: 'idle' });
+  });
+
+  it('control: a trait not on the page has no state and records nothing', () => {
+    const book = new StateBook([trait('T')]);
+    book.seedState('Other', 'busy');
+    expect(book.getState('Other')).toBeUndefined();
+    expect([...book.getAllStates().keys()]).toEqual(['T']);
+  });
+
+  it('keeps each entity scope apart from the singleton', () => {
+    const book = new StateBook([trait('T')]);
+    book.seedState('T', 'busy', 'row-1');
+    expect(book.getState('T', 'row-1')?.currentState).toBe('busy');
+    expect(book.getState('T')?.currentState).toBe('idle');
+  });
+
+  it('answers whether the current state has an arm on the event, with or without the UI: prefix', () => {
+    const book = new StateBook([trait('T')]);
+    expect(book.canHandleEvent('T', 'GO')).toBe(true);
+    expect(book.canHandleEvent('T', 'UI:GO')).toBe(true);
+    book.seedState('T', 'busy');
+    expect(book.canHandleEvent('T', 'GO')).toBe(false);
+  });
+
+  it('a lifecycle arm that moves the trait is no repaint; one that stays and only renders is', () => {
+    const book = new StateBook([lifecycle]);
+    expect(book.repaintLifecycleEvent('L')).toBeUndefined();
+    book.seedState('L', 'shown');
+    expect(book.repaintLifecycleEvent('L')).toBe('INIT');
+  });
+
+  it('reports a rollback hop to the observer, and none when the state does not change', () => {
+    const onRollback = vi.fn();
+    const book = new StateBook([trait('T')], { onTransition: vi.fn(), onRollback });
+    book.seedState('T', 'busy');
+    book.rollbackState('T', 'idle', undefined, 'server-rejected');
+    book.rollbackState('T', 'idle', undefined, 'server-rejected');
+    expect(onRollback).toHaveBeenCalledTimes(1);
+    expect(onRollback).toHaveBeenCalledWith({ traitName: 'T', from: 'busy', to: 'idle', cause: 'server-rejected' });
   });
 });

@@ -19,10 +19,23 @@ export class KernelEngine {
     private readonly ports: KernelHostPorts,
     private readonly entityTypes: readonly string[] = [],
     private readonly store?: Readonly<Record<string, string>>,
+    forkedFrom?: KernelServerHandle,
   ) {
     installKernelEvaluator(kernel);
-    this.handle = this.openServer();
+    this.handle = forkedFrom?.fork() ?? this.openServer();
     this.declare();
+  }
+
+  /**
+   * A kernel on the same program, registered once, holding none of this one's session: every trait at its initial
+   * state, no rows the kernel held, its locales and mounted ticks kept. A stateless host serves each request a
+   * fork (EXEC-DIST-5), `ports` answering it.
+   */
+  fork(ports: KernelHostPorts = this.ports): KernelEngine {
+    const forked = new KernelEngine(this.kernel, this.schemaJson, ports, this.entityTypes, this.store, this.handle);
+    forked.tickMount = this.tickMount;
+    forked.messages = this.messages;
+    return forked;
   }
 
   /** A server over the host's ports, or over the kernel's own store when `store` selects one (native add-on only). */

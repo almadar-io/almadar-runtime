@@ -2,14 +2,11 @@
 // browser's `fetch`: a browser cannot resolve a name, so there is no address check and no pinning — the
 // program's egress list (checked by the driver) and the browser's own CORS bound the call.
 import { describe, it, expect } from 'vitest';
-import type { EventPayload, JsonObject, OrbitalDefinition } from '@almadar/core';
+import type { JsonObject, OrbitalDefinition } from '@almadar/core';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import { runsBrowserDataEffect, runsServerEffect } from '../src/traits/trait-index';
 import { createLocalStoreTransport } from '../src/evaluation/local-store-transport';
-import { stubEffectHandlers } from './fixtures/effect-handlers.js';
-import { EffectExecutor, type BindingContext, type EffectContext } from '../src/index.js';
 import { createBrowserHttpPorts, runHttpCall, type HttpCall, type HttpPorts } from '../src/kernel/http-exchange.js';
-import { ServerLegCollector } from '../src/effects/server-leg.js';
 import { fakeHttpKernel } from './helpers/fake-http-kernel.js';
 import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
 import { localStorePersistence, openLocalKernel } from '../src/evaluation/local-store-transport.js';
@@ -56,37 +53,6 @@ describe.skipIf(KERNEL_DIR === undefined)('browser http ports', () => {
     const keyed: HttpCall = { ...call, request: { auth: { scheme: 'bearer', credential: 'KEY' } } };
     expect(await runHttpCall(p, keyed)).toMatchObject({ error: { kind: 'unconfigured', credential: 'KEY' } });
     expect(sends).toBe(0);
-  });
-});
-
-describe.skipIf(KERNEL_DIR === undefined)('a client-role executor runs a keyless http itself', () => {
-  const bindings: BindingContext = { entity: { id: 'row-1' }, payload: {} };
-  const context: EffectContext = { traitName: 'T', state: 'idle', transition: 'idle->idle' };
-  const effect = (request: JsonObject) => ['http', 'GET', ORIGIN, '/search', request, { emit: { success: 'OK', failure: 'ERR' } }];
-
-  async function runClient(request: JsonObject) {
-    const emitted: Array<{ event: string; payload: EventPayload | undefined }> = [];
-    const collector = new ServerLegCollector();
-    const handlers = stubEffectHandlers({ emit: (event: string, payload?: EventPayload) => { emitted.push({ event, payload }); } });
-    const executor = new EffectExecutor({
-      handlers, bindings, context, environment: 'client',
-      delegate: collector,
-      http: ports(async () => new Response('ok', { status: 200 })),
-    });
-    await executor.execute(effect(request));
-    return { emitted, delegated: collector.drain() };
-  }
-
-  it('keyless: executed on the client, nothing delegated to the server leg', async () => {
-    const { emitted, delegated } = await runClient({ query: { q: 'a' } });
-    expect(delegated).toEqual([]);
-    expect(emitted).toEqual([{ event: 'OK', payload: expect.objectContaining({ status: 200, body: 'ok' }) }]);
-  });
-
-  it('control: with an auth key the call is handed to the server leg and not run here', async () => {
-    const { emitted, delegated } = await runClient({ auth: { scheme: 'bearer', credential: 'KEY' } });
-    expect(emitted).toEqual([]);
-    expect(delegated).toHaveLength(1);
   });
 });
 

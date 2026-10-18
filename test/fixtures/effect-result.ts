@@ -1,5 +1,4 @@
-import type { ServerEffectResult } from '../../src/effects/ServerEffectHandlers.js';
-import type { EntityRow } from '@almadar/core';
+import type { EntityRow, ServerEffectResult } from '@almadar/core';
 
 /** `ServerEffectResult.data` is `EntityRow | batch summary | raw service
  *  result`; every non-batch persist/set result really is a row. The batch

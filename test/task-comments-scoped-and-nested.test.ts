@@ -5,24 +5,19 @@
  * nests under it inside the same task's thread.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { EntityRow, EventPayload, OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
-import { preprocessSchema } from '../src/traits/UsesIntegration.js';
+import type { EntityRow, EventPayload, OrbitalEventResponse } from '@almadar/core';
 import { MockPersistenceAdapter } from '@almadar/db/mock';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
+import { IO_REGISTRY, resolveProgram } from './helpers/behavior-packages.js';
 
 const ORBITAL = 'TaskListOrbital';
 const USER = { id: 'member-1', role: 'manager', name: 'Mia' };
 
 async function taskRuntime() {
-  const raw = JSON.parse(readFileSync(join(IO_REGISTRY, 'app/organisms/std-task-manager.orb'), 'utf-8')) as OrbitalSchema;
-  const resolved = await preprocessSchema(raw, { basePath: IO_ROOT, stdLibPath: STD_ROOT, allowOutsideBasePath: true });
-  if (!resolved.success) throw new Error(resolved.errors.join('; '));
   const persistence = new MockPersistenceAdapter();
   const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false, persistence });
-  await runtime.register(resolved.data.schema);
+  await runtime.register(await resolveProgram(join(IO_REGISTRY, 'app/organisms/std-task-manager.orb')));
   const send = (targetTrait: string, event: string, payload: EventPayload = {}) =>
     runtime.processOrbitalEvent(ORBITAL, { event, targetTrait, payload, user: USER });
   return { runtime, persistence, send };

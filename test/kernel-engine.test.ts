@@ -231,6 +231,14 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel engine', () => {
     expect(response.states).toEqual({ Draft: 'saved' });
   });
 
+  it('registers an orb-resolved program that keeps its uses declarations without running orb again', async () => {
+    const schema = notes();
+    schema.orbitals[0].uses = [{ as: 'Gone', from: 'std/behaviors/std-not-installed' }];
+    const runtime = await open(schema);
+    const response = await runtime.processOrbitalEvent('Main', { event: 'SAVE', targetTrait: 'Draft' });
+    expect(response.states).toEqual({ Draft: 'saved' });
+  });
+
   it('refuses a program whose traits are still references (the kernel takes an orb-resolved program)', async () => {
     const schema = notes();
     schema.orbitals[0].traits.push({ ref: 'Elsewhere.traits.Other' });

@@ -6,6 +6,8 @@ import { createRequire } from 'node:module';
 
 import { behaviorRegistryDir, readBehaviorPackage, resolveOrbBinary } from '@almadar/core/behavior-package';
 import { dirname, join } from 'node:path';
+import type { OrbitalSchema } from '@almadar/core';
+import { programResolve } from '../../src/host/program/index.js';
 
 const require = createRequire(import.meta.url);
 
@@ -51,4 +53,9 @@ export function climbsOutOfPackage(source: string): boolean {
   return /['"`]packages\/almadar-/.test(code)
     || /['"`]\.\.['"`]\s*,\s*['"`]\.\.['"`]\s*,\s*['"`]\.\.['"`]/.test(code)
     || /\.\.\/\.\.\/\.\.\//.test(code);
+}
+
+/** A program file resolved by `orb` from this package, as a host registers it. */
+export function resolveProgram(path: string): Promise<OrbitalSchema> {
+  return programResolve(path, { cwd: PACKAGE_ROOT, orbBin: ORB_BIN });
 }

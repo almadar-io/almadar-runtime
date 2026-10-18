@@ -41,7 +41,7 @@ import { effectSiteFor, getOperatorRunsOn } from '@almadar/std/registry';
 import { collectDeclaredConfigDefaults } from './config-defaults.js';
 import { findEntityAmongOrbitals, parseOrbitalTraits } from './OrbitalTraitParsing.js';
 import type { TraitDefinition } from '../types.js';
-import { tickEventKey } from './StateMachineCore.js';
+import { tickEventKey } from './state-book.js';
 
 const traitIndexLog = createLogger('almadar:runtime:trait-index');
 

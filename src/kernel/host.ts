@@ -17,11 +17,11 @@ import {
   type JsonValue,
   type OnDeviceModelPorts,
   type PersistenceAdapter,
+  type ProgramValidationIssue,
   type ServiceHostPorts,
   type ServiceParams,
   type UserContext,
 } from '@almadar/core';
-import { issuePayload } from '../effects/EffectExecutor.js';
 import { untilAborted, type InFlightCalls } from '../effects/in-flight-calls.js';
 import type { EffectHandlers, ServiceCallContext } from '../types.js';
 import { isProgramEffect } from '../host/program/effects.js';
@@ -32,7 +32,15 @@ import type { CallSiteWire, IoAnswerWire, IoRequestWire, Settled, SubstrateFailu
 import type { OsCompletionPort, OsHostPort } from './os-port.js';
 import { TabHostFailure, type BrowserTabPort } from './tab-port.js';
 
-/** `call-service`, exactly as the JS stage resolves it: the host's handler, mock mode, or the integrations default. */
+function issuePayload(issue: ProgramValidationIssue): EventPayload {
+  const payload: EventPayload = { code: issue.code, message: issue.message };
+  if (issue.path !== undefined) payload.path = issue.path;
+  if (issue.line !== undefined) payload.line = issue.line;
+  if (issue.column !== undefined) payload.column = issue.column;
+  return payload;
+}
+
+/** `call-service`, as the host answers it: the host's handler, mock mode, or the integrations default. */
 export type KernelCallService = (
   service: string,
   action: string,

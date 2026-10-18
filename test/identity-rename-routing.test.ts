@@ -1,5 +1,5 @@
 /**
- * Rabit V4 Phase 4 — the payoff test (interpreter path).
+ * Rabit V4 Phase 4 — the payoff test (server runtime on the kernel).
  *
  * A mid-session trait rename is modeled as a ledger `curName` edit: the
  * OWNER's display name changes (and its ledger row), but the name strings
@@ -14,10 +14,6 @@
  */
 import { describe, it, expect } from 'vitest';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import {
-  StateMachineManager,
-  type TraitDefinition,
-} from '../src/traits/StateMachineCore.js';
 import type { OrbitalSchema, Trait } from '@almadar/core';
 import { asOrbitalId, asEntityId, asTraitId, asEventId } from '@almadar/core';
 
@@ -135,7 +131,7 @@ async function runGoAndRecord(schema: OrbitalSchema): Promise<string[]> {
   return recorded;
 }
 
-describe('V4 interpreter — cross-trait routing survives a trait rename when ids are present', () => {
+describe('V4 — cross-trait routing survives a trait rename when ids are present', () => {
   it('baseline: routes before any rename (ids)', async () => {
     const recorded = await runGoAndRecord(buildSchema('Emitter', true));
     expect(recorded).toContain('SIGNAL');
@@ -160,34 +156,3 @@ describe('V4 interpreter — cross-trait routing survives a trait rename when id
   });
 });
 
-describe('V4 interpreter — StateMachineManager id-first lookup + rename', () => {
-  function traitDef(id: string, name: string): TraitDefinition {
-    return {
-      id: asTraitId(id),
-      name,
-      states: [{ name: 'idle', isInitial: true }],
-      transitions: [{ from: 'idle', to: 'busy', event: 'GO' }],
-    };
-  }
-
-  it('getStateById resolves by id and survives renameTrait', () => {
-    const mgr = new StateMachineManager([traitDef(TID_A, 'Emitter')]);
-    // Drive a transition so the trait has non-initial live state.
-    mgr.sendEvent('GO');
-    expect(mgr.getStateById(TID_A)?.currentState).toBe('busy');
-
-    // Rename: the id holder still reads the live 'busy' state, unchanged.
-    mgr.renameTrait('Emitter', 'PulseEmitter');
-    expect(mgr.getState('Emitter')).toBeUndefined();
-    expect(mgr.getStateById(TID_A)?.currentState).toBe('busy');
-    expect(mgr.getState('PulseEmitter')?.currentState).toBe('busy');
-  });
-
-  it('getStateById returns undefined for id-free (legacy) traits — name path only', () => {
-    const mgr = new StateMachineManager([
-      { name: 'Legacy', states: [{ name: 'idle', isInitial: true }], transitions: [] },
-    ]);
-    expect(mgr.getStateById('trt_01HZZZZZZZZZZZZZZZZZZZZZZZ')).toBeUndefined();
-    expect(mgr.getState('Legacy')?.currentState).toBe('idle');
-  });
-});

@@ -9,10 +9,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
-import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { MockPersistenceAdapter } from '@almadar/db/mock';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
-import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
+import { IO_REGISTRY, resolveProgram } from './helpers/behavior-packages.js';
 
 const CHAT_ORBS = [
   join(IO_REGISTRY, 'app/organisms/std-realtime-chat.orb'),
@@ -22,15 +21,9 @@ const CHAT_ORBS = [
 
 async function chatRuntime(orbPath: string) {
   const raw = JSON.parse(readFileSync(orbPath, 'utf-8')) as OrbitalSchema;
-  const resolved = await preprocessSchema(raw, {
-    basePath: IO_ROOT,
-    stdLibPath: STD_ROOT,
-    allowOutsideBasePath: true,
-  });
-  if (!resolved.success) throw new Error(resolved.errors.join('; '));
   const persistence = new MockPersistenceAdapter({ ownerId: 'viewer-1', ownerFields: ['ChannelMember.member'] });
   const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false, persistence });
-  await runtime.register(resolved.data.schema);
+  await runtime.register(await resolveProgram(orbPath));
   // A whole-orbital import (`reference`) prefixes the imported traits with the orbital name.
   const imported = raw.orbitals.some((o) => o.name === 'ChatMessageOrbital' && 'reference' in o && o.reference !== undefined);
   const trait = (name: string): string => (imported ? `ChatMessageOrbital${name}` : name);

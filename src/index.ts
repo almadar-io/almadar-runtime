@@ -64,46 +64,20 @@ export {
 // Duration strings ('5s'/'1m'/'1h') — the other tick-interval shape, alongside cron
 export { parseDurationString, isValidDurationString } from "./time/duration.js";
 
-// BindingResolver
-export {
-  interpolateProps,
-  interpolateValue,
-  containsBindings,
-  extractBindings,
-  createContextFromBindings,
-  createMinimalContext,
-  deferEntityBindings,
-  isSExpression,
-  type DeferredPatternValue,
-  type EvaluationContext,
-} from "./evaluation/BindingResolver.js";
 
-// StateMachineCore
+// The client's record of each trait's state, as the kernel reports it
 export {
   findInitialState,
   createInitialTraitState,
+  findMatchingTransitions,
   findTransition,
   normalizeEventKey,
-  processEvent,
-  processTick,
   tickEventKey,
-  selectDispatchCandidates,
-  StateMachineManager,
+  StateBook,
   LIFECYCLE_EVENTS,
   UNMOUNT_EVENT,
-  type ProcessEventOptions,
-  type ProcessTickOptions,
-} from "./traits/StateMachineCore.js";
+} from "./traits/state-book.js";
 
-// TraitCascade — same-trait fetch->emit->self-apply cascade completion,
-// shared by OrbitalServerRuntime and any stateless-server caller.
-export {
-  runTraitCascade,
-  type RunTraitCascadeOptions,
-  type TraitCascadeResult,
-  type CascadeEmittedEvent,
-  type CascadeStepEffectsResult,
-} from "./traits/TraitCascade.js";
 
 // identity/routing — `listens {}` source-matching (`parseListenSource`),
 // shared by OrbitalServerRuntime's cross-trait fan-out and any
@@ -118,7 +92,7 @@ export {
 
 // trait-index — the ONE per-trait evaluation index builder (resolved
 // linkedEntity, merged config, frame keys, V4 ids) shared by the unified
-// `evaluateOrbitalEvent` composition's stateful and stateless callers.
+// browser client and the hosts.
 export {
   browserLegEvents,
   buildTraitIndex,
@@ -135,44 +109,13 @@ export {
   type StampEmitIdentity,
 } from "./events/emit-stamp.js";
 
-// evaluateOrbitalEvent — THE event-evaluation composition, one owner for
-// every server-side execution path (stateful sessions vs stateless
-// per-request evaluations differ only in the deps supplied).
-export {
-  evaluateOrbitalEvent,
-  collectListenerTargets,
-  type CollectedListenerTarget,
-  type EvaluateOrbitalEventDeps,
-  type EvaluateEffectRunner,
-} from "./evaluation/evaluateOrbitalEvent.js";
+// The traits whose `listens` react to an emit the bus carries outside a kernel dispatch
+export { collectListenerTargets, type CollectedListenerTarget } from "./traits/listen-targets.js";
 
-// stage-runner — the TraitIndex → effect-stage bridge for index-based
-// hosts (stateless per-request, embedded/headless).
-export {
-  createIndexStageRunner,
-  type IndexStageRunnerOptions,
-} from "./evaluation/stage-runner.js";
-export type { DeliverEmit } from "./effects/effect-stage.js";
-
-// effect-stage — the server effect-execution stage extracted from
-// OrbitalServerRuntime.executeEffects (behavior-identical move); the
-// stateless/stateful composition lands on top of it next.
-export {
-  runServerEffectStage,
-  type ServerEffectStageDeps,
-  type ServerEffectStageArgs,
-} from "./effects/effect-stage.js";
 
 export { InFlightCalls, type KeyedCallOutcome } from "./effects/in-flight-calls.js";
 export { embedOnDevice, onDeviceHandlers, OnDeviceModelFailure, promptOnDevice } from "./effects/on-device-model.js";
 
-// EffectExecutor
-export {
-  EffectExecutor,
-  clientResolvesRenderBindings,
-  createTestExecutor,
-  type EffectExecutorOptions,
-} from "./effects/EffectExecutor.js";
 
 
 // Client-role server leg (P3) and the one event transport (P5)
@@ -196,9 +139,7 @@ export {
 // The one resolve of a row-set reference against a store (browser store resolver in `@almadar/ui`, JS server engine).
 export { resolveRowSetFromStore, resolveRowSetFromRows, type RowSetStore } from "./effects/row-set-resolve.js";
 
-// CircuitStore (P2) — the manager+frames port `evaluateOrbitalEvent`
-// already consumes, made explicit; `snapshot`/`restore` back the client
-// role's `runtimeOptimistic` rollback.
+// CircuitStore — the browser client's trait states and frames; `snapshot`/`restore` back an optimistic rollback.
 export {
   createMemoryCircuitStore,
   type CircuitStore,
@@ -247,16 +188,6 @@ export type { ResidenceTransportOptions } from "./evaluation/residence-transport
 export { browserStoreName, openBrowserHost, openBrowserStore, openBrowserStoreTransport, openBundledBrowserStore } from "./evaluation/browser-store-transport.js";
 export type { BrowserHost, BrowserHostOptions, BrowserStoreTransportOptions, InputDispatchListener } from "./evaluation/browser-store-transport.js";
 
-// Server-side effect handlers factory — the `fetch`/`persist`/`set`/`ref`/
-// `deref`/`swap`/`atomic`/`callService` layer. Mirrors the handlers built
-// inline in `OrbitalServerRuntime.executeEffects` so client-side offline
-// previews run the same semantics against an `InMemoryPersistence`.
-export {
-  createServerEffectHandlers,
-  type CreateServerEffectHandlersOptions,
-  type ServerEffectResult,
-} from "./effects/ServerEffectHandlers.js";
-
 // Resolved-schema → TraitDefinition[] parsing — extracted from
 // OrbitalServerRuntime.registerOrbitalAsync so a stateless per-request
 // caller (no OrbitalServerRuntime instance) can parse a schema the same way.
@@ -279,23 +210,7 @@ export {
   type PayloadValidationFailure,
 } from "./traits/PayloadValidator.js";
 
-// Uses Integration (for `uses` system)
-export {
-  preprocessSchema,
-  getIsolatedCollectionName,
-  getNamespacedEvent,
-  isNamespacedEvent,
-  parseNamespacedEvent,
-  type PreprocessedSchema,
-  type EntitySharingMap,
-  type EventNamespaceMap,
-  type PreprocessOptions,
-  type PreprocessResult,
-} from "./traits/UsesIntegration.js";
-
-// Loader (for registerWithPreprocess consumers who need to construct a
-// custom SchemaLoader — e.g. to map std imports onto a non-standard
-// on-disk layout).
+// Loader of resolved program files (lazy pages).
 export {
   createUnifiedLoader,
   createHttpLoader,

@@ -1,11 +1,7 @@
 /**
  * CircuitStore — P2, `docs/Almadar_Runtime_Stateless_Stateful_PLAN.md` §4.2.
  *
- * The contract `evaluateOrbitalEvent` already consumes as two separate deps
- * (`manager: StateMachineManager`, `frames: Map<string, EntityRow>`), made
- * explicit as one port so a deployment (stateless per-request, stateful
- * long-lived, browser client) constructs/shares ONE of these instead of the
- * composition's callers inventing their own manager+frames wiring.
+ * The browser client's circuit state: each trait's state and entity frame as the kernel last reported them.
  *
  * `snapshot`/`restore` are the JS twin of orbital-core's
  * `RuntimeKernel::snapshot_trait`/`restore_trait` (`runtime/kernel.rs`) — the
@@ -16,10 +12,8 @@
  * @packageDocumentation
  */
 import { AwaitingRegistry } from './awaiting.js';
-import { StateMachineManager, type TraitDefinition } from '../traits/StateMachineCore.js';
-import type { EntityRow, EventPayload, RollbackCause, RuntimeConfig, TransitionObserver } from '../types.js';
-import { MountLifecycle } from './mount-lifecycle.js';
-import type { WorklistItem } from './evaluateOrbitalEvent.js';
+import { StateBook } from '../traits/state-book.js';
+import type { EntityRow, EventPayload, RollbackCause, TraitDefinition, TransitionObserver } from '../types.js';
 
 /**
  * A trait instance's state + entity frame at a point in time — the twin of
@@ -33,12 +27,11 @@ export interface TraitSnapshot {
 }
 
 export interface CircuitStore {
-  readonly manager: StateMachineManager;
+  /** Each trait's state as the kernel last reported it. */
+  readonly states: StateBook;
   /** The entity-frame map (`(set @entity.X)` writes), keyed by
    *  `IndexedTrait.frameKey`. */
   readonly frames: Map<string, EntityRow>;
-  /** The current mount's lifecycle — which traits still await INIT, and what is held for them. */
-  readonly mount: MountLifecycle<WorklistItem>;
   /** Embedded child → the payload its composer last composed it with (sticky `@callsitePayload`). */
   readonly callsitePayloads: Map<string, EventPayload>;
   /** Traits awaiting a server round trip (per-trait subscriptions; see `AwaitingRegistry`). */
@@ -61,8 +54,7 @@ export interface CircuitStore {
   /**
    * Notify subscribers that circuit state changed. Callers (the client
    * role, `client-role.ts`) call this ONCE after a dispatch/fold finishes
-   * writing state — the store itself never wraps/monkey-patches the
-   * manager to auto-fire this on every internal commit.
+   * writing state — the store never fires this on its own.
    */
   notify(): void;
   /** `useSyncExternalStore`-shaped subscription. Returns the unsubscribe fn. */
@@ -78,33 +70,31 @@ export interface CircuitStore {
  * implementation itself carries no lifetime opinion.
  */
 export function createMemoryCircuitStore(
-  traits: TraitDefinition[] = [],
-  config: RuntimeConfig = {},
+  traits: readonly TraitDefinition[] = [],
   observer?: TransitionObserver,
 ): CircuitStore {
-  const manager = new StateMachineManager(traits, config, observer);
+  const states = new StateBook(traits, observer);
   const frames = new Map<string, EntityRow>();
   const listeners = new Set<() => void>();
   let version = 0;
 
   return {
-    manager,
+    states,
     frames,
-    mount: new MountLifecycle<WorklistItem>(),
     callsitePayloads: new Map<string, EventPayload>(),
     awaiting: new AwaitingRegistry(),
     snapshot(trait, entityId, frameKey) {
       const key = frameKey ?? trait;
       const frame = frames.get(key);
       return {
-        state: manager.getState(trait, entityId)?.currentState ?? '',
+        state: states.getState(trait, entityId)?.currentState ?? '',
         frame: frame !== undefined ? { ...frame } : undefined,
       };
     },
     restore(trait, entityId, snap, frameKey, cause) {
       const key = frameKey ?? trait;
       if (snap.state !== '') {
-        manager.rollbackState(trait, snap.state, entityId, cause);
+        states.rollbackState(trait, snap.state, entityId, cause);
       }
       if (snap.frame === undefined) {
         frames.delete(key);

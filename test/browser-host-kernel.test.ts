@@ -6,7 +6,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { Effect, EventPayload, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, SExpr } from '@almadar/core';
 import { chromeTabPort, type ChromeRuntimeApi, type ChromeTabsApi, type PageMessage, type PageReply } from '../src/host/chrome/index.js';
 import { IndexedDbPersistence } from '@almadar/db/browser';
-import { tickEventKey } from '../src/traits/StateMachineCore';
+import { tickEventKey } from '../src/traits/state-book';
 import { openBrowserHost, type BrowserHost } from '../src/evaluation/browser-store-transport';
 import type { KernelModule } from '../src/kernel/index.js';
 import { KERNEL_DIR, loadKernel } from './helpers/kernel-module.js';

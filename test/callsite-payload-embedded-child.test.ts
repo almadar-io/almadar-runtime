@@ -26,10 +26,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { OrbitalServerRuntime, type ClientRenderUITuple } from '../src/server/OrbitalServerRuntime.js';
-import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { normalizeCallSiteConfigToValues } from '@almadar/core';
 import type { ClientEffectTuple, OrbitalSchema, RenderUIEffect, RuntimeValue, Trait } from '@almadar/core';
-import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
+import { IO_REGISTRY, resolveProgram } from './helpers/behavior-packages.js';
 
 // `['render-ui', slot, pattern, props, priority]` — the resolved leaf
 // values (label/disabled/content/…) live in `pattern` (index 2), the fully
@@ -175,9 +174,7 @@ describe('callsite-payload capture — embedded child re-render (synthetic)', ()
 });
 
 // ============================================================================
-// (b) Real organism — std-helpdesk, resolved with the JS resolver (no CLI
-// binary dependency: the registry .orb already carries every `ref`-composed
-// trait `preprocessSchema` needs to inline).
+// (b) Real organism — std-helpdesk, resolved by `orb`.
 // ============================================================================
 
 const HELPDESK_ORB = join(IO_REGISTRY, 'app/organisms/std-helpdesk.orb');
@@ -208,16 +205,8 @@ describe('callsite-payload capture — std-helpdesk (real organism)', () => {
     helpdeskRefEntry('TicketReplyOrbital', 'Typography.traits.TypographyRender', 'content', '@callsitePayload.error');
 
   async function registerHelpdesk(): Promise<OrbitalServerRuntime> {
-    const raw = JSON.parse(readFileSync(HELPDESK_ORB, 'utf-8')) as OrbitalSchema;
-    const result = await preprocessSchema(raw, {
-      basePath: IO_ROOT,
-      stdLibPath: STD_ROOT,
-      allowOutsideBasePath: true,
-    });
-    expect(result.success).toBe(true);
-    if (!result.success) throw new Error(`preprocessSchema failed: ${result.errors.join('; ')}`);
     const runtime = new OrbitalServerRuntime({ mode: 'mock', debug: false });
-    await runtime.register(result.data.schema);
+    await runtime.register(await resolveProgram(HELPDESK_ORB));
     return runtime;
   }
 

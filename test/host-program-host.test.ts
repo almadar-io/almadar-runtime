@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { behaviorCatalog, behaviorDescribe, behaviorSource, isProgramEffect, mountBehaviorValue, mountTraitValue, programCompose, programEval, programPrint, programRead, programValidate, runProgramEffect } from '../src/host/program/index.js';
+import { BehaviorDescriptionSchema, JsonValueSchema, parseProgram, type JsonValue } from '@almadar/core';
 import { installWorkspaceHost, installedWorkspaceHost, uninstallWorkspaceHost, workspaceOwnerSegment, type WorkspaceHost } from '../src/host/program/workspace-host.js';
 
 // The program host runs the real `orb` (no mock of the thing under test). It
@@ -11,6 +12,9 @@ const ORB = process.env['ORBITAL_BIN'] ?? join(process.env['HOME'] ?? '', 'bin',
 // orb resolves behavior packages by walking up from the project directory, so the
 // test projects live under this package, where an installed @almadar/std is reachable.
 const TMP_ROOT = join(import.meta.dirname, '.tmp-program-host');
+
+/** A program as an effect argument: plain JSON, where an absent field is no key. */
+const arg = (value: object): JsonValue => JsonValueSchema.parse(JSON.parse(JSON.stringify(value)));
 function stdReachable(from: string): boolean {
   for (let dir = from; ; dir = dirname(dir)) {
     if (existsSync(join(dir, 'node_modules', '@almadar', 'std', 'package.json'))) return true;
@@ -123,7 +127,7 @@ describe.skipIf(!hasOrb)('program host (real orb)', () => {
       const cwd = project();
       installWorkspaceHost(localWorkspaceHost(cwd));
       const program = await programRead(VALID, { cwd, orbBin: ORB });
-      const out = await runProgramEffect('program/eval', [{ ...program, name: 'HelloApp' }, { workspace: 'app-1' }], { cwd, orbBin: ORB }, owner);
+      const out = await runProgramEffect('program/eval', [arg({ ...program, name: 'HelloApp' }), { workspace: 'app-1' }], { cwd, orbBin: ORB }, owner);
       expect(out.ok).toBe(true);
       if (!out.ok) return;
       const result = out.result as { behavior: string; value: { behavior: string } };
@@ -140,7 +144,7 @@ describe.skipIf(!hasOrb)('program host (real orb)', () => {
       const cwd = project();
       installWorkspaceHost(localWorkspaceHost(cwd));
       const program = await programRead(VALID, { cwd, orbBin: ORB });
-      const out = await runProgramEffect('program/eval', [{ ...program, name: 'HelloApp' }, { workspace: 'app-1' }], { cwd, orbBin: ORB }, owner);
+      const out = await runProgramEffect('program/eval', [arg({ ...program, name: 'HelloApp' }), { workspace: 'app-1' }], { cwd, orbBin: ORB }, owner);
       if (!out.ok) throw new Error(out.error);
       const value = (out.result as { value: { behavior: string } }).value;
       const other = await runProgramEffect('behavior/source', [value], { cwd, orbBin: ORB }, { principal: 'user-b' });
@@ -156,7 +160,7 @@ describe.skipIf(!hasOrb)('program host (real orb)', () => {
       const cwd = project();
       installWorkspaceHost(localWorkspaceHost(cwd));
       const program = await programRead(VALID, { cwd, orbBin: ORB });
-      const out = await runProgramEffect('program/eval', [{ ...program, name: 'HelloApp' }, { workspace: 'app-1' }], { cwd, orbBin: ORB }, owner);
+      const out = await runProgramEffect('program/eval', [arg({ ...program, name: 'HelloApp' }), { workspace: 'app-1' }], { cwd, orbBin: ORB }, owner);
       if (!out.ok) throw new Error(out.error);
       const value = (out.result as { value: { behavior: string } }).value;
       expect(await mountBehaviorValue(value, { cwd, orbBin: ORB }, { principal: 'user-b' })).toMatchObject({ ok: false, error: expect.stringMatching(/another user's workspace/) });
@@ -168,7 +172,7 @@ describe.skipIf(!hasOrb)('program host (real orb)', () => {
       installWorkspaceHost(localWorkspaceHost(cwd));
       const spaced = { principal: 'StudioUser Id 1' };
       const program = await programRead(VALID, { cwd, orbBin: ORB });
-      const out = await runProgramEffect('program/eval', [{ ...program, name: 'HelloApp' }, { workspace: 'app-1' }], { cwd, orbBin: ORB }, spaced);
+      const out = await runProgramEffect('program/eval', [arg({ ...program, name: 'HelloApp' }), { workspace: 'app-1' }], { cwd, orbBin: ORB }, spaced);
       if (!out.ok) throw new Error(out.error);
       const value = (out.result as { value: { behavior: string } }).value;
       expect(value.behavior.startsWith('./workspaces/StudioUser_20Id_201/')).toBe(true);
@@ -179,7 +183,7 @@ describe.skipIf(!hasOrb)('program host (real orb)', () => {
       const cwd = project();
       installWorkspaceHost(localWorkspaceHost(cwd));
       const program = await programRead(VALID, { cwd, orbBin: ORB });
-      const out = await runProgramEffect('program/eval', [{ ...program, name: 'HelloApp' }, { workspace: 'app-1' }], { cwd, orbBin: ORB });
+      const out = await runProgramEffect('program/eval', [arg({ ...program, name: 'HelloApp' }), { workspace: 'app-1' }], { cwd, orbBin: ORB });
       expect(out).toMatchObject({ ok: false, error: expect.stringMatching(/signed-in/) });
       expect(existsSync(join(cwd, 'workspaces'))).toBe(false);
     });
@@ -187,14 +191,14 @@ describe.skipIf(!hasOrb)('program host (real orb)', () => {
     it('control: a workspace eval on a host with no workspace host fails, naming it', async () => {
       const cwd = project();
       const program = await programRead(VALID, { cwd, orbBin: ORB });
-      const out = await runProgramEffect('program/eval', [{ ...program, name: 'HelloApp' }, { workspace: 'app-1' }], { cwd, orbBin: ORB }, owner);
+      const out = await runProgramEffect('program/eval', [arg({ ...program, name: 'HelloApp' }), { workspace: 'app-1' }], { cwd, orbBin: ORB }, owner);
       expect(out).toMatchObject({ ok: false, error: expect.stringMatching(/workspace host/) });
     });
 
     it('the retired into option is refused', async () => {
       const cwd = project();
       const program = await programRead(VALID, { cwd, orbBin: ORB });
-      const out = await runProgramEffect('program/eval', [{ ...program, name: 'HelloApp' }, { into: cwd }], { cwd, orbBin: ORB }, owner);
+      const out = await runProgramEffect('program/eval', [arg({ ...program, name: 'HelloApp' }), { into: cwd }], { cwd, orbBin: ORB }, owner);
       expect(out).toMatchObject({ ok: false, error: expect.stringMatching(/unsupported option "into"/) });
     });
   });
@@ -222,7 +226,7 @@ describe.skipIf(!hasOrb)('program host (real orb)', () => {
   it('a final eval refuses a control nothing in the app handles, and writes nothing', async () => {
     const cwd = project();
     const program = { ...(await programRead(OFFERED_CONTROL, { cwd, orbBin: ORB })), name: 'Offered' };
-    const out = await runProgramEffect('program/eval', [program, { final: true }], { cwd, orbBin: ORB });
+    const out = await runProgramEffect('program/eval', [arg(program), { final: true }], { cwd, orbBin: ORB });
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.errors?.map((e) => e.code)).toContain('ORB_EMIT_CONTROL_UNHANDLED');
     expect(existsSync(join(cwd, 'orbitals'))).toBe(false);
@@ -231,7 +235,7 @@ describe.skipIf(!hasOrb)('program host (real orb)', () => {
   it('control: the same program evaluates when the eval is not final (an importer may wire it)', async () => {
     const cwd = project();
     const program = { ...(await programRead(OFFERED_CONTROL, { cwd, orbBin: ORB })), name: 'Offered' };
-    expect((await runProgramEffect('program/eval', [program, { final: false }], { cwd, orbBin: ORB })).ok).toBe(true);
+    expect((await runProgramEffect('program/eval', [arg(program), { final: false }], { cwd, orbBin: ORB })).ok).toBe(true);
     expect((await programEval(program, { cwd, orbBin: ORB })).ok).toBe(true);
   });
 
@@ -239,7 +243,7 @@ describe.skipIf(!hasOrb)('program host (real orb)', () => {
     const cwd = project();
     const program = { ...(await programRead(VALID, { cwd, orbBin: ORB })), name: 'HelloApp' };
     const before = readdirSync(cwd);
-    const out = await runProgramEffect('program/validate', [program], { cwd, orbBin: ORB });
+    const out = await runProgramEffect('program/validate', [arg(program)], { cwd, orbBin: ORB });
     expect(out).toEqual({ ok: true, result: { valid: true, errors: [], warnings: [] } });
     expect(isProgramEffect('program/validate')).toBe(true);
     expect(readdirSync(cwd)).toEqual(before);
@@ -262,13 +266,13 @@ describe.skipIf(!hasOrb)('program host (real orb)', () => {
   it('program/validate honours final like program/eval, and control: the same program is valid when not final', async () => {
     const cwd = project();
     const program = { ...(await programRead(OFFERED_CONTROL, { cwd, orbBin: ORB })), name: 'Offered' };
-    const finalOut = await runProgramEffect('program/validate', [program, { final: true }], { cwd, orbBin: ORB });
+    const finalOut = await runProgramEffect('program/validate', [arg(program), { final: true }], { cwd, orbBin: ORB });
     expect(finalOut.ok).toBe(true);
     if (finalOut.ok && typeof finalOut.result === 'object' && 'valid' in finalOut.result) {
       expect(finalOut.result.valid).toBe(false);
       expect([...finalOut.result.errors, ...finalOut.result.warnings].map((e) => e.code)).toContain('ORB_EMIT_CONTROL_UNHANDLED');
     }
-    const open = await runProgramEffect('program/validate', [program, { final: false }], { cwd, orbBin: ORB });
+    const open = await runProgramEffect('program/validate', [arg(program), { final: false }], { cwd, orbBin: ORB });
     expect(open).toEqual({ ok: true, result: { valid: true, errors: [], warnings: [] } });
   });
 
@@ -276,7 +280,7 @@ describe.skipIf(!hasOrb)('program host (real orb)', () => {
     const cwd = project();
     expect((await runProgramEffect('program/validate', ['not a program'], { cwd, orbBin: ORB })).ok).toBe(false);
     const program = { ...(await programRead(VALID, { cwd, orbBin: ORB })), name: 'HelloApp' };
-    const out = await runProgramEffect('program/validate', [program, { workspace: 'x' }], { cwd, orbBin: ORB });
+    const out = await runProgramEffect('program/validate', [arg(program), { workspace: 'x' }], { cwd, orbBin: ORB });
     expect(out).toEqual({ ok: false, error: 'program/validate: unsupported option "workspace"' });
   });
 
@@ -328,8 +332,8 @@ describe.skipIf(!hasOrb)('reflection + print + mount (real orb)', () => {
   it('behavior/describe on an orbital value describes only that orbital', async () => {
     const out = await runProgramEffect('behavior/describe', [{ behavior: 'almadar-std/std-agent-assistant', orbital: 'AgentRecordsOrbital' }], { cwd: project(), orbBin: ORB });
     expect(out.ok).toBe(true);
-    if (!out.ok || out.result === null || typeof out.result !== 'object' || !('orbitals' in out.result)) return;
-    expect(out.result.orbitals.map((o) => o.value.orbital)).toEqual(['AgentRecordsOrbital']);
+    if (!out.ok) return;
+    expect(BehaviorDescriptionSchema.parse(out.result).orbitals.map((o) => o.value.orbital)).toEqual(['AgentRecordsOrbital']);
   });
 
   it('control: an orbital the behavior does not declare is a failure as data', async () => {
@@ -358,8 +362,8 @@ describe.skipIf(!hasOrb)('reflection + print + mount (real orb)', () => {
     const opts = { cwd: project(), orbBin: ORB };
     const value = { behavior: 'almadar-std/std-agent-assistant' };
     const resolved = await runProgramEffect('behavior/resolve', [value], opts);
-    if (!resolved.ok || typeof resolved.result !== 'object' || !('orbitals' in resolved.result)) throw new Error(`expected a program, got ${JSON.stringify(resolved)}`);
-    const traits = resolved.result.orbitals.flatMap((o) => o.traits);
+    if (!resolved.ok) throw new Error(`expected a program, got ${JSON.stringify(resolved)}`);
+    const traits = parseProgram(resolved.result).orbitals.flatMap((o) => o.traits);
     expect(traits.length).toBeGreaterThan(0);
     expect(traits.every((t) => typeof t === 'object' && 'stateMachine' in t)).toBe(true);
   });
@@ -431,7 +435,7 @@ describe.skipIf(!hasOrb)('reflection + print + mount (real orb)', () => {
   };
 
   it('program/step plays each request from its own state and returns it played, with the circuit it ran', async () => {
-    const out = await runProgramEffect('program/step', [MODES, [
+    const out = await runProgramEffect('program/step', [arg(MODES), [
       { orbital: 'Editor', trait: 'Modes', from: 'NORMAL', event: 'KEY', payload: { key: 'i' } },
       { orbital: 'Editor', trait: 'Modes', from: 'NORMAL', event: 'KEY', payload: { key: 'v' } },
     ]], { cwd: project(), orbBin: ORB });
@@ -448,18 +452,18 @@ describe.skipIf(!hasOrb)('reflection + print + mount (real orb)', () => {
   });
 
   it('control: a request no guard admits fails its guard and fires nothing', async () => {
-    const out = await runProgramEffect('program/step', [MODES, [{ orbital: 'Editor', trait: 'Modes', from: 'NORMAL', event: 'KEY', payload: { key: 'x' } }]], { cwd: project(), orbBin: ORB });
+    const out = await runProgramEffect('program/step', [arg(MODES), [{ orbital: 'Editor', trait: 'Modes', from: 'NORMAL', event: 'KEY', payload: { key: 'x' } }]], { cwd: project(), orbBin: ORB });
     expect(out).toMatchObject({ ok: true, result: [{ result: { transitionFired: false, guard: 'fail', state: { before: 'NORMAL', after: 'NORMAL' }, effects: [] } }] });
     if (out.ok && Array.isArray(out.result)) expect(out.result[0]).not.toHaveProperty('result.firedArm');
   });
 
   it('edge: a request for a trait the program does not have is a failure as data', async () => {
-    const out = await runProgramEffect('program/step', [MODES, [{ orbital: 'Editor', trait: 'Nope', from: 'NORMAL', event: 'KEY', payload: {} }]], { cwd: project(), orbBin: ORB });
+    const out = await runProgramEffect('program/step', [arg(MODES), [{ orbital: 'Editor', trait: 'Nope', from: 'NORMAL', event: 'KEY', payload: {} }]], { cwd: project(), orbBin: ORB });
     expect(out).toMatchObject({ ok: false });
   });
 
   it('control: program/step without requests is refused', async () => {
-    expect(await runProgramEffect('program/step', [MODES, 'nope'], { cwd: project(), orbBin: ORB })).toMatchObject({ ok: false });
+    expect(await runProgramEffect('program/step', [arg(MODES), 'nope'], { cwd: project(), orbBin: ORB })).toMatchObject({ ok: false });
   });
 
   it('control: resolving a behavior that is not installed is a failure as data', async () => {
@@ -521,18 +525,19 @@ describe.skipIf(!hasOrb)('orbital values + program/compose (real orb)', () => {
     const help = { name: 'HelpProgram', orbitals: [{ ...ACCORDION, name: 'Help', entity: 'Topic', pages: { '/accordion': '/help' } }] };
     const composed = await runProgramEffect('program/compose', [[help, faq], { appName: 'Support' }], opts);
     expect(composed.ok).toBe(true);
-    if (!composed.ok || typeof composed.result !== 'object' || !('orbitals' in composed.result)) return;
-    expect(composed.result.name).toBe('Support');
-    expect(composed.result.orbitals.map((o) => o.name)).toEqual(['Help', 'Faq']);
-    expect(composed.result.orbitals.every((o) => o.pages.length === 0)).toBe(true);
+    if (!composed.ok) return;
+    const app = parseProgram(composed.result);
+    expect(app.name).toBe('Support');
+    expect(app.orbitals.map((o) => o.name)).toEqual(['Help', 'Faq']);
+    expect(app.orbitals.every((o) => (o.pages ?? []).length === 0)).toBe(true);
   });
 
   it('a composed app of an orbital value evaluates clean', async () => {
     const opts = { cwd: project(), orbBin: ORB };
     const faq = { name: 'FaqProgram', orbitals: [{ ...ACCORDION, name: 'Faq', entity: 'Question' }] };
     const composed = await runProgramEffect('program/compose', [[faq], { appName: 'Support' }], opts);
-    if (!composed.ok || typeof composed.result !== 'object' || !('orbitals' in composed.result)) throw new Error(JSON.stringify(composed));
-    const evaluated = await programEval({ ...composed.result, name: 'Support' }, opts);
+    if (!composed.ok) throw new Error(JSON.stringify(composed));
+    const evaluated = await programEval({ ...parseProgram(composed.result), name: 'Support' }, opts);
     expect(evaluated.ok, JSON.stringify(evaluated)).toBe(true);
   });
 
@@ -563,10 +568,10 @@ describe('runProgramEffect — argument validation (no orb needed)', () => {
 
   it('refuses an unknown or malformed eval option', async () => {
     const program = { name: 'X', orbitals: [{ name: 'O', entity: { name: 'E', persistence: 'runtime', fields: [{ name: 'id', type: 'string' }] }, traits: [], pages: [] }] };
-    expect(await runProgramEffect('program/eval', [program, { into: '' }], opts)).toEqual({ ok: false, error: 'program/eval: unsupported option "into"' });
-    expect(await runProgramEffect('program/eval', [program, { publish: true }], opts)).toEqual({ ok: false, error: 'program/eval: unsupported option "publish"' });
-    expect(await runProgramEffect('program/eval', [program, []], opts)).toEqual({ ok: false, error: 'program/eval: options must be an object' });
-    expect(await runProgramEffect('program/eval', [program, { final: 'yes' }], opts)).toEqual({ ok: false, error: 'program/eval: final must be a boolean' });
+    expect(await runProgramEffect('program/eval', [arg(program), { into: '' }], opts)).toEqual({ ok: false, error: 'program/eval: unsupported option "into"' });
+    expect(await runProgramEffect('program/eval', [arg(program), { publish: true }], opts)).toEqual({ ok: false, error: 'program/eval: unsupported option "publish"' });
+    expect(await runProgramEffect('program/eval', [arg(program), []], opts)).toEqual({ ok: false, error: 'program/eval: options must be an object' });
+    expect(await runProgramEffect('program/eval', [arg(program), { final: 'yes' }], opts)).toEqual({ ok: false, error: 'program/eval: final must be a boolean' });
   });
 
   it('a host failure (no orb) comes back as data', async () => {
@@ -587,7 +592,7 @@ describe.skipIf(!hasOrb)('runProgramEffect (real orb)', () => {
     const read = await runProgramEffect('program/read', [VALID], { cwd, orbBin: ORB });
     expect(read.ok).toBe(true);
     if (!read.ok || typeof read.result === 'string' || !('orbitals' in read.result)) return;
-    const evald = await runProgramEffect('program/eval', [{ ...read.result, name: 'HelloApp' }, {}], { cwd, orbBin: ORB });
+    const evald = await runProgramEffect('program/eval', [arg({ ...read.result, name: 'HelloApp' }), {}], { cwd, orbBin: ORB });
     expect(evald).toMatchObject({ ok: true, result: { behavior: './orbitals/HelloApp' } });
     expect(existsSync(join(cwd, 'orbitals', 'HelloApp.orb'))).toBe(true);
   });

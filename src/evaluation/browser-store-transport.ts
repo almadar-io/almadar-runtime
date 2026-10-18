@@ -6,7 +6,7 @@
 import type { BrowserTabPort, MessageCatalogs, OnDeviceModelPorts, OrbitalDefinition, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, RuntimeValue } from '@almadar/core';
 import { applyRowAccess, externalInputsOf, orbitalInlineEntities, parseOrbitalSchema, readableEntitiesOf, storesRowsInBrowser } from '@almadar/core';
 import { entityAccessPolicies } from '@almadar/core/mock';
-import type { ServerEffectStageDeps } from '../effects/effect-stage.js';
+import type { KernelHostPorts } from '../kernel/host.js';
 import type { HttpPorts } from '../kernel/http-exchange.js';
 import type { KernelModule } from '../kernel/wire.js';
 import { dispatchDeclaredInput } from './declared-input-dispatch.js';
@@ -18,7 +18,7 @@ import { seedBrowserStore } from '../entities/seedBrowserStore.js';
 import type { EventTransport } from '../server/EventTransport.js';
 import { buildTraitIndex } from '../traits/trait-index.js';
 import { createLocalStoreTransport, localStorePersistence, openLocalKernel } from './local-store-transport.js';
-import { tickEventKey } from '../traits/StateMachineCore.js';
+import { tickEventKey } from '../traits/state-book.js';
 import { createTickScheduler, type TickHandle } from '../time/TickScheduler.js';
 import { createLogger } from '@almadar/logger';
 import { isValidCronExpression } from '../time/cron.js';
@@ -219,7 +219,7 @@ export async function openBrowserHost(options: BrowserHostOptions): Promise<Brow
     }
   };
 
-  const servicePorts: NonNullable<ServerEffectStageDeps['servicePorts']> = (caller, user, message) => {
+  const servicePorts: KernelHostPorts['servicePorts'] = (caller, user, message) => {
     // A dispatch made while the lending request still runs is part of that request (a tool loop);
     // one made after it finished (a watch reporting later) is a new request and takes its turn.
     const lentBy = running;

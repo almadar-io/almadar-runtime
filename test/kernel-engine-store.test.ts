@@ -42,6 +42,7 @@ class Scripted implements KernelServerHandle {
   setMessages(): void {}
   lastError(): string { return ''; }
   setCapabilities(entity: string): void { this.log.push(`${this.label} setCapabilities ${entity}`); }
+  fork(): KernelServerHandle { throw new Error('unused'); }
   free(): void { this.log.push(`${this.label} free`); }
 }
 

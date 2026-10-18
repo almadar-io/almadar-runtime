@@ -6,23 +6,14 @@
  * consequence is the body holding its skate curve after boot.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OrbitalSchema } from '@almadar/core';
-import { preprocessSchema } from '../src/traits/UsesIntegration.js';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import { InMemoryPersistence } from '@almadar/db/mock';
-import { IO_ROOT, STD_ROOT, IO_REGISTRY } from './helpers/behavior-packages.js';
+import { IO_REGISTRY, resolveProgram } from './helpers/behavior-packages.js';
 
-async function sine(): Promise<OrbitalSchema> {
-  const raw = JSON.parse(readFileSync(join(IO_REGISTRY, 'riya/atoms/riya-level-sine.orb'), 'utf-8')) as OrbitalSchema;
-  const res = await preprocessSchema(raw, {
-    basePath: IO_ROOT,
-    stdLibPath: STD_ROOT,
-    allowOutsideBasePath: true,
-  });
-  if (!res.success) throw new Error(res.errors.join('; '));
-  return res.data.schema;
+function sine(): Promise<OrbitalSchema> {
+  return resolveProgram(join(IO_REGISTRY, 'riya/atoms/riya-level-sine.orb'));
 }
 
 const PAGE = ['SineLevelData', 'SineBody', 'SineGate', 'SineFx', 'SinePickup', 'SineChoice', 'SineTutorial', 'RiyaSineGenre', 'RiyaSinePlay', 'SineChallenge', 'RiyaSineClear'];

@@ -60,6 +60,7 @@ function scripted(log: string[]): KernelModule {
     setMessages(): void {}
     lastError(): string { return ''; }
     osAllows(): boolean { return false; }
+    fork(): KernelServerHandle { throw new Error('unused'); }
     free(): void {}
   }
   return stubKernelModule(Handle);

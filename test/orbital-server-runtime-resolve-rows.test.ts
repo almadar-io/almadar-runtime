@@ -118,6 +118,7 @@ describe('the kernel engine resolves through its resolve flight', () => {
       setMessages(): void {}
       lastError(): string { return ''; }
       osAllows(): boolean { return false; }
+      fork(): KernelServerHandle { throw new Error('unused'); }
       free(): void {}
     }
     const kernel: KernelModule = stubKernelModule(Handle);

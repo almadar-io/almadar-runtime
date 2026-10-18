@@ -539,6 +539,16 @@ export async function mountBehaviorValue(value: BehaviorRef, opts: ProgramHostOp
   return { ok: true, mounted: { schema, firstPage } };
 }
 
+/** A program file resolved by `orb` (every import flattened, every composed trait inlined): what a host registers. */
+export async function programResolve(path: string, opts: ProgramHostOptions): Promise<OrbitalSchema> {
+  return parseJson(ProgramParser, await runOrb(['resolve', path], opts), 'program/resolve');
+}
+
+/** An unresolved program resolved by `orb` from the project root `opts.cwd`, so its relative imports resolve there. */
+export function programResolveSchema(program: OrbitalSchema, opts: ProgramHostOptions): Promise<OrbitalSchema> {
+  return withProjectFile(opts.cwd, 'program.orb', JSON.stringify(program), (path) => programResolve(path, opts));
+}
+
 /** `behavior/resolve`: the behavior a value belongs to, resolved by `orb` — every import and composed trait inlined, as the runtime runs it. */
 export async function behaviorResolve(value: Pick<TraitValue, 'behavior'>, opts: ProgramHostOptions): Promise<OrbitalSchema | { error: string }> {
   const file = await behaviorFile(value.behavior, opts);
