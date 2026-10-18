@@ -8,6 +8,7 @@ import { InMemoryPersistence } from '@almadar/db/mock';
 import type { EntityRow, RowSetRef } from '@almadar/core';
 import { InFlightCalls } from '../src/effects/in-flight-calls.js';
 import { KernelEngine, type KernelHostPorts, type KernelModule, type KernelServerHandle } from '../src/kernel/index.js';
+import { stubKernelModule } from './helpers/kernel-module.js';
 
 const reference: RowSetRef = {
   entityType: 'Ticket',
@@ -54,13 +55,14 @@ function scripted(log: string[]): KernelModule {
     mount(): void {}
     remount(): void {}
     setTickMount(): void {}
+    seedRuntimeMock(): void {}
     setCapabilities(): void {}
     setMessages(): void {}
     lastError(): string { return ''; }
     osAllows(): boolean { return false; }
     free(): void {}
   }
-  return { Server: Handle, osGlobMatches: () => false, isPublicAddress: () => false };
+  return stubKernelModule(Handle);
 }
 
 describe('KernelEngine.resolveRows', () => {

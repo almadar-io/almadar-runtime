@@ -1,7 +1,7 @@
 // The `http` effect on the interpreter path: the kernel builds the request, the host moves the bytes, the
 // outcome routes to emit.success / failure / cancelled. A non-2xx reply is a success. Twin of the kernel host tests below.
 import { describe, it, expect } from 'vitest';
-import type { EventPayload } from '@almadar/core';
+import type { CallServiceEmitConfig, EventPayload, HttpEffect, SExpr } from '@almadar/core';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 import { EffectExecutor, type BindingContext, type EffectContext, type HttpEffectReport } from '../src/index.js';
 import { InFlightCalls } from '../src/effects/in-flight-calls.js';
@@ -28,7 +28,7 @@ function run(app: FakeApp, now?: number) {
     return { emitted, reports, execute };
 }
 
-const http = (request: object, options: object = { emit: ALL }, origin = ORIGIN) => ['http', 'GET', origin, '/search', request, options];
+const http = (request: SExpr, options: CallServiceEmitConfig = { emit: ALL }, origin = ORIGIN): HttpEffect => ['http', 'GET', origin, '/search', request, options];
 
 describe('http effect (interpreter)', () => {
     it('passes the dispatch stamp as execution metadata, not an authored request option', async () => {

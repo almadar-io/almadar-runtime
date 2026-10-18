@@ -2,7 +2,7 @@
 // (recorded exchange), and the dispatch returns the program's external emits.
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
-import { isJsonObject, type EventPayload, type JsonValue } from '@almadar/core';
+import { isJsonObject, toWireValue, type EventPayload, type JsonValue } from '@almadar/core';
 import { emitPayload, KernelProgram, resolveProgramFile, type ProgramRun } from '../src/kernel/program-node.js';
 import { kernelWorkspaceHost } from '../src/kernel/workspace-node.js';
 import type { PinnedInit } from '../src/kernel/http-exchange.js';
@@ -100,7 +100,7 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel program host', () => {
       const t = transport(200, JSON.stringify(reply));
       return (await startFile('vision-lmstudio', t.http)).dispatch('VisionOrbital', 'LLM_GENERATE', { userPrompt: 'hi' });
     };
-    const usage = (run: ProgramRun): JsonValue => emitPayload(run, 'LLM_USAGE_REPORTED', (payload) => ({ provider: payload.provider ?? null, model: payload.model ?? null, action: payload.action ?? null, inputTokens: payload.inputTokens ?? null, outputTokens: payload.outputTokens ?? null }));
+    const usage = (run: ProgramRun): JsonValue | undefined => emitPayload(run, 'LLM_USAGE_REPORTED', (payload) => toWireValue({ provider: payload.provider ?? null, model: payload.model ?? null, action: payload.action ?? null, inputTokens: payload.inputTokens ?? null, outputTokens: payload.outputTokens ?? null }));
 
     it('reports the provider, the model and the tokens the provider reported', async () => {
       const run = await generate({ choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 12, completion_tokens: 5 } });
@@ -223,12 +223,15 @@ describe.skipIf(KERNEL_DIR === undefined || NATIVE_ADDON === undefined)('kernel 
       osGrants: { fs: [{ glob: `${dir}/**`, modes: ['read'] }] },
       orbitals: [{
         name: 'Main',
+        pages: [],
         entity: { name: 'Job', persistence: 'runtime', fields: [{ name: 'id', type: 'string' }] },
         traits: [{
           name: 'Reader',
+          scope: 'instance',
           linkedEntity: 'Job',
           stateMachine: {
             states: [{ name: 'idle', isInitial: true }, { name: 'done' }],
+            events: [{ key: 'READ', name: 'Read' }],
             transitions: [{ from: 'idle', to: 'done', event: 'READ', effects: [['os/read-file', path, { emit: { success: 'OK', failure: 'BAD' } }]] }],
           },
         }],
@@ -337,7 +340,7 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel workspace host: std-workspace 
         const found = objects.get(key);
         return found === undefined
           ? new Response('<Error><Code>NoSuchKey</Code></Error>', { status: 404, headers: [['content-type', 'application/xml']] })
-          : new Response(found, { status: 200 });
+          : new Response(found.slice(), { status: 200 });
       };
       return { objects, seen, fetch };
     }

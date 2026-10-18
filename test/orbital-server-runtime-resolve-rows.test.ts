@@ -5,6 +5,7 @@ import express from 'express';
 import http from 'node:http';
 import type { EntityRow, OrbitalSchema, RowQueryPage, RowSetRef, SExpr, UserContext } from '@almadar/core';
 import type { VerifiedUser } from '@almadar/auth';
+import { stubKernelModule } from './helpers/kernel-module.js';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import { OrbitalServerRuntime } from '../src/server/OrbitalServerRuntime.js';
 import type { KernelModule, KernelServerHandle } from '../src/kernel/index.js';
@@ -112,13 +113,14 @@ describe('the kernel engine resolves through its resolve flight', () => {
       mount(): void {}
       remount(): void {}
       setTickMount(): void {}
+      seedRuntimeMock(): void {}
       setCapabilities(): void {}
       setMessages(): void {}
       lastError(): string { return ''; }
       osAllows(): boolean { return false; }
       free(): void {}
     }
-    const kernel: KernelModule = { Server: Handle, osGlobMatches: () => false, isPublicAddress: () => false };
+    const kernel: KernelModule = stubKernelModule(Handle);
     const runtime = new OrbitalServerRuntime({ persistence: new InMemoryPersistence(), debug: false, kernel });
     await runtime.register(schema(true));
     const page = await runtime.resolveRows(reference(['a1']), ALICE);

@@ -3,7 +3,7 @@
 // Chrome API, so `browser/tab-open|list|query|watch` run end to end. Skipped without a built kernel (ALMADAR_KERNEL_DIR).
 import 'fake-indexeddb/auto';
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { EventPayload, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
+import type { Effect, EventPayload, OrbitalEventRequest, OrbitalEventResponse, OrbitalSchema, SExpr } from '@almadar/core';
 import { chromeTabPort, type ChromeRuntimeApi, type ChromeTabsApi, type PageMessage, type PageReply } from '../src/host/chrome/index.js';
 import { IndexedDbPersistence } from '@almadar/db/browser';
 import { tickEventKey } from '../src/traits/StateMachineCore';
@@ -241,7 +241,7 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
     host.close();
   });
 
-  const painter = (effects: Array<{ event: string; effects: unknown[][] }>): OrbitalSchema => ({
+  const painter = (effects: Array<{ event: string; effects: Effect[] }>): OrbitalSchema => ({
     name: 'Painter',
     orbitals: [{
       name: 'Board',
@@ -260,7 +260,7 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
   });
 
   it('a step that does not fire repaints what the slot holds, not the render of the first arm that enters the state', async () => {
-    const say = (content: string): unknown[] => ['render-ui', 'main', { type: 'typography', content }];
+    const say = (content: string): Effect => ['render-ui', 'main', { type: 'typography', content }];
     const host = await openBrowserHost({
       databaseName: `kernel-paint-${Math.random()}`,
       schema: painter([{ event: 'INIT', effects: [say('first')] }, { event: 'GO', effects: [say('second')] }]),
@@ -277,7 +277,7 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
   });
 
   it('a list equals the empty list only when it is empty', async () => {
-    const compare = (operator: string, left: unknown[]): unknown[] => ['emit', 'OUT', { v: [operator, left, ['list']] }];
+    const compare = (operator: string, left: SExpr): Effect => ['emit', 'OUT', { v: [operator, left, ['list']] }];
     const host = await openBrowserHost({
       databaseName: `kernel-lists-${Math.random()}`,
       schema: painter([

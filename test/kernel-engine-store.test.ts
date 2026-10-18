@@ -12,7 +12,7 @@ import type { OrbitalSchema } from '@almadar/core';
 import { InFlightCalls } from '../src/effects/in-flight-calls.js';
 import { KernelEngine, type KernelHostPorts, type KernelModule, type KernelServerClass, type KernelServerHandle } from '../src/kernel/index.js';
 import { KernelProgram } from '../src/kernel/program-node.js';
-import { NATIVE_ADDON } from './helpers/kernel-module.js';
+import { NATIVE_ADDON, stubKernelModule } from './helpers/kernel-module.js';
 
 const ports = (persistence: InMemoryPersistence): KernelHostPorts => ({
   persistence,
@@ -38,6 +38,7 @@ class Scripted implements KernelServerHandle {
   mount(): void {}
   remount(): void {}
   setTickMount(): void {}
+  seedRuntimeMock(): void {}
   setMessages(): void {}
   lastError(): string { return ''; }
   setCapabilities(entity: string): void { this.log.push(`${this.label} setCapabilities ${entity}`); }
@@ -51,11 +52,7 @@ function module(log: string[], withStore: boolean): KernelModule {
       ? (_schema, envJson) => { log.push(`withStore ${envJson}`); return new Scripted(log, 'stored'); }
       : undefined;
   }
-  const unused = (): never => { throw new Error('unused'); };
-  return {
-    Server, osGlobMatches: () => false, isPublicAddress: () => false, osDeferringOps: () => '[]', osCompletionEvent: () => 'null', tabUrlMatches: () => false,
-    evaluateMany: unused, evaluateGuards: unused, evaluateTraced: unused, mapListenPayload: unused, scopeRows: unused, checkMutationAccess: unused, resolveRowBinding: unused,
-  };
+  return stubKernelModule(Server);
 }
 
 const env = { DATA_BACKEND: 'mock', NODE_ENV: 'development' };

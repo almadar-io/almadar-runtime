@@ -4,7 +4,7 @@ import type { RowQuery } from '@almadar/core';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import { routeByEntity } from '../src/evaluation/routed-persistence';
 
-const everything: RowQuery = { order: [], offset: 0, limit: 10, total: 'exact' };
+const everything: RowQuery = { offset: 0, limit: 10, total: 'exact' };
 
 function stores() {
   const stored = new InMemoryPersistence();

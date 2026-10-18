@@ -25,6 +25,7 @@ const SAMPLES: { readonly [K in IoRequestWire['kind']]: Extract<IoRequestWire, {
   pageFacts: { kind: 'pageFacts', fields: ['hostname', 'screenWidth'] },
   prompt: { kind: 'prompt', text: 't', schema: 's', key: 'k' },
   embed: { kind: 'embed', texts: ['a'], key: 'k' },
+  tab: { kind: 'tab', ask: { kind: 'navigate', tab: 7, url: 'https://example.com/a' }, key: 'k' },
   secret: { kind: 'secret', name: 'n', principal: 'p' },
   secretSet: { kind: 'secretSet', name: 'n', value: 'v', ttlMs: 5, principal: 'p' },
   secretRotate: { kind: 'secretRotate', name: 'n', value: 'v', principal: 'p' },

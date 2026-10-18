@@ -2,6 +2,7 @@
 // orbital-core `tests/host_effects.rs` (EXEC-HTTP-2). Same vectors, same messages, one set of host functions.
 import { describe, it, expect } from 'vitest';
 import type { EventPayload } from '@almadar/core';
+import type { OsOp } from '@almadar/core/kernel-wire';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import { stubEffectHandlers } from './fixtures/effect-handlers.js';
 import { EffectExecutor, type BindingContext, type EffectContext } from '../src/index.js';
@@ -217,13 +218,14 @@ describe('kernel host answers', () => {
     });
 
     it('os is denied on a host given no os port, as the native host with none, and never touches the host adapter', async () => {
-        const answer = await host(app())({ kind: 'os', op: 'os/read-file', args: ['/data/a'], key: null, site: null });
+        const answer = await host(app())({ kind: 'os', op: 'os/read-file', args: ['/data/a'] });
         expect(answer).toEqual({ kind: 'os', result: { error: { kind: 'denied', message: 'os/read-file: no os host configured' } } });
     });
 
     it('os is denied for every op the interpreter once handled in process when no os port is given', async () => {
-        for (const op of ['os/watch-cron', 'os/watch-files', 'os/debounce']) {
-            const answer = await host(app())({ kind: 'os', op, args: [], key: null, site: null });
+        const ops: OsOp[] = ['os/watch-cron', 'os/watch-files'];
+        for (const op of ops) {
+            const answer = await host(app())({ kind: 'os', op, args: [] });
             expect(answer).toEqual({ kind: 'os', result: { error: { kind: 'denied', message: `${op}: no os host configured` } } });
         }
     });
@@ -238,7 +240,7 @@ describe('kernel host answers', () => {
             causalId: 'api#1',
             hop: 1,
         };
-        const answer = await host(app())({ kind: 'deliver', envelope, key: null, site: { trait: 'Sender', followOn: false, emit: {} } });
+        const answer = await host(app())({ kind: 'deliver', envelope, site: { trait: 'Sender', followOn: false, emit: {} } });
         expect(answer).toEqual({ kind: 'deliver', result: { error: { kind: 'down', id: 'e1' } } });
     });
 
@@ -322,7 +324,7 @@ describe('the driver\'s asks on the interpreter path', () => {
     });
 
     it('a secretRotate ask answers an error when the host cannot rotate, the credential is unknown, or nobody is signed in', async () => {
-        const cases: Array<[string, HttpSecrets, object, string | undefined, string]> = [
+        const cases: Array<[string, HttpSecrets & { held: Map<string, string> }, object, string | undefined, string]> = [
             ['no rotate port', memorySecrets({ RT: 'old' }, false), { kind: 'secretRotate', name: 'RT', value: 'n' }, undefined, 'rotatable'],
             ['unknown credential', memorySecrets({}), { kind: 'secretRotate', name: 'RT', value: 'n' }, undefined, 'not stored'],
             ['user scope, nobody signed in', memorySecrets({ RT: 'old' }), { kind: 'secretRotate', name: 'RT', value: 'n', scope: 'user' }, undefined, 'nobody is signed in'],

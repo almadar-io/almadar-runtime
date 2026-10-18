@@ -21,10 +21,9 @@ class Rows implements CredentialPersistence {
     const at = this.rows.findIndex((row) => row.id === id);
     if (at >= 0) this.rows[at] = { ...this.rows[at], ...data };
   }
-  async delete(_type: string, id: string): Promise<boolean> {
+  async delete(_type: string, id: string): Promise<void> {
     const at = this.rows.findIndex((row) => row.id === id);
     if (at >= 0) this.rows.splice(at, 1);
-    return at >= 0;
   }
   async list(): Promise<EntityRow[]> {
     return this.rows;
