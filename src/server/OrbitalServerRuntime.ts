@@ -1324,7 +1324,14 @@ export class OrbitalServerRuntime {
     this.kernelOs = this.config.osHost?.(kernelOsGrants(kernel, () => this.requireKernelEngine()));
     this.kernelEngine = KernelEngine.open(kernel, schema, this.kernelPorts(registered.egress ?? []));
     this.kernelEngine.setMessages(this.appLocales, this.messages);
+    this.seedKernelRuntimeMock();
     this.syncTickMount();
+  }
+
+  /** A mock store seeds every entity; the `[runtime]` rows the kernel holds itself are seeded in the kernel. */
+  private seedKernelRuntimeMock(): void {
+    if (this.config.mode !== 'mock' || !(this.persistence instanceof MockPersistenceAdapter)) return;
+    this.kernelEngine?.seedRuntimeMock(this.config.defaultUser?.id);
   }
 
   private requireKernelEngine(): KernelEngine {
@@ -1660,6 +1667,7 @@ export class OrbitalServerRuntime {
    */
   resetCircuitState(): void {
     this.kernelEngine?.reset();
+    this.seedKernelRuntimeMock();
     this.kernelOs?.close();
   }
 

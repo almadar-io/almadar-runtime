@@ -61,12 +61,15 @@ describe('hermetic reset', () => {
     expect(r.transitioned).toBe(false);
   });
 
-  it('frames written before the reset are gone', async () => {
+  it('frames written before the reset are gone: the frame is a fresh boot\'s', async () => {
+    const booted = (await send(await runtime(), 'A', 'INIT')).entityByTrait?.['A']?.['n'];
     const rt = await runtime();
     await send(rt, 'A', 'OPEN');
     expect((await send(rt, 'A', 'INIT')).entityByTrait?.['A']?.['n']).toBe(7);
     rt.resetCircuitState();
-    expect((await send(rt, 'A', 'INIT')).entityByTrait?.['A']?.['n']).toBeUndefined();
+    const after = (await send(rt, 'A', 'INIT')).entityByTrait?.['A']?.['n'];
+    expect(after).not.toBe(7);
+    expect(after).toEqual(booted);
   });
 
   it("a delivery held for a trait awaiting INIT is not released into the next mount", async () => {
