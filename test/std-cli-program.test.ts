@@ -9,6 +9,7 @@ import { KERNEL_DIR } from './helpers/kernel-module.js';
 const fixture = fileURLToPath(new URL('./fixtures/std-cli-sh.lolo', import.meta.url));
 const inTmp = fileURLToPath(new URL('./fixtures/std-cli-sh-tmp.lolo', import.meta.url));
 const binary = fileURLToPath(new URL('./fixtures/std-cli-sh-binary.lolo', import.meta.url));
+const passEnv = fileURLToPath(new URL('./fixtures/std-cli-sh-passenv.lolo', import.meta.url));
 
 function answer(run: ProgramRun, event: string): EventPayload | undefined {
   return run.emits.find((emit) => emit.event === event)?.payload;
@@ -101,5 +102,39 @@ describe.skipIf(KERNEL_DIR === undefined)('std-cli on the Node os host', () => {
     const run = await open.dispatch('ShOrbital', 'CLI_CANCEL', {});
     expect(answer(run, 'CLI_FAILED')).toEqual({ stage: '', error: 'nothing is running', code: 'cli_idle' });
     expect(answer(run, 'CLI_DONE')).toBeUndefined();
+  });
+
+  describe('passEnv', () => {
+    const PRINT = 'printf "%s|%s|%s|%s" "$ALMADAR_PASSENV_PROBE" "${ALMADAR_PASSENV_UNSET-unset}" "$FIXED" "$ALMADAR_PASSENV_PINNED"';
+    const saved = { probe: process.env.ALMADAR_PASSENV_PROBE, unset: process.env.ALMADAR_PASSENV_UNSET, pinned: process.env.ALMADAR_PASSENV_PINNED };
+    afterEach(() => {
+      for (const [name, value] of [['ALMADAR_PASSENV_PROBE', saved.probe], ['ALMADAR_PASSENV_UNSET', saved.unset], ['ALMADAR_PASSENV_PINNED', saved.pinned]] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    });
+
+    it('adds each named host variable that is set to the child environment, beside the env knob', async () => {
+      process.env.ALMADAR_PASSENV_PROBE = 'host-value';
+      delete process.env.ALMADAR_PASSENV_UNSET;
+      process.env.ALMADAR_PASSENV_PINNED = 'host-pinned';
+      open = await KernelProgram.open(await resolveProgramFile(passEnv), { kernelDir: KERNEL_DIR ?? '', os: true });
+      const run = await open.dispatch('ShEnvOrbital', 'CLI_RUN', { stage: 'env', argv: ['-c', PRINT] });
+      expect(answer(run, 'CLI_DONE')).toMatchObject({ stage: 'env', exitCode: 0, stdout: 'host-value|unset|1|host-pinned' });
+    });
+
+    it("edge: a variable the run's own env sets keeps the run's value (and the run's env replaces the knob's)", async () => {
+      delete process.env.ALMADAR_PASSENV_PROBE;
+      process.env.ALMADAR_PASSENV_PINNED = 'host-pinned';
+      open = await KernelProgram.open(await resolveProgramFile(passEnv), { kernelDir: KERNEL_DIR ?? '', os: true });
+      const run = await open.dispatch('ShEnvOrbital', 'CLI_RUN', { stage: 'env', argv: ['-c', PRINT], env: { ALMADAR_PASSENV_PINNED: 'from-run' } });
+      expect(answer(run, 'CLI_DONE')?.stdout).toBe('|unset||from-run');
+    });
+
+    it('control: without passEnv the child sees no host variable', async () => {
+      process.env.ALMADAR_PASSENV_PROBE = 'host-value';
+      const run = await sh('printf "%s" "${ALMADAR_PASSENV_PROBE-absent}"');
+      expect(answer(run, 'CLI_DONE')?.stdout).toBe('absent');
+    });
   });
 });

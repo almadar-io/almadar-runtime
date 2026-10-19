@@ -1,0 +1,23 @@
+app std-cli-sh-passenv [
+  version: "1.0.0",
+  description: "Test fixture: std-cli running sh with two host variables passed through, one fixed variable, and one passed name the run itself also sets.",
+  exec: ["sh"],
+  env: ["ALMADAR_PASSENV_PROBE", "ALMADAR_PASSENV_UNSET", "ALMADAR_PASSENV_PINNED"]
+]
+orbital ShEnvOrbital {
+  uses Cli from "std/behaviors/std-cli"
+
+  entity ShEnvRun [runtime] {
+    id : string!
+  }
+
+  trait ShEnv = Cli.traits.CliRunner {
+    config {
+      command: "sh"
+      env: { FIXED: "1" }
+      passEnv: ["ALMADAR_PASSENV_PROBE", "ALMADAR_PASSENV_UNSET", "ALMADAR_PASSENV_PINNED"]
+    }
+  }
+
+  page "/sh-env" as ShEnvPage -> ShEnv
+}

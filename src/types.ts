@@ -38,6 +38,7 @@ import type {
     OrbitalDefinition,
     RowSetRef,
 } from '@almadar/core';
+import type { HopObservation } from '@almadar/core/kernel-wire';
 import type { ProgramEffectName, ProgramEffectOutcome } from './host/program/index.js';
 import type {
     ComposeBehaviorsInput,
@@ -847,6 +848,8 @@ export interface TransitionObserver {
             error?: string;
             durationMs?: number;
         }>;
+        /** Recorded for a verifier only (`setRecordEntityAfter`): the arm, payload and `@entity` before and after. */
+        observed?: HopObservation;
     }): void;
     /**
      * Called when an optimistic dispatch is undone: the state moved back from
