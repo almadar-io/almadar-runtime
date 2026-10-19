@@ -7,7 +7,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import type { EventPayload, OrbitalSchema, ServiceParams } from '@almadar/core';
 import { isInlineTrait } from '@almadar/core';
 import { openBrowserHost, type BrowserHost } from '../src/evaluation/browser-store-transport';
-import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
+import { KERNEL_DIR, testKernel, TEST_LANGUAGE } from './helpers/kernel-module.js';
 
 const program: OrbitalSchema = {
   name: 'Recall',
@@ -44,7 +44,7 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost: cancel a call, then 
         const timer = setTimeout(() => resolve({ n: Number(params?.n) }), 60);
         context?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')); });
       });
-    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: `recall-${Math.random()}`, schema: program, callService });
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, kernel: await testKernel(), databaseName: `recall-${Math.random()}`, schema: program, callService });
     hosts.push(host);
     await host.send('Recall', { event: 'INIT', targetTrait: 'Judge', payload: {} });
     const ask = host.send('Recall', { event: 'ASK', payload: {} });
@@ -67,7 +67,7 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost: cancel a call, then 
         const timer = setTimeout(() => resolve({ n: Number(params?.n) }), 80);
         context?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')); });
       });
-    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: `recall-${Math.random()}`, schema: program, callService });
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, kernel: await testKernel(), databaseName: `recall-${Math.random()}`, schema: program, callService });
     hosts.push(host);
     await host.send('Recall', { event: 'INIT', targetTrait: 'Judge', payload: {} });
     const ask = host.send('Recall', { event: 'ASK', payload: {} }).then(() => order.push('ask done'));
@@ -97,7 +97,7 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost: a view request cance
         const timer = setTimeout(() => resolve({ n: Number(params?.n) }), 80);
         context?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')); });
       });
-    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: `recall-tick-${Math.random()}`, schema: ticking, callService });
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, kernel: await testKernel(), databaseName: `recall-tick-${Math.random()}`, schema: ticking, callService });
     hosts.push(host);
     await host.send(program.orbitals[0].name, { event: 'INIT', targetTrait: 'Judge', payload: {} });
     await new Promise((r) => setTimeout(r, 60));

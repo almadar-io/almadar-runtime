@@ -116,6 +116,7 @@ describe('the kernel engine resolves through its resolve flight', () => {
       seedRuntimeMock(): void {}
       setCapabilities(): void {}
       setMessages(): void {}
+      setManagedProgram(): void {}
       lastError(): string { return ''; }
       osAllows(): boolean { return false; }
       fork(): KernelServerHandle { throw new Error('unused'); }

@@ -8,7 +8,7 @@ import { runsBrowserDataEffect, runsServerEffect } from '../src/traits/trait-ind
 import { createLocalStoreTransport } from '../src/evaluation/local-store-transport';
 import { createBrowserHttpPorts, runHttpCall, type HttpCall, type HttpPorts } from '../src/kernel/http-exchange.js';
 import { fakeHttpKernel } from './helpers/fake-http-kernel.js';
-import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
+import { KERNEL_DIR, testKernel, TEST_LANGUAGE } from './helpers/kernel-module.js';
 import { localStorePersistence, openLocalKernel } from '../src/evaluation/local-store-transport.js';
 
 const ORIGIN = 'https://api.example.com';
@@ -76,7 +76,7 @@ describe.skipIf(KERNEL_DIR === undefined)('a browser store runs a leg with a key
   });
 
   async function load(def: OrbitalDefinition, httpPorts: HttpPorts | undefined) {
-    const transport = createLocalStoreTransport({ kernelEngine: testKernel().then((kernel) => openLocalKernel({ kernel, schema: { name: 'http', orbitals: [def], egress: [ORIGIN] }, persistence: localStorePersistence({ name: 'http', orbitals: [def], egress: [ORIGIN] }, new InMemoryPersistence()), ...(httpPorts !== undefined ? { http: httpPorts } : {}) })) });
+    const transport = createLocalStoreTransport({ kernelEngine: testKernel().then((kernel) => openLocalKernel({ kernel, language: TEST_LANGUAGE, schema: { name: 'http', orbitals: [def], egress: [ORIGIN] }, persistence: localStorePersistence({ name: 'http', orbitals: [def], egress: [ORIGIN] }, new InMemoryPersistence()), ...(httpPorts !== undefined ? { http: httpPorts } : {}) })) });
     const response = await transport.send('Feed', { event: 'LOAD', targetTrait: 'Loader' });
     return response.emittedEvents.map((e) => ({ event: e.event, payload: e.payload }));
   }

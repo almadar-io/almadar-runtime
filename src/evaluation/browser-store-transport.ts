@@ -52,6 +52,8 @@ export interface BrowserStoreTransportOptions {
   schema: OrbitalSchema;
   /** The initialised `@almadar/kernel` module the store's legs run on. */
   kernel: KernelModule;
+  /** The language bundle as JSON (`LanguageBundle`) the kernel is opened with: a browser has no `node_modules` to read it from. */
+  language: string;
   factory?: IDBFactory;
   /** The viewer's locale: picks the entity's rows for it when the store is first seeded. */
   locale?: string;
@@ -73,6 +75,7 @@ export async function openBrowserStoreTransport(options: BrowserStoreTransportOp
   return createLocalStoreTransport({
     kernelEngine: openLocalKernel({
       kernel: options.kernel,
+      language: options.language,
       schema: options.schema,
       persistence,
       ...(options.callService !== undefined ? { callService: options.callService } : {}),
@@ -86,12 +89,13 @@ export async function openBrowserStoreTransport(options: BrowserStoreTransportOp
  * A compiled client's bundled `browserSchema.json`, parsed by this runtime's own core (the client's core may predate
  * the browser-storage fields), served on the kernel like any local host.
  */
-export function openBundledBrowserStore(bundled: RuntimeValue, kernel: KernelModule, locale?: string, callService?: EffectHandlers['callService'], messages?: MessageCatalogs, http?: HttpPorts): Promise<EventTransport> {
+export function openBundledBrowserStore(bundled: RuntimeValue, kernel: KernelModule, language: string, locale?: string, callService?: EffectHandlers['callService'], messages?: MessageCatalogs, http?: HttpPorts): Promise<EventTransport> {
   const schema = parseOrbitalSchema(bundled);
   return openBrowserStoreTransport({
     databaseName: browserStoreName(schema.name, locale),
     schema,
     kernel,
+    language,
     ...(locale !== undefined ? { locale } : {}),
     ...(callService !== undefined ? { callService } : {}),
     ...(http !== undefined ? { http } : {}),
@@ -110,6 +114,8 @@ export interface BrowserHostOptions {
   onDevice?: OnDeviceModelPorts;
   /** The initialised `@almadar/kernel` module the program runs on; this host answers its I/O. */
   kernel: KernelModule;
+  /** The language bundle as JSON (`LanguageBundle`) the kernel is opened with: a browser has no `node_modules` to read it from. */
+  language: string;
   /** The browser's tabs for the `browser/tab-*` effects; absent, a tab ask fails `unavailable`. */
   tabs?: BrowserTabPort;
   factory?: IDBFactory;
@@ -244,6 +250,7 @@ export async function openBrowserHost(options: BrowserHostOptions): Promise<Brow
   let deferred: ((call: DeferredCallOutcome) => void) | undefined;
   const kernelEngine = openLocalKernel({
     kernel: options.kernel,
+    language: options.language,
     schema,
     persistence,
     callService: options.callService,

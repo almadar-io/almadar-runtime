@@ -58,6 +58,7 @@ function scripted(log: string[]): KernelModule {
     seedRuntimeMock(): void {}
     setCapabilities(): void {}
     setMessages(): void {}
+    setManagedProgram(): void {}
     lastError(): string { return ''; }
     osAllows(): boolean { return false; }
     fork(): KernelServerHandle { throw new Error('unused'); }

@@ -85,6 +85,24 @@ describe('GET /:orbital/entities/:entityType', () => {
     expect(body.rows.map((r) => r.id)).toEqual(expect.arrayContaining([n1, n2, n3]));
   });
 
+  it('a runtime on a real store never serves the full row set: the route bypasses every @read policy', async () => {
+    const runtime = new OrbitalServerRuntime({ mode: 'real' });
+    await runtime.register(schema);
+    await runtime.persistence.create('Note', { title: 'Private' });
+
+    const app = express();
+    app.use(express.json());
+    app.use('/api/orbitals', runtime.router());
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, () => resolve());
+    });
+    const port = (server!.address() as { port: number }).port;
+
+    const res = await fetch(`http://localhost:${port}/api/orbitals/Notes/entities/Note`);
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain('Private');
+  });
+
   it('404s on an unregistered orbital', async () => {
     const runtime = new OrbitalServerRuntime();
     await runtime.register(schema);

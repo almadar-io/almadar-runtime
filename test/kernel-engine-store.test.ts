@@ -40,6 +40,7 @@ class Scripted implements KernelServerHandle {
   setTickMount(): void {}
   seedRuntimeMock(): void {}
   setMessages(): void {}
+  setManagedProgram(): void {}
   lastError(): string { return ''; }
   setCapabilities(entity: string): void { this.log.push(`${this.label} setCapabilities ${entity}`); }
   fork(): KernelServerHandle { throw new Error('unused'); }

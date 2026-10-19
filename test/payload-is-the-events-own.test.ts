@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import type { OrbitalDefinition } from '@almadar/core';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import { createLocalStoreTransport } from '../src/evaluation/local-store-transport';
-import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
+import { KERNEL_DIR, testKernel, TEST_LANGUAGE } from './helpers/kernel-module.js';
 import { localStorePersistence, openLocalKernel } from '../src/evaluation/local-store-transport.js';
 
 const orbital: OrbitalDefinition = {
@@ -29,7 +29,7 @@ const orbital: OrbitalDefinition = {
 };
 
 function host() {
-  return createLocalStoreTransport({ kernelEngine: testKernel().then((kernel) => openLocalKernel({ kernel, schema: { name: 'payload', orbitals: [orbital] }, persistence: localStorePersistence({ name: 'payload', orbitals: [orbital] }, new InMemoryPersistence()) })) });
+  return createLocalStoreTransport({ kernelEngine: testKernel().then((kernel) => openLocalKernel({ kernel, language: TEST_LANGUAGE, schema: { name: 'payload', orbitals: [orbital] }, persistence: localStorePersistence({ name: 'payload', orbitals: [orbital] }, new InMemoryPersistence()) })) });
 }
 
 describe.skipIf(KERNEL_DIR === undefined)('@payload is the event\'s own', () => {

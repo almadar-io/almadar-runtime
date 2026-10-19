@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import type { OrbitalDefinition, OrbitalEntity, OrbitalEventRequest, TraitTick } from '@almadar/core';
 import { createLocalStoreTransport } from '../src/evaluation/local-store-transport';
 import { IndexedDbPersistence } from '@almadar/db/browser';
-import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
+import { KERNEL_DIR, testKernel, TEST_LANGUAGE } from './helpers/kernel-module.js';
 import { localStorePersistence, openLocalKernel } from '../src/evaluation/local-store-transport.js';
 
 const draft: OrbitalEntity = {
@@ -59,7 +59,7 @@ const autosave = (overrides: Partial<TraitTick> = {}): TraitTick => ({
 
 async function host(tick: TraitTick) {
   const persistence = await IndexedDbPersistence.open({ databaseName: `run-tick-${Math.random()}`, entityTypes: ['Note', 'Draft'] });
-  return { persistence, transport: createLocalStoreTransport({ kernelEngine: testKernel().then((kernel) => openLocalKernel({ kernel, schema: { name: 'run-tick', orbitals: [orbital(tick)] }, persistence: localStorePersistence({ name: 'run-tick', orbitals: [orbital(tick)] }, persistence) })) }) };
+  return { persistence, transport: createLocalStoreTransport({ kernelEngine: testKernel().then((kernel) => openLocalKernel({ kernel, language: TEST_LANGUAGE, schema: { name: 'run-tick', orbitals: [orbital(tick)] }, persistence: localStorePersistence({ name: 'run-tick', orbitals: [orbital(tick)] }, persistence) })) }) };
 }
 
 const leg = (from: string, tick = 'autosave'): OrbitalEventRequest => ({

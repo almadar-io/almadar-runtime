@@ -7,7 +7,7 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect } from 'vitest';
 import type { OrbitalEventResponse, OrbitalSchema } from '@almadar/core';
 import { openBundledBrowserStore } from '../src/evaluation/browser-store-transport';
-import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
+import { KERNEL_DIR, TEST_LANGUAGE, testKernel } from './helpers/kernel-module.js';
 
 function bundled(): OrbitalSchema {
   return {
@@ -44,20 +44,20 @@ function saidText(response: OrbitalEventResponse): string | undefined {
 
 describe.skipIf(KERNEL_DIR === undefined)('a bundled browser store translates with the catalogs it is given', () => {
   it('uses the request locale\'s message', async () => {
-    const transport = await openBundledBrowserStore(JSON.parse(JSON.stringify(bundled())), await testKernel(), 'ar', undefined, MESSAGES);
+    const transport = await openBundledBrowserStore(JSON.parse(JSON.stringify(bundled())), await testKernel(), TEST_LANGUAGE, 'ar', undefined, MESSAGES);
     const response = await transport.send('Greet', { event: 'SAY', locale: 'ar', traits: [{ trait: 'Greeter', from: 'idle' }] });
     expect(response.success).toBe(true);
     expect(saidText(response)).toBe('مرحبا');
   });
 
   it('a request without a locale uses the program\'s first locale', async () => {
-    const transport = await openBundledBrowserStore(JSON.parse(JSON.stringify(bundled())), await testKernel(), 'en', undefined, MESSAGES);
+    const transport = await openBundledBrowserStore(JSON.parse(JSON.stringify(bundled())), await testKernel(), TEST_LANGUAGE, 'en', undefined, MESSAGES);
     const response = await transport.send('Greet', { event: 'SAY', traits: [{ trait: 'Greeter', from: 'idle' }] });
     expect(saidText(response)).toBe('Hello');
   });
 
   it('control: without catalogs the translating leg fails', async () => {
-    const transport = await openBundledBrowserStore(JSON.parse(JSON.stringify(bundled())), await testKernel(), 'en');
+    const transport = await openBundledBrowserStore(JSON.parse(JSON.stringify(bundled())), await testKernel(), TEST_LANGUAGE, 'en');
     const response = await transport.send('Greet', { event: 'SAY', traits: [{ trait: 'Greeter', from: 'idle' }] });
     // A failing effect stops only its transition (G-UI-097): the missing message is reported, not thrown.
     expect(response.rejections).toEqual([expect.objectContaining({ code: 'effect-failed', trait: 'Greeter', error: expect.stringMatching(/message for `greet:hello`/) })]);

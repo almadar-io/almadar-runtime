@@ -11,7 +11,6 @@ import type { CredentialSeedKernel } from '../host/credentials/seed.js';
 /** The whole server kernel as Node loads it: the shared module plus the server-only exports the client build omits. */
 export interface LoadedKernel extends KernelModule, HttpKernel, CredentialSeedKernel {
   initSync(input: { module: Uint8Array }): object;
-  installLanguage(bundleJson: string): void;
 }
 
 export interface LoadKernelOptions {

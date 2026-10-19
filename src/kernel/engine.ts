@@ -63,6 +63,15 @@ export class KernelEngine {
     this.declare();
     this.handle.setTickMount(JSON.stringify(this.tickMount));
     this.handle.setMessages(JSON.stringify(this.messages.locales), JSON.stringify(this.messages.catalogs));
+    if (this.managedProgram !== undefined) this.handle.setManagedProgram(this.managedProgram);
+  }
+
+  private managedProgram: string | undefined;
+
+  /** The program whose declared credentials this kernel's credential effects manage beside its own (a console's app). */
+  setManagedProgram(program: OrbitalSchema): void {
+    this.managedProgram = JSON.stringify(program);
+    this.handle.setManagedProgram(this.managedProgram);
   }
 
   /** The program's declared locales and merged catalogs (a lazy page's behavior contributes its namespaced keys). */

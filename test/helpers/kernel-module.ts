@@ -1,3 +1,4 @@
+import { readLanguageBundle } from '@almadar/core/language-data';
 import { loadKernelModule } from '../../src/kernel/load-node.js';
 import type { KernelModule } from '../../src/kernel/index.js';
 import type { LoadedKernel } from '../../src/kernel/load-node.js';
@@ -10,6 +11,9 @@ export function loadKernel(): Promise<LoadedKernel> {
   if (KERNEL_DIR === undefined) throw new Error('ALMADAR_KERNEL_DIR is not set');
   return loadKernelModule(KERNEL_DIR);
 }
+
+/** The installed language as the bundle a browser host hands its kernel. */
+export const TEST_LANGUAGE: string = JSON.stringify(readLanguageBundle(process.cwd()));
 
 let loaded: Promise<KernelModule> | undefined;
 
@@ -36,6 +40,7 @@ export function stubKernelModule(Server: KernelServerClass, overrides: Partial<O
     osDeferringOps: () => '[]',
     osCompletionEvent: () => 'null',
     tabUrlMatches: () => false,
+    installLanguage: unexpected('installLanguage'),
     evaluateMany: unexpected('evaluateMany'),
     resolveValues: unexpected('resolveValues'),
     evaluateGuards: unexpected('evaluateGuards'),

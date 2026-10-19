@@ -7,7 +7,7 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect } from 'vitest';
 import type { EventPayload, OrbitalSchema, ServiceHostPorts, ServiceParams } from '@almadar/core';
 import { openBrowserHost } from '../src/evaluation/browser-store-transport';
-import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
+import { KERNEL_DIR, testKernel, TEST_LANGUAGE } from './helpers/kernel-module.js';
 
 function program(entity: OrbitalSchema['orbitals'][number]['entity']): OrbitalSchema {
   return {
@@ -42,7 +42,7 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost', () => {
       calls.push({ service, action, params });
       return { category: 'learn', confidence: 0.9, reasoning: 'r' };
     };
-    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program(runtimeItem), callService });
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, kernel: await testKernel(), databaseName: db(), schema: program(runtimeItem), callService });
     const res = await host.send('Feed', { event: 'JUDGE', payload: { title: 'Graphs 101' } });
     expect(res.success).toBe(true);
     expect(calls).toEqual([{ service: 'knowledge', action: 'status', params: { text: 'Graphs 101', categories: ['learn', 'laugh'] } }]);
@@ -50,7 +50,7 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost', () => {
   });
 
   it('a provider failure takes the failure route', async () => {
-    const host = await openBrowserHost({ kernel: await testKernel(),
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, kernel: await testKernel(),
       databaseName: db(),
       schema: program(runtimeItem),
       callService: async () => {
@@ -82,7 +82,7 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost', () => {
       }],
     };
     let lent: ServiceHostPorts | undefined;
-    const host = await openBrowserHost({ kernel: await testKernel(),
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, kernel: await testKernel(),
       databaseName: db(),
       schema: watcher,
       callService: async (_s, _a, _p, context) => {
@@ -120,7 +120,7 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost', () => {
       }],
     };
     let lent: ServiceHostPorts | undefined;
-    const host = await openBrowserHost({ kernel: await testKernel(),
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, kernel: await testKernel(),
       databaseName: db(),
       schema: watcher,
       callService: async (_s, _a, _p, context) => {
@@ -166,7 +166,7 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost', () => {
     };
     const log: string[] = [];
     let running = 0;
-    const host = await openBrowserHost({ kernel: await testKernel(),
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, kernel: await testKernel(),
       databaseName: db(),
       schema: slow,
       callService: async (_s, _a, params) => {
@@ -205,7 +205,7 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost', () => {
       }],
     };
     let inner: string | undefined;
-    const host = await openBrowserHost({ kernel: await testKernel(),
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, kernel: await testKernel(),
       databaseName: db(),
       schema: watcher,
       callService: async (_s, _a, _p, context) => {
@@ -220,12 +220,12 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserHost', () => {
   });
 
   it('edge: a program with no browser-stored entity still opens (runtime entities live in memory)', async () => {
-    await expect(openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program(runtimeItem), callService: async () => ({}) })).resolves.toBeDefined();
+    await expect(openBrowserHost({ language: TEST_LANGUAGE, kernel: await testKernel(), databaseName: db(), schema: program(runtimeItem), callService: async () => ({}) })).resolves.toBeDefined();
   });
 
   it('control: a browser-stored entity is still served from IndexedDB', async () => {
     const local = { name: 'Item', persistence: 'persistent' as const, collection: 'items', local: true, fields: [{ name: 'id', type: 'string' as const, required: true }], instances: [{ id: 'I-1' }] };
-    const host = await openBrowserHost({ kernel: await testKernel(), databaseName: db(), schema: program(local), callService: async () => ({}) });
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, kernel: await testKernel(), databaseName: db(), schema: program(local), callService: async () => ({}) });
     expect(host).toBeDefined();
   });
 });

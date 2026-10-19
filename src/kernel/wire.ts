@@ -42,6 +42,8 @@ export interface KernelServerHandle {
   seedRuntimeMock(viewerId?: string): void;
   setCapabilities(entityType: string, queryJson: string, writeJson: string): void;
   setMessages(localesJson: string, catalogsJson: string): void;
+  /** The program (as JSON) whose declared credentials this server's credential effects manage beside its own. */
+  setManagedProgram(programJson: string): void;
   lastError(): string;
   /** A server holding this one's registered program and none of its session (a stateless request's kernel). */
   fork(): KernelServerHandle;
@@ -72,4 +74,6 @@ export interface KernelModule extends KernelEvaluatorExports {
   osCompletionEvent(siteJson: string, key: string, outcomeJson: string): string;
   /** Whether the Chrome match pattern matches the URL: the one rule a browser-tab host filters tabs with. */
   tabUrlMatches(pattern: string, url: string): boolean;
+  /** Installs the language data (`@almadar/core/language-data` `LanguageBundle` as JSON) for a host with no `node_modules`; the first install wins. */
+  installLanguage(bundleJson: string): void;
 }

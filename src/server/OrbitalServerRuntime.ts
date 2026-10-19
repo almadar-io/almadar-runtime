@@ -1066,8 +1066,20 @@ export class OrbitalServerRuntime {
     this.kernelOs = this.config.osHost?.(kernelOsGrants(kernel, () => this.requireKernelEngine()));
     this.kernelEngine = KernelEngine.open(kernel, schema, this.kernelPorts(registered.egress ?? []));
     this.kernelEngine.setMessages(this.appLocales, this.messages);
+    if (this.managedProgram !== undefined) this.kernelEngine.setManagedProgram(this.managedProgram);
     this.seedKernelRuntimeMock();
     this.syncTickMount();
+  }
+
+  private managedProgram: OrbitalSchema | undefined;
+
+  /**
+   * Name the program whose declared credentials this runtime's credential effects manage beside its own: an
+   * integrations console serving the app a host shows saves and tests that app's keys. Naming another replaces it.
+   */
+  manageCredentialsOf(program: OrbitalSchema): void {
+    this.managedProgram = program;
+    this.kernelEngine?.setManagedProgram(program);
   }
 
   /** A mock store seeds every entity; the `[runtime]` rows the kernel holds itself are seeded in the kernel. */
@@ -2072,7 +2084,12 @@ export class OrbitalServerRuntime {
     // same store (a trait's fetched `data`) and can pick a row a hidden
     // sibling references, which the runtime's own `onDelete: restrict` then
     // rejects — see `@almadar-io/verify`'s `driver/tick.ts` `listEntityRows`.
+    // A mock store only: on a real store it would serve every row past the entity's `@read` policy.
     router.get("/:orbital/entities/:entityType", (req: Request, res: Response, next: NextFunction) => {
+      if (this.config.mode !== 'mock') {
+        res.status(404).json({ success: false, error: "Not found" });
+        return;
+      }
       const entityType = req.params.entityType as string;
       this.entityRows(req.params.orbital as string, entityType)
         .then((rows) => {

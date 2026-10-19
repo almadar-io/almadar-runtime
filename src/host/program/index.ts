@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { createLogger } from '@almadar/logger';
-import { discoverBehaviorPackages } from '@almadar/core/behavior-package';
+import { discoverBehaviorPackages, resolveOrbBinary } from '@almadar/core/behavior-package';
 import {
   CatalogEntrySchema,
   CatalogScopeSchema,
@@ -74,39 +74,7 @@ export interface ProgramHostOptions {
   readonly orbBin?: string;
 }
 
-const BinPackageSchema = z.object({ bin: z.union([z.string(), z.record(z.string())]).optional() });
-
-/**
- * The one `orb` binary resolver every host uses: the configured binary (`ORBITAL_BIN`, then `ALMADAR_ORB`; a
- * path that does not exist is skipped), then the local `~/bin/orbital` under `ALMADAR_DEV=1` (the published
- * launcher can lag the subcommand surface), then the `@almadar/orb` npm package's bin, then `orb` on PATH.
- */
-export function resolveOrbBinary(): string {
-  for (const name of ['ORBITAL_BIN', 'ALMADAR_ORB']) {
-    const configured = process.env[name];
-    if (configured && existsSync(configured)) return configured;
-  }
-  if (process.env['ALMADAR_DEV'] === '1') {
-    const local = join(process.env['HOME'] ?? '', 'bin', 'orbital');
-    if (existsSync(local)) return local;
-  }
-  const require = createRequire(import.meta.url);
-  let pkgPath: string | undefined;
-  try {
-    pkgPath = require.resolve('@almadar/orb/package.json');
-  } catch {
-    pkgPath = undefined;
-  }
-  if (pkgPath !== undefined) {
-    const parsed = BinPackageSchema.safeParse(JSON.parse(readFileSync(pkgPath, 'utf-8')));
-    const bin = parsed.success ? (typeof parsed.data.bin === 'string' ? parsed.data.bin : Object.values(parsed.data.bin ?? {})[0]) : undefined;
-    if (bin !== undefined) {
-      const binPath = resolve(dirname(pkgPath), bin);
-      if (existsSync(binPath)) return binPath;
-    }
-  }
-  return 'orb';
-}
+export { resolveOrbBinary };
 
 interface OrbRun {
   readonly stdout: string;
@@ -115,7 +83,7 @@ interface OrbRun {
 }
 
 function runOrb(args: readonly string[], opts: ProgramHostOptions): Promise<OrbRun> {
-  const bin = opts.orbBin ?? resolveOrbBinary();
+  const bin = opts.orbBin ?? resolveOrbBinary(opts.cwd);
   return new Promise((done) => {
     execFile(bin, [...args], { cwd: opts.cwd, maxBuffer: 1024 * 1024 * 512 }, (error, stdout, stderr) => {
       const code = error === null ? 0 : typeof error.code === 'number' ? error.code : 1;
@@ -127,7 +95,7 @@ function runOrb(args: readonly string[], opts: ProgramHostOptions): Promise<OrbR
 
 /** {@link runOrb} for a caller that cannot await (a prompt builder, a module-level allowlist). */
 function runOrbSync(args: readonly string[], opts: ProgramHostOptions): OrbRun {
-  const bin = opts.orbBin ?? resolveOrbBinary();
+  const bin = opts.orbBin ?? resolveOrbBinary(opts.cwd);
   const res = spawnSync(bin, [...args], { cwd: opts.cwd, maxBuffer: 1024 * 1024 * 512, encoding: 'utf-8' });
   const code = res.error !== undefined ? 1 : (res.status ?? 1);
   const stderr = res.error !== undefined ? res.error.message : res.stderr;

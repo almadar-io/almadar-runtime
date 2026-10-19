@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import type { EntityRow, OrbitalSchema, ServiceParams } from '@almadar/core';
 import type { EffectHandlers } from '../src/types';
 import { browserStoreName, openBrowserStore, openBrowserStoreTransport, openBundledBrowserStore } from '../src/evaluation/browser-store-transport';
-import { KERNEL_DIR, testKernel } from './helpers/kernel-module.js';
+import { KERNEL_DIR, TEST_LANGUAGE, testKernel } from './helpers/kernel-module.js';
 
 function schema(local: boolean, localeInstances?: Record<string, EntityRow[]>): OrbitalSchema {
   return {
@@ -42,7 +42,7 @@ const db = () => `bst-${Math.random()}`;
 
 describe.skipIf(KERNEL_DIR === undefined)('openBrowserStoreTransport', () => {
   it('runs a stateless leg from the carried state against the seeded store', async () => {
-    const transport = await openBrowserStoreTransport({ kernel: await testKernel(), databaseName: db(), schema: schema(true) });
+    const transport = await openBrowserStoreTransport({ kernel: await testKernel(), language: TEST_LANGUAGE, databaseName: db(), schema: schema(true) });
     const response = await transport.send('Books', { event: 'LOAD', traits: [{ trait: 'InvoiceList', from: 'open' }] });
     expect(response.success).toBe(true);
     expect(JSON.stringify(response)).toContain('INV-1');
@@ -50,13 +50,13 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserStoreTransport', () => {
   });
 
   it('control: the same leg from a state with no LOAD arm does nothing', async () => {
-    const transport = await openBrowserStoreTransport({ kernel: await testKernel(), databaseName: db(), schema: schema(true) });
+    const transport = await openBrowserStoreTransport({ kernel: await testKernel(), language: TEST_LANGUAGE, databaseName: db(), schema: schema(true) });
     const response = await transport.send('Books', { event: 'LOAD', traits: [{ trait: 'InvoiceList', from: 'idle' }] });
     expect(JSON.stringify(response)).not.toContain('INV-1');
   });
 
   it('refuses a schema that declares no browser-stored entity', async () => {
-    await expect(openBrowserStoreTransport({ kernel: await testKernel(), databaseName: db(), schema: schema(false) })).rejects.toThrow(/no browser-stored entity/);
+    await expect(openBrowserStoreTransport({ kernel: await testKernel(), language: TEST_LANGUAGE, databaseName: db(), schema: schema(false) })).rejects.toThrow(/no browser-stored entity/);
   });
 
   it('openBrowserStore returns null when nothing is browser-stored, and a seeded store otherwise', async () => {
@@ -67,21 +67,21 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserStoreTransport', () => {
 
   it('openBundledBrowserStore parses a compiled client\'s bundled JSON with this runtime\'s core', async () => {
     const bundled = JSON.parse(JSON.stringify({ ...schema(true), name: `Bundled-${Math.random()}` }));
-    const transport = await openBundledBrowserStore(bundled, await testKernel());
+    const transport = await openBundledBrowserStore(bundled, await testKernel(), TEST_LANGUAGE);
     const response = await transport.send('Books', { event: 'LOAD', traits: [{ trait: 'InvoiceList', from: 'open' }] });
     expect(JSON.stringify(response)).toContain('INV-1');
   });
 
   it('the bundled store runs the cascade like any kernel host (its clients declare the host fans out)', async () => {
     const bundled = JSON.parse(JSON.stringify({ ...schema(true), name: `Relay-${Math.random()}` }));
-    const transport = await openBundledBrowserStore(bundled, await testKernel());
+    const transport = await openBundledBrowserStore(bundled, await testKernel(), TEST_LANGUAGE);
     const response = await transport.send('Books', { event: 'LOAD', traits: [{ trait: 'InvoiceList', from: 'open' }] });
     expect(response.states).toEqual({ InvoiceList: 'shown' });
     expect(response.emittedEvents.find((e) => e.event === 'LOADED')?.source?.dispatched).toBe(true);
   });
 
   it('control: the runtime-path store applies the cascade in process and marks it consumed', async () => {
-    const transport = await openBrowserStoreTransport({ kernel: await testKernel(), databaseName: db(), schema: schema(true) });
+    const transport = await openBrowserStoreTransport({ kernel: await testKernel(), language: TEST_LANGUAGE, databaseName: db(), schema: schema(true) });
     const response = await transport.send('Books', { event: 'LOAD', traits: [{ trait: 'InvoiceList', from: 'open' }] });
     expect(response.states).toEqual({ InvoiceList: 'shown' });
     expect(response.emittedEvents.find((e) => e.event === 'LOADED')?.source?.dispatched).toBe(true);
@@ -90,8 +90,8 @@ describe.skipIf(KERNEL_DIR === undefined)('openBrowserStoreTransport', () => {
   it('a viewer locale seeds its own database from its own rows', async () => {
     const app = `Locale-${Math.random()}`;
     const localized = { ...schema(true, { ar: [{ id: 'INV-1', amount: 4200, client: 'نور' }] }), name: app };
-    const ar = await openBundledBrowserStore(JSON.parse(JSON.stringify(localized)), await testKernel(), 'ar');
-    const en = await openBundledBrowserStore(JSON.parse(JSON.stringify(localized)), await testKernel(), 'en');
+    const ar = await openBundledBrowserStore(JSON.parse(JSON.stringify(localized)), await testKernel(), TEST_LANGUAGE, 'ar');
+    const en = await openBundledBrowserStore(JSON.parse(JSON.stringify(localized)), await testKernel(), TEST_LANGUAGE, 'en');
     const load = (t: Awaited<ReturnType<typeof openBundledBrowserStore>>) =>
       t.send('Books', { event: 'LOAD', traits: [{ trait: 'InvoiceList', from: 'open' }] }).then((r) => JSON.stringify(r));
     expect(await load(ar)).toContain('نور');
@@ -135,7 +135,7 @@ describe.skipIf(KERNEL_DIR === undefined)('a browser leg that calls a service', 
       return { sent: true };
     };
     const bundled = JSON.parse(JSON.stringify(browserServiceSchema(`Site-${Math.random()}`)));
-    const transport = await openBundledBrowserStore(bundled, await testKernel(), undefined, callService);
+    const transport = await openBundledBrowserStore(bundled, await testKernel(), TEST_LANGUAGE, undefined, callService);
     const response = await transport.send('Site', { event: 'INIT', traits: [{ trait: 'Pageview', from: 'active' }] });
     expect(response.success).toBe(true);
     expect(calls).toEqual([{ service: 'test-svc', action: 'run', params: { url: 'https://c.example/docs', active: true } }]);
@@ -144,6 +144,6 @@ describe.skipIf(KERNEL_DIR === undefined)('a browser leg that calls a service', 
 
   it('control: without a callService a schema with no browser-stored entity is still refused', async () => {
     const bundled = JSON.parse(JSON.stringify(browserServiceSchema(`Site-${Math.random()}`)));
-    await expect(openBundledBrowserStore(bundled, await testKernel())).rejects.toThrow(/no browser-stored entity/);
+    await expect(openBundledBrowserStore(bundled, await testKernel(), TEST_LANGUAGE)).rejects.toThrow(/no browser-stored entity/);
   });
 });

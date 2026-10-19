@@ -9,7 +9,7 @@ import { IndexedDbPersistence } from '@almadar/db/browser';
 import { tickEventKey } from '../src/traits/state-book';
 import { openBrowserHost, type BrowserHost } from '../src/evaluation/browser-store-transport';
 import type { KernelModule } from '../src/kernel/index.js';
-import { KERNEL_DIR, loadKernel } from './helpers/kernel-module.js';
+import { KERNEL_DIR, loadKernel, TEST_LANGUAGE } from './helpers/kernel-module.js';
 
 type Listener = (message: PageMessage, sender: { tab?: { id?: number; url?: string } }, respond: (reply: PageReply) => void) => boolean | void;
 
@@ -102,7 +102,7 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
   });
 
   const open = (chrome: FakeChrome, extra: Partial<Parameters<typeof openBrowserHost>[0]> = {}): Promise<BrowserHost> =>
-    openBrowserHost({
+    openBrowserHost({ language: TEST_LANGUAGE,
       databaseName: `kernel-${Math.random()}`,
       schema: program(),
       callService: async () => null,
@@ -207,7 +207,7 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
       ],
     };
     const databaseName = `kernel-mixed-${Math.random()}`;
-    const host = await openBrowserHost({ databaseName, schema: stored, callService: async () => null, kernel });
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, databaseName, schema: stored, callService: async () => null, kernel });
     expect((await host.send('Notes', { event: 'SAVE', targetTrait: 'Saver' })).success).toBe(true);
     expect((await host.send('Clocks', { event: 'BUMP', targetTrait: 'Counter' })).success).toBe(true);
     const reopened = await IndexedDbPersistence.open({ databaseName, entityTypes: ['Note'] });
@@ -234,7 +234,7 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
         pages: [],
       }],
     };
-    const host = await openBrowserHost({ databaseName: `kernel-tick-${Math.random()}`, schema: ticking, callService: async () => null, kernel });
+    const host = await openBrowserHost({ language: TEST_LANGUAGE, databaseName: `kernel-tick-${Math.random()}`, schema: ticking, callService: async () => null, kernel });
     const response = await host.send('Clock', { event: tickEventKey('beat'), runTick: { trait: 'Pulse', tick: 'beat' }, targetTrait: 'Pulse' });
     expect(response.emittedEvents.map((e) => e.event)).toEqual(['PULSED']);
     host.close();
@@ -260,7 +260,7 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
 
   it('a step that does not fire repaints what the slot holds, not the render of the first arm that enters the state', async () => {
     const say = (content: string): Effect => ['render-ui', 'main', { type: 'typography', content }];
-    const host = await openBrowserHost({
+    const host = await openBrowserHost({ language: TEST_LANGUAGE,
       databaseName: `kernel-paint-${Math.random()}`,
       schema: painter([{ event: 'INIT', effects: [say('first')] }, { event: 'GO', effects: [say('second')] }]),
       callService: async () => null,
@@ -276,7 +276,7 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
 
   it('a list equals the empty list only when it is empty', async () => {
     const compare = (operator: string, left: SExpr): Effect => ['emit', 'OUT', { v: [operator, left, ['list']] }];
-    const host = await openBrowserHost({
+    const host = await openBrowserHost({ language: TEST_LANGUAGE,
       databaseName: `kernel-lists-${Math.random()}`,
       schema: painter([
         { event: 'INIT', effects: [compare('!=', ['list', 1, 2])] },

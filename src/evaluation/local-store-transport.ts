@@ -21,6 +21,8 @@ import { buildTraitIndex } from '../traits/trait-index.js';
 export interface LocalKernelOptions {
   /** The initialised `@almadar/kernel` module. */
   kernel: KernelModule;
+  /** The language bundle as JSON (`LanguageBundle`), installed into `kernel` before it opens: a browser has no `node_modules` to read it from. */
+  language: string;
   schema: OrbitalSchema;
   /** Every row the kernel reads and writes (`localStorePersistence` over a browser store). */
   persistence: PersistenceAdapter;
@@ -46,6 +48,7 @@ export function localStorePersistence(schema: OrbitalSchema, store: PersistenceA
 /** A kernel over a local store, answering its I/O with `persistence` and the given ports. */
 export function openLocalKernel(options: LocalKernelOptions): KernelEngine {
   const { schema, persistence } = options;
+  options.kernel.installLanguage(options.language);
   const callService = options.callService ?? defaultCallService;
   const engine = KernelEngine.open(options.kernel, { ...schema, orbitals: inlineTraitRefs(schema.orbitals) }, {
     persistence,
