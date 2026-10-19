@@ -95,6 +95,14 @@ export function chromeTabPort(tabs: ChromeTabsApi, runtime: ChromeRuntimeApi, ma
           return null;
         case 'command':
           return send(ask.tab, ask.command);
+        case 'capture': {
+          const windowId = (await tabs.update(ask.tab, { active: true }))?.windowId;
+          if (windowId === undefined) throw new TabHostFailure('failed', `Chrome did not say which window shows tab ${ask.tab}`);
+          // Chrome refuses a page outside the extension's access (chrome:// pages, the web store, no host permission).
+          return tabs.captureVisibleTab(windowId, { format: ask.format, ...(typeof ask.quality === 'number' ? { quality: ask.quality } : {}) }).catch((error: Error) => {
+            throw new TabHostFailure('not-ready', `Tab ${ask.tab} cannot be captured: ${error.message}`);
+          });
+        }
         case 'awaitReady':
           return awaitReady(ask.tab, ask.timeoutMs, context.signal);
         case 'watch': {

@@ -280,6 +280,12 @@ function decodeTabAsk(value: JsonValue): TabAsk {
     }
     case 'unwatch':
       return { kind, watchId: text(entry, 'watchId') };
+    case 'capture': {
+      const format = text(entry, 'format');
+      if (format !== 'png' && format !== 'jpeg') throw new Error(`kernel wire: unknown capture format "${format}"`);
+      const quality = 'quality' in entry ? whole(entry, 'quality') : undefined;
+      return { kind, tab: whole(entry, 'tab'), format, ...(quality !== undefined ? { quality } : {}) };
+    }
     default:
       throw new Error(`kernel wire: unknown tab ask "${kind}"`);
   }

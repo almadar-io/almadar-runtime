@@ -29,7 +29,7 @@ function program(): OrbitalSchema {
         stateMachine: {
           states: [{ name: 'idle', isInitial: true }],
           events: [
-            { key: 'OPEN', name: 'Open' }, { key: 'LIST', name: 'List' }, { key: 'READ', name: 'Read' }, { key: 'WATCH', name: 'Watch' },
+            { key: 'OPEN', name: 'Open' }, { key: 'LIST', name: 'List' }, { key: 'READ', name: 'Read' }, { key: 'WATCH', name: 'Watch' }, { key: 'SHOOT', name: 'Shoot' },
             { key: 'OK', name: 'Ok' }, { key: 'BAD', name: 'Bad' },
             { key: 'ITEM_SEEN', name: 'Item seen', external: true },
           ],
@@ -38,6 +38,7 @@ function program(): OrbitalSchema {
             { from: 'idle', to: 'idle', event: 'LIST', effects: [['browser/tab-list', { match: 'https://example.com/*' }, routes]] },
             { from: 'idle', to: 'idle', event: 'READ', effects: [['browser/tab-query', { tab: 1, selector: '.item', fields: { title: { selector: 'h2' } } }, routes]] },
             { from: 'idle', to: 'idle', event: 'WATCH', effects: [['browser/tab-watch', { match: 'https://example.com/*', selector: '.item', fields: { title: { selector: 'h2' } }, event: 'ITEM_SEEN' }, routes]] },
+            { from: 'idle', to: 'idle', event: 'SHOOT', effects: [['browser/tab-capture', { tab: 2, format: 'jpeg', quality: 70 }, routes]] },
             { from: 'idle', to: 'idle', event: 'OK', effects: [] },
             { from: 'idle', to: 'idle', event: 'BAD', effects: [] },
             { from: 'idle', to: 'idle', event: 'ITEM_SEEN', effects: [] },
@@ -54,6 +55,7 @@ interface FakeChrome {
   runtime: ChromeRuntimeApi;
   created: Array<{ url: string; active: boolean }>;
   commands: Array<{ tab: number; kind: string }>;
+  captured: Array<{ windowId: number; format: string; quality: number | undefined }>;
   report(message: PageMessage, tab: number): void;
 }
 
@@ -61,9 +63,11 @@ function fakeChrome(pageAnswer: (kind: string) => PageReply | undefined): FakeCh
   const listeners: Listener[] = [];
   const created: Array<{ url: string; active: boolean }> = [];
   const commands: Array<{ tab: number; kind: string }> = [];
+  const captured: Array<{ windowId: number; format: string; quality: number | undefined }> = [];
   return {
     created,
     commands,
+    captured,
     tabs: {
       query: async () => [{ id: 1, url: 'https://example.com/a', title: 'A', active: true }, { id: 2, url: 'https://other.test/', title: 'B', active: false }],
       create: async (props) => {
@@ -71,7 +75,11 @@ function fakeChrome(pageAnswer: (kind: string) => PageReply | undefined): FakeCh
         return { id: 42, url: props.url, active: props.active };
       },
       remove: async () => undefined,
-      update: async (tab) => ({ id: tab }),
+      update: async (tab) => ({ id: tab, windowId: 9 }),
+      captureVisibleTab: async (windowId, options) => {
+        captured.push({ windowId, format: options.format, quality: options.quality });
+        return `data:image/${options.format};base64,/9j/4AAQ`;
+      },
       sendMessage: async (tab, message) => {
         if (message.almadarPage !== 'command') return undefined;
         commands.push({ tab, kind: message.command.kind });
@@ -126,6 +134,16 @@ describe.skipIf(KERNEL_DIR === undefined)('browser host on the kernel engine', (
     const host = await open(chrome);
     const response = await host.send('Pages', { event: 'LIST', targetTrait: 'Pager' });
     expect(emitted(response, 'OK')).toMatchObject({ tabs: [{ tab: 1, url: 'https://example.com/a', title: 'A', active: true }] });
+    host.close();
+  });
+
+  it('browser/tab-capture shows the tab, captures its window and emits the image without its data URL prefix', async () => {
+    const chrome = fakeChrome(answer);
+    const host = await open(chrome);
+    const response = await host.send('Pages', { event: 'SHOOT', targetTrait: 'Pager' });
+    expect(chrome.captured).toEqual([{ windowId: 9, format: 'jpeg', quality: 70 }]);
+    expect(emitted(response, 'OK')).toMatchObject({ tab: 2, format: 'jpeg', image: '/9j/4AAQ' });
+    expect(emitted(response, 'BAD')).toBeUndefined();
     host.close();
   });
 

@@ -8,13 +8,15 @@ export interface ChromeTab {
   url?: string;
   title?: string;
   active?: boolean;
+  windowId?: number;
 }
 
 export interface ChromeTabsApi {
   query(filter: object): Promise<ChromeTab[]>;
   create(props: { url: string; active: boolean }): Promise<ChromeTab>;
   remove(tab: number): Promise<void>;
-  update(tab: number, props: { url: string }): Promise<ChromeTab | undefined>;
+  update(tab: number, props: { url?: string; active?: boolean }): Promise<ChromeTab | undefined>;
+  captureVisibleTab(windowId: number, options: { format: 'png' | 'jpeg'; quality?: number }): Promise<string>;
   sendMessage(tab: number, message: PageMessage): Promise<PageReply | undefined>;
 }
 

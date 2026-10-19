@@ -22,8 +22,9 @@ function fakeChrome(open: Array<{ id?: number; url: string; title?: string; acti
   const sentToRuntime: PageMessage[] = [];
   const created: Array<{ url: string; active: boolean }> = [];
   const removed: number[] = [];
-  const updated: Array<{ tab: number; url: string }> = [];
-  const state = { reply: { result: true } as PageReply | undefined, createdId: 42 as number | undefined, failSend: false };
+  const updated: Array<{ tab: number; url?: string; active?: boolean }> = [];
+  const captured: Array<{ windowId: number; options: { format: 'png' | 'jpeg'; quality?: number } }> = [];
+  const state = { reply: { result: true } as PageReply | undefined, createdId: 42 as number | undefined, failSend: false, windowId: 7 as number | undefined, refuseCapture: false };
   const tabs: ChromeTabsApi = {
     query: async () => open,
     create: async (props) => {
@@ -34,8 +35,13 @@ function fakeChrome(open: Array<{ id?: number; url: string; title?: string; acti
       removed.push(tab);
     },
     update: async (tab, props) => {
-      updated.push({ tab, url: props.url });
-      return { id: tab };
+      updated.push({ tab, ...props });
+      return { id: tab, ...(state.windowId !== undefined ? { windowId: state.windowId } : {}) };
+    },
+    captureVisibleTab: async (windowId, options) => {
+      captured.push({ windowId, options });
+      if (state.refuseCapture) throw new Error('Cannot access contents of url "chrome://settings/".');
+      return `data:image/${options.format};base64,AAAA`;
     },
     sendMessage: async (tab, message) => {
       sentToTabs.push({ tab, message });
@@ -51,7 +57,7 @@ function fakeChrome(open: Array<{ id?: number; url: string; title?: string; acti
     onMessage: { addListener: (l) => runtimeListeners.push(l) },
   };
   const fromTab = (tab: number, url: string, message: PageMessage) => runtimeListeners.forEach((l) => l(message, { tab: { id: tab, url } }, () => undefined));
-  return { tabs, runtime, sentToTabs, sentToRuntime, created, removed, updated, state, runtimeListeners, fromTab };
+  return { tabs, runtime, sentToTabs, sentToRuntime, created, removed, updated, captured, state, runtimeListeners, fromTab };
 }
 
 function port(c = fakeChrome()) {
@@ -90,6 +96,25 @@ describe('chromeTabPort answers the raw tab asks', () => {
     expect(await t.port.perform({ kind: 'navigate', tab: 7, url: 'https://example.com/next' }, t.context)).toBeNull();
     expect(t.c.removed).toEqual([7]);
     expect(t.c.updated).toEqual([{ tab: 7, url: 'https://example.com/next' }]);
+  });
+
+  it('capture: brings the tab to the front of its window and answers that window as a data URL', async () => {
+    const t = port();
+    expect(await t.port.perform({ kind: 'capture', tab: 3, format: 'jpeg', quality: 60 }, t.context)).toBe('data:image/jpeg;base64,AAAA');
+    expect(t.c.updated).toEqual([{ tab: 3, active: true }]);
+    expect(t.c.captured).toEqual([{ windowId: 7, options: { format: 'jpeg', quality: 60 } }]);
+    await t.port.perform({ kind: 'capture', tab: 3, format: 'png' }, t.context);
+    expect(t.c.captured[1]).toEqual({ windowId: 7, options: { format: 'png' } });
+  });
+
+  it('control: a page Chrome will not capture is not-ready, and a tab in no window is a failure', async () => {
+    const refused = port();
+    refused.c.state.refuseCapture = true;
+    await expect(refused.port.perform({ kind: 'capture', tab: 3, format: 'png' }, refused.context)).rejects.toMatchObject({ kind: 'not-ready' });
+    const lost = port();
+    lost.c.state.windowId = undefined;
+    await expect(lost.port.perform({ kind: 'capture', tab: 3, format: 'png' }, lost.context)).rejects.toMatchObject({ kind: 'failed' });
+    expect(lost.c.captured).toEqual([]);
   });
 
   it('a Chrome error on a tab propagates for the host to report as a failure', async () => {
