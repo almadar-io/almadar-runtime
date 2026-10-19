@@ -1,0 +1,18 @@
+app training-board [
+  version: "1.0.0",
+  description: "std-training-board with the configuration the gha-almadar training route used.",
+  exec: ["aws", "ssh"],
+  env: ["PATH", "HOME"]
+]
+uses Board from "std/behaviors/std-training-board"
+
+orbital Board = Board.orbitals.TrainingBoardOrbital {
+  traits { TrainingStatus { config {
+    region: "us-east-1"
+    instanceTypes: ["g4dn.*", "g5.*", "p3.*", "p4d.*"]
+    sshKey: "~/.ssh/masar-training-key.pem"
+    sshUser: "ubuntu"
+    processPattern: "train_v1_1|eval_orbgen|orbgen\\.train|orbgen\\.train_grpo"
+    logPaths: ["/var/log/masar-training-v2.log", "/var/log/masar-training-v1-fixed.log", "/var/log/masar-training.log"]
+  } } }
+}

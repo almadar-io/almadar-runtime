@@ -1,0 +1,161 @@
+{
+ "region": "us-east-1",
+ "now": "2026-10-15T12:30:45.678Z",
+ "scenarios": [
+  {
+   "name": "instances with catalog specs, volumes, images, buckets, groups, keys, roles, quotas and costs; a second load is cached",
+   "requests": [
+    "GET",
+    "GET"
+   ],
+   "table": {
+    "aws ec2 describe-instances --query Reservations[*].Instances[*].[InstanceId,InstanceType,State.Name,Tags[?Key==`Name`].Value|[0],LaunchTime,PublicIpAddress,Placement.AvailabilityZone] --output json --region us-east-1 --output json": [
+     {
+      "stdout": "[[[\"i-1\", \"g5.xlarge\", \"running\", \"trainer\", \"2026-10-15T10:00:00.000Z\", \"3.4.5.6\", \"us-east-1a\"], [\"i-4\", \"g4dn.12xlarge\", \"running\", \"big\", \"2026-10-14T10:00:00.000Z\", null, \"us-east-1a\"]], [[\"i-2\", \"t3.micro\", \"stopped\", null, \"2026-09-01T00:00:00.000Z\", null, \"us-east-1b\"], [\"i-3\", \"x9.mega\", \"running\", \"odd\", \"2026-10-01T00:00:00.000Z\", \"1.1.1.1\", \"us-east-1c\"]]]"
+     }
+    ],
+    "aws ec2 describe-volumes --query Volumes[*].[VolumeId,Size,State,VolumeType,AvailabilityZone,Tags[?Key==`Name`].Value|[0],Attachments[0].InstanceId,Iops] --output json --region us-east-1 --output json": [
+     {
+      "stdout": "[[\"vol-1\", 100, \"in-use\", \"gp3\", \"us-east-1a\", \"root\", \"i-1\", 3000], [\"vol-2\", 8, \"available\", \"gp2\", \"us-east-1b\", null, null, 100]]"
+     }
+    ],
+    "aws ec2 describe-images --owners self --query Images[*].[ImageId,Name,State,CreationDate,BlockDeviceMappings[0].Ebs.VolumeSize] --output json --region us-east-1 --output json": [
+     {
+      "stdout": "[[\"ami-1\", \"orbgen-base\", \"available\", \"2026-08-01T00:00:00.000Z\", 60], [\"ami-2\", \"old\", null, \"2025-01-01T00:00:00.000Z\", null]]"
+     }
+    ],
+    "aws s3 ls --region us-east-1 --output json": [
+     {
+      "stdout": "2025-01-01 00:00:00 orbgen-artifacts\n2025-02-02 00:00:00 almadar-backups\n2025-03-03 00:00:00 personal-photos\n2025-04-04 00:00:00 other-almadar-logs\n"
+     }
+    ],
+    "aws s3 ls s3://orbgen-artifacts/ --recursive --summarize --output text": [
+     {
+      "stdout": "2026-01-01 00:00:00   10 a/Total Objects: 99 trap\n2026-01-01 00:00:00   20 b\n\nTotal Objects: 1234\n   Total Size: 5368709120\n"
+     }
+    ],
+    "aws s3 ls s3://almadar-backups/ --recursive --summarize --output text": [
+     {
+      "stderr": "Access Denied\n",
+      "code": 1
+     }
+    ],
+    "aws s3 ls s3://other-almadar-logs/ --recursive --summarize --output text": [
+     {
+      "stdout": "\nTotal Objects: 0\n   Total Size: 0\n"
+     }
+    ],
+    "aws ec2 describe-security-groups --filters Name=group-name,Values=orbgen* --query SecurityGroups[*].[GroupId,GroupName,Description] --output json --region us-east-1 --output json": [
+     {
+      "stdout": "[[\"sg-1\", \"orbgen-ssh\", \"ssh access\"]]"
+     }
+    ],
+    "aws ec2 describe-key-pairs --query KeyPairs[*].[KeyName,KeyPairId,CreateTime] --output json --region us-east-1 --output json": [
+     {
+      "stdout": "[[\"orbgen-key\", \"key-0abc\", \"2026-01-01T00:00:00.000Z\"]]"
+     }
+    ],
+    "aws iam list-roles --query Roles[?contains(RoleName, `orbgen`)].{RoleName:RoleName,CreateDate:CreateDate} --output json --region us-east-1 --output json": [
+     {
+      "stdout": "[{\"RoleName\": \"orbgen-runner\", \"CreateDate\": \"2026-01-01T00:00:00Z\"}]"
+     }
+    ],
+    "aws service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA --query Quota.Value --output text --region us-east-1 --output json": [
+     {
+      "stdout": "64.0\n"
+     }
+    ],
+    "aws service-quotas get-service-quota --service-code ec2 --quota-code L-3819A6DF --query Quota.Value --output text --region us-east-1 --output json": [
+     {
+      "stdout": "32.0\n"
+     }
+    ],
+    "aws ce get-cost-and-usage --time-period Start=2026-10-01,End=2026-10-15 --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=SERVICE --region us-east-1 --output json": [
+     {
+      "stdout": "{\"ResultsByTime\": [{\"Groups\": [{\"Keys\": [\"Amazon Elastic Compute Cloud - Compute\"], \"Metrics\": {\"UnblendedCost\": {\"Amount\": \"12.3456\", \"Unit\": \"USD\"}}}, {\"Keys\": [\"AWS Cost Explorer\"], \"Metrics\": {\"UnblendedCost\": {\"Amount\": \"0.01\", \"Unit\": \"USD\"}}}, {\"Keys\": [\"Amazon Simple Storage Service\"], \"Metrics\": {\"UnblendedCost\": {\"Amount\": \"3.456\", \"Unit\": \"USD\"}}}]}]}"
+     }
+    ],
+    "aws ce get-cost-and-usage --time-period Start=2026-07-17,End=2026-10-15 --granularity MONTHLY --metrics UnblendedCost UsageQuantity --filter {\"Dimensions\":{\"Key\":\"SERVICE\",\"Values\":[\"Amazon Elastic Compute Cloud - Compute\"]}} --group-by Type=DIMENSION,Key=INSTANCE_TYPE --region us-east-1 --output json": [
+     {
+      "stdout": "{\"ResultsByTime\": [{\"Groups\": [{\"Keys\": [\"g5.xlarge\"], \"Metrics\": {\"UnblendedCost\": {\"Amount\": \"10.06\", \"Unit\": \"USD\"}, \"UsageQuantity\": {\"Amount\": \"10\", \"Unit\": \"Hrs\"}}}, {\"Keys\": [\"NoInstanceType\"], \"Metrics\": {\"UnblendedCost\": {\"Amount\": \"5\", \"Unit\": \"USD\"}, \"UsageQuantity\": {\"Amount\": \"0\", \"Unit\": \"Hrs\"}}}, {\"Keys\": [\"t3.micro\"], \"Metrics\": {\"UnblendedCost\": {\"Amount\": \"0.001\", \"Unit\": \"USD\"}, \"UsageQuantity\": {\"Amount\": \"0.1\", \"Unit\": \"Hrs\"}}}]}, {\"Groups\": [{\"Keys\": [\"g5.xlarge\"], \"Metrics\": {\"UnblendedCost\": {\"Amount\": \"2.012\", \"Unit\": \"USD\"}, \"UsageQuantity\": {\"Amount\": \"2.0004\", \"Unit\": \"Hrs\"}}}, {\"Keys\": [\"x9.mega\"], \"Metrics\": {\"UnblendedCost\": {\"Amount\": \"1.25\", \"Unit\": \"USD\"}, \"UsageQuantity\": {\"Amount\": \"3.33\", \"Unit\": \"Hrs\"}}}]}]}"
+     }
+    ]
+   }
+  },
+  {
+   "name": "the CLI cannot authenticate: every part is empty, and a refresh reads again",
+   "requests": [
+    "GET",
+    "POST"
+   ],
+   "table": {
+    "aws ec2 describe-instances --query Reservations[*].Instances[*].[InstanceId,InstanceType,State.Name,Tags[?Key==`Name`].Value|[0],LaunchTime,PublicIpAddress,Placement.AvailabilityZone] --output json --region us-east-1 --output json": [
+     {
+      "stderr": "Unable to locate credentials. You can configure credentials by running \"aws configure\".\n",
+      "code": 255
+     }
+    ],
+    "aws ec2 describe-volumes --query Volumes[*].[VolumeId,Size,State,VolumeType,AvailabilityZone,Tags[?Key==`Name`].Value|[0],Attachments[0].InstanceId,Iops] --output json --region us-east-1 --output json": [
+     {
+      "stderr": "Unable to locate credentials. You can configure credentials by running \"aws configure\".\n",
+      "code": 255
+     }
+    ],
+    "aws ec2 describe-images --owners self --query Images[*].[ImageId,Name,State,CreationDate,BlockDeviceMappings[0].Ebs.VolumeSize] --output json --region us-east-1 --output json": [
+     {
+      "stderr": "Unable to locate credentials. You can configure credentials by running \"aws configure\".\n",
+      "code": 255
+     }
+    ],
+    "aws s3 ls --region us-east-1 --output json": [
+     {
+      "stderr": "Unable to locate credentials. You can configure credentials by running \"aws configure\".\n",
+      "code": 255
+     }
+    ],
+    "aws ec2 describe-security-groups --filters Name=group-name,Values=orbgen* --query SecurityGroups[*].[GroupId,GroupName,Description] --output json --region us-east-1 --output json": [
+     {
+      "stderr": "Unable to locate credentials. You can configure credentials by running \"aws configure\".\n",
+      "code": 255
+     }
+    ],
+    "aws ec2 describe-key-pairs --query KeyPairs[*].[KeyName,KeyPairId,CreateTime] --output json --region us-east-1 --output json": [
+     {
+      "stderr": "Unable to locate credentials. You can configure credentials by running \"aws configure\".\n",
+      "code": 255
+     }
+    ],
+    "aws iam list-roles --query Roles[?contains(RoleName, `orbgen`)].{RoleName:RoleName,CreateDate:CreateDate} --output json --region us-east-1 --output json": [
+     {
+      "stderr": "Unable to locate credentials. You can configure credentials by running \"aws configure\".\n",
+      "code": 255
+     }
+    ],
+    "aws service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA --query Quota.Value --output text --region us-east-1 --output json": [
+     {
+      "stderr": "Unable to locate credentials. You can configure credentials by running \"aws configure\".\n",
+      "code": 255
+     }
+    ],
+    "aws service-quotas get-service-quota --service-code ec2 --quota-code L-3819A6DF --query Quota.Value --output text --region us-east-1 --output json": [
+     {
+      "stderr": "Unable to locate credentials. You can configure credentials by running \"aws configure\".\n",
+      "code": 255
+     }
+    ],
+    "aws ce get-cost-and-usage --time-period Start=2026-10-01,End=2026-10-15 --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=SERVICE --region us-east-1 --output json": [
+     {
+      "stderr": "Unable to locate credentials. You can configure credentials by running \"aws configure\".\n",
+      "code": 255
+     }
+    ],
+    "aws ce get-cost-and-usage --time-period Start=2026-07-17,End=2026-10-15 --granularity MONTHLY --metrics UnblendedCost UsageQuantity --filter {\"Dimensions\":{\"Key\":\"SERVICE\",\"Values\":[\"Amazon Elastic Compute Cloud - Compute\"]}} --group-by Type=DIMENSION,Key=INSTANCE_TYPE --region us-east-1 --output json": [
+     {
+      "stderr": "Unable to locate credentials. You can configure credentials by running \"aws configure\".\n",
+      "code": 255
+     }
+    ]
+   }
+  }
+ ]
+}

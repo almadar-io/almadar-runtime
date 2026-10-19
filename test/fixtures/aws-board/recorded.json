@@ -1,0 +1,524 @@
+{
+ "recorded": [
+  {
+   "name": "instances with catalog specs, volumes, images, buckets, groups, keys, roles, quotas and costs; a second load is cached",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "instances": [
+       {
+        "instanceId": "i-1",
+        "instanceType": "g5.xlarge",
+        "state": "running",
+        "name": "trainer",
+        "launchTime": "2026-10-15T10:00:00.000Z",
+        "publicIp": "3.4.5.6",
+        "az": "us-east-1a",
+        "vcpus": 4,
+        "memoryGb": 16,
+        "gpu": "NVIDIA A10G",
+        "gpuCount": 1,
+        "gpuMemoryGb": 24,
+        "hourlyUsd": 1.006,
+        "dailyUsd": 24.14,
+        "monthlyUsd": 734.38
+       },
+       {
+        "instanceId": "i-4",
+        "instanceType": "g4dn.12xlarge",
+        "state": "running",
+        "name": "big",
+        "launchTime": "2026-10-14T10:00:00.000Z",
+        "publicIp": null,
+        "az": "us-east-1a",
+        "vcpus": 48,
+        "memoryGb": 192,
+        "gpu": "NVIDIA T4",
+        "gpuCount": 4,
+        "gpuMemoryGb": 16,
+        "hourlyUsd": 3.912,
+        "dailyUsd": 93.89,
+        "monthlyUsd": 2855.76
+       },
+       {
+        "instanceId": "i-2",
+        "instanceType": "t3.micro",
+        "state": "stopped",
+        "name": "",
+        "launchTime": "2026-09-01T00:00:00.000Z",
+        "publicIp": null,
+        "az": "us-east-1b",
+        "vcpus": 2,
+        "memoryGb": 1,
+        "gpu": null,
+        "gpuCount": 0,
+        "gpuMemoryGb": 0,
+        "hourlyUsd": 0.0104,
+        "dailyUsd": 0.25,
+        "monthlyUsd": 7.59
+       },
+       {
+        "instanceId": "i-3",
+        "instanceType": "x9.mega",
+        "state": "running",
+        "name": "odd",
+        "launchTime": "2026-10-01T00:00:00.000Z",
+        "publicIp": "1.1.1.1",
+        "az": "us-east-1c",
+        "vcpus": null,
+        "memoryGb": null,
+        "gpu": null,
+        "gpuCount": 0,
+        "gpuMemoryGb": 0,
+        "hourlyUsd": null,
+        "dailyUsd": null,
+        "monthlyUsd": null
+       }
+      ],
+      "volumes": [
+       {
+        "volumeId": "vol-1",
+        "size": 100,
+        "state": "in-use",
+        "volumeType": "gp3",
+        "az": "us-east-1a",
+        "name": "root",
+        "attachedTo": "i-1",
+        "iops": 3000,
+        "monthlyCost": 8
+       },
+       {
+        "volumeId": "vol-2",
+        "size": 8,
+        "state": "available",
+        "volumeType": "gp2",
+        "az": "us-east-1b",
+        "name": "",
+        "attachedTo": null,
+        "iops": 100,
+        "monthlyCost": 0.64
+       }
+      ],
+      "amis": [
+       {
+        "imageId": "ami-1",
+        "name": "orbgen-base",
+        "state": "available",
+        "created": "2026-08-01T00:00:00.000Z",
+        "sizeGb": 60,
+        "monthlyCost": 3
+       },
+       {
+        "imageId": "ami-2",
+        "name": "old",
+        "state": "",
+        "created": "2025-01-01T00:00:00.000Z",
+        "sizeGb": 0,
+        "monthlyCost": 0
+       }
+      ],
+      "s3Buckets": [
+       {
+        "name": "orbgen-artifacts",
+        "totalObjects": 1234,
+        "totalSizeMb": 5120,
+        "monthlyCost": 0.12
+       },
+       {
+        "name": "almadar-backups",
+        "totalObjects": 0,
+        "totalSizeMb": 0,
+        "monthlyCost": 0
+       },
+       {
+        "name": "other-almadar-logs",
+        "totalObjects": 0,
+        "totalSizeMb": 0,
+        "monthlyCost": 0
+       }
+      ],
+      "securityGroups": [
+       {
+        "groupId": "sg-1",
+        "groupName": "orbgen-ssh",
+        "description": "ssh access"
+       }
+      ],
+      "keyPairs": [
+       {
+        "keyName": "orbgen-key",
+        "keyId": "key-0abc",
+        "created": "2026-01-01T00:00:00.000Z"
+       }
+      ],
+      "iamRoles": [
+       {
+        "roleName": "orbgen-runner",
+        "created": "2026-01-01T00:00:00Z"
+       }
+      ],
+      "quotas": [
+       {
+        "name": "On-Demand G/VT instances (vCPUs)",
+        "value": 64,
+        "used": 8
+       },
+       {
+        "name": "Spot G/VT instances (vCPUs)",
+        "value": 32,
+        "used": 0
+       }
+      ],
+      "costExplorer": [
+       {
+        "service": "Amazon Elastic Compute Cloud - Compute",
+        "cost": 12.35,
+        "unit": "USD"
+       },
+       {
+        "service": "Amazon Simple Storage Service",
+        "cost": 3.46,
+        "unit": "USD"
+       },
+       {
+        "service": "AWS Cost Explorer",
+        "cost": 0.01,
+        "unit": "USD"
+       }
+      ],
+      "costExplorerTotal": 15.82,
+      "costExplorerPeriod": "2026-10",
+      "estimatedMonthlyCost": 3603.36,
+      "runningHourlyCost": 4.92,
+      "instanceTypeHistory": [
+       {
+        "instanceType": "g5.xlarge",
+        "hours": 12,
+        "cost": 12.07,
+        "vcpus": 4,
+        "memoryGb": 16,
+        "gpu": "NVIDIA A10G",
+        "gpuCount": 1
+       },
+       {
+        "instanceType": "x9.mega",
+        "hours": 3.3,
+        "cost": 1.25,
+        "vcpus": null,
+        "memoryGb": null,
+        "gpu": null,
+        "gpuCount": 0
+       }
+      ],
+      "instanceTypeHistoryDays": 90,
+      "fetchedAt": "2026-10-15T12:30:45.678Z"
+     }
+    },
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "instances": [
+       {
+        "instanceId": "i-1",
+        "instanceType": "g5.xlarge",
+        "state": "running",
+        "name": "trainer",
+        "launchTime": "2026-10-15T10:00:00.000Z",
+        "publicIp": "3.4.5.6",
+        "az": "us-east-1a",
+        "vcpus": 4,
+        "memoryGb": 16,
+        "gpu": "NVIDIA A10G",
+        "gpuCount": 1,
+        "gpuMemoryGb": 24,
+        "hourlyUsd": 1.006,
+        "dailyUsd": 24.14,
+        "monthlyUsd": 734.38
+       },
+       {
+        "instanceId": "i-4",
+        "instanceType": "g4dn.12xlarge",
+        "state": "running",
+        "name": "big",
+        "launchTime": "2026-10-14T10:00:00.000Z",
+        "publicIp": null,
+        "az": "us-east-1a",
+        "vcpus": 48,
+        "memoryGb": 192,
+        "gpu": "NVIDIA T4",
+        "gpuCount": 4,
+        "gpuMemoryGb": 16,
+        "hourlyUsd": 3.912,
+        "dailyUsd": 93.89,
+        "monthlyUsd": 2855.76
+       },
+       {
+        "instanceId": "i-2",
+        "instanceType": "t3.micro",
+        "state": "stopped",
+        "name": "",
+        "launchTime": "2026-09-01T00:00:00.000Z",
+        "publicIp": null,
+        "az": "us-east-1b",
+        "vcpus": 2,
+        "memoryGb": 1,
+        "gpu": null,
+        "gpuCount": 0,
+        "gpuMemoryGb": 0,
+        "hourlyUsd": 0.0104,
+        "dailyUsd": 0.25,
+        "monthlyUsd": 7.59
+       },
+       {
+        "instanceId": "i-3",
+        "instanceType": "x9.mega",
+        "state": "running",
+        "name": "odd",
+        "launchTime": "2026-10-01T00:00:00.000Z",
+        "publicIp": "1.1.1.1",
+        "az": "us-east-1c",
+        "vcpus": null,
+        "memoryGb": null,
+        "gpu": null,
+        "gpuCount": 0,
+        "gpuMemoryGb": 0,
+        "hourlyUsd": null,
+        "dailyUsd": null,
+        "monthlyUsd": null
+       }
+      ],
+      "volumes": [
+       {
+        "volumeId": "vol-1",
+        "size": 100,
+        "state": "in-use",
+        "volumeType": "gp3",
+        "az": "us-east-1a",
+        "name": "root",
+        "attachedTo": "i-1",
+        "iops": 3000,
+        "monthlyCost": 8
+       },
+       {
+        "volumeId": "vol-2",
+        "size": 8,
+        "state": "available",
+        "volumeType": "gp2",
+        "az": "us-east-1b",
+        "name": "",
+        "attachedTo": null,
+        "iops": 100,
+        "monthlyCost": 0.64
+       }
+      ],
+      "amis": [
+       {
+        "imageId": "ami-1",
+        "name": "orbgen-base",
+        "state": "available",
+        "created": "2026-08-01T00:00:00.000Z",
+        "sizeGb": 60,
+        "monthlyCost": 3
+       },
+       {
+        "imageId": "ami-2",
+        "name": "old",
+        "state": "",
+        "created": "2025-01-01T00:00:00.000Z",
+        "sizeGb": 0,
+        "monthlyCost": 0
+       }
+      ],
+      "s3Buckets": [
+       {
+        "name": "orbgen-artifacts",
+        "totalObjects": 1234,
+        "totalSizeMb": 5120,
+        "monthlyCost": 0.12
+       },
+       {
+        "name": "almadar-backups",
+        "totalObjects": 0,
+        "totalSizeMb": 0,
+        "monthlyCost": 0
+       },
+       {
+        "name": "other-almadar-logs",
+        "totalObjects": 0,
+        "totalSizeMb": 0,
+        "monthlyCost": 0
+       }
+      ],
+      "securityGroups": [
+       {
+        "groupId": "sg-1",
+        "groupName": "orbgen-ssh",
+        "description": "ssh access"
+       }
+      ],
+      "keyPairs": [
+       {
+        "keyName": "orbgen-key",
+        "keyId": "key-0abc",
+        "created": "2026-01-01T00:00:00.000Z"
+       }
+      ],
+      "iamRoles": [
+       {
+        "roleName": "orbgen-runner",
+        "created": "2026-01-01T00:00:00Z"
+       }
+      ],
+      "quotas": [
+       {
+        "name": "On-Demand G/VT instances (vCPUs)",
+        "value": 64,
+        "used": 8
+       },
+       {
+        "name": "Spot G/VT instances (vCPUs)",
+        "value": 32,
+        "used": 0
+       }
+      ],
+      "costExplorer": [
+       {
+        "service": "Amazon Elastic Compute Cloud - Compute",
+        "cost": 12.35,
+        "unit": "USD"
+       },
+       {
+        "service": "Amazon Simple Storage Service",
+        "cost": 3.46,
+        "unit": "USD"
+       },
+       {
+        "service": "AWS Cost Explorer",
+        "cost": 0.01,
+        "unit": "USD"
+       }
+      ],
+      "costExplorerTotal": 15.82,
+      "costExplorerPeriod": "2026-10",
+      "estimatedMonthlyCost": 3603.36,
+      "runningHourlyCost": 4.92,
+      "instanceTypeHistory": [
+       {
+        "instanceType": "g5.xlarge",
+        "hours": 12,
+        "cost": 12.07,
+        "vcpus": 4,
+        "memoryGb": 16,
+        "gpu": "NVIDIA A10G",
+        "gpuCount": 1
+       },
+       {
+        "instanceType": "x9.mega",
+        "hours": 3.3,
+        "cost": 1.25,
+        "vcpus": null,
+        "memoryGb": null,
+        "gpu": null,
+        "gpuCount": 0
+       }
+      ],
+      "instanceTypeHistoryDays": 90,
+      "fetchedAt": "2026-10-15T12:30:45.678Z"
+     }
+    }
+   ],
+   "calls": [
+    "aws ec2 describe-instances --query Reservations[*].Instances[*].[InstanceId,InstanceType,State.Name,Tags[?Key==`Name`].Value|[0],LaunchTime,PublicIpAddress,Placement.AvailabilityZone] --output json --region us-east-1 --output json",
+    "aws ec2 describe-volumes --query Volumes[*].[VolumeId,Size,State,VolumeType,AvailabilityZone,Tags[?Key==`Name`].Value|[0],Attachments[0].InstanceId,Iops] --output json --region us-east-1 --output json",
+    "aws ec2 describe-images --owners self --query Images[*].[ImageId,Name,State,CreationDate,BlockDeviceMappings[0].Ebs.VolumeSize] --output json --region us-east-1 --output json",
+    "aws s3 ls --region us-east-1 --output json",
+    "aws s3 ls s3://orbgen-artifacts/ --recursive --summarize --output text",
+    "aws s3 ls s3://almadar-backups/ --recursive --summarize --output text",
+    "aws s3 ls s3://other-almadar-logs/ --recursive --summarize --output text",
+    "aws ec2 describe-security-groups --filters Name=group-name,Values=orbgen* --query SecurityGroups[*].[GroupId,GroupName,Description] --output json --region us-east-1 --output json",
+    "aws ec2 describe-key-pairs --query KeyPairs[*].[KeyName,KeyPairId,CreateTime] --output json --region us-east-1 --output json",
+    "aws iam list-roles --query Roles[?contains(RoleName, `orbgen`)].{RoleName:RoleName,CreateDate:CreateDate} --output json --region us-east-1 --output json",
+    "aws service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA --query Quota.Value --output text --region us-east-1 --output json",
+    "aws service-quotas get-service-quota --service-code ec2 --quota-code L-3819A6DF --query Quota.Value --output text --region us-east-1 --output json",
+    "aws ce get-cost-and-usage --time-period Start=2026-10-01,End=2026-10-15 --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=SERVICE --region us-east-1 --output json",
+    "aws ce get-cost-and-usage --time-period Start=2026-07-17,End=2026-10-15 --granularity MONTHLY --metrics UnblendedCost UsageQuantity --filter {\"Dimensions\":{\"Key\":\"SERVICE\",\"Values\":[\"Amazon Elastic Compute Cloud - Compute\"]}} --group-by Type=DIMENSION,Key=INSTANCE_TYPE --region us-east-1 --output json"
+   ]
+  },
+  {
+   "name": "the CLI cannot authenticate: every part is empty, and a refresh reads again",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "instances": [],
+      "volumes": [],
+      "amis": [],
+      "s3Buckets": [],
+      "securityGroups": [],
+      "keyPairs": [],
+      "iamRoles": [],
+      "quotas": [],
+      "costExplorer": [],
+      "costExplorerTotal": 0,
+      "costExplorerPeriod": "2026-10",
+      "estimatedMonthlyCost": 0,
+      "runningHourlyCost": 0,
+      "instanceTypeHistory": [],
+      "instanceTypeHistoryDays": 90,
+      "fetchedAt": "2026-10-15T12:30:45.678Z"
+     }
+    },
+    {
+     "method": "POST",
+     "status": 200,
+     "body": {
+      "instances": [],
+      "volumes": [],
+      "amis": [],
+      "s3Buckets": [],
+      "securityGroups": [],
+      "keyPairs": [],
+      "iamRoles": [],
+      "quotas": [],
+      "costExplorer": [],
+      "costExplorerTotal": 0,
+      "costExplorerPeriod": "2026-10",
+      "estimatedMonthlyCost": 0,
+      "runningHourlyCost": 0,
+      "instanceTypeHistory": [],
+      "instanceTypeHistoryDays": 90,
+      "fetchedAt": "2026-10-15T12:30:45.678Z"
+     }
+    }
+   ],
+   "calls": [
+    "aws ec2 describe-instances --query Reservations[*].Instances[*].[InstanceId,InstanceType,State.Name,Tags[?Key==`Name`].Value|[0],LaunchTime,PublicIpAddress,Placement.AvailabilityZone] --output json --region us-east-1 --output json",
+    "aws ec2 describe-volumes --query Volumes[*].[VolumeId,Size,State,VolumeType,AvailabilityZone,Tags[?Key==`Name`].Value|[0],Attachments[0].InstanceId,Iops] --output json --region us-east-1 --output json",
+    "aws ec2 describe-images --owners self --query Images[*].[ImageId,Name,State,CreationDate,BlockDeviceMappings[0].Ebs.VolumeSize] --output json --region us-east-1 --output json",
+    "aws s3 ls --region us-east-1 --output json",
+    "aws ec2 describe-security-groups --filters Name=group-name,Values=orbgen* --query SecurityGroups[*].[GroupId,GroupName,Description] --output json --region us-east-1 --output json",
+    "aws ec2 describe-key-pairs --query KeyPairs[*].[KeyName,KeyPairId,CreateTime] --output json --region us-east-1 --output json",
+    "aws iam list-roles --query Roles[?contains(RoleName, `orbgen`)].{RoleName:RoleName,CreateDate:CreateDate} --output json --region us-east-1 --output json",
+    "aws service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA --query Quota.Value --output text --region us-east-1 --output json",
+    "aws service-quotas get-service-quota --service-code ec2 --quota-code L-3819A6DF --query Quota.Value --output text --region us-east-1 --output json",
+    "aws ce get-cost-and-usage --time-period Start=2026-10-01,End=2026-10-15 --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=SERVICE --region us-east-1 --output json",
+    "aws ce get-cost-and-usage --time-period Start=2026-07-17,End=2026-10-15 --granularity MONTHLY --metrics UnblendedCost UsageQuantity --filter {\"Dimensions\":{\"Key\":\"SERVICE\",\"Values\":[\"Amazon Elastic Compute Cloud - Compute\"]}} --group-by Type=DIMENSION,Key=INSTANCE_TYPE --region us-east-1 --output json",
+    "aws ec2 describe-instances --query Reservations[*].Instances[*].[InstanceId,InstanceType,State.Name,Tags[?Key==`Name`].Value|[0],LaunchTime,PublicIpAddress,Placement.AvailabilityZone] --output json --region us-east-1 --output json",
+    "aws ec2 describe-volumes --query Volumes[*].[VolumeId,Size,State,VolumeType,AvailabilityZone,Tags[?Key==`Name`].Value|[0],Attachments[0].InstanceId,Iops] --output json --region us-east-1 --output json",
+    "aws ec2 describe-images --owners self --query Images[*].[ImageId,Name,State,CreationDate,BlockDeviceMappings[0].Ebs.VolumeSize] --output json --region us-east-1 --output json",
+    "aws s3 ls --region us-east-1 --output json",
+    "aws ec2 describe-security-groups --filters Name=group-name,Values=orbgen* --query SecurityGroups[*].[GroupId,GroupName,Description] --output json --region us-east-1 --output json",
+    "aws ec2 describe-key-pairs --query KeyPairs[*].[KeyName,KeyPairId,CreateTime] --output json --region us-east-1 --output json",
+    "aws iam list-roles --query Roles[?contains(RoleName, `orbgen`)].{RoleName:RoleName,CreateDate:CreateDate} --output json --region us-east-1 --output json",
+    "aws service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA --query Quota.Value --output text --region us-east-1 --output json",
+    "aws service-quotas get-service-quota --service-code ec2 --quota-code L-3819A6DF --query Quota.Value --output text --region us-east-1 --output json",
+    "aws ce get-cost-and-usage --time-period Start=2026-10-01,End=2026-10-15 --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=SERVICE --region us-east-1 --output json",
+    "aws ce get-cost-and-usage --time-period Start=2026-07-17,End=2026-10-15 --granularity MONTHLY --metrics UnblendedCost UsageQuantity --filter {\"Dimensions\":{\"Key\":\"SERVICE\",\"Values\":[\"Amazon Elastic Compute Cloud - Compute\"]}} --group-by Type=DIMENSION,Key=INSTANCE_TYPE --region us-east-1 --output json"
+   ]
+  }
+ ]
+}

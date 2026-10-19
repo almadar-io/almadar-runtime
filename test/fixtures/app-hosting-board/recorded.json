@@ -1,0 +1,230 @@
+{
+ "recorded": [
+  {
+   "name": "the latest rollout of a backend with its build, cached, then forced; a backend with no rollouts",
+   "responses": [
+    {
+     "path": "/studio/status",
+     "status": 200,
+     "body": {
+      "rolloutState": "FAILED",
+      "rolloutId": "rollout-3",
+      "rolloutTime": "2026-10-15T09:00:00.5Z",
+      "commitMessage": "fix: deploy the studio",
+      "commitHash": "abcdef1",
+      "commitUrl": "https://github.com/almadar-io/studio/commit/abcdef1",
+      "buildLogsUrl": "https://console.cloud.google.com/cloud-build/builds;region=us-central1/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b?project=123",
+      "cloudBuildId": "0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "cloudBuildRegion": "us-central1",
+      "errorSource": "CLOUD_BUILD"
+     }
+    },
+    {
+     "path": "/studio/status",
+     "status": 200,
+     "body": {
+      "rolloutState": "FAILED",
+      "rolloutId": "rollout-3",
+      "rolloutTime": "2026-10-15T09:00:00.5Z",
+      "commitMessage": "fix: deploy the studio",
+      "commitHash": "abcdef1",
+      "commitUrl": "https://github.com/almadar-io/studio/commit/abcdef1",
+      "buildLogsUrl": "https://console.cloud.google.com/cloud-build/builds;region=us-central1/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b?project=123",
+      "cloudBuildId": "0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "cloudBuildRegion": "us-central1",
+      "errorSource": "CLOUD_BUILD"
+     }
+    },
+    {
+     "path": "/studio/status?force=true",
+     "status": 200,
+     "body": {
+      "rolloutState": "FAILED",
+      "rolloutId": "rollout-3",
+      "rolloutTime": "2026-10-15T09:00:00.5Z",
+      "commitMessage": "fix: deploy the studio",
+      "commitHash": "abcdef1",
+      "commitUrl": "https://github.com/almadar-io/studio/commit/abcdef1",
+      "buildLogsUrl": "https://console.cloud.google.com/cloud-build/builds;region=us-central1/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b?project=123",
+      "cloudBuildId": "0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "cloudBuildRegion": "us-central1",
+      "errorSource": "CLOUD_BUILD"
+     }
+    },
+    {
+     "path": "/empty/status",
+     "status": 200,
+     "body": {
+      "rolloutState": "UNKNOWN",
+      "rolloutId": "",
+      "rolloutTime": "",
+      "commitMessage": "",
+      "commitHash": "",
+      "commitUrl": "",
+      "buildLogsUrl": "",
+      "cloudBuildId": "",
+      "cloudBuildRegion": "",
+      "errorSource": ""
+     }
+    }
+   ],
+   "calls": [
+    "gcloud auth print-access-token",
+    "curl -s https://firebaseapphosting.googleapis.com/v1beta/projects/kflow-b3a39/locations/europe-west4/backends/studio/rollouts?pageSize=100 -H Authorization: Bearer ya29.token",
+    "curl -s https://firebaseapphosting.googleapis.com/v1beta/projects/kflow-b3a39/locations/europe-west4/backends/studio/builds/build-2026-10-15-002 -H Authorization: Bearer ya29.token",
+    "gcloud auth print-access-token",
+    "curl -s https://firebaseapphosting.googleapis.com/v1beta/projects/kflow-b3a39/locations/europe-west4/backends/studio/rollouts?pageSize=100 -H Authorization: Bearer ya29.token",
+    "curl -s https://firebaseapphosting.googleapis.com/v1beta/projects/kflow-b3a39/locations/europe-west4/backends/studio/builds/build-2026-10-15-002 -H Authorization: Bearer ya29.token",
+    "gcloud auth print-access-token",
+    "curl -s https://firebaseapphosting.googleapis.com/v1beta/projects/kflow-b3a39/locations/europe-west4/backends/empty/rollouts?pageSize=100 -H Authorization: Bearer ya29.token"
+   ]
+  },
+  {
+   "name": "no token: the status is unknown; a rollout whose build cannot be read keeps the rollout",
+   "responses": [
+    {
+     "path": "/studio/status",
+     "status": 200,
+     "body": {
+      "rolloutState": "UNKNOWN",
+      "rolloutId": "",
+      "rolloutTime": "",
+      "commitMessage": "",
+      "commitHash": "",
+      "commitUrl": "",
+      "buildLogsUrl": "",
+      "cloudBuildId": "",
+      "cloudBuildRegion": "",
+      "errorSource": ""
+     }
+    },
+    {
+     "path": "/other/status?force=true",
+     "status": 200,
+     "body": {
+      "rolloutState": "IN_PROGRESS",
+      "rolloutId": "rollout-9",
+      "rolloutTime": "2026-10-15T09:01:00Z",
+      "commitMessage": "",
+      "commitHash": "",
+      "commitUrl": "",
+      "buildLogsUrl": "",
+      "cloudBuildId": "",
+      "cloudBuildRegion": "europe-west4",
+      "errorSource": ""
+     }
+    }
+   ],
+   "calls": [
+    "gcloud auth print-access-token",
+    "gcloud auth print-access-token",
+    "curl -s https://firebaseapphosting.googleapis.com/v1beta/projects/kflow-b3a39/locations/europe-west4/backends/other/rollouts?pageSize=100 -H Authorization: Bearer ya29.token",
+    "curl -s https://firebaseapphosting.googleapis.com/v1beta/projects/x/builds/gone -H Authorization: Bearer ya29.token"
+   ]
+  },
+  {
+   "name": "a backend's log lines, cached; a failed build's log from a non-zero gcloud; an unreadable build log",
+   "responses": [
+    {
+     "path": "/studio/logs",
+     "status": 200,
+     "body": {
+      "lines": [
+       {
+        "ts": "2026-10-15T09:01:02",
+        "severity": "ERROR",
+        "revision": "xyz",
+        "msg": "boom happened"
+       },
+       {
+        "ts": "2026-10-15T09:01:03",
+        "severity": "INFO",
+        "revision": "xyz",
+        "msg": "served /api"
+       },
+       {
+        "ts": "2026-10-15T09:01:04",
+        "severity": "INFO",
+        "revision": "",
+        "msg": "pino line"
+       },
+       {
+        "ts": "2026-10-15T09:01:05",
+        "severity": "DEBUG",
+        "revision": "",
+        "msg": "{\"a\":1}"
+       },
+       {
+        "ts": "",
+        "severity": "WARNING",
+        "revision": "",
+        "msg": "no time"
+       }
+      ]
+     }
+    },
+    {
+     "path": "/studio/logs",
+     "status": 200,
+     "body": {
+      "lines": [
+       {
+        "ts": "2026-10-15T09:01:02",
+        "severity": "ERROR",
+        "revision": "xyz",
+        "msg": "boom happened"
+       },
+       {
+        "ts": "2026-10-15T09:01:03",
+        "severity": "INFO",
+        "revision": "xyz",
+        "msg": "served /api"
+       },
+       {
+        "ts": "2026-10-15T09:01:04",
+        "severity": "INFO",
+        "revision": "",
+        "msg": "pino line"
+       },
+       {
+        "ts": "2026-10-15T09:01:05",
+        "severity": "DEBUG",
+        "revision": "",
+        "msg": "{\"a\":1}"
+       },
+       {
+        "ts": "",
+        "severity": "WARNING",
+        "revision": "",
+        "msg": "no time"
+       }
+      ]
+     }
+    },
+    {
+     "path": "/build-logs/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b?region=us-central1",
+     "status": 200,
+     "body": {
+      "lines": [
+       "starting build",
+       "Step 1/3 : FROM node",
+       "ERROR: build step 1 failed"
+      ]
+     }
+    },
+    {
+     "path": "/build-logs/missing",
+     "status": 200,
+     "body": {
+      "lines": []
+     }
+    }
+   ],
+   "calls": [
+    "gcloud logging read resource.type=\"cloud_run_revision\" resource.labels.service_name=\"studio\" --project=kflow-b3a39 --limit=60 --format=json",
+    "gcloud builds log 0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b --project=kflow-b3a39 --region=us-central1",
+    "gcloud builds log missing --project=kflow-b3a39 --region=europe-west4"
+   ]
+  }
+ ]
+}

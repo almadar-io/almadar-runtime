@@ -1,0 +1,15 @@
+app app-hosting-board [
+  version: "1.0.0",
+  description: "std-app-hosting-board with the project and region the gha-almadar firebase route used.",
+  exec: ["gcloud"],
+  env: ["PATH", "HOME"],
+  egress: ["https://firebaseapphosting.googleapis.com"]
+]
+uses Board from "std/behaviors/std-app-hosting-board"
+
+orbital Board = Board.orbitals.AppHostingBoardOrbital {
+  traits { AppHostingStatus { config {
+    project: "kflow-b3a39"
+    region: "europe-west4"
+  } } }
+}

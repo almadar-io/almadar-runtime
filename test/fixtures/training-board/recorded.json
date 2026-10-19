@@ -1,0 +1,317 @@
+{
+ "recorded": [
+  {
+   "name": "a training instance with GPU, process, uptime and a log; one without a public IP",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "instances": [
+       {
+        "instanceId": "i-1",
+        "instanceType": "g5.xlarge",
+        "publicIp": "3.4.5.6",
+        "launchTime": "2026-10-15T09:00:00+00:00",
+        "phase": "RL (Trajectory Balance)",
+        "uptime": "up 3 hours, 12 minutes",
+        "gpu": {
+         "name": "NVIDIA A10G",
+         "temp": 61,
+         "memoryUsed": 12034,
+         "memoryTotal": 23028,
+         "utilization": 97
+        },
+        "process": {
+         "pid": 4242,
+         "cpu": 312.5,
+         "memoryMb": 3072,
+         "elapsed": "512:34",
+         "command": "python -m orbgen.train --config cfg.yaml"
+        },
+        "epochs": [
+         {
+          "epoch": 1,
+          "metrics": {
+           "nt_loss": 0.6516,
+           "attr_loss": 2.1834,
+           "edge_loss": 0.4828,
+           "acc": 0.788
+          },
+          "time": 203.1,
+          "isBest": false
+         },
+         {
+          "epoch": 10,
+          "metrics": {
+           "loss": 0.1234,
+           "acc": 0.9
+          },
+          "time": 199,
+          "isBest": true
+         },
+         {
+          "epoch": 2374,
+          "metrics": {
+           "loss": 0.05302,
+           "grad_norm": 0.03491,
+           "learning_rate": 0.00001,
+           "epoch": 2.374
+          },
+          "time": 0,
+          "isBest": false
+         },
+         {
+          "epoch": 2331,
+          "metrics": {
+           "eval_loss": 0.05809,
+           "eval_runtime": 12.5,
+           "epoch": 2.331
+          },
+          "time": 0,
+          "isBest": true
+         }
+        ],
+        "logTail": [
+         "line 10",
+         "line 11",
+         "line 12",
+         "line 13",
+         "line 14",
+         "line 15",
+         "line 16",
+         "line 17",
+         "line 18",
+         "line 19",
+         "line 20",
+         "line 21",
+         "line 22",
+         "line 23",
+         "line 24",
+         "line 25",
+         "line 26",
+         "line 27",
+         "line 28",
+         "line 29",
+         "line 30",
+         "line 31",
+         "line 32",
+         "line 33",
+         "line 34",
+         "line 35",
+         "line 36",
+         "line 37",
+         "line 38",
+         "line 39"
+        ]
+       },
+       {
+        "instanceId": "i-2",
+        "instanceType": "p3.2xlarge",
+        "publicIp": "",
+        "launchTime": "2026-10-15T08:00:00+00:00",
+        "phase": null,
+        "uptime": null,
+        "gpu": null,
+        "process": null,
+        "epochs": [],
+        "logTail": []
+       }
+      ],
+      "fetchedAt": "2026-10-19T13:52:37.682Z"
+     }
+    },
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "instances": [
+       {
+        "instanceId": "i-1",
+        "instanceType": "g5.xlarge",
+        "publicIp": "3.4.5.6",
+        "launchTime": "2026-10-15T09:00:00+00:00",
+        "phase": "RL (Trajectory Balance)",
+        "uptime": "up 3 hours, 12 minutes",
+        "gpu": {
+         "name": "NVIDIA A10G",
+         "temp": 61,
+         "memoryUsed": 12034,
+         "memoryTotal": 23028,
+         "utilization": 97
+        },
+        "process": {
+         "pid": 4242,
+         "cpu": 312.5,
+         "memoryMb": 3072,
+         "elapsed": "512:34",
+         "command": "python -m orbgen.train --config cfg.yaml"
+        },
+        "epochs": [
+         {
+          "epoch": 1,
+          "metrics": {
+           "nt_loss": 0.6516,
+           "attr_loss": 2.1834,
+           "edge_loss": 0.4828,
+           "acc": 0.788
+          },
+          "time": 203.1,
+          "isBest": false
+         },
+         {
+          "epoch": 10,
+          "metrics": {
+           "loss": 0.1234,
+           "acc": 0.9
+          },
+          "time": 199,
+          "isBest": true
+         },
+         {
+          "epoch": 2374,
+          "metrics": {
+           "loss": 0.05302,
+           "grad_norm": 0.03491,
+           "learning_rate": 0.00001,
+           "epoch": 2.374
+          },
+          "time": 0,
+          "isBest": false
+         },
+         {
+          "epoch": 2331,
+          "metrics": {
+           "eval_loss": 0.05809,
+           "eval_runtime": 12.5,
+           "epoch": 2.331
+          },
+          "time": 0,
+          "isBest": true
+         }
+        ],
+        "logTail": [
+         "line 10",
+         "line 11",
+         "line 12",
+         "line 13",
+         "line 14",
+         "line 15",
+         "line 16",
+         "line 17",
+         "line 18",
+         "line 19",
+         "line 20",
+         "line 21",
+         "line 22",
+         "line 23",
+         "line 24",
+         "line 25",
+         "line 26",
+         "line 27",
+         "line 28",
+         "line 29",
+         "line 30",
+         "line 31",
+         "line 32",
+         "line 33",
+         "line 34",
+         "line 35",
+         "line 36",
+         "line 37",
+         "line 38",
+         "line 39"
+        ]
+       },
+       {
+        "instanceId": "i-2",
+        "instanceType": "p3.2xlarge",
+        "publicIp": "",
+        "launchTime": "2026-10-15T08:00:00+00:00",
+        "phase": null,
+        "uptime": null,
+        "gpu": null,
+        "process": null,
+        "epochs": [],
+        "logTail": []
+       }
+      ],
+      "fetchedAt": "2026-10-19T13:52:37.682Z"
+     }
+    }
+   ],
+   "calls": [
+    "aws ec2 describe-instances --region us-east-1 --filters Name=instance-state-name,Values=running Name=instance-type,Values=g4dn.*,g5.*,p3.*,p4d.* --query Reservations[].Instances[].{Id:InstanceId,Type:InstanceType,IP:PublicIpAddress,Launch:LaunchTime} --output json",
+    "ssh -i HOMEKEY -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@3.4.5.6 echo \"===GPU===\"; nvidia-smi --query-gpu=name,temperature.gpu,memory.used,memory.total,utilization.gpu --format=csv,noheader 2>/dev/null || echo \"N/A\"; echo \"===PROCESS===\"; ps aux | grep -E \"train_v1_1|eval_orbgen|orbgen\\.train|orbgen\\.train_grpo\" | grep -v grep | head -1 || echo \"NONE\"; echo \"===UPTIME===\"; uptime -p 2>/dev/null || uptime; echo \"===LOG===\"; tail -60 /var/log/masar-training-v2.log 2>/dev/null || tail -60 /var/log/masar-training-v1-fixed.log 2>/dev/null || tail -60 /var/log/masar-training.log 2>/dev/null || echo \"NO LOG\""
+   ]
+  },
+  {
+   "name": "an instance whose GPU, process and log are absent, and one ssh cannot reach",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "instances": [
+       {
+        "instanceId": "i-3",
+        "instanceType": "g4dn.xlarge",
+        "publicIp": "9.9.9.9",
+        "launchTime": "2026-10-15T09:00:00+00:00",
+        "phase": null,
+        "uptime": "12:00:00 up 5 min,  0 users,  load average: 0.00",
+        "gpu": null,
+        "process": null,
+        "epochs": [],
+        "logTail": []
+       },
+       {
+        "instanceId": "i-4",
+        "instanceType": "g4dn.xlarge",
+        "publicIp": "8.8.8.8",
+        "launchTime": "2026-10-15T09:00:00+00:00",
+        "phase": null,
+        "uptime": null,
+        "gpu": null,
+        "process": null,
+        "epochs": [],
+        "logTail": []
+       }
+      ],
+      "fetchedAt": "2026-10-19T13:52:37.760Z"
+     }
+    }
+   ],
+   "calls": [
+    "aws ec2 describe-instances --region us-east-1 --filters Name=instance-state-name,Values=running Name=instance-type,Values=g4dn.*,g5.*,p3.*,p4d.* --query Reservations[].Instances[].{Id:InstanceId,Type:InstanceType,IP:PublicIpAddress,Launch:LaunchTime} --output json",
+    "ssh -i HOMEKEY -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@9.9.9.9 echo \"===GPU===\"; nvidia-smi --query-gpu=name,temperature.gpu,memory.used,memory.total,utilization.gpu --format=csv,noheader 2>/dev/null || echo \"N/A\"; echo \"===PROCESS===\"; ps aux | grep -E \"train_v1_1|eval_orbgen|orbgen\\.train|orbgen\\.train_grpo\" | grep -v grep | head -1 || echo \"NONE\"; echo \"===UPTIME===\"; uptime -p 2>/dev/null || uptime; echo \"===LOG===\"; tail -60 /var/log/masar-training-v2.log 2>/dev/null || tail -60 /var/log/masar-training-v1-fixed.log 2>/dev/null || tail -60 /var/log/masar-training.log 2>/dev/null || echo \"NO LOG\"",
+    "ssh -i HOMEKEY -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@8.8.8.8 echo \"===GPU===\"; nvidia-smi --query-gpu=name,temperature.gpu,memory.used,memory.total,utilization.gpu --format=csv,noheader 2>/dev/null || echo \"N/A\"; echo \"===PROCESS===\"; ps aux | grep -E \"train_v1_1|eval_orbgen|orbgen\\.train|orbgen\\.train_grpo\" | grep -v grep | head -1 || echo \"NONE\"; echo \"===UPTIME===\"; uptime -p 2>/dev/null || uptime; echo \"===LOG===\"; tail -60 /var/log/masar-training-v2.log 2>/dev/null || tail -60 /var/log/masar-training-v1-fixed.log 2>/dev/null || tail -60 /var/log/masar-training.log 2>/dev/null || echo \"NO LOG\""
+   ]
+  },
+  {
+   "name": "aws cannot list instances: none, and a refresh reads again",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "instances": [],
+      "fetchedAt": "2026-10-19T13:52:37.787Z"
+     }
+    },
+    {
+     "method": "POST",
+     "status": 200,
+     "body": {
+      "instances": [],
+      "fetchedAt": "2026-10-19T13:52:37.810Z"
+     }
+    }
+   ],
+   "calls": [
+    "aws ec2 describe-instances --region us-east-1 --filters Name=instance-state-name,Values=running Name=instance-type,Values=g4dn.*,g5.*,p3.*,p4d.* --query Reservations[].Instances[].{Id:InstanceId,Type:InstanceType,IP:PublicIpAddress,Launch:LaunchTime} --output json",
+    "aws ec2 describe-instances --region us-east-1 --filters Name=instance-state-name,Values=running Name=instance-type,Values=g4dn.*,g5.*,p3.*,p4d.* --query Reservations[].Instances[].{Id:InstanceId,Type:InstanceType,IP:PublicIpAddress,Launch:LaunchTime} --output json"
+   ]
+  }
+ ]
+}

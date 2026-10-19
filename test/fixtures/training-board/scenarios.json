@@ -1,0 +1,63 @@
+{
+ "region": "us-east-1",
+ "scenarios": [
+  {
+   "name": "a training instance with GPU, process, uptime and a log; one without a public IP",
+   "requests": [
+    "GET",
+    "GET"
+   ],
+   "table": {
+    "aws ec2 describe-instances --region us-east-1 --filters Name=instance-state-name,Values=running Name=instance-type,Values=g4dn.*,g5.*,p3.*,p4d.* --query Reservations[].Instances[].{Id:InstanceId,Type:InstanceType,IP:PublicIpAddress,Launch:LaunchTime} --output json": [
+     {
+      "stdout": "[{\"Id\": \"i-1\", \"Type\": \"g5.xlarge\", \"IP\": \"3.4.5.6\", \"Launch\": \"2026-10-15T09:00:00+00:00\"}, {\"Id\": \"i-2\", \"Type\": \"p3.2xlarge\", \"IP\": null, \"Launch\": \"2026-10-15T08:00:00+00:00\"}]"
+     }
+    ],
+    "ssh -i HOMEKEY -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@3.4.5.6 echo \"===GPU===\"; nvidia-smi --query-gpu=name,temperature.gpu,memory.used,memory.total,utilization.gpu --format=csv,noheader 2>/dev/null || echo \"N/A\"; echo \"===PROCESS===\"; ps aux | grep -E \"train_v1_1|eval_orbgen|orbgen\\.train|orbgen\\.train_grpo\" | grep -v grep | head -1 || echo \"NONE\"; echo \"===UPTIME===\"; uptime -p 2>/dev/null || uptime; echo \"===LOG===\"; tail -60 /var/log/masar-training-v2.log 2>/dev/null || tail -60 /var/log/masar-training-v1-fixed.log 2>/dev/null || tail -60 /var/log/masar-training.log 2>/dev/null || echo \"NO LOG\"": [
+     {
+      "stdout": "===GPU===\nNVIDIA A10G, 61, 12034 MiB, 23028 MiB, 97 %\n===PROCESS===\nubuntu    4242 312.5 18.2 30000000 3145728 ?  Rl   10:00 512:34 python -m orbgen.train --config cfg.yaml\n===UPTIME===\nup 3 hours, 12 minutes\n===LOG===\nPhase BC: starting\n  Epoch   1 | nt_loss=0.6516 attr_loss=2.1834 edge_loss=0.4828 acc=0.788 (203.1s)\n  Epoch  10 | loss=0.1234 acc=0.9 (199s) *BEST*\n{'loss': '0.05302', 'grad_norm': '0.03491', 'learning_rate': '1e-05', 'epoch': '2.374'}\n{'eval_loss': '0.05809', 'eval_runtime': '12.5', 'epoch': '2.331'}\nPhase RL: begin\nnoise line\nline 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29\nline 30\nline 31\nline 32\nline 33\nline 34\nline 35\nline 36\nline 37\nline 38\nline 39\n"
+     }
+    ]
+   }
+  },
+  {
+   "name": "an instance whose GPU, process and log are absent, and one ssh cannot reach",
+   "requests": [
+    "GET"
+   ],
+   "table": {
+    "aws ec2 describe-instances --region us-east-1 --filters Name=instance-state-name,Values=running Name=instance-type,Values=g4dn.*,g5.*,p3.*,p4d.* --query Reservations[].Instances[].{Id:InstanceId,Type:InstanceType,IP:PublicIpAddress,Launch:LaunchTime} --output json": [
+     {
+      "stdout": "[{\"Id\": \"i-3\", \"Type\": \"g4dn.xlarge\", \"IP\": \"9.9.9.9\", \"Launch\": \"2026-10-15T09:00:00+00:00\"}, {\"Id\": \"i-4\", \"Type\": \"g4dn.xlarge\", \"IP\": \"8.8.8.8\", \"Launch\": \"2026-10-15T09:00:00+00:00\"}]"
+     }
+    ],
+    "ssh -i HOMEKEY -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@9.9.9.9 echo \"===GPU===\"; nvidia-smi --query-gpu=name,temperature.gpu,memory.used,memory.total,utilization.gpu --format=csv,noheader 2>/dev/null || echo \"N/A\"; echo \"===PROCESS===\"; ps aux | grep -E \"train_v1_1|eval_orbgen|orbgen\\.train|orbgen\\.train_grpo\" | grep -v grep | head -1 || echo \"NONE\"; echo \"===UPTIME===\"; uptime -p 2>/dev/null || uptime; echo \"===LOG===\"; tail -60 /var/log/masar-training-v2.log 2>/dev/null || tail -60 /var/log/masar-training-v1-fixed.log 2>/dev/null || tail -60 /var/log/masar-training.log 2>/dev/null || echo \"NO LOG\"": [
+     {
+      "stdout": "===GPU===\nN/A\n===PROCESS===\nNONE\n===UPTIME===\n 12:00:00 up 5 min,  0 users,  load average: 0.00\n===LOG===\nNO LOG\n"
+     }
+    ],
+    "ssh -i HOMEKEY -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@8.8.8.8 echo \"===GPU===\"; nvidia-smi --query-gpu=name,temperature.gpu,memory.used,memory.total,utilization.gpu --format=csv,noheader 2>/dev/null || echo \"N/A\"; echo \"===PROCESS===\"; ps aux | grep -E \"train_v1_1|eval_orbgen|orbgen\\.train|orbgen\\.train_grpo\" | grep -v grep | head -1 || echo \"NONE\"; echo \"===UPTIME===\"; uptime -p 2>/dev/null || uptime; echo \"===LOG===\"; tail -60 /var/log/masar-training-v2.log 2>/dev/null || tail -60 /var/log/masar-training-v1-fixed.log 2>/dev/null || tail -60 /var/log/masar-training.log 2>/dev/null || echo \"NO LOG\"": [
+     {
+      "stderr": "ssh: connect to host 8.8.8.8 port 22: Operation timed out\n",
+      "code": 255
+     }
+    ]
+   }
+  },
+  {
+   "name": "aws cannot list instances: none, and a refresh reads again",
+   "requests": [
+    "GET",
+    "POST"
+   ],
+   "table": {
+    "aws ec2 describe-instances --region us-east-1 --filters Name=instance-state-name,Values=running Name=instance-type,Values=g4dn.*,g5.*,p3.*,p4d.* --query Reservations[].Instances[].{Id:InstanceId,Type:InstanceType,IP:PublicIpAddress,Launch:LaunchTime} --output json": [
+     {
+      "stderr": "Unable to locate credentials\n",
+      "code": 255
+     }
+    ]
+   }
+  }
+ ]
+}

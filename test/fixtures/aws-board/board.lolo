@@ -1,0 +1,19 @@
+app aws-board [
+  version: "1.0.0",
+  description: "std-aws-board with the configuration the gha-almadar aws route used.",
+  exec: ["aws"],
+  env: ["PATH", "HOME"]
+]
+uses Board from "std/behaviors/std-aws-board"
+
+orbital Board = Board.orbitals.AwsBoardOrbital {
+  traits { AwsStatus { config {
+    region: "us-east-1"
+    catalog: { "g4dn.xlarge": { vcpus: 4, memoryGb: 16, gpu: "NVIDIA T4", gpuCount: 1, gpuMemoryGb: 16, hourlyUsd: 0.526 }, "g4dn.2xlarge": { vcpus: 8, memoryGb: 32, gpu: "NVIDIA T4", gpuCount: 1, gpuMemoryGb: 16, hourlyUsd: 0.752 }, "g4dn.4xlarge": { vcpus: 16, memoryGb: 64, gpu: "NVIDIA T4", gpuCount: 1, gpuMemoryGb: 16, hourlyUsd: 1.204 }, "g4dn.8xlarge": { vcpus: 32, memoryGb: 128, gpu: "NVIDIA T4", gpuCount: 1, gpuMemoryGb: 16, hourlyUsd: 2.176 }, "g4dn.12xlarge": { vcpus: 48, memoryGb: 192, gpu: "NVIDIA T4", gpuCount: 4, gpuMemoryGb: 16, hourlyUsd: 3.912 }, "g4dn.16xlarge": { vcpus: 64, memoryGb: 256, gpu: "NVIDIA T4", gpuCount: 1, gpuMemoryGb: 16, hourlyUsd: 4.352 }, "g4dn.metal": { vcpus: 96, memoryGb: 384, gpu: "NVIDIA T4", gpuCount: 8, gpuMemoryGb: 16, hourlyUsd: 7.824 }, "g5.xlarge": { vcpus: 4, memoryGb: 16, gpu: "NVIDIA A10G", gpuCount: 1, gpuMemoryGb: 24, hourlyUsd: 1.006 }, "g5.2xlarge": { vcpus: 8, memoryGb: 32, gpu: "NVIDIA A10G", gpuCount: 1, gpuMemoryGb: 24, hourlyUsd: 1.212 }, "g5.4xlarge": { vcpus: 16, memoryGb: 64, gpu: "NVIDIA A10G", gpuCount: 1, gpuMemoryGb: 24, hourlyUsd: 1.624 }, "g5.8xlarge": { vcpus: 32, memoryGb: 128, gpu: "NVIDIA A10G", gpuCount: 1, gpuMemoryGb: 24, hourlyUsd: 2.448 }, "g5.12xlarge": { vcpus: 48, memoryGb: 192, gpu: "NVIDIA A10G", gpuCount: 4, gpuMemoryGb: 24, hourlyUsd: 5.672 }, "g5.16xlarge": { vcpus: 64, memoryGb: 256, gpu: "NVIDIA A10G", gpuCount: 1, gpuMemoryGb: 24, hourlyUsd: 4.096 }, "g5.24xlarge": { vcpus: 96, memoryGb: 384, gpu: "NVIDIA A10G", gpuCount: 4, gpuMemoryGb: 24, hourlyUsd: 8.144 }, "g5.48xlarge": { vcpus: 192, memoryGb: 768, gpu: "NVIDIA A10G", gpuCount: 8, gpuMemoryGb: 24, hourlyUsd: 16.288 }, "p3.2xlarge": { vcpus: 8, memoryGb: 61, gpu: "NVIDIA V100", gpuCount: 1, gpuMemoryGb: 16, hourlyUsd: 3.06 }, "p3.8xlarge": { vcpus: 32, memoryGb: 244, gpu: "NVIDIA V100", gpuCount: 4, gpuMemoryGb: 16, hourlyUsd: 12.24 }, "p3.16xlarge": { vcpus: 64, memoryGb: 488, gpu: "NVIDIA V100", gpuCount: 8, gpuMemoryGb: 16, hourlyUsd: 24.48 }, "p4d.24xlarge": { vcpus: 96, memoryGb: 1152, gpu: "NVIDIA A100", gpuCount: 8, gpuMemoryGb: 40, hourlyUsd: 32.7726 }, "p5.48xlarge": { vcpus: 192, memoryGb: 2048, gpu: "NVIDIA H100", gpuCount: 8, gpuMemoryGb: 80, hourlyUsd: 98.32 }, "t3.micro": { vcpus: 2, memoryGb: 1, gpuCount: 0, gpuMemoryGb: 0, hourlyUsd: 0.0104 }, "t3.small": { vcpus: 2, memoryGb: 2, gpuCount: 0, gpuMemoryGb: 0, hourlyUsd: 0.0208 }, "t3.medium": { vcpus: 2, memoryGb: 4, gpuCount: 0, gpuMemoryGb: 0, hourlyUsd: 0.0416 }, "t3.large": { vcpus: 2, memoryGb: 8, gpuCount: 0, gpuMemoryGb: 0, hourlyUsd: 0.0832 }, "t3.xlarge": { vcpus: 4, memoryGb: 16, gpuCount: 0, gpuMemoryGb: 0, hourlyUsd: 0.1664 }, "t3.2xlarge": { vcpus: 8, memoryGb: 32, gpuCount: 0, gpuMemoryGb: 0, hourlyUsd: 0.3328 }, "m5.large": { vcpus: 2, memoryGb: 8, gpuCount: 0, gpuMemoryGb: 0, hourlyUsd: 0.096 }, "m5.xlarge": { vcpus: 4, memoryGb: 16, gpuCount: 0, gpuMemoryGb: 0, hourlyUsd: 0.192 }, "m5.2xlarge": { vcpus: 8, memoryGb: 32, gpuCount: 0, gpuMemoryGb: 0, hourlyUsd: 0.384 }, "c5.large": { vcpus: 2, memoryGb: 4, gpuCount: 0, gpuMemoryGb: 0, hourlyUsd: 0.085 }, "c5.xlarge": { vcpus: 4, memoryGb: 8, gpuCount: 0, gpuMemoryGb: 0, hourlyUsd: 0.17 } }
+    bucketNameContains: ["orbgen", "almadar"]
+    securityGroupFilter: "orbgen*"
+    roleNameContains: "orbgen"
+    quotas: [{ code: "L-DB2E81BA", name: "On-Demand G/VT instances (vCPUs)", countsRunning: true }, { code: "L-3819A6DF", name: "Spot G/VT instances (vCPUs)", countsRunning: false }]
+    gvtFamilies: ["g3", "g3s", "g4ad", "g4dn", "g5", "g5g", "g6", "g6e", "gr6", "vt1"]
+  } } }
+}
