@@ -1,0 +1,33 @@
+app clock-now [
+  version: "1.0.0",
+  description: "Test fixture: answers the time the host clock gives @now."
+]
+orbital ClockOrbital {
+  entity ClockFrame [runtime] {
+    id : string!
+  }
+
+  trait Clock -> ClockFrame [integration, instance] {
+    initial: idle
+
+    state idle {
+      INIT -> idle
+      ASK_TIME -> idle
+        (emit TIME { at: @now })
+    }
+
+    emits {
+      TIME -> external {
+        at : number!
+      }
+        @description "The host clock's time."
+    }
+
+    listens {
+      ASK_TIME -> external { }
+        @description "Ask the time."
+    }
+  }
+
+  page "/clock" -> Clock
+}

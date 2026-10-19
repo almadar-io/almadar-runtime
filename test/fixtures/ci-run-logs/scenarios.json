@@ -1,0 +1,81 @@
+{
+ "owner": "almadar-io",
+ "repo": "almadar-core",
+ "runId": "777",
+ "scenarios": [
+  {
+   "name": "failed jobs: GitHub markers set the level, other lines are info, an unreadable log is skipped",
+   "table": {
+    "gh api repos/almadar-io/almadar-core/actions/runs/777/jobs": [
+     {
+      "stdout": "{\"total_count\": 4, \"jobs\": [{\"id\": 1, \"name\": \"build\", \"status\": \"completed\", \"conclusion\": \"failure\", \"html_url\": \"https://github.com/almadar-io/almadar-core/actions/runs/777/job/1\"}, {\"id\": 2, \"name\": \"lint\", \"status\": \"completed\", \"conclusion\": \"success\", \"html_url\": \"https://github.com/almadar-io/almadar-core/actions/runs/777/job/2\"}, {\"id\": 3, \"name\": \"test\", \"status\": \"completed\", \"conclusion\": \"failure\", \"html_url\": \"https://github.com/almadar-io/almadar-core/actions/runs/777/job/3\"}, {\"id\": 4, \"name\": \"e2e\", \"status\": \"completed\", \"conclusion\": \"failure\", \"html_url\": \"https://github.com/almadar-io/almadar-core/actions/runs/777/job/4\"}]}"
+     }
+    ],
+    "gh api repos/almadar-io/almadar-core/actions/jobs/1/logs": [
+     {
+      "stdout": "2026-10-19T10:00:00.1234567Z ##[group]Run pnpm test\n2026-10-19T10:00:01.0000000Z   npm warn deprecated\n\n2026-10-19T10:00:02.5Z ##[error]Process completed with exit code 1.\n2026-10-19T10:00:03Z ##[warning]Node 18 is deprecated\n2026-10-19T10:00:04.000Z [ERROR] Tests failed: 3\n2026-10-19T10:00:05.000Z see ##[error] in the middle\n   \nno timestamp line\n2026-10-19T10:00:06.000Z \n"
+     }
+    ],
+    "gh api repos/almadar-io/almadar-core/actions/jobs/3/logs": [
+     {
+      "stdout": "2026-10-19T11:00:00.000Z ##[error]lint failed\r\n2026-10-19T11:00:01.000Z done\n"
+     }
+    ],
+    "gh api repos/almadar-io/almadar-core/actions/jobs/4/logs": [
+     {
+      "stderr": "HTTP 410: Gone",
+      "code": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "no failed job: the run summary lines, all info",
+   "table": {
+    "gh api repos/almadar-io/almadar-core/actions/runs/777/jobs": [
+     {
+      "stdout": "{\"total_count\": 2, \"jobs\": [{\"id\": 1, \"name\": \"build\", \"status\": \"completed\", \"conclusion\": \"success\", \"html_url\": \"https://github.com/almadar-io/almadar-core/actions/runs/777/job/1\"}, {\"id\": 2, \"name\": \"deploy\", \"status\": \"completed\", \"conclusion\": \"cancelled\", \"html_url\": \"https://github.com/almadar-io/almadar-core/actions/runs/777/job/2\"}]}"
+     }
+    ],
+    "gh run view 777 --repo almadar-io/almadar-core": [
+     {
+      "stdout": "X main CI \u00b7 777\nTriggered via push about 1 hour ago\n\nJOBS\nX build in 2m (ID 1)\n  failed step: error in setup\n"
+     }
+    ]
+   }
+  },
+  {
+   "name": "the job list cannot be read: the run summary from stderr",
+   "table": {
+    "gh api repos/almadar-io/almadar-core/actions/runs/777/jobs": [
+     {
+      "stderr": "HTTP 404: Not Found",
+      "code": 1
+     }
+    ],
+    "gh run view 777 --repo almadar-io/almadar-core": [
+     {
+      "stdout": "",
+      "stderr": "could not find any workflow run with ID 777\n",
+      "code": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "the job list is not JSON: the run summary",
+   "table": {
+    "gh api repos/almadar-io/almadar-core/actions/runs/777/jobs": [
+     {
+      "stdout": "<html>oops</html>"
+     }
+    ],
+    "gh run view 777 --repo almadar-io/almadar-core": [
+     {
+      "stdout": "\u2713 main CI \u00b7 777\n"
+     }
+    ]
+   }
+  }
+ ]
+}

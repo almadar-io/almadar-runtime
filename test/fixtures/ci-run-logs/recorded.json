@@ -1,0 +1,166 @@
+{
+ "recorded": [
+  {
+   "name": "failed jobs: GitHub markers set the level, other lines are info, an unreadable log is skipped",
+   "response": {
+    "status": 200,
+    "body": {
+     "repo": "almadar-core",
+     "runId": "777",
+     "lines": [
+      {
+       "job": "build",
+       "step": "",
+       "msg": "##[group]Run pnpm test",
+       "level": "info"
+      },
+      {
+       "job": "build",
+       "step": "",
+       "msg": "npm warn deprecated",
+       "level": "info"
+      },
+      {
+       "job": "build",
+       "step": "",
+       "msg": "Process completed with exit code 1.",
+       "level": "error"
+      },
+      {
+       "job": "build",
+       "step": "",
+       "msg": "Node 18 is deprecated",
+       "level": "warning"
+      },
+      {
+       "job": "build",
+       "step": "",
+       "msg": "[ERROR] Tests failed: 3",
+       "level": "error"
+      },
+      {
+       "job": "build",
+       "step": "",
+       "msg": "see  in the middle",
+       "level": "error"
+      },
+      {
+       "job": "build",
+       "step": "",
+       "msg": "no timestamp line",
+       "level": "info"
+      },
+      {
+       "job": "test",
+       "step": "",
+       "msg": "lint failed",
+       "level": "error"
+      },
+      {
+       "job": "test",
+       "step": "",
+       "msg": "done",
+       "level": "info"
+      }
+     ]
+    }
+   },
+   "calls": [
+    "gh api repos/almadar-io/almadar-core/actions/runs/777/jobs",
+    "gh api repos/almadar-io/almadar-core/actions/jobs/1/logs",
+    "gh api repos/almadar-io/almadar-core/actions/jobs/3/logs",
+    "gh api repos/almadar-io/almadar-core/actions/jobs/4/logs"
+   ]
+  },
+  {
+   "name": "no failed job: the run summary lines, all info",
+   "response": {
+    "status": 200,
+    "body": {
+     "repo": "almadar-core",
+     "runId": "777",
+     "lines": [
+      {
+       "job": "",
+       "step": "",
+       "msg": "X main CI · 777",
+       "level": "info"
+      },
+      {
+       "job": "",
+       "step": "",
+       "msg": "Triggered via push about 1 hour ago",
+       "level": "info"
+      },
+      {
+       "job": "",
+       "step": "",
+       "msg": "JOBS",
+       "level": "info"
+      },
+      {
+       "job": "",
+       "step": "",
+       "msg": "X build in 2m (ID 1)",
+       "level": "info"
+      },
+      {
+       "job": "",
+       "step": "",
+       "msg": "failed step: error in setup",
+       "level": "error"
+      }
+     ]
+    }
+   },
+   "calls": [
+    "gh api repos/almadar-io/almadar-core/actions/runs/777/jobs",
+    "gh run view 777 --repo almadar-io/almadar-core"
+   ]
+  },
+  {
+   "name": "the job list cannot be read: the run summary from stderr",
+   "response": {
+    "status": 200,
+    "body": {
+     "repo": "almadar-core",
+     "runId": "777",
+     "lines": [
+      {
+       "job": "",
+       "step": "",
+       "msg": "could not find any workflow run with ID 777",
+       "level": "info"
+      }
+     ]
+    }
+   },
+   "calls": [
+    "gh api repos/almadar-io/almadar-core/actions/runs/777/jobs",
+    "gh run view 777 --repo almadar-io/almadar-core"
+   ]
+  },
+  {
+   "name": "the job list is not JSON: the run summary",
+   "response": {
+    "status": 200,
+    "body": {
+     "repo": "almadar-core",
+     "runId": "777",
+     "lines": [
+      {
+       "job": "",
+       "step": "",
+       "msg": "✓ main CI · 777",
+       "level": "info"
+      }
+     ]
+    }
+   },
+   "calls": [
+    "gh api repos/almadar-io/almadar-core/actions/runs/777/jobs",
+    "gh run view 777 --repo almadar-io/almadar-core"
+   ]
+  }
+ ]
+}

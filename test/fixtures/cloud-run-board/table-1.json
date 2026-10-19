@@ -1,0 +1,41 @@
+{
+ "gcloud auth print-access-token": [
+  {
+   "stderr": "ERROR: (gcloud.auth.print-access-token) no credentialed accounts\n",
+   "code": 1
+  }
+ ],
+ "bq --project_id=kflow-b3a39 ls --format=json kflow-b3a39:billing_export": [
+  {
+   "stdout": "[{\"tableReference\":{\"tableId\":\"gcp_billing_export_resource_v1_01D132_70B90C_D90086\"}}]"
+  }
+ ],
+ "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT resource.name AS svc,   SUM(cost) AS gross,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS net FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE service.description = 'Cloud Run' AND DATE(usage_start_time) >= '2026-10-01' GROUP BY svc": [
+  {
+   "stderr": "BigQuery error\n",
+   "code": 2
+  }
+ ],
+ "gcloud run services list --project=kflow-b3a39 --format=json": [
+  {
+   "stdout": "[{\"apiVersion\": \"serving.knative.dev/v1\", \"kind\": \"Service\", \"metadata\": {\"name\": \"studio\", \"creationTimestamp\": \"2025-01-01T00:00:00Z\", \"annotations\": {\"serving.knative.dev/creator\": \"osama@almadar.io\", \"serving.knative.dev/lastModified\": \"2026-10-12T08:00:00.000Z\"}, \"labels\": {\"cloud.googleapis.com/location\": \"europe-west4\"}}, \"status\": {\"url\": \"https://studio-x.run.app\", \"conditions\": [{\"type\": \"Ready\", \"status\": \"True\"}, {\"type\": \"ConfigurationsReady\", \"status\": \"True\"}], \"latestReadyRevisionName\": \"studio-00042-abc\"}}]"
+  }
+ ],
+ "gcloud services list --enabled --project=kflow-b3a39 --format=json": [
+  {
+   "stdout": "[{\"name\": \"projects/1/services/run.googleapis.com\", \"config\": {\"name\": \"run.googleapis.com\", \"title\": \"run.googleapis.com\"}}, {\"name\": \"projects/1/services/bigquery.googleapis.com\", \"config\": {\"name\": \"bigquery.googleapis.com\", \"title\": \"bigquery.googleapis.com\"}}, {\"name\": \"projects/1/services/maps-backend.googleapis.com\", \"config\": {\"name\": \"maps-backend.googleapis.com\", \"title\": \"maps-backend.googleapis.com\"}}, {\"name\": \"projects/1/services/firestore.googleapis.com\", \"config\": {\"name\": \"firestore.googleapis.com\", \"title\": \"firestore.googleapis.com\"}}, {\"name\": \"projects/1/services/identitytoolkit.googleapis.com\", \"config\": {\"name\": \"identitytoolkit.googleapis.com\", \"title\": \"identitytoolkit.googleapis.com\"}}, {\"name\": \"projects/1/services/iam.googleapis.com\", \"config\": {\"name\": \"iam.googleapis.com\", \"title\": \"iam.googleapis.com\"}}]"
+  }
+ ],
+ "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT service.description AS service_name,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS total_cost,   currency FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE DATE(usage_start_time) >= '2026-10-01' GROUP BY service_name, currency ORDER BY total_cost DESC": [
+  {
+   "stderr": "BigQuery error\n",
+   "code": 2
+  }
+ ],
+ "gcloud run services describe studio --region=europe-west4 --project=kflow-b3a39 --format=json": [
+  {
+   "stderr": "ERROR: not found\n",
+   "code": 1
+  }
+ ]
+}

@@ -1,0 +1,245 @@
+{
+ "project": "kflow-b3a39",
+ "table": "gcp_billing_export_resource_v1_01D132_70B90C_D90086",
+ "now": "2026-10-15T12:30:45.678Z",
+ "scenarios": [
+  {
+   "name": "usage, cost, three services and the billing rollup; a second load is cached",
+   "requests": [
+    "GET",
+    "GET"
+   ],
+   "token": {
+    "stdout": "ya29.token\n"
+   },
+   "monitoring": {
+    "billable_instance_time": {
+     "status": 200,
+     "body": {
+      "timeSeries": [
+       {
+        "resource": {
+         "type": "cloud_run_revision",
+         "labels": {
+          "service_name": "studio",
+          "project_id": "kflow-b3a39"
+         }
+        },
+        "points": [
+         {
+          "value": {
+           "doubleValue": 3600.5
+          }
+         },
+         {
+          "value": {
+           "doubleValue": 1800
+          }
+         }
+        ]
+       },
+       {
+        "resource": {
+         "type": "cloud_run_revision",
+         "labels": {
+          "service_name": "inference",
+          "project_id": "kflow-b3a39"
+         }
+        },
+        "points": [
+         {
+          "value": {
+           "doubleValue": 720
+          }
+         }
+        ]
+       },
+       {
+        "resource": {
+         "type": "cloud_run_revision",
+         "labels": {
+          "service_name": "studio",
+          "project_id": "kflow-b3a39"
+         }
+        },
+        "points": [
+         {
+          "value": {
+           "doubleValue": 0.25
+          }
+         }
+        ]
+       },
+       {
+        "resource": {
+         "labels": {}
+        },
+        "points": [
+         {
+          "value": {
+           "doubleValue": 9
+          }
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "request_count": {
+     "status": 200,
+     "body": {
+      "timeSeries": [
+       {
+        "resource": {
+         "type": "cloud_run_revision",
+         "labels": {
+          "service_name": "studio",
+          "project_id": "kflow-b3a39"
+         }
+        },
+        "points": [
+         {
+          "value": {
+           "int64Value": "1200"
+          }
+         },
+         {
+          "value": {
+           "int64Value": "34"
+          }
+         }
+        ]
+       },
+       {
+        "resource": {
+         "type": "cloud_run_revision",
+         "labels": {
+          "service_name": "quiet",
+          "project_id": "kflow-b3a39"
+         }
+        },
+        "points": [
+         {
+          "value": {
+           "int64Value": "7"
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "costQuery": {
+    "stdout": "[{\"svc\": \"studio\", \"gross\": \"12.345678\", \"net\": \"3.21\"}, {\"svc\": \"inference\", \"gross\": \"40.1\", \"net\": \"-0.004\"}, {\"svc\": \"\", \"gross\": \"1\", \"net\": \"1\"}]"
+   },
+   "servicesList": {
+    "stdout": "[{\"apiVersion\": \"serving.knative.dev/v1\", \"kind\": \"Service\", \"metadata\": {\"name\": \"studio\", \"creationTimestamp\": \"2025-01-01T00:00:00Z\", \"annotations\": {\"serving.knative.dev/creator\": \"osama@almadar.io\", \"serving.knative.dev/lastModified\": \"2026-10-12T08:00:00.000Z\"}, \"labels\": {\"cloud.googleapis.com/location\": \"europe-west4\"}}, \"status\": {\"url\": \"https://studio-x.run.app\", \"conditions\": [{\"type\": \"Ready\", \"status\": \"True\"}, {\"type\": \"ConfigurationsReady\", \"status\": \"True\"}], \"latestReadyRevisionName\": \"studio-00042-abc\"}}, {\"apiVersion\": \"serving.knative.dev/v1\", \"kind\": \"Service\", \"metadata\": {\"name\": \"inference\", \"creationTimestamp\": \"2025-06-01T00:00:00Z\", \"annotations\": {\"serving.knative.dev/creator\": \"ci@almadar.io\", \"serving.knative.dev/lastModified\": \"2026-10-01T00:00:00Z\"}, \"labels\": {\"cloud.googleapis.com/location\": \"us-central1\"}}, \"status\": {\"url\": \"https://inf.run.app\", \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\"}, {\"type\": \"ConfigurationsReady\", \"status\": \"True\"}], \"latestReadyRevisionName\": \"inference-00007\"}}, {\"apiVersion\": \"serving.knative.dev/v1\", \"kind\": \"Service\", \"metadata\": {\"name\": \"quiet\", \"creationTimestamp\": \"2025-07-01T00:00:00Z\", \"annotations\": {\"serving.knative.dev/creator\": \"\"}, \"labels\": {\"cloud.googleapis.com/location\": \"europe-west1\"}}, \"status\": {\"url\": \"\", \"conditions\": [], \"latestReadyRevisionName\": \"\"}}]"
+   },
+   "describe": {
+    "studio": {
+     "stdout": "{\"spec\": {\"template\": {\"metadata\": {\"annotations\": {\"autoscaling.knative.dev/minScale\": \"1\", \"autoscaling.knative.dev/maxScale\": \"5\"}}, \"spec\": {\"containers\": [{\"image\": \"x\", \"resources\": {\"limits\": {\"cpu\": \"2\", \"memory\": \"1Gi\"}}}], \"containerConcurrency\": 250}}}}"
+    },
+    "inference": {
+     "stdout": "{\"spec\": {\"template\": {\"metadata\": {\"annotations\": {}}, \"spec\": {\"containers\": [{\"image\": \"x\", \"resources\": {\"limits\": {\"cpu\": \"4000m\", \"memory\": \"16Gi\", \"nvidia.com/gpu\": \"1\"}}}], \"nodeSelector\": {\"run.googleapis.com/accelerator\": \"nvidia-l4\"}}}}}"
+    },
+    "quiet": {
+     "stdout": "{\"spec\": {\"template\": {\"metadata\": {\"annotations\": {\"autoscaling.knative.dev/minScale\": \"0\", \"autoscaling.knative.dev/maxScale\": \"3\", \"run.googleapis.com/gpu-zonal-redundancy-disabled\": \"true\"}}, \"spec\": {\"containers\": [{\"image\": \"x\", \"resources\": {\"limits\": {\"memory\": \"256Mi\", \"nvidia.com/gpu\": \"2\"}}}], \"containerConcurrency\": 80, \"nodeSelector\": {\"run.googleapis.com/accelerator\": \"nvidia-l4\"}}}}}"
+    }
+   },
+   "enabled": {
+    "stdout": "[{\"name\": \"projects/1/services/run.googleapis.com\", \"config\": {\"name\": \"run.googleapis.com\", \"title\": \"run.googleapis.com\"}}, {\"name\": \"projects/1/services/bigquery.googleapis.com\", \"config\": {\"name\": \"bigquery.googleapis.com\", \"title\": \"bigquery.googleapis.com\"}}, {\"name\": \"projects/1/services/maps-backend.googleapis.com\", \"config\": {\"name\": \"maps-backend.googleapis.com\", \"title\": \"maps-backend.googleapis.com\"}}, {\"name\": \"projects/1/services/firestore.googleapis.com\", \"config\": {\"name\": \"firestore.googleapis.com\", \"title\": \"firestore.googleapis.com\"}}, {\"name\": \"projects/1/services/identitytoolkit.googleapis.com\", \"config\": {\"name\": \"identitytoolkit.googleapis.com\", \"title\": \"identitytoolkit.googleapis.com\"}}, {\"name\": \"projects/1/services/iam.googleapis.com\", \"config\": {\"name\": \"iam.googleapis.com\", \"title\": \"iam.googleapis.com\"}}]"
+   },
+   "billingQuery": {
+    "stdout": "[{\"service_name\": \"Cloud Run\", \"total_cost\": \"3.2061\", \"currency\": \"USD\"}, {\"service_name\": \"BigQuery\", \"total_cost\": \"0.004\", \"currency\": \"USD\"}, {\"service_name\": \"Cloud Storage\", \"total_cost\": \"0.004\", \"currency\": \"USD\"}, {\"service_name\": \"App Engine\", \"total_cost\": \"-0.001\", \"currency\": \"USD\"}]"
+   }
+  },
+  {
+   "name": "no token, no cost, an unreadable describe, and billing from the enabled services only",
+   "requests": [
+    "GET"
+   ],
+   "token": {
+    "stderr": "ERROR: (gcloud.auth.print-access-token) no credentialed accounts\n",
+    "code": 1
+   },
+   "costQuery": {
+    "stderr": "BigQuery error\n",
+    "code": 2
+   },
+   "servicesList": {
+    "stdout": "[{\"apiVersion\": \"serving.knative.dev/v1\", \"kind\": \"Service\", \"metadata\": {\"name\": \"studio\", \"creationTimestamp\": \"2025-01-01T00:00:00Z\", \"annotations\": {\"serving.knative.dev/creator\": \"osama@almadar.io\", \"serving.knative.dev/lastModified\": \"2026-10-12T08:00:00.000Z\"}, \"labels\": {\"cloud.googleapis.com/location\": \"europe-west4\"}}, \"status\": {\"url\": \"https://studio-x.run.app\", \"conditions\": [{\"type\": \"Ready\", \"status\": \"True\"}, {\"type\": \"ConfigurationsReady\", \"status\": \"True\"}], \"latestReadyRevisionName\": \"studio-00042-abc\"}}]"
+   },
+   "describe": {
+    "studio": {
+     "stderr": "ERROR: not found\n",
+     "code": 1
+    }
+   },
+   "enabled": {
+    "stdout": "[{\"name\": \"projects/1/services/run.googleapis.com\", \"config\": {\"name\": \"run.googleapis.com\", \"title\": \"run.googleapis.com\"}}, {\"name\": \"projects/1/services/bigquery.googleapis.com\", \"config\": {\"name\": \"bigquery.googleapis.com\", \"title\": \"bigquery.googleapis.com\"}}, {\"name\": \"projects/1/services/maps-backend.googleapis.com\", \"config\": {\"name\": \"maps-backend.googleapis.com\", \"title\": \"maps-backend.googleapis.com\"}}, {\"name\": \"projects/1/services/firestore.googleapis.com\", \"config\": {\"name\": \"firestore.googleapis.com\", \"title\": \"firestore.googleapis.com\"}}, {\"name\": \"projects/1/services/identitytoolkit.googleapis.com\", \"config\": {\"name\": \"identitytoolkit.googleapis.com\", \"title\": \"identitytoolkit.googleapis.com\"}}, {\"name\": \"projects/1/services/iam.googleapis.com\", \"config\": {\"name\": \"iam.googleapis.com\", \"title\": \"iam.googleapis.com\"}}]"
+   },
+   "billingQuery": {
+    "stderr": "BigQuery error\n",
+    "code": 2
+   }
+  },
+  {
+   "name": "a refused metric is empty but usage is still read; no service list; an empty billing rollup keeps the enabled services",
+   "requests": [
+    "GET",
+    "POST"
+   ],
+   "token": {
+    "stdout": "ya29.token\n"
+   },
+   "monitoring": {
+    "billable_instance_time": {
+     "status": 200,
+     "body": {
+      "timeSeries": [
+       {
+        "resource": {
+         "type": "cloud_run_revision",
+         "labels": {
+          "service_name": "studio",
+          "project_id": "kflow-b3a39"
+         }
+        },
+        "points": [
+         {
+          "value": {
+           "doubleValue": 100
+          }
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "request_count": {
+     "status": 403,
+     "body": {
+      "error": {
+       "message": "denied"
+      }
+     }
+    }
+   },
+   "costQuery": {
+    "stdout": "[]"
+   },
+   "servicesList": {
+    "stderr": "ERROR\n",
+    "code": 1
+   },
+   "describe": {},
+   "enabled": {
+    "stdout": "[{\"name\": \"projects/1/services/run.googleapis.com\", \"config\": {\"name\": \"run.googleapis.com\", \"title\": \"run.googleapis.com\"}}, {\"name\": \"projects/1/services/bigquery.googleapis.com\", \"config\": {\"name\": \"bigquery.googleapis.com\", \"title\": \"bigquery.googleapis.com\"}}]"
+   },
+   "billingQuery": {
+    "stdout": "[]"
+   }
+  }
+ ]
+}

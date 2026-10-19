@@ -1,0 +1,33 @@
+{
+ "gcloud auth print-access-token": [
+  {
+   "stdout": "ya29.token\n"
+  }
+ ],
+ "bq --project_id=kflow-b3a39 ls --format=json kflow-b3a39:billing_export": [
+  {
+   "stdout": "[{\"tableReference\":{\"tableId\":\"gcp_billing_export_resource_v1_01D132_70B90C_D90086\"}}]"
+  }
+ ],
+ "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT resource.name AS svc,   SUM(cost) AS gross,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS net FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE service.description = 'Cloud Run' AND DATE(usage_start_time) >= '2026-10-01' GROUP BY svc": [
+  {
+   "stdout": "[]"
+  }
+ ],
+ "gcloud run services list --project=kflow-b3a39 --format=json": [
+  {
+   "stderr": "ERROR\n",
+   "code": 1
+  }
+ ],
+ "gcloud services list --enabled --project=kflow-b3a39 --format=json": [
+  {
+   "stdout": "[{\"name\": \"projects/1/services/run.googleapis.com\", \"config\": {\"name\": \"run.googleapis.com\", \"title\": \"run.googleapis.com\"}}, {\"name\": \"projects/1/services/bigquery.googleapis.com\", \"config\": {\"name\": \"bigquery.googleapis.com\", \"title\": \"bigquery.googleapis.com\"}}]"
+  }
+ ],
+ "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT service.description AS service_name,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS total_cost,   currency FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE DATE(usage_start_time) >= '2026-10-01' GROUP BY service_name, currency ORDER BY total_cost DESC": [
+  {
+   "stdout": "[]"
+  }
+ ]
+}

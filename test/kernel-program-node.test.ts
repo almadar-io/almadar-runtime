@@ -1,6 +1,6 @@
 // The Node program host: a `.lolo` program composing std-llm runs on the kernel engine, the transport is a fake fetch
 // (recorded exchange), and the dispatch returns the program's external emits.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { isJsonObject, toWireValue, type EventPayload, type JsonValue } from '@almadar/core';
 import { emitPayload, KernelProgram, resolveProgramFile, type ProgramRun } from '../src/kernel/program-node.js';
@@ -75,6 +75,31 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel program host inbound hooks (EX
     try {
       const answer = await open.deliverInbound('nobody', { headers: {}, rawBody: '' });
       expect(answer.status).toBe(404);
+    } finally {
+      open.close();
+    }
+  });
+});
+
+describe.skipIf(KERNEL_DIR === undefined)('kernel program host clock', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('@now on the wasm kernel reads the JS clock, so a test freezes it by stubbing Date.now', async () => {
+    const open = await KernelProgram.open(await resolveProgramFile(fixture('clock-now')), { kernelDir: KERNEL_DIR ?? '' });
+    try {
+      vi.spyOn(Date, 'now').mockReturnValue(1_760_000_000_123);
+      expect((await open.dispatch('ClockOrbital', 'ASK_TIME', {})).emits.find((e) => e.event === 'TIME')?.payload).toEqual({ at: 1_760_000_000_123 });
+    } finally {
+      open.close();
+    }
+  });
+
+  it('control: unstubbed, @now is the system clock', async () => {
+    const open = await KernelProgram.open(await resolveProgramFile(fixture('clock-now')), { kernelDir: KERNEL_DIR ?? '' });
+    try {
+      const before = Date.now();
+      const at = (await open.dispatch('ClockOrbital', 'ASK_TIME', {})).emits.find((e) => e.event === 'TIME')?.payload?.at;
+      expect(typeof at === 'number' && at >= before && at <= Date.now()).toBe(true);
     } finally {
       open.close();
     }

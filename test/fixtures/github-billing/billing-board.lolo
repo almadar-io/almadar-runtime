@@ -1,0 +1,12 @@
+app github-billing-board [
+  version: "1.0.0",
+  description: "std-github-billing with the accounts the gha-almadar github route billed: the almadar-io organization and the itechdom user.",
+  egress: ["https://api.github.com"]
+]
+uses Billing from "std/behaviors/std-github-billing"
+
+orbital Billing = Billing.orbitals.GithubBillingOrbital {
+  traits { GithubBilling { config {
+    accounts: [{ name: "almadar-io", kind: "org" }, { name: "itechdom", kind: "user" }]
+  } } }
+}

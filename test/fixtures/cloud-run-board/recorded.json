@@ -1,0 +1,421 @@
+{
+ "recorded": [
+  {
+   "name": "usage, cost, three services and the billing rollup; a second load is cached",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "billing": {
+       "entries": [
+        {
+         "service": "Cloud Run",
+         "cost": 3.21,
+         "currency": "USD"
+        },
+        {
+         "service": "App Engine",
+         "cost": 0,
+         "currency": "USD"
+        },
+        {
+         "service": "BigQuery",
+         "cost": 0,
+         "currency": "USD"
+        },
+        {
+         "service": "Cloud Storage",
+         "cost": 0,
+         "currency": "USD"
+        }
+       ],
+       "totalCost": 3.21,
+       "currency": "USD",
+       "billingPeriod": "2026-10"
+      },
+      "cloudRun": {
+       "services": [
+        {
+         "name": "studio",
+         "region": "europe-west4",
+         "url": "https://studio-x.run.app",
+         "lastDeployed": "2026-10-12T08:00:00.000Z",
+         "latestRevision": "studio-00042-abc",
+         "status": "Active",
+         "creator": "osama@almadar.io",
+         "cpu": 2,
+         "memoryGb": 1,
+         "minInstances": 1,
+         "maxInstances": 5,
+         "concurrency": 250,
+         "gpu": null,
+         "gpuCount": 0,
+         "hourlyIfUp": 0.1818,
+         "activeInstanceHours": 1.5,
+         "avgInstances": 0.004,
+         "requestCount": 1234,
+         "hasUsageData": true,
+         "grossCostMtd": 12.3457,
+         "netCostMtd": 3.21,
+         "projectedMonthlyUsd": 6.72,
+         "hasCostData": true
+        },
+        {
+         "name": "inference",
+         "region": "us-central1",
+         "url": "https://inf.run.app",
+         "lastDeployed": "2026-10-01T00:00:00Z",
+         "latestRevision": "inference-00007",
+         "status": "Inactive",
+         "creator": "ci@almadar.io",
+         "cpu": 4,
+         "memoryGb": 16,
+         "minInstances": 0,
+         "maxInstances": 100,
+         "concurrency": 80,
+         "gpu": "nvidia-l4",
+         "gpuCount": 1,
+         "hourlyIfUp": 1.5368,
+         "activeInstanceHours": 0.2,
+         "avgInstances": 0.001,
+         "requestCount": 0,
+         "hasUsageData": true,
+         "grossCostMtd": 40.1,
+         "netCostMtd": -0.004,
+         "projectedMonthlyUsd": -0.01,
+         "hasCostData": true
+        },
+        {
+         "name": "quiet",
+         "region": "europe-west1",
+         "url": "",
+         "lastDeployed": "2025-07-01T00:00:00Z",
+         "latestRevision": "",
+         "status": "Unknown",
+         "creator": "",
+         "cpu": 1,
+         "memoryGb": 0.25,
+         "minInstances": 0,
+         "maxInstances": 3,
+         "concurrency": 80,
+         "gpu": "nvidia-l4",
+         "gpuCount": 2,
+         "hourlyIfUp": 1.4329,
+         "activeInstanceHours": 0,
+         "avgInstances": 0,
+         "requestCount": 7,
+         "hasUsageData": true,
+         "grossCostMtd": 0,
+         "netCostMtd": 0,
+         "projectedMonthlyUsd": 0,
+         "hasCostData": true
+        }
+       ],
+       "actualBilledUsd": 3.21,
+       "periodHoursElapsed": 348.5
+      },
+      "fetchedAt": "2026-10-15T12:30:45.678Z"
+     }
+    },
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "billing": {
+       "entries": [
+        {
+         "service": "Cloud Run",
+         "cost": 3.21,
+         "currency": "USD"
+        },
+        {
+         "service": "App Engine",
+         "cost": 0,
+         "currency": "USD"
+        },
+        {
+         "service": "BigQuery",
+         "cost": 0,
+         "currency": "USD"
+        },
+        {
+         "service": "Cloud Storage",
+         "cost": 0,
+         "currency": "USD"
+        }
+       ],
+       "totalCost": 3.21,
+       "currency": "USD",
+       "billingPeriod": "2026-10"
+      },
+      "cloudRun": {
+       "services": [
+        {
+         "name": "studio",
+         "region": "europe-west4",
+         "url": "https://studio-x.run.app",
+         "lastDeployed": "2026-10-12T08:00:00.000Z",
+         "latestRevision": "studio-00042-abc",
+         "status": "Active",
+         "creator": "osama@almadar.io",
+         "cpu": 2,
+         "memoryGb": 1,
+         "minInstances": 1,
+         "maxInstances": 5,
+         "concurrency": 250,
+         "gpu": null,
+         "gpuCount": 0,
+         "hourlyIfUp": 0.1818,
+         "activeInstanceHours": 1.5,
+         "avgInstances": 0.004,
+         "requestCount": 1234,
+         "hasUsageData": true,
+         "grossCostMtd": 12.3457,
+         "netCostMtd": 3.21,
+         "projectedMonthlyUsd": 6.72,
+         "hasCostData": true
+        },
+        {
+         "name": "inference",
+         "region": "us-central1",
+         "url": "https://inf.run.app",
+         "lastDeployed": "2026-10-01T00:00:00Z",
+         "latestRevision": "inference-00007",
+         "status": "Inactive",
+         "creator": "ci@almadar.io",
+         "cpu": 4,
+         "memoryGb": 16,
+         "minInstances": 0,
+         "maxInstances": 100,
+         "concurrency": 80,
+         "gpu": "nvidia-l4",
+         "gpuCount": 1,
+         "hourlyIfUp": 1.5368,
+         "activeInstanceHours": 0.2,
+         "avgInstances": 0.001,
+         "requestCount": 0,
+         "hasUsageData": true,
+         "grossCostMtd": 40.1,
+         "netCostMtd": -0.004,
+         "projectedMonthlyUsd": -0.01,
+         "hasCostData": true
+        },
+        {
+         "name": "quiet",
+         "region": "europe-west1",
+         "url": "",
+         "lastDeployed": "2025-07-01T00:00:00Z",
+         "latestRevision": "",
+         "status": "Unknown",
+         "creator": "",
+         "cpu": 1,
+         "memoryGb": 0.25,
+         "minInstances": 0,
+         "maxInstances": 3,
+         "concurrency": 80,
+         "gpu": "nvidia-l4",
+         "gpuCount": 2,
+         "hourlyIfUp": 1.4329,
+         "activeInstanceHours": 0,
+         "avgInstances": 0,
+         "requestCount": 7,
+         "hasUsageData": true,
+         "grossCostMtd": 0,
+         "netCostMtd": 0,
+         "projectedMonthlyUsd": 0,
+         "hasCostData": true
+        }
+       ],
+       "actualBilledUsd": 3.21,
+       "periodHoursElapsed": 348.5
+      },
+      "fetchedAt": "2026-10-15T12:30:45.678Z"
+     }
+    }
+   ],
+   "calls": [
+    "gcloud auth print-access-token",
+    "bq --project_id=kflow-b3a39 ls --format=json kflow-b3a39:billing_export",
+    "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT resource.name AS svc,   SUM(cost) AS gross,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS net FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE service.description = 'Cloud Run' AND DATE(usage_start_time) >= '2026-10-01' GROUP BY svc",
+    "gcloud run services list --project=kflow-b3a39 --format=json",
+    "gcloud run services describe quiet --region=europe-west1 --project=kflow-b3a39 --format=json",
+    "gcloud run services describe studio --region=europe-west4 --project=kflow-b3a39 --format=json",
+    "gcloud run services describe inference --region=us-central1 --project=kflow-b3a39 --format=json",
+    "gcloud services list --enabled --project=kflow-b3a39 --format=json",
+    "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT service.description AS service_name,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS total_cost,   currency FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE DATE(usage_start_time) >= '2026-10-01' GROUP BY service_name, currency ORDER BY total_cost DESC"
+   ],
+   "httpCalls": [
+    "/v3/projects/kflow-b3a39/timeSeries?aggregation.alignmentPeriod=1254646s&aggregation.crossSeriesReducer=REDUCE_SUM&aggregation.groupByFields=resource.label.\"service_name\"&aggregation.perSeriesAligner=ALIGN_SUM&filter=metric.type=\"run.googleapis.com/container/billable_instance_time\"&interval.endTime=2026-10-15T12:30:45.678Z&interval.startTime=2026-10-01T00:00:00.000Z auth=Bearer ya29.token",
+    "/v3/projects/kflow-b3a39/timeSeries?aggregation.alignmentPeriod=1254646s&aggregation.crossSeriesReducer=REDUCE_SUM&aggregation.groupByFields=resource.label.\"service_name\"&aggregation.perSeriesAligner=ALIGN_SUM&filter=metric.type=\"run.googleapis.com/request_count\"&interval.endTime=2026-10-15T12:30:45.678Z&interval.startTime=2026-10-01T00:00:00.000Z auth=Bearer ya29.token"
+   ]
+  },
+  {
+   "name": "no token, no cost, an unreadable describe, and billing from the enabled services only",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "billing": {
+       "entries": [
+        {
+         "service": "BigQuery",
+         "cost": 0,
+         "currency": "USD"
+        },
+        {
+         "service": "Cloud Run",
+         "cost": 0,
+         "currency": "USD"
+        },
+        {
+         "service": "Firebase Auth",
+         "cost": 0,
+         "currency": "USD"
+        },
+        {
+         "service": "Firestore",
+         "cost": 0,
+         "currency": "USD"
+        },
+        {
+         "service": "IAM",
+         "cost": 0,
+         "currency": "USD"
+        }
+       ],
+       "totalCost": 0,
+       "currency": "USD",
+       "billingPeriod": "2026-10"
+      },
+      "cloudRun": {
+       "services": [
+        {
+         "name": "studio",
+         "region": "europe-west4",
+         "url": "https://studio-x.run.app",
+         "lastDeployed": "2026-10-12T08:00:00.000Z",
+         "latestRevision": "studio-00042-abc",
+         "status": "Active",
+         "creator": "osama@almadar.io",
+         "cpu": 1,
+         "memoryGb": 0.5,
+         "minInstances": 0,
+         "maxInstances": 100,
+         "concurrency": 80,
+         "gpu": null,
+         "gpuCount": 0,
+         "hourlyIfUp": 0.0909,
+         "activeInstanceHours": 0,
+         "avgInstances": 0,
+         "requestCount": 0,
+         "hasUsageData": false,
+         "grossCostMtd": 0,
+         "netCostMtd": 0,
+         "projectedMonthlyUsd": 0,
+         "hasCostData": false
+        }
+       ],
+       "actualBilledUsd": 0,
+       "periodHoursElapsed": 348.5
+      },
+      "fetchedAt": "2026-10-15T12:30:45.678Z"
+     }
+    }
+   ],
+   "calls": [
+    "gcloud auth print-access-token",
+    "bq --project_id=kflow-b3a39 ls --format=json kflow-b3a39:billing_export",
+    "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT resource.name AS svc,   SUM(cost) AS gross,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS net FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE service.description = 'Cloud Run' AND DATE(usage_start_time) >= '2026-10-01' GROUP BY svc",
+    "gcloud run services list --project=kflow-b3a39 --format=json",
+    "gcloud run services describe studio --region=europe-west4 --project=kflow-b3a39 --format=json",
+    "gcloud services list --enabled --project=kflow-b3a39 --format=json",
+    "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT service.description AS service_name,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS total_cost,   currency FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE DATE(usage_start_time) >= '2026-10-01' GROUP BY service_name, currency ORDER BY total_cost DESC"
+   ],
+   "httpCalls": []
+  },
+  {
+   "name": "a refused metric is empty but usage is still read; no service list; an empty billing rollup keeps the enabled services",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "billing": {
+       "entries": [
+        {
+         "service": "BigQuery",
+         "cost": 0,
+         "currency": "USD"
+        },
+        {
+         "service": "Cloud Run",
+         "cost": 0,
+         "currency": "USD"
+        }
+       ],
+       "totalCost": 0,
+       "currency": "USD",
+       "billingPeriod": "2026-10"
+      },
+      "cloudRun": {
+       "services": [],
+       "actualBilledUsd": 0,
+       "periodHoursElapsed": 348.5
+      },
+      "fetchedAt": "2026-10-15T12:30:45.678Z"
+     }
+    },
+    {
+     "method": "POST",
+     "status": 200,
+     "body": {
+      "billing": {
+       "entries": [
+        {
+         "service": "BigQuery",
+         "cost": 0,
+         "currency": "USD"
+        },
+        {
+         "service": "Cloud Run",
+         "cost": 0,
+         "currency": "USD"
+        }
+       ],
+       "totalCost": 0,
+       "currency": "USD",
+       "billingPeriod": "2026-10"
+      },
+      "cloudRun": {
+       "services": [],
+       "actualBilledUsd": 0,
+       "periodHoursElapsed": 348.5
+      },
+      "fetchedAt": "2026-10-15T12:30:45.678Z"
+     }
+    }
+   ],
+   "calls": [
+    "gcloud auth print-access-token",
+    "bq --project_id=kflow-b3a39 ls --format=json kflow-b3a39:billing_export",
+    "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT resource.name AS svc,   SUM(cost) AS gross,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS net FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE service.description = 'Cloud Run' AND DATE(usage_start_time) >= '2026-10-01' GROUP BY svc",
+    "gcloud run services list --project=kflow-b3a39 --format=json",
+    "gcloud services list --enabled --project=kflow-b3a39 --format=json",
+    "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT service.description AS service_name,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS total_cost,   currency FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE DATE(usage_start_time) >= '2026-10-01' GROUP BY service_name, currency ORDER BY total_cost DESC",
+    "gcloud auth print-access-token",
+    "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT resource.name AS svc,   SUM(cost) AS gross,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS net FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE service.description = 'Cloud Run' AND DATE(usage_start_time) >= '2026-10-01' GROUP BY svc",
+    "gcloud run services list --project=kflow-b3a39 --format=json",
+    "gcloud services list --enabled --project=kflow-b3a39 --format=json",
+    "bq --project_id=kflow-b3a39 query --use_legacy_sql=false --format=json SELECT service.description AS service_name,   SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS total_cost,   currency FROM `kflow-b3a39.billing_export.gcp_billing_export_resource_v1_01D132_70B90C_D90086` WHERE DATE(usage_start_time) >= '2026-10-01' GROUP BY service_name, currency ORDER BY total_cost DESC"
+   ],
+   "httpCalls": [
+    "/v3/projects/kflow-b3a39/timeSeries?aggregation.alignmentPeriod=1254646s&aggregation.crossSeriesReducer=REDUCE_SUM&aggregation.groupByFields=resource.label.\"service_name\"&aggregation.perSeriesAligner=ALIGN_SUM&filter=metric.type=\"run.googleapis.com/container/billable_instance_time\"&interval.endTime=2026-10-15T12:30:45.678Z&interval.startTime=2026-10-01T00:00:00.000Z auth=Bearer ya29.token",
+    "/v3/projects/kflow-b3a39/timeSeries?aggregation.alignmentPeriod=1254646s&aggregation.crossSeriesReducer=REDUCE_SUM&aggregation.groupByFields=resource.label.\"service_name\"&aggregation.perSeriesAligner=ALIGN_SUM&filter=metric.type=\"run.googleapis.com/request_count\"&interval.endTime=2026-10-15T12:30:45.678Z&interval.startTime=2026-10-01T00:00:00.000Z auth=Bearer ya29.token",
+    "/v3/projects/kflow-b3a39/timeSeries?aggregation.alignmentPeriod=1254646s&aggregation.crossSeriesReducer=REDUCE_SUM&aggregation.groupByFields=resource.label.\"service_name\"&aggregation.perSeriesAligner=ALIGN_SUM&filter=metric.type=\"run.googleapis.com/container/billable_instance_time\"&interval.endTime=2026-10-15T12:30:45.678Z&interval.startTime=2026-10-01T00:00:00.000Z auth=Bearer ya29.token",
+    "/v3/projects/kflow-b3a39/timeSeries?aggregation.alignmentPeriod=1254646s&aggregation.crossSeriesReducer=REDUCE_SUM&aggregation.groupByFields=resource.label.\"service_name\"&aggregation.perSeriesAligner=ALIGN_SUM&filter=metric.type=\"run.googleapis.com/request_count\"&interval.endTime=2026-10-15T12:30:45.678Z&interval.startTime=2026-10-01T00:00:00.000Z auth=Bearer ya29.token"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,18 @@
+app cloud-run-board [
+  version: "1.0.0",
+  description: "std-cloud-run-board with the configuration the gha-almadar gcloud route used.",
+  exec: ["gcloud", "bq"],
+  env: ["PATH", "HOME"],
+  egress: ["https://monitoring.googleapis.com"]
+]
+uses Board from "std/behaviors/std-cloud-run-board"
+
+orbital Board = Board.orbitals.CloudRunBoardOrbital {
+  traits { CloudRunStatus { config {
+    project: "kflow-b3a39"
+    billingExportTable: "gcp_billing_export_resource_v1_01D132_70B90C_D90086"
+    resourceLevelExport: true
+    trackedServices: { "run.googleapis.com": "Cloud Run", "cloudbuild.googleapis.com": "Cloud Build", "firebasehosting.googleapis.com": "Firebase Hosting", "storage.googleapis.com": "Cloud Storage", "artifactregistry.googleapis.com": "Artifact Registry", "secretmanager.googleapis.com": "Secret Manager", "logging.googleapis.com": "Cloud Logging", "monitoring.googleapis.com": "Cloud Monitoring", "firebaseapphosting.googleapis.com": "Firebase App Hosting", "compute.googleapis.com": "Compute Engine", "container.googleapis.com": "Google Kubernetes Engine", "sqladmin.googleapis.com": "Cloud SQL", "bigquery.googleapis.com": "BigQuery", "cloudresourcemanager.googleapis.com": "Resource Manager", "iam.googleapis.com": "IAM", "firestore.googleapis.com": "Firestore", "identitytoolkit.googleapis.com": "Firebase Auth" }
+    gpuRatesPerSecond: { "nvidia-l4": { zonal: 0.0002909, noZonal: 0.0001867 } }
+  } } }
+}

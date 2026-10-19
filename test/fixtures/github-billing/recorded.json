@@ -1,0 +1,711 @@
+{
+ "recorded": [
+  {
+   "name": "an org with actions, storage, transfer and unpriced SKUs; a user with no usage",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "accounts": [
+       {
+        "name": "almadar-io",
+        "kind": "org",
+        "available": true,
+        "error": null,
+        "grossUsd": 13.2,
+        "netUsd": 2.23,
+        "discountUsd": 10.98,
+        "byProduct": [
+         {
+          "product": "actions",
+          "gross": 13.2,
+          "net": 2.2259,
+          "quantity": 2057,
+          "unit": "Minutes"
+         },
+         {
+          "product": "packages",
+          "gross": 0,
+          "net": 0,
+          "quantity": 81,
+          "unit": "GigabyteHours"
+         },
+         {
+          "product": "git_lfs",
+          "gross": 0,
+          "net": 0,
+          "quantity": 3,
+          "unit": "Gigabytes"
+         },
+         {
+          "product": "copilot",
+          "gross": 0,
+          "net": 0,
+          "quantity": 1,
+          "unit": "UserMonths"
+         },
+         {
+          "product": "other",
+          "gross": 0,
+          "net": 0,
+          "quantity": 2,
+          "unit": ""
+         }
+        ],
+        "bySku": [
+         {
+          "product": "actions",
+          "sku": "Actions Linux",
+          "unit": "Minutes",
+          "category": "compute",
+          "quantity": 1534.7,
+          "gross": 12.28,
+          "net": 1.4024
+         },
+         {
+          "product": "actions",
+          "sku": "Actions macOS 3-core",
+          "unit": "Minutes",
+          "category": "compute",
+          "quantity": 10,
+          "gross": 0.8,
+          "net": 0.8
+         },
+         {
+          "product": "actions",
+          "sku": "Actions storage",
+          "unit": "GigabyteHours",
+          "category": "storage",
+          "quantity": 512.1,
+          "gross": 0.12,
+          "net": 0.0235
+         },
+         {
+          "product": "packages",
+          "sku": "Packages storage",
+          "unit": "GigabyteHours",
+          "category": "storage",
+          "quantity": 80.5,
+          "gross": 0,
+          "net": 0
+         },
+         {
+          "product": "git_lfs",
+          "sku": "Git LFS bandwidth",
+          "unit": "Gigabytes",
+          "category": "transfer",
+          "quantity": 3.3,
+          "gross": 0,
+          "net": 0
+         },
+         {
+          "product": "copilot",
+          "sku": "Copilot seat storage",
+          "unit": "UserMonths",
+          "category": "storage",
+          "quantity": 1,
+          "gross": 0,
+          "net": 0
+         },
+         {
+          "product": "other",
+          "sku": "(unknown)",
+          "unit": "",
+          "category": "other",
+          "quantity": 2,
+          "gross": 0,
+          "net": 0
+         }
+        ],
+        "netByCategory": {
+         "compute": 2.2024,
+         "storage": 0.0235,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": [
+         {
+          "repo": "almadar-core",
+          "gross": 10,
+          "net": 0.0235
+         },
+         {
+          "repo": "almadar-ui",
+          "gross": 2.4,
+          "net": 1.402
+         },
+         {
+          "repo": "orbital-rust",
+          "gross": 0.8,
+          "net": 0.8
+         },
+         {
+          "repo": "almadar-std",
+          "gross": 0,
+          "net": 0.0004
+         }
+        ]
+       },
+       {
+        "name": "itechdom",
+        "kind": "user",
+        "available": true,
+        "error": null,
+        "grossUsd": 0,
+        "netUsd": 0,
+        "discountUsd": 0,
+        "byProduct": [],
+        "bySku": [],
+        "netByCategory": {
+         "compute": 0,
+         "storage": 0,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": []
+       }
+      ],
+      "period": "2026-10",
+      "totalGrossUsd": 13.2,
+      "totalNetUsd": 2.23,
+      "fetchedAt": "2026-10-19T13:22:38.249Z"
+     }
+    },
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "accounts": [
+       {
+        "name": "almadar-io",
+        "kind": "org",
+        "available": true,
+        "error": null,
+        "grossUsd": 13.2,
+        "netUsd": 2.23,
+        "discountUsd": 10.98,
+        "byProduct": [
+         {
+          "product": "actions",
+          "gross": 13.2,
+          "net": 2.2259,
+          "quantity": 2057,
+          "unit": "Minutes"
+         },
+         {
+          "product": "packages",
+          "gross": 0,
+          "net": 0,
+          "quantity": 81,
+          "unit": "GigabyteHours"
+         },
+         {
+          "product": "git_lfs",
+          "gross": 0,
+          "net": 0,
+          "quantity": 3,
+          "unit": "Gigabytes"
+         },
+         {
+          "product": "copilot",
+          "gross": 0,
+          "net": 0,
+          "quantity": 1,
+          "unit": "UserMonths"
+         },
+         {
+          "product": "other",
+          "gross": 0,
+          "net": 0,
+          "quantity": 2,
+          "unit": ""
+         }
+        ],
+        "bySku": [
+         {
+          "product": "actions",
+          "sku": "Actions Linux",
+          "unit": "Minutes",
+          "category": "compute",
+          "quantity": 1534.7,
+          "gross": 12.28,
+          "net": 1.4024
+         },
+         {
+          "product": "actions",
+          "sku": "Actions macOS 3-core",
+          "unit": "Minutes",
+          "category": "compute",
+          "quantity": 10,
+          "gross": 0.8,
+          "net": 0.8
+         },
+         {
+          "product": "actions",
+          "sku": "Actions storage",
+          "unit": "GigabyteHours",
+          "category": "storage",
+          "quantity": 512.1,
+          "gross": 0.12,
+          "net": 0.0235
+         },
+         {
+          "product": "packages",
+          "sku": "Packages storage",
+          "unit": "GigabyteHours",
+          "category": "storage",
+          "quantity": 80.5,
+          "gross": 0,
+          "net": 0
+         },
+         {
+          "product": "git_lfs",
+          "sku": "Git LFS bandwidth",
+          "unit": "Gigabytes",
+          "category": "transfer",
+          "quantity": 3.3,
+          "gross": 0,
+          "net": 0
+         },
+         {
+          "product": "copilot",
+          "sku": "Copilot seat storage",
+          "unit": "UserMonths",
+          "category": "storage",
+          "quantity": 1,
+          "gross": 0,
+          "net": 0
+         },
+         {
+          "product": "other",
+          "sku": "(unknown)",
+          "unit": "",
+          "category": "other",
+          "quantity": 2,
+          "gross": 0,
+          "net": 0
+         }
+        ],
+        "netByCategory": {
+         "compute": 2.2024,
+         "storage": 0.0235,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": [
+         {
+          "repo": "almadar-core",
+          "gross": 10,
+          "net": 0.0235
+         },
+         {
+          "repo": "almadar-ui",
+          "gross": 2.4,
+          "net": 1.402
+         },
+         {
+          "repo": "orbital-rust",
+          "gross": 0.8,
+          "net": 0.8
+         },
+         {
+          "repo": "almadar-std",
+          "gross": 0,
+          "net": 0.0004
+         }
+        ]
+       },
+       {
+        "name": "itechdom",
+        "kind": "user",
+        "available": true,
+        "error": null,
+        "grossUsd": 0,
+        "netUsd": 0,
+        "discountUsd": 0,
+        "byProduct": [],
+        "bySku": [],
+        "netByCategory": {
+         "compute": 0,
+         "storage": 0,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": []
+       }
+      ],
+      "period": "2026-10",
+      "totalGrossUsd": 13.2,
+      "totalNetUsd": 2.23,
+      "fetchedAt": "2026-10-19T13:22:38.249Z"
+     }
+    }
+   ],
+   "calls": [
+    "gh api /organizations/almadar-io/settings/billing/usage",
+    "gh api /users/itechdom/settings/billing/usage"
+   ]
+  },
+  {
+   "name": "a refresh reads again; the second read differs",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "accounts": [
+       {
+        "name": "almadar-io",
+        "kind": "org",
+        "available": true,
+        "error": null,
+        "grossUsd": 12.28,
+        "netUsd": 1.4,
+        "discountUsd": 10.88,
+        "byProduct": [
+         {
+          "product": "actions",
+          "gross": 12.28,
+          "net": 1.402,
+          "quantity": 1535,
+          "unit": "Minutes"
+         }
+        ],
+        "bySku": [
+         {
+          "product": "actions",
+          "sku": "Actions Linux",
+          "unit": "Minutes",
+          "category": "compute",
+          "quantity": 1534.7,
+          "gross": 12.28,
+          "net": 1.402
+         }
+        ],
+        "netByCategory": {
+         "compute": 1.402,
+         "storage": 0,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": [
+         {
+          "repo": "almadar-core",
+          "gross": 9.88,
+          "net": 0
+         },
+         {
+          "repo": "almadar-ui",
+          "gross": 2.4,
+          "net": 1.402
+         }
+        ]
+       },
+       {
+        "name": "itechdom",
+        "kind": "user",
+        "available": true,
+        "error": null,
+        "grossUsd": 0.04,
+        "netUsd": 0,
+        "discountUsd": 0.04,
+        "byProduct": [
+         {
+          "product": "actions",
+          "gross": 0.04,
+          "net": 0,
+          "quantity": 5,
+          "unit": "Minutes"
+         }
+        ],
+        "bySku": [
+         {
+          "product": "actions",
+          "sku": "Actions Linux",
+          "unit": "Minutes",
+          "category": "compute",
+          "quantity": 5,
+          "gross": 0.04,
+          "net": 0
+         }
+        ],
+        "netByCategory": {
+         "compute": 0,
+         "storage": 0,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": [
+         {
+          "repo": "kflow.ai",
+          "gross": 0.04,
+          "net": 0
+         }
+        ]
+       }
+      ],
+      "period": "2026-10",
+      "totalGrossUsd": 12.32,
+      "totalNetUsd": 1.4,
+      "fetchedAt": "2026-10-19T13:22:38.285Z"
+     }
+    },
+    {
+     "method": "POST",
+     "status": 200,
+     "body": {
+      "accounts": [
+       {
+        "name": "almadar-io",
+        "kind": "org",
+        "available": true,
+        "error": null,
+        "grossUsd": 0.92,
+        "netUsd": 0.82,
+        "discountUsd": 0.1,
+        "byProduct": [
+         {
+          "product": "actions",
+          "gross": 0.92,
+          "net": 0.8235,
+          "quantity": 522,
+          "unit": "Minutes"
+         }
+        ],
+        "bySku": [
+         {
+          "product": "actions",
+          "sku": "Actions macOS 3-core",
+          "unit": "Minutes",
+          "category": "compute",
+          "quantity": 10,
+          "gross": 0.8,
+          "net": 0.8
+         },
+         {
+          "product": "actions",
+          "sku": "Actions storage",
+          "unit": "GigabyteHours",
+          "category": "storage",
+          "quantity": 512.1,
+          "gross": 0.12,
+          "net": 0.0235
+         }
+        ],
+        "netByCategory": {
+         "compute": 0.8,
+         "storage": 0.0235,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": [
+         {
+          "repo": "orbital-rust",
+          "gross": 0.8,
+          "net": 0.8
+         },
+         {
+          "repo": "almadar-core",
+          "gross": 0.12,
+          "net": 0.0235
+         }
+        ]
+       },
+       {
+        "name": "itechdom",
+        "kind": "user",
+        "available": true,
+        "error": null,
+        "grossUsd": 0.04,
+        "netUsd": 0,
+        "discountUsd": 0.04,
+        "byProduct": [
+         {
+          "product": "actions",
+          "gross": 0.04,
+          "net": 0,
+          "quantity": 5,
+          "unit": "Minutes"
+         }
+        ],
+        "bySku": [
+         {
+          "product": "actions",
+          "sku": "Actions Linux",
+          "unit": "Minutes",
+          "category": "compute",
+          "quantity": 5,
+          "gross": 0.04,
+          "net": 0
+         }
+        ],
+        "netByCategory": {
+         "compute": 0,
+         "storage": 0,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": [
+         {
+          "repo": "kflow.ai",
+          "gross": 0.04,
+          "net": 0
+         }
+        ]
+       }
+      ],
+      "period": "2026-10",
+      "totalGrossUsd": 0.96,
+      "totalNetUsd": 0.82,
+      "fetchedAt": "2026-10-19T13:22:38.313Z"
+     }
+    }
+   ],
+   "calls": [
+    "gh api /organizations/almadar-io/settings/billing/usage",
+    "gh api /organizations/almadar-io/settings/billing/usage",
+    "gh api /users/itechdom/settings/billing/usage",
+    "gh api /users/itechdom/settings/billing/usage"
+   ]
+  },
+  {
+   "name": "an org without enhanced billing and a user reply that is not JSON",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "accounts": [
+       {
+        "name": "almadar-io",
+        "kind": "org",
+        "available": false,
+        "error": "Billing usage unavailable (404) — not on enhanced billing, or missing scope",
+        "grossUsd": 0,
+        "netUsd": 0,
+        "discountUsd": 0,
+        "byProduct": [],
+        "bySku": [],
+        "netByCategory": {
+         "compute": 0,
+         "storage": 0,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": []
+       },
+       {
+        "name": "itechdom",
+        "kind": "user",
+        "available": false,
+        "error": "Failed to parse billing usage response",
+        "grossUsd": 0,
+        "netUsd": 0,
+        "discountUsd": 0,
+        "byProduct": [],
+        "bySku": [],
+        "netByCategory": {
+         "compute": 0,
+         "storage": 0,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": []
+       }
+      ],
+      "period": "2026-10",
+      "totalGrossUsd": 0,
+      "totalNetUsd": 0,
+      "fetchedAt": "2026-10-19T13:22:38.342Z"
+     }
+    }
+   ],
+   "calls": [
+    "gh api /organizations/almadar-io/settings/billing/usage",
+    "gh api /users/itechdom/settings/billing/usage"
+   ]
+  },
+  {
+   "name": "usage without a usageItems list counts as none",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "accounts": [
+       {
+        "name": "almadar-io",
+        "kind": "org",
+        "available": true,
+        "error": null,
+        "grossUsd": 0,
+        "netUsd": 0,
+        "discountUsd": 0,
+        "byProduct": [],
+        "bySku": [],
+        "netByCategory": {
+         "compute": 0,
+         "storage": 0,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": []
+       },
+       {
+        "name": "itechdom",
+        "kind": "user",
+        "available": true,
+        "error": null,
+        "grossUsd": 0.01,
+        "netUsd": 0.01,
+        "discountUsd": 0,
+        "byProduct": [
+         {
+          "product": "actions",
+          "gross": 0.01,
+          "net": 0.005,
+          "quantity": 1,
+          "unit": "Minutes"
+         }
+        ],
+        "bySku": [
+         {
+          "product": "actions",
+          "sku": "Actions Linux",
+          "unit": "Minutes",
+          "category": "compute",
+          "quantity": 1,
+          "gross": 0.01,
+          "net": 0.005
+         }
+        ],
+        "netByCategory": {
+         "compute": 0.005,
+         "storage": 0,
+         "transfer": 0,
+         "other": 0
+        },
+        "repos": [
+         {
+          "repo": "x",
+          "gross": 0.01,
+          "net": 0.005
+         }
+        ]
+       }
+      ],
+      "period": "2026-10",
+      "totalGrossUsd": 0.01,
+      "totalNetUsd": 0.01,
+      "fetchedAt": "2026-10-19T13:22:38.371Z"
+     }
+    }
+   ],
+   "calls": [
+    "gh api /organizations/almadar-io/settings/billing/usage",
+    "gh api /users/itechdom/settings/billing/usage"
+   ]
+  }
+ ]
+}

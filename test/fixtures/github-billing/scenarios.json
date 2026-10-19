@@ -1,0 +1,305 @@
+{
+ "accounts": [
+  {
+   "name": "almadar-io",
+   "kind": "org"
+  },
+  {
+   "name": "itechdom",
+   "kind": "user"
+  }
+ ],
+ "scenarios": [
+  {
+   "name": "an org with actions, storage, transfer and unpriced SKUs; a user with no usage",
+   "requests": [
+    "GET",
+    "GET"
+   ],
+   "replies": {
+    "almadar-io": [
+     {
+      "status": 200,
+      "body": {
+       "usageItems": [
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "actions",
+         "sku": "Actions Linux",
+         "quantity": 1234.4,
+         "unitType": "Minutes",
+         "pricePerUnit": 0.008,
+         "grossAmount": 9.875,
+         "discountAmount": 9.875,
+         "netAmount": 0.0,
+         "organizationName": "almadar-io",
+         "repositoryName": "almadar-core"
+        },
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "actions",
+         "sku": "Actions Linux",
+         "quantity": 300.26,
+         "unitType": "Minutes",
+         "pricePerUnit": 0.008,
+         "grossAmount": 2.402,
+         "discountAmount": 1.0,
+         "netAmount": 1.402,
+         "organizationName": "almadar-io",
+         "repositoryName": "almadar-ui"
+        },
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "actions",
+         "sku": "Actions macOS 3-core",
+         "quantity": 10,
+         "unitType": "Minutes",
+         "pricePerUnit": 0.008,
+         "grossAmount": 0.8,
+         "discountAmount": 0,
+         "netAmount": 0.8,
+         "organizationName": "almadar-io",
+         "repositoryName": "orbital-rust"
+        },
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "actions",
+         "sku": "Actions storage",
+         "quantity": 512.123,
+         "unitType": "GigabyteHours",
+         "pricePerUnit": 0.008,
+         "grossAmount": 0.12345,
+         "discountAmount": 0.1,
+         "netAmount": 0.02345,
+         "organizationName": "almadar-io",
+         "repositoryName": "almadar-core"
+        },
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "packages",
+         "sku": "Packages storage",
+         "quantity": 80.5,
+         "unitType": "GigabyteHours",
+         "pricePerUnit": 0.008,
+         "grossAmount": 0.0,
+         "discountAmount": 0.0,
+         "netAmount": 0.0,
+         "organizationName": "almadar-io"
+        },
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "git_lfs",
+         "sku": "Git LFS bandwidth",
+         "quantity": 3.33333,
+         "unitType": "Gigabytes",
+         "pricePerUnit": 0.008,
+         "grossAmount": 0.0,
+         "discountAmount": 0.0,
+         "netAmount": 0.0,
+         "organizationName": "almadar-io"
+        },
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "copilot",
+         "sku": "Copilot seat storage",
+         "quantity": 1,
+         "unitType": "UserMonths",
+         "pricePerUnit": 0.008,
+         "grossAmount": 0.0,
+         "discountAmount": 0.0,
+         "netAmount": 0.0,
+         "organizationName": "almadar-io"
+        },
+        {
+         "date": "2026-10-02T00:00:00Z",
+         "quantity": 2,
+         "grossAmount": 0.0,
+         "netAmount": 0.0
+        },
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "actions",
+         "sku": "Actions Linux",
+         "quantity": 0.05,
+         "unitType": "Minutes",
+         "pricePerUnit": 0.008,
+         "grossAmount": 0.0004,
+         "discountAmount": 0,
+         "netAmount": 0.0004,
+         "organizationName": "almadar-io",
+         "repositoryName": "almadar-std"
+        }
+       ]
+      }
+     }
+    ],
+    "itechdom": [
+     {
+      "status": 200,
+      "body": {
+       "usageItems": []
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "a refresh reads again; the second read differs",
+   "requests": [
+    "GET",
+    "POST"
+   ],
+   "replies": {
+    "almadar-io": [
+     {
+      "status": 200,
+      "body": {
+       "usageItems": [
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "actions",
+         "sku": "Actions Linux",
+         "quantity": 1234.4,
+         "unitType": "Minutes",
+         "pricePerUnit": 0.008,
+         "grossAmount": 9.875,
+         "discountAmount": 9.875,
+         "netAmount": 0.0,
+         "organizationName": "almadar-io",
+         "repositoryName": "almadar-core"
+        },
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "actions",
+         "sku": "Actions Linux",
+         "quantity": 300.26,
+         "unitType": "Minutes",
+         "pricePerUnit": 0.008,
+         "grossAmount": 2.402,
+         "discountAmount": 1.0,
+         "netAmount": 1.402,
+         "organizationName": "almadar-io",
+         "repositoryName": "almadar-ui"
+        }
+       ]
+      }
+     },
+     {
+      "status": 200,
+      "body": {
+       "usageItems": [
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "actions",
+         "sku": "Actions macOS 3-core",
+         "quantity": 10,
+         "unitType": "Minutes",
+         "pricePerUnit": 0.008,
+         "grossAmount": 0.8,
+         "discountAmount": 0,
+         "netAmount": 0.8,
+         "organizationName": "almadar-io",
+         "repositoryName": "orbital-rust"
+        },
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "actions",
+         "sku": "Actions storage",
+         "quantity": 512.123,
+         "unitType": "GigabyteHours",
+         "pricePerUnit": 0.008,
+         "grossAmount": 0.12345,
+         "discountAmount": 0.1,
+         "netAmount": 0.02345,
+         "organizationName": "almadar-io",
+         "repositoryName": "almadar-core"
+        }
+       ]
+      }
+     }
+    ],
+    "itechdom": [
+     {
+      "status": 200,
+      "body": {
+       "usageItems": [
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "actions",
+         "sku": "Actions Linux",
+         "quantity": 5,
+         "unitType": "Minutes",
+         "pricePerUnit": 0.008,
+         "grossAmount": 0.04,
+         "discountAmount": 0.04,
+         "netAmount": 0.0,
+         "organizationName": "almadar-io",
+         "repositoryName": "kflow.ai"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "an org without enhanced billing and a user reply that is not JSON",
+   "requests": [
+    "GET"
+   ],
+   "replies": {
+    "almadar-io": [
+     {
+      "status": 404,
+      "body": {
+       "message": "Not Found",
+       "documentation_url": "https://docs.github.com/rest"
+      }
+     }
+    ],
+    "itechdom": [
+     {
+      "status": 200,
+      "raw": "<html>maintenance</html>"
+     }
+    ]
+   }
+  },
+  {
+   "name": "usage without a usageItems list counts as none",
+   "requests": [
+    "GET"
+   ],
+   "replies": {
+    "almadar-io": [
+     {
+      "status": 200,
+      "body": {}
+     }
+    ],
+    "itechdom": [
+     {
+      "status": 200,
+      "body": {
+       "usageItems": [
+        {
+         "date": "2026-10-01T00:00:00Z",
+         "product": "actions",
+         "sku": "Actions Linux",
+         "quantity": 1,
+         "unitType": "Minutes",
+         "pricePerUnit": 0.008,
+         "grossAmount": 0.005,
+         "discountAmount": 0.0,
+         "netAmount": 0.005,
+         "organizationName": "almadar-io",
+         "repositoryName": "x"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

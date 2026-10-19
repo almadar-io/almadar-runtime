@@ -164,4 +164,42 @@ describe.skipIf(KERNEL_DIR === undefined)('std-github on the kernel', () => {
       p.close();
     }
   });
+
+  const BILLING = ['GITHUB_BILLING_USAGE_ANSWERED', 'GITHUB_BILLING_USAGE_FAILED'];
+  const item = { product: 'actions', sku: 'Actions Linux', quantity: 10, unitType: 'Minutes', grossAmount: 0.08, discountAmount: 0.08, netAmount: 0, repositoryName: 'a' };
+
+  it('billing usage reads the org path with the month and answers the usage items', async () => {
+    const t = github([{ status: 200, body: JSON.stringify({ usageItems: [item] }) }]);
+    const p = await open(t);
+    try {
+      expect(await answer(p, 'GITHUB_BILLING_USAGE', { account: 'acme', kind: 'org', year: 2026, month: 10 }, BILLING)).toEqual({ event: 'GITHUB_BILLING_USAGE_ANSWERED', payload: { account: 'acme', kind: 'org', year: 2026, month: 10, items: [item] } });
+      const url = new URL(t.sent[0].url);
+      expect([t.sent.length, url.origin + url.pathname, url.searchParams.get('year'), url.searchParams.get('month')]).toEqual([1, 'https://api.github.com/organizations/acme/settings/billing/usage', '2026', '10']);
+    } finally {
+      p.close();
+    }
+  });
+
+  it('control: a user account reads the users path, and a report without usageItems has none', async () => {
+    const t = github([{ status: 200, body: '{}' }]);
+    const p = await open(t);
+    try {
+      expect((await answer(p, 'GITHUB_BILLING_USAGE', { account: 'octo', kind: 'user', year: 2026, month: 1 }, BILLING)).payload).toMatchObject({ items: [] });
+      const url = new URL(t.sent[0].url);
+      expect([url.pathname, url.searchParams.get('year'), url.searchParams.get('month')]).toEqual(['/users/octo/settings/billing/usage', '2026', '1']);
+    } finally {
+      p.close();
+    }
+  });
+
+  it('edge: a 404 fails with GitHub\'s message, a body that is not JSON fails PARSE_ERROR', async () => {
+    const p = await open(github([{ status: 404, body: '{"message":"Not Found"}' }, { status: 200, body: '<html>maintenance</html>' }]));
+    try {
+      expect(await answer(p, 'GITHUB_BILLING_USAGE', { account: 'acme', kind: 'org', year: 2026, month: 10 }, BILLING)).toEqual({ event: 'GITHUB_BILLING_USAGE_FAILED', payload: { account: 'acme', kind: 'org', status: 404, code: 'SERVICE_ERROR', message: 'GitHub API request failed: Not Found' } });
+      expect((await answer(p, 'GITHUB_BILLING_USAGE', { account: 'octo', kind: 'user', year: 2026, month: 10 }, BILLING)).payload).toMatchObject({ account: 'octo', status: 200, code: 'PARSE_ERROR' });
+    } finally {
+      p.close();
+    }
+  });
 });
+
