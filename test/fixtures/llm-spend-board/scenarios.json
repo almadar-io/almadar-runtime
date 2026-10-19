@@ -1,0 +1,359 @@
+{
+ "traceOrigin": "http://127.0.0.1:3999",
+ "scenarios": [
+  {
+   "name": "every provider answers, the trace reports usage priced from the table; cached, then a refresh with lower balances spends",
+   "keys": [
+    "ANTHROPIC_API_KEY",
+    "OPEN_ROUTER_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "KIMI_API_KEY"
+   ],
+   "trace": true,
+   "prices": [
+    {
+     "provider": "openai",
+     "model": "gpt-4o",
+     "promptPer1K": 0.005,
+     "completionPer1K": 0.015
+    },
+    {
+     "provider": "deepseek",
+     "model": "deepseek-v4-flash",
+     "promptPer1K": 0.0001,
+     "completionPer1K": 0.0002
+    }
+   ],
+   "requests": [
+    "GET",
+    "GET",
+    "POST"
+   ],
+   "replies": {
+    "openrouter": [
+     {
+      "status": 200,
+      "body": {
+       "data": {
+        "label": "k",
+        "usage": 12.5,
+        "limit": null,
+        "is_free_tier": false
+       }
+      }
+     },
+     {
+      "status": 200,
+      "body": {
+       "data": {
+        "label": "k",
+        "usage": 12.5,
+        "limit": null,
+        "is_free_tier": false
+       }
+      }
+     }
+    ],
+    "deepseek": [
+     {
+      "status": 200,
+      "body": {
+       "balance_infos": [
+        {
+         "currency": "CNY",
+         "total_balance": "110.50",
+         "granted_balance": "0",
+         "topped_up_balance": "110.50"
+        }
+       ]
+      }
+     },
+     {
+      "status": 200,
+      "body": {
+       "balance_infos": [
+        {
+         "currency": "CNY",
+         "total_balance": "108.25",
+         "granted_balance": "0",
+         "topped_up_balance": "108.25"
+        }
+       ]
+      }
+     }
+    ],
+    "kimi": [
+     {
+      "status": 200,
+      "body": {
+       "data": {
+        "available_balance": 42.0,
+        "voucher_balance": 0,
+        "cash_balance": 42.0
+       }
+      }
+     },
+     {
+      "status": 200,
+      "body": {
+       "data": {
+        "available_balance": 41.9,
+        "voucher_balance": 0,
+        "cash_balance": 41.9
+       }
+      }
+     }
+    ],
+    "trace": [
+     {
+      "status": 200,
+      "body": [
+       {
+        "seq": 0,
+        "atMs": 1760695200000,
+        "seed": "L.LLM_GENERATE",
+        "outcomes": [
+         {
+          "emits": [
+           {
+            "event": "LLM_USAGE_REPORTED",
+            "payload": {
+             "provider": "openai",
+             "model": "gpt-4o",
+             "action": "generate",
+             "inputTokens": 1000,
+             "outputTokens": 200
+            }
+           },
+           {
+            "event": "LLM_GENERATE_RESULT",
+            "payload": {
+             "content": "x"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "seq": 1,
+        "atMs": 1760781600000,
+        "seed": "L.LLM_GENERATE",
+        "outcomes": [
+         {
+          "emits": [
+           {
+            "event": "LLM_USAGE_REPORTED",
+            "payload": {
+             "provider": "openai",
+             "model": "gpt-4o",
+             "action": "generate",
+             "inputTokens": 500,
+             "outputTokens": 100
+            }
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "seq": 2,
+        "atMs": 1760781600000,
+        "seed": "L.LLM_GENERATE",
+        "outcomes": [
+         {
+          "emits": [
+           {
+            "event": "LLM_USAGE_REPORTED",
+            "payload": {
+             "provider": "openai",
+             "model": "gpt-4o",
+             "action": "generate",
+             "inputTokens": null,
+             "outputTokens": null
+            }
+           }
+          ]
+         },
+         {
+          "emits": [
+           {
+            "event": "LLM_USAGE_REPORTED",
+            "payload": {
+             "provider": "deepseek",
+             "model": "deepseek-v4-flash",
+             "action": "generate",
+             "inputTokens": 40,
+             "outputTokens": 10
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "status": 200,
+      "body": [
+       {
+        "seq": 0,
+        "atMs": 1760695200000,
+        "seed": "L.LLM_GENERATE",
+        "outcomes": [
+         {
+          "emits": [
+           {
+            "event": "LLM_USAGE_REPORTED",
+            "payload": {
+             "provider": "openai",
+             "model": "gpt-4o",
+             "action": "generate",
+             "inputTokens": 1000,
+             "outputTokens": 200
+            }
+           },
+           {
+            "event": "LLM_GENERATE_RESULT",
+            "payload": {
+             "content": "x"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "seq": 1,
+        "atMs": 1760781600000,
+        "seed": "L.LLM_GENERATE",
+        "outcomes": [
+         {
+          "emits": [
+           {
+            "event": "LLM_USAGE_REPORTED",
+            "payload": {
+             "provider": "openai",
+             "model": "gpt-4o",
+             "action": "generate",
+             "inputTokens": 500,
+             "outputTokens": 100
+            }
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "seq": 2,
+        "atMs": 1760781600000,
+        "seed": "L.LLM_GENERATE",
+        "outcomes": [
+         {
+          "emits": [
+           {
+            "event": "LLM_USAGE_REPORTED",
+            "payload": {
+             "provider": "openai",
+             "model": "gpt-4o",
+             "action": "generate",
+             "inputTokens": null,
+             "outputTokens": null
+            }
+           }
+          ]
+         },
+         {
+          "emits": [
+           {
+            "event": "LLM_USAGE_REPORTED",
+            "payload": {
+             "provider": "deepseek",
+             "model": "deepseek-v4-flash",
+             "action": "generate",
+             "inputTokens": 40,
+             "outputTokens": 10
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "no provider key, no trace server, no price table",
+   "keys": [],
+   "trace": false,
+   "prices": null,
+   "requests": [
+    "GET"
+   ],
+   "replies": {}
+  },
+  {
+   "name": "a refused key, an unreachable provider, a trace server without a trace",
+   "keys": [
+    "OPEN_ROUTER_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "KIMI_API_KEY"
+   ],
+   "trace": true,
+   "prices": [
+    {
+     "provider": "openai",
+     "model": "gpt-4o",
+     "promptPer1K": 0.005,
+     "completionPer1K": 0.015
+    },
+    {
+     "provider": "deepseek",
+     "model": "deepseek-v4-flash",
+     "promptPer1K": 0.0001,
+     "completionPer1K": 0.0002
+    }
+   ],
+   "requests": [
+    "GET"
+   ],
+   "replies": {
+    "openrouter": [
+     {
+      "status": 401,
+      "body": {
+       "error": {
+        "message": "No auth credentials found"
+       }
+      }
+     }
+    ],
+    "deepseek": [
+     "unreachable"
+    ],
+    "kimi": [
+     {
+      "status": 200,
+      "body": {
+       "data": {
+        "available_balance": 5,
+        "voucher_balance": 0,
+        "cash_balance": 5
+       }
+      }
+     }
+    ],
+    "trace": [
+     {
+      "status": 503,
+      "body": {
+       "error": "down"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

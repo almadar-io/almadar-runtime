@@ -1,0 +1,493 @@
+{
+ "recorded": [
+  {
+   "name": "every provider answers, the trace reports usage priced from the table; cached, then a refresh with lower balances spends",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "providers": {
+       "anthropic": {
+        "available": true,
+        "currency": "USD"
+       },
+       "openrouter": {
+        "available": true,
+        "usage": 12.5,
+        "actualSpend": 12.5,
+        "currency": "USD"
+       },
+       "deepseek": {
+        "available": true,
+        "balance": 110.5,
+        "currency": "CNY"
+       },
+       "kimi": {
+        "available": true,
+        "balance": 42,
+        "currency": "CNY"
+       }
+      },
+      "usage": {
+       "totalCalls": 4,
+       "inputTokens": 1540,
+       "outputTokens": 310,
+       "unreportedCalls": 1,
+       "totalCost": 0.012006000000000001,
+       "byModel": [
+        {
+         "provider": "openai",
+         "model": "gpt-4o",
+         "calls": 3,
+         "inputTokens": 1500,
+         "outputTokens": 300,
+         "unreportedCalls": 1,
+         "cost": 0.012
+        },
+        {
+         "provider": "deepseek",
+         "model": "deepseek-v4-flash",
+         "calls": 1,
+         "inputTokens": 40,
+         "outputTokens": 10,
+         "unreportedCalls": 0,
+         "cost": 0.000006000000000000001
+        }
+       ],
+       "byDay": [
+        {
+         "date": "2025-10-18",
+         "calls": 3,
+         "inputTokens": 540,
+         "outputTokens": 110,
+         "cost": 0.004006
+        },
+        {
+         "date": "2025-10-17",
+         "calls": 1,
+         "inputTokens": 1000,
+         "outputTokens": 200,
+         "cost": 0.008
+        }
+       ],
+       "recentCalls": [
+        {
+         "at": "2025-10-18T10:00:00.000Z",
+         "provider": "deepseek",
+         "model": "deepseek-v4-flash",
+         "action": "generate",
+         "inputTokens": 40,
+         "outputTokens": 10,
+         "cost": 0.000006000000000000001
+        },
+        {
+         "at": "2025-10-18T10:00:00.000Z",
+         "provider": "openai",
+         "model": "gpt-4o",
+         "action": "generate",
+         "inputTokens": null,
+         "outputTokens": null,
+         "cost": 0
+        },
+        {
+         "at": "2025-10-18T10:00:00.000Z",
+         "provider": "openai",
+         "model": "gpt-4o",
+         "action": "generate",
+         "inputTokens": 500,
+         "outputTokens": 100,
+         "cost": 0.004
+        },
+        {
+         "at": "2025-10-17T10:00:00.000Z",
+         "provider": "openai",
+         "model": "gpt-4o",
+         "action": "generate",
+         "inputTokens": 1000,
+         "outputTokens": 200,
+         "cost": 0.008
+        }
+       ],
+       "source": "http://127.0.0.1:3999/api/trace",
+       "error": null
+      },
+      "modelPricing": [
+       {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "promptPer1K": 0.005,
+        "completionPer1K": 0.015
+       },
+       {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "promptPer1K": 0.0001,
+        "completionPer1K": 0.0002
+       }
+      ],
+      "fetchedAt": "2026-10-19T13:57:01.833Z"
+     }
+    },
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "providers": {
+       "anthropic": {
+        "available": true,
+        "currency": "USD"
+       },
+       "openrouter": {
+        "available": true,
+        "usage": 12.5,
+        "actualSpend": 12.5,
+        "currency": "USD"
+       },
+       "deepseek": {
+        "available": true,
+        "balance": 110.5,
+        "currency": "CNY"
+       },
+       "kimi": {
+        "available": true,
+        "balance": 42,
+        "currency": "CNY"
+       }
+      },
+      "usage": {
+       "totalCalls": 4,
+       "inputTokens": 1540,
+       "outputTokens": 310,
+       "unreportedCalls": 1,
+       "totalCost": 0.012006000000000001,
+       "byModel": [
+        {
+         "provider": "openai",
+         "model": "gpt-4o",
+         "calls": 3,
+         "inputTokens": 1500,
+         "outputTokens": 300,
+         "unreportedCalls": 1,
+         "cost": 0.012
+        },
+        {
+         "provider": "deepseek",
+         "model": "deepseek-v4-flash",
+         "calls": 1,
+         "inputTokens": 40,
+         "outputTokens": 10,
+         "unreportedCalls": 0,
+         "cost": 0.000006000000000000001
+        }
+       ],
+       "byDay": [
+        {
+         "date": "2025-10-18",
+         "calls": 3,
+         "inputTokens": 540,
+         "outputTokens": 110,
+         "cost": 0.004006
+        },
+        {
+         "date": "2025-10-17",
+         "calls": 1,
+         "inputTokens": 1000,
+         "outputTokens": 200,
+         "cost": 0.008
+        }
+       ],
+       "recentCalls": [
+        {
+         "at": "2025-10-18T10:00:00.000Z",
+         "provider": "deepseek",
+         "model": "deepseek-v4-flash",
+         "action": "generate",
+         "inputTokens": 40,
+         "outputTokens": 10,
+         "cost": 0.000006000000000000001
+        },
+        {
+         "at": "2025-10-18T10:00:00.000Z",
+         "provider": "openai",
+         "model": "gpt-4o",
+         "action": "generate",
+         "inputTokens": null,
+         "outputTokens": null,
+         "cost": 0
+        },
+        {
+         "at": "2025-10-18T10:00:00.000Z",
+         "provider": "openai",
+         "model": "gpt-4o",
+         "action": "generate",
+         "inputTokens": 500,
+         "outputTokens": 100,
+         "cost": 0.004
+        },
+        {
+         "at": "2025-10-17T10:00:00.000Z",
+         "provider": "openai",
+         "model": "gpt-4o",
+         "action": "generate",
+         "inputTokens": 1000,
+         "outputTokens": 200,
+         "cost": 0.008
+        }
+       ],
+       "source": "http://127.0.0.1:3999/api/trace",
+       "error": null
+      },
+      "modelPricing": [
+       {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "promptPer1K": 0.005,
+        "completionPer1K": 0.015
+       },
+       {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "promptPer1K": 0.0001,
+        "completionPer1K": 0.0002
+       }
+      ],
+      "fetchedAt": "2026-10-19T13:57:01.833Z"
+     }
+    },
+    {
+     "method": "POST",
+     "status": 200,
+     "body": {
+      "providers": {
+       "anthropic": {
+        "available": true,
+        "currency": "USD"
+       },
+       "openrouter": {
+        "available": true,
+        "usage": 12.5,
+        "actualSpend": 12.5,
+        "currency": "USD"
+       },
+       "deepseek": {
+        "available": true,
+        "balance": 108.25,
+        "actualSpend": 2.25,
+        "currency": "CNY"
+       },
+       "kimi": {
+        "available": true,
+        "balance": 41.9,
+        "actualSpend": 0.1,
+        "currency": "CNY"
+       }
+      },
+      "usage": {
+       "totalCalls": 4,
+       "inputTokens": 1540,
+       "outputTokens": 310,
+       "unreportedCalls": 1,
+       "totalCost": 0.012006000000000001,
+       "byModel": [
+        {
+         "provider": "openai",
+         "model": "gpt-4o",
+         "calls": 3,
+         "inputTokens": 1500,
+         "outputTokens": 300,
+         "unreportedCalls": 1,
+         "cost": 0.012
+        },
+        {
+         "provider": "deepseek",
+         "model": "deepseek-v4-flash",
+         "calls": 1,
+         "inputTokens": 40,
+         "outputTokens": 10,
+         "unreportedCalls": 0,
+         "cost": 0.000006000000000000001
+        }
+       ],
+       "byDay": [
+        {
+         "date": "2025-10-18",
+         "calls": 3,
+         "inputTokens": 540,
+         "outputTokens": 110,
+         "cost": 0.004006
+        },
+        {
+         "date": "2025-10-17",
+         "calls": 1,
+         "inputTokens": 1000,
+         "outputTokens": 200,
+         "cost": 0.008
+        }
+       ],
+       "recentCalls": [
+        {
+         "at": "2025-10-18T10:00:00.000Z",
+         "provider": "deepseek",
+         "model": "deepseek-v4-flash",
+         "action": "generate",
+         "inputTokens": 40,
+         "outputTokens": 10,
+         "cost": 0.000006000000000000001
+        },
+        {
+         "at": "2025-10-18T10:00:00.000Z",
+         "provider": "openai",
+         "model": "gpt-4o",
+         "action": "generate",
+         "inputTokens": null,
+         "outputTokens": null,
+         "cost": 0
+        },
+        {
+         "at": "2025-10-18T10:00:00.000Z",
+         "provider": "openai",
+         "model": "gpt-4o",
+         "action": "generate",
+         "inputTokens": 500,
+         "outputTokens": 100,
+         "cost": 0.004
+        },
+        {
+         "at": "2025-10-17T10:00:00.000Z",
+         "provider": "openai",
+         "model": "gpt-4o",
+         "action": "generate",
+         "inputTokens": 1000,
+         "outputTokens": 200,
+         "cost": 0.008
+        }
+       ],
+       "source": "http://127.0.0.1:3999/api/trace",
+       "error": null
+      },
+      "modelPricing": [
+       {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "promptPer1K": 0.005,
+        "completionPer1K": 0.015
+       },
+       {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "promptPer1K": 0.0001,
+        "completionPer1K": 0.0002
+       }
+      ],
+      "fetchedAt": "2026-10-19T13:57:01.838Z"
+     }
+    }
+   ],
+   "fetched": [
+    "https://openrouter.ai/api/v1/auth/key auth=Bearer test-open_router_api_key",
+    "https://api.deepseek.com/user/balance auth=Bearer test-deepseek_api_key",
+    "https://api.moonshot.ai/v1/users/me/balance auth=Bearer test-kimi_api_key",
+    "http://127.0.0.1:3999/api/trace auth=",
+    "https://openrouter.ai/api/v1/auth/key auth=Bearer test-open_router_api_key",
+    "https://api.deepseek.com/user/balance auth=Bearer test-deepseek_api_key",
+    "https://api.moonshot.ai/v1/users/me/balance auth=Bearer test-kimi_api_key",
+    "http://127.0.0.1:3999/api/trace auth="
+   ]
+  },
+  {
+   "name": "no provider key, no trace server, no price table",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "providers": {
+       "anthropic": null,
+       "openrouter": null,
+       "deepseek": null,
+       "kimi": null
+      },
+      "usage": {
+       "totalCalls": 0,
+       "inputTokens": null,
+       "outputTokens": null,
+       "unreportedCalls": 0,
+       "totalCost": null,
+       "byModel": [],
+       "byDay": [],
+       "recentCalls": [],
+       "source": null,
+       "error": "ALMADAR_TRACE_URL is not set; point it at a kernel server that serves /api/trace"
+      },
+      "modelPricing": [],
+      "fetchedAt": "2026-10-19T13:57:01.842Z"
+     }
+    }
+   ],
+   "fetched": []
+  },
+  {
+   "name": "a refused key, an unreachable provider, a trace server without a trace",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "body": {
+      "providers": {
+       "anthropic": null,
+       "openrouter": {
+        "available": false,
+        "currency": "USD",
+        "error": "HTTP 401"
+       },
+       "deepseek": {
+        "available": false,
+        "currency": "CNY",
+        "error": "fetch failed"
+       },
+       "kimi": {
+        "available": true,
+        "balance": 5,
+        "currency": "CNY"
+       }
+      },
+      "usage": {
+       "totalCalls": 0,
+       "inputTokens": null,
+       "outputTokens": null,
+       "unreportedCalls": 0,
+       "totalCost": null,
+       "byModel": [],
+       "byDay": [],
+       "recentCalls": [],
+       "source": "http://127.0.0.1:3999/api/trace",
+       "error": "http://127.0.0.1:3999/api/trace answered 503; the server exposes no trace"
+      },
+      "modelPricing": [
+       {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "promptPer1K": 0.005,
+        "completionPer1K": 0.015
+       },
+       {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "promptPer1K": 0.0001,
+        "completionPer1K": 0.0002
+       }
+      ],
+      "fetchedAt": "2026-10-19T13:57:01.845Z"
+     }
+    }
+   ],
+   "fetched": [
+    "https://openrouter.ai/api/v1/auth/key auth=Bearer test-open_router_api_key",
+    "https://api.deepseek.com/user/balance auth=Bearer test-deepseek_api_key",
+    "https://api.moonshot.ai/v1/users/me/balance auth=Bearer test-kimi_api_key",
+    "http://127.0.0.1:3999/api/trace auth="
+   ]
+  }
+ ]
+}
