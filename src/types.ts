@@ -840,6 +840,8 @@ export interface TransitionObserver {
         from: string;
         to: string;
         event: string;
+        /** The arm that fired, by its position among the state's arms for the event. */
+        firedArm?: number;
         guardResult?: boolean;
         effects: Array<{
             type: string;
@@ -848,7 +850,7 @@ export interface TransitionObserver {
             error?: string;
             durationMs?: number;
         }>;
-        /** Recorded for a verifier only (`setRecordEntityAfter`): the arm, payload and `@entity` before and after. */
+        /** Recorded for a verifier only (`setRecordEntityAfter`): the payload and `@entity` before and after. */
         observed?: HopObservation;
     }): void;
     /**
