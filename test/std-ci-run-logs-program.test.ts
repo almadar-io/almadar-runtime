@@ -1,4 +1,4 @@
-// std-ci-run-logs on the Node os host against what the gha-almadar logs route answered (tools/gha-almadar
+// std-ci-run-logs on the Node os host against what the gha-almadar logs route answered (archive/tools/gha-almadar
 // scripts/record-logs-parity.ts), both replaying the same `gh` replies through test/fixtures/fake-cli.mjs on PATH:
 // the same lines and the same gh calls in order. Adapted, by owner rule (no heuristics, decisions log 2026-10-19): the
 // route guessed a level from words in the text; the atom reads it only from a leading ##[error] / ##[warning] marker.

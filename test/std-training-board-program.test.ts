@@ -1,4 +1,4 @@
-// std-training-board on the Node os host against the boards the gha-almadar training route answered (tools/gha-almadar
+// std-training-board on the Node os host against the boards the gha-almadar training route answered (archive/tools/gha-almadar
 // scripts/record-training-parity.ts), the same aws and ssh replies played by test/fixtures/fake-cli.mjs. The atom runs
 // `ssh -i ~/… -l ubuntu <host>` where the route's shell ran `ssh -i <expanded home>/… ubuntu@<host>` (same login; a
 // program's strings cannot hold a bare `@`). Adapted, by owner rule (no heuristics, decisions log 2026-10-19): there is no

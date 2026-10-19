@@ -1,4 +1,4 @@
-// std-ci-status on the kernel against the boards the gha-almadar runs route answered (tools/gha-almadar
+// std-ci-status on the kernel against the boards the gha-almadar runs route answered (archive/tools/gha-almadar
 // scripts/record-parity.ts, which replayed the same scenarios through a fake `gh`): the same runs per request, the same
 // GraphQL pages asked for, the same extra repositories read, the cache window and the stale board kept.
 // One adapted difference: `gh run list` reports an unfinished run's conclusion as "" where GitHub's REST and GraphQL

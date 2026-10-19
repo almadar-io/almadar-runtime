@@ -1,4 +1,4 @@
-// std-aws-board on the Node os host against the boards the gha-almadar aws route answered (tools/gha-almadar
+// std-aws-board on the Node os host against the boards the gha-almadar aws route answered (archive/tools/gha-almadar
 // scripts/record-aws-parity.ts), the clock frozen at the scenarios' `now` on both sides and the same aws replies played by
 // test/fixtures/fake-cli.mjs: the same board and the same aws calls in order. Adapted, by owner rule (no heuristics,
 // decisions log 2026-10-19): the G/VT quota's `used` sums catalog vCPUs of the running G/VT-family instances (the route

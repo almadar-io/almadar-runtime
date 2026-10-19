@@ -1,4 +1,4 @@
-// std-github-billing on the kernel against the boards the gha-almadar github route answered (tools/gha-almadar
+// std-github-billing on the kernel against the boards the gha-almadar github route answered (archive/tools/gha-almadar
 // scripts/record-github-parity.ts, which replayed the same usage replies through `gh api`): the same accounts,
 // breakdowns, rounding, order and totals, the same reads per request and the cache window. Adapted, by owner rule (no
 // heuristics, decisions log 2026-10-19): an error is GitHub's own message, not the route's guessed scope hint, and a

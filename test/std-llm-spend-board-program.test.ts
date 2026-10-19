@@ -1,4 +1,4 @@
-// std-llm-spend-board on the kernel against the boards the gha-almadar llm route answered (tools/gha-almadar
+// std-llm-spend-board on the kernel against the boards the gha-almadar llm route answered (archive/tools/gha-almadar
 // scripts/record-llm-parity.ts): provider balances and the kernel trace from a pinned fetch, keys from the credential
 // store (a key the route had no environment variable for is a credential the store does not hold), prices as seeded
 // LlmPrice rows (the route read a file), balance snapshots kept as rows across the requests. Adapted, by owner ruling

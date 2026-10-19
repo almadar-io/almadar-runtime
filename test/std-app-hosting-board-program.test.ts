@@ -1,4 +1,4 @@
-// std-app-hosting-board on the Node os host against what the gha-almadar firebase route answered (tools/gha-almadar
+// std-app-hosting-board on the Node os host against what the gha-almadar firebase route answered (archive/tools/gha-almadar
 // scripts/record-firebase-parity.ts): the same gcloud replies played by test/fixtures/fake-cli.mjs, the App Hosting REST
 // replies the route fetched with curl played by a pinned fetch. The same answers, gcloud calls and REST reads. Adapted,
 // by owner rule (no heuristics, decisions log 2026-10-19): a structured log line with no `message` shows its payload as

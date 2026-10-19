@@ -1,4 +1,4 @@
-// std-cloud-run-board on the Node os host against the boards the gha-almadar gcloud route answered (tools/gha-almadar
+// std-cloud-run-board on the Node os host against the boards the gha-almadar gcloud route answered (archive/tools/gha-almadar
 // scripts/record-gcloud-parity.ts), the clock frozen at the scenarios' `now` on both sides and the same gcloud and bq
 // replies played by test/fixtures/fake-cli.mjs, Cloud Monitoring by a pinned fetch. Adapted, by owner rule (no
 // heuristics or fallbacks, decisions log 2026-10-19): a service whose describe cannot be read has hasResourceData false
