@@ -1,0 +1,15 @@
+{
+  "answers": [
+    {
+      "event": "DOCKER_FAILED",
+      "payload": {
+        "code": "docker_exit_1",
+        "error": "Error: boom",
+        "op": "stop"
+      }
+    }
+  ],
+  "argv": [
+    "stop fail"
+  ]
+}

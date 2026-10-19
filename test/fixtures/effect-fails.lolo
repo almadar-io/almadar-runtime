@@ -1,0 +1,30 @@
+app effect-fails [
+  version: "1.0.0",
+  description: "Test fixture: an effect that always fails (reading a file that does not exist, with no failure event), so a host must report the rejection.",
+  fs: { "/tmp/**": [read] }
+]
+orbital FailsOrbital {
+  entity FailsRow [runtime] {
+    id : string!
+    data : bytes = ""
+  }
+  trait Fails -> FailsRow [integration, instance] {
+    initial: idle
+    state idle {
+      INIT -> idle
+      READ -> idle
+        (os/read-file "/tmp/almadar-effect-fails-never-exists" { key: "read" emit: { success: GOT } })
+      GOT -> idle
+        (set @entity.data @payload.data)
+    }
+    emits {
+      GOT -> internal { data : bytes! }
+        @tier "internal"
+    }
+    listens {
+      READ -> external { }
+        @description "Read the file that is never there."
+    }
+  }
+  page "/fails" as FailsPage -> Fails
+}

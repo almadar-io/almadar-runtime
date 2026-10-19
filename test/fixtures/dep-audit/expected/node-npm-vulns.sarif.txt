@@ -1,0 +1,118 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "almadar-security-audit",
+          "informationUri": "https://almadar.io",
+          "version": "1.0.0",
+          "rules": [
+            {
+              "id": "GHSA-vh95-rmgr-6w4m",
+              "name": "Prototype Pollution in minimist",
+              "shortDescription": {
+                "text": "Prototype Pollution in minimist"
+              },
+              "fullDescription": {
+                "text": ""
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "help": {
+                "markdown": "",
+                "text": ""
+              },
+              "properties": {
+                "precision": "high",
+                "tags": [
+                  "security",
+                  "node",
+                  "low"
+                ]
+              }
+            },
+            {
+              "id": "GHSA-r628-mhmh-qjhw",
+              "name": "Arbitrary File Overwrite",
+              "shortDescription": {
+                "text": "Arbitrary File Overwrite"
+              },
+              "fullDescription": {
+                "text": ""
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "help": {
+                "markdown": "",
+                "text": ""
+              },
+              "properties": {
+                "precision": "high",
+                "tags": [
+                  "security",
+                  "node",
+                  "info"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "GHSA-vh95-rmgr-6w4m",
+          "level": "note",
+          "message": {
+            "markdown": "**Prototype Pollution in minimist**\n\nPackage: minimist\nAffected versions: <0.2.1",
+            "text": "Prototype Pollution in minimist in minimist (<0.2.1)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "package.json"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "cvssScore": 2,
+            "cwe": "CWE-1321",
+            "fixAvailable": true
+          }
+        },
+        {
+          "ruleId": "GHSA-r628-mhmh-qjhw",
+          "level": "note",
+          "message": {
+            "markdown": "**Arbitrary File Overwrite**\n\nPackage: tar\nAffected versions: <4.4.2",
+            "text": "Arbitrary File Overwrite in tar (<4.4.2)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "package.json"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "cvssScore": 5,
+            "fixAvailable": false
+          }
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "startTimeUtc": "<time>"
+        }
+      ]
+    }
+  ]
+}

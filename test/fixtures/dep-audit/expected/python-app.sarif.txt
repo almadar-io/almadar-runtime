@@ -1,0 +1,118 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "almadar-security-audit",
+          "informationUri": "https://almadar.io",
+          "version": "1.0.0",
+          "rules": [
+            {
+              "id": "51668",
+              "name": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+              "shortDescription": {
+                "text": "Requests before 2.31.0 leaks Proxy-Authorization headers."
+              },
+              "fullDescription": {
+                "text": "Requests before 2.31.0 leaks Proxy-Authorization headers."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "help": {
+                "text": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+                "markdown": "Requests before 2.31.0 leaks Proxy-Authorization headers."
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "python",
+                  "moderate"
+                ],
+                "precision": "high"
+              }
+            },
+            {
+              "id": "PYSEC-flask",
+              "name": "Security Vulnerability",
+              "shortDescription": {
+                "text": "Security Vulnerability"
+              },
+              "fullDescription": {
+                "text": ""
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "help": {
+                "text": "",
+                "markdown": ""
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "python",
+                  "moderate"
+                ],
+                "precision": "high"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "51668",
+          "level": "warning",
+          "message": {
+            "text": "Requests before 2.31.0 leaks Proxy-Authorization headers. in requests (<2.31.0)",
+            "markdown": "**Requests before 2.31.0 leaks Proxy-Authorization headers.**\n\nPackage: requests\nAffected versions: <2.31.0"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "requirements.txt"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "cvssScore": 6.1,
+            "cve": "CVE-2023-32681",
+            "fixAvailable": true
+          }
+        },
+        {
+          "ruleId": "PYSEC-flask",
+          "level": "warning",
+          "message": {
+            "text": "Security Vulnerability in flask (<2.2.5)",
+            "markdown": "**Security Vulnerability**\n\nPackage: flask\nAffected versions: <2.2.5"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "requirements.txt"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "cvssScore": 5,
+            "fixAvailable": false
+          }
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "startTimeUtc": "<time>"
+        }
+      ]
+    }
+  ]
+}

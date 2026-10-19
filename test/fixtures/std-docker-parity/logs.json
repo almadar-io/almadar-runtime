@@ -1,0 +1,18 @@
+{
+  "answers": [
+    {
+      "event": "LOGS_DONE",
+      "payload": {
+        "containerId": "cid123",
+        "lineCount": 2,
+        "logs": [
+          "2026-01-01T00:00:01Z warn",
+          "2026-01-01T00:00:02Z hello"
+        ]
+      }
+    }
+  ],
+  "argv": [
+    "logs --tail 5 --timestamps cid123"
+  ]
+}

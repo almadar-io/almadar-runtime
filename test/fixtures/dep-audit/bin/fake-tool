@@ -1,0 +1,20 @@
+#!/bin/sh
+# Test double for pnpm, npm, safety, pip, python3 and node: answers from the project's .fake/<tool>-<subcommand>.{out,exit}.
+tool=$(basename "$0")
+project="$PWD"
+prev=""
+for a in "$@"; do
+  case "$prev" in --dir|--prefix) project="$a" ;; --file) project=$(dirname "$a") ;; esac
+  prev="$a"
+done
+sub="$1"; [ "$tool" = "python3" ] && sub="version"; [ "$tool" = "node" ] && sub="version"
+[ "$tool" = "pip" ] && sub="list"
+case "$1" in --dir|--prefix) sub="$3" ;; esac
+here=$(cd "$(dirname "$0")/.." && pwd)
+fixtures="$project/.fake"
+[ -f "$fixtures/$tool-$sub.out" ] || fixtures="$here/global/.fake"
+out="$fixtures/$tool-$sub.out"
+if [ -f "$out" ]; then cat "$out"; else printf '%s: no fixture for %s %s\n' "$tool" "$sub" "$project" >&2; exit 127; fi
+code="$fixtures/$tool-$sub.exit"
+[ -f "$code" ] && exit "$(cat "$code")"
+exit 0

@@ -1,0 +1,20 @@
+app std-cli-sh [
+  version: "1.0.0",
+  description: "Test fixture: std-cli composed to run sh, so one program can produce any output, exit code or signal.",
+  exec: ["sh"]
+]
+orbital ShOrbital {
+  uses Cli from "std/behaviors/std-cli"
+
+  entity ShRun [runtime] {
+    id : string!
+  }
+
+  trait Sh = Cli.traits.CliRunner {
+    config {
+      command: "sh"
+    }
+  }
+
+  page "/sh" as ShPage -> Sh
+}

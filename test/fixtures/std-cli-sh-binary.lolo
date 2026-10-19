@@ -1,0 +1,21 @@
+app std-cli-sh-binary [
+  version: "1.0.0",
+  description: "Test fixture: std-cli composed to run sh with binary output, so a run can answer bytes that are not UTF-8.",
+  exec: ["sh"]
+]
+orbital ShBinOrbital {
+  uses Cli from "std/behaviors/std-cli"
+
+  entity ShBinRun [runtime] {
+    id : string!
+  }
+
+  trait ShBin = Cli.traits.CliRunner {
+    config {
+      command: "sh"
+      binaryOutput: true
+    }
+  }
+
+  page "/sh-bin" as ShBinPage -> ShBin
+}

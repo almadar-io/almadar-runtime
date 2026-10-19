@@ -1,0 +1,348 @@
+{
+  "salt": "fixed-salt",
+  "deliveries": [
+    {
+      "body": "{\"n\":\"pageview\",\"d\":\"almadar.io\",\"u\":\"/\",\"r\":\"https://google.com/search?q=x\"}",
+      "xff": "5.5.5.5",
+      "ua": "Mozilla/5.0 A",
+      "status": 202,
+      "event": {
+        "name": "pageview",
+        "domain": "almadar.io",
+        "path": "/",
+        "referrer": "https://google.com/search?q=x",
+        "visitorId": "5c5fc00cd0eaeb1ce2a845de6e362ed1e62ceb80922c86158210aaa07dfc0260"
+      }
+    },
+    {
+      "body": "{\"n\":\"pageview\",\"d\":\"almadar.io\",\"u\":\"/docs\",\"r\":\"https://user:pw@Sub.Example.COM:8080/path#x\"}",
+      "xff": "6.6.6.6, 10.0.0.1",
+      "ua": "Mozilla/5.0 B",
+      "status": 202,
+      "event": {
+        "name": "pageview",
+        "domain": "almadar.io",
+        "path": "/docs",
+        "referrer": "https://user:pw@Sub.Example.COM:8080/path#x",
+        "visitorId": "132919d7c0ff6cd98c0ebdceba9068a94e272f3193c67902d66dba035632b714"
+      }
+    },
+    {
+      "body": "{\"n\":\"pageview\",\"d\":\"almadar.io\",\"u\":\"/\",\"w\":1280}",
+      "xff": "5.5.5.5",
+      "ua": "Mozilla/5.0 A",
+      "status": 202,
+      "event": {
+        "name": "pageview",
+        "domain": "almadar.io",
+        "path": "/",
+        "screenWidth": 1280,
+        "visitorId": "5c5fc00cd0eaeb1ce2a845de6e362ed1e62ceb80922c86158210aaa07dfc0260"
+      }
+    },
+    {
+      "body": "{\"n\":\"signup\",\"d\":\"almadar.io\",\"u\":\"/pricing\",\"p\":{\"plan\":\"pro\",\"seats\":3,\"trial\":true}}",
+      "xff": "7.7.7.7",
+      "ua": "curl/8",
+      "status": 202,
+      "event": {
+        "name": "signup",
+        "domain": "almadar.io",
+        "path": "/pricing",
+        "visitorId": "0c2845322925190d6131218e7eaae2e9b17b86e2cc6db2838b08eb69ab7ef6c1",
+        "props": {
+          "plan": "pro",
+          "seats": 3,
+          "trial": true
+        }
+      }
+    },
+    {
+      "body": "{\"n\":\"pageview\",\"d\":\"kflow.ai\",\"u\":\"/\",\"r\":\"not a url\"}",
+      "xff": "8.8.8.8",
+      "ua": "Mozilla/5.0 A",
+      "status": 202,
+      "event": {
+        "name": "pageview",
+        "domain": "kflow.ai",
+        "path": "/",
+        "referrer": "not a url",
+        "visitorId": "74a1dc26bf46707081fa3a5acc7e5373276dd3cf3bc3e5ee54104199e33f1477"
+      }
+    },
+    {
+      "body": "{\"n\":\"pageview\",\"d\":\"almadar.io\",\"u\":\"/docs\",\"r\":\"https://google.com/\"}",
+      "xff": " 9.9.9.9 ",
+      "ua": "Mozilla/5.0 D",
+      "status": 202,
+      "event": {
+        "name": "pageview",
+        "domain": "almadar.io",
+        "path": "/docs",
+        "referrer": "https://google.com/",
+        "visitorId": "4609cceb6ad010dee68ca2b56b190fcd9bbd2486b74cc2e9707f6cd33769c114"
+      }
+    },
+    {
+      "body": "{\"n\":\"pageview\",\"d\":\"almadar.io\",\"u\":\"/blog\",\"r\":\"\",\"w\":\"wide\"}",
+      "xff": "5.5.5.5",
+      "ua": "Mozilla/5.0 A",
+      "status": 202,
+      "event": {
+        "name": "pageview",
+        "domain": "almadar.io",
+        "path": "/blog",
+        "referrer": "",
+        "visitorId": "5c5fc00cd0eaeb1ce2a845de6e362ed1e62ceb80922c86158210aaa07dfc0260"
+      }
+    },
+    {
+      "body": "{\"n\":\"pageview\",\"d\":\"almadar.io\",\"u\":\"/\",\"p\":[1,2]}",
+      "xff": "6.6.6.6",
+      "ua": "Mozilla/5.0 B",
+      "status": 202,
+      "event": {
+        "name": "pageview",
+        "domain": "almadar.io",
+        "path": "/",
+        "visitorId": "132919d7c0ff6cd98c0ebdceba9068a94e272f3193c67902d66dba035632b714"
+      }
+    },
+    {
+      "body": "{\"n\":\"pageview\",\"d\":\"kflow.ai\",\"u\":\"/\",\"r\":\"https://[::1]:3000/x\"}",
+      "xff": "8.8.8.8",
+      "ua": "Mozilla/5.0 A",
+      "status": 202,
+      "event": {
+        "name": "pageview",
+        "domain": "kflow.ai",
+        "path": "/",
+        "referrer": "https://[::1]:3000/x",
+        "visitorId": "74a1dc26bf46707081fa3a5acc7e5373276dd3cf3bc3e5ee54104199e33f1477"
+      }
+    },
+    {
+      "body": "{\"d\":\"almadar.io\",\"u\":\"/\"}",
+      "xff": "1.1.1.1",
+      "ua": "Mozilla/5.0 A",
+      "status": 400,
+      "event": null
+    },
+    {
+      "body": "not json",
+      "xff": "1.1.1.1",
+      "ua": "Mozilla/5.0 A",
+      "status": 400,
+      "event": null
+    },
+    {
+      "body": "{\"n\":\"\",\"d\":\"almadar.io\",\"u\":\"/\"}",
+      "xff": "1.1.1.1",
+      "ua": "Mozilla/5.0 A",
+      "status": 400,
+      "event": null
+    },
+    {
+      "body": "{\"n\":5,\"d\":\"almadar.io\",\"u\":\"/\"}",
+      "xff": "1.1.1.1",
+      "ua": "Mozilla/5.0 A",
+      "status": 400,
+      "event": null
+    },
+    {
+      "body": "[1,2]",
+      "xff": "1.1.1.1",
+      "ua": "Mozilla/5.0 A",
+      "status": 400,
+      "event": null
+    },
+    {
+      "body": "5",
+      "xff": "1.1.1.1",
+      "ua": "Mozilla/5.0 A",
+      "status": 400,
+      "event": null
+    },
+    {
+      "body": "",
+      "xff": "1.1.1.1",
+      "ua": "Mozilla/5.0 A",
+      "status": 400,
+      "event": null
+    }
+  ],
+  "stats": [
+    {
+      "query": {
+        "domain": "almadar.io"
+      },
+      "status": 200,
+      "result": {
+        "pageviews": 6,
+        "visitors": 4,
+        "pages": [
+          {
+            "key": "/ (almadar.io)",
+            "count": 3
+          },
+          {
+            "key": "/docs (almadar.io)",
+            "count": 2
+          },
+          {
+            "key": "/blog (almadar.io)",
+            "count": 1
+          }
+        ],
+        "countries": [],
+        "referrers": [
+          {
+            "key": "google.com",
+            "count": 2
+          },
+          {
+            "key": "sub.example.com",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "query": {},
+      "status": 200,
+      "result": {
+        "pageviews": 8,
+        "visitors": 5,
+        "pages": [
+          {
+            "key": "/ (almadar.io)",
+            "count": 3
+          },
+          {
+            "key": "/docs (almadar.io)",
+            "count": 2
+          },
+          {
+            "key": "/ (kflow.ai)",
+            "count": 2
+          },
+          {
+            "key": "/blog (almadar.io)",
+            "count": 1
+          }
+        ],
+        "countries": [],
+        "referrers": [
+          {
+            "key": "google.com",
+            "count": 2
+          },
+          {
+            "key": "sub.example.com",
+            "count": 1
+          },
+          {
+            "key": "not a url",
+            "count": 1
+          },
+          {
+            "key": "[::1]",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "query": {
+        "domain": "kflow.ai"
+      },
+      "status": 200,
+      "result": {
+        "pageviews": 2,
+        "visitors": 1,
+        "pages": [
+          {
+            "key": "/ (kflow.ai)",
+            "count": 2
+          }
+        ],
+        "countries": [],
+        "referrers": [
+          {
+            "key": "not a url",
+            "count": 1
+          },
+          {
+            "key": "[::1]",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "query": {
+        "domain": "almadar.io",
+        "limit": 1
+      },
+      "status": 200,
+      "result": {
+        "pageviews": 6,
+        "visitors": 4,
+        "pages": [
+          {
+            "key": "/ (almadar.io)",
+            "count": 3
+          }
+        ],
+        "countries": [],
+        "referrers": [
+          {
+            "key": "google.com",
+            "count": 2
+          }
+        ]
+      }
+    },
+    {
+      "query": {
+        "domain": "almadar.io",
+        "from": "FUTURE"
+      },
+      "status": 200,
+      "result": {
+        "pageviews": 0,
+        "visitors": 0,
+        "pages": [],
+        "countries": [],
+        "referrers": []
+      }
+    },
+    {
+      "query": {
+        "domain": "almadar.io",
+        "to": 0
+      },
+      "status": 200,
+      "result": {
+        "pageviews": 0,
+        "visitors": 0,
+        "pages": [],
+        "countries": [],
+        "referrers": []
+      }
+    },
+    {
+      "query": {
+        "domain": "nope.example"
+      },
+      "status": 200,
+      "result": {
+        "pageviews": 0,
+        "visitors": 0,
+        "pages": [],
+        "countries": [],
+        "referrers": []
+      }
+    }
+  ]
+}

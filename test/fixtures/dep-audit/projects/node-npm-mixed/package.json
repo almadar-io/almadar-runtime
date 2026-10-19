@@ -1,0 +1,1 @@
+{ "name": "node-npm-mixed", "version": "1.0.0", "scripts": { "audit": "npm audit" } }

@@ -1,0 +1,1 @@
+{"vulnerabilities":[{"advisory_id":"51668","advisory":"Requests before 2.31.0 leaks Proxy-Authorization headers.","severity":"high","cvssv3":6.1,"package_name":"requests","vulnerable_spec":"<2.31.0","fixed_versions":"2.31.0","cve":"CVE-2023-32681","more_info_url":"https://data.safetycli.com/v/51668"}]}

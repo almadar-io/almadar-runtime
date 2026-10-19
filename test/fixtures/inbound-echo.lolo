@@ -1,0 +1,39 @@
+app inbound-echo [
+  version: "1.0.0",
+  description: "Test fixture: an inbound hook that answers 201 with the user agent and the raw body it was delivered.",
+  inbound: ["echo"]
+]
+orbital EchoOrbital {
+  entity EchoFrame [runtime] {
+    id : string!
+  }
+
+  trait EchoInbound -> EchoFrame [integration, instance] {
+    initial: idle
+
+    state idle {
+      INIT -> idle
+      ECHO_RECEIVED -> idle
+        (emit ECHO_ANSWERED { status: 201, body: (json/stringify { ua: (object/get @payload.headers "user-agent" ""), raw: @payload.rawBody }) })
+    }
+
+    emits {
+      ECHO_ANSWERED -> internal {
+        status : number!
+        body : string!
+      }
+        @description "The answer to the delivery."
+    }
+
+    listens {
+      ECHO_RECEIVED -> inbound "echo" answers ECHO_ANSWERED {
+        headers : Map string string
+        body : Map string string
+        rawBody : string
+      }
+        @description "A delivery at /api/hooks/echo."
+    }
+  }
+
+  page "/echo" -> EchoInbound
+}

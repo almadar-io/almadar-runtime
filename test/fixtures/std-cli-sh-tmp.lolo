@@ -1,0 +1,22 @@
+app std-cli-sh-tmp [
+  version: "1.0.0",
+  description: "Test fixture: std-cli composed to run sh in /tmp, so a run can show the directory it ran in.",
+  exec: ["sh"],
+  fs: { "/tmp": [read] }
+]
+orbital ShTmpOrbital {
+  uses Cli from "std/behaviors/std-cli"
+
+  entity ShTmpRun [runtime] {
+    id : string!
+  }
+
+  trait ShTmp = Cli.traits.CliRunner {
+    config {
+      command: "sh"
+      cwd: "/tmp"
+    }
+  }
+
+  page "/sh-tmp" as ShTmpPage -> ShTmp
+}

@@ -1,0 +1,77 @@
+
+[1m[34m═════════════════════════[0m
+[1m[34m  SECURITY AUDIT REPORT  [0m
+[1m[34m═════════════════════════[0m
+
+Project: almadar-security-audit
+Scanned: <time>
+Duration: <ms>ms
+
+
+[1m[37mSUMMARY[0m
+[2m───────[0m
+Total Vulnerabilities: [33m2[0m
+  Critical: [2m0[0m
+  High: [2m0[0m
+  Moderate: [31m2[0m
+  Low: [2m0[0m
+  Info: [2m0[0m
+Outdated Dependencies: [33m1[0m
+Config Issues: [33m6[0m
+
+
+[1m[37mVULNERABILITIES[0m
+[2m───────────────[0m
+
+[33mMODERATE[0m (2):
+  [33m51668[0m: Requests before 2.31.0 leaks Proxy-Authorization headers.
+    Package: [36mrequests[0m
+    Severity: [33mMODERATE[0m (CVSS: 6.1)
+    Affected: <2.31.0
+    Patched: 2.31.0
+    CVE: CVE-2023-32681
+    [32m✓ Fix available[0m
+  [33mPYSEC-flask[0m: Security Vulnerability
+    Package: [36mflask[0m
+    Severity: [33mMODERATE[0m (CVSS: 5)
+    Affected: <2.2.5
+
+
+[1m[37mOUTDATED DEPENDENCIES[0m
+[2m─────────────────────[0m
+  [36mrequests[0m: [31m2.25.0[0m → [32m2.32.3[0m
+
+
+[1m[37mCONFIGURATION ISSUES[0m
+[2m────────────────────[0m
+  [misconfiguration] [33mMODERATE[0m requirements.txt
+    2 unpinned dependencies detected
+    Recommendation: Pin dependency versions (e.g., package==1.2.3) for reproducible and secure builds
+  [missing] [34mLOW[0m virtual environment
+    No virtual environment directory found
+    Recommendation: Use virtual environments to isolate project dependencies
+  [missing] [2mINFO[0m bandit.yml
+    Bandit config for security linting not found
+    Recommendation: Consider adding Bandit for automated security scanning
+  [missing] [2mINFO[0m .bandit
+    Bandit config for security linting not found
+    Recommendation: Consider adding Bandit for automated security scanning
+  [missing] [34mLOW[0m pyproject.toml
+    No security tools configured in pyproject.toml
+    Recommendation: Add security tools like bandit and safety to dev dependencies
+  [deprecated] [31m[1mHIGH[0m Python version
+    Python 3.7 reached End-of-Life on 2023-06-27
+    Recommendation: Upgrade to Python 3.9+ (3.11 or 3.12 recommended)
+
+
+[1m[37mPACKAGE REPORTS[0m
+[2m───────────────[0m
+
+📦 [36mpython-app[0m [2mv2.0.1[0m
+   Ecosystem: python
+   Vulnerabilities: 2
+   Outdated: 1
+   Config Issues: 6
+
+[2m══════════════════════════════════════════════════[0m
+[33m VULNERABILITIES DETECTED [0m

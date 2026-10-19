@@ -1,0 +1,39 @@
+app json-nodes [
+  version: "1.0.0",
+  description: "Test fixture: WALK answers WALKED with how many values json/nodes finds in the payload tree and the JSON of that list."
+]
+type Leaf = { b : string }
+type Tree = { a : [Leaf], c : string }
+orbital WalkOrbital {
+  entity WalkFrame [runtime] {
+    id : string!
+  }
+
+  trait Walker -> WalkFrame [integration, instance] {
+    initial: idle
+
+    state idle {
+      INIT -> idle
+        (render-ui main { type: typography, variant: caption, content: "Send WALK." })
+      WALK -> idle
+        (emit WALKED { count: (array/len (json/nodes @payload.tree)), nodes: (json/stringify (json/nodes @payload.tree)) })
+    }
+
+    emits {
+      WALKED -> external {
+        count : number!
+        nodes : string!
+      }
+        @description "The walk of the tree."
+    }
+
+    listens {
+      WALK -> external {
+        tree : Tree!
+      }
+        @description "Walk this tree."
+    }
+  }
+
+  page "/walk" -> Walker
+}

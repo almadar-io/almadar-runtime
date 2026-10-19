@@ -1,0 +1,14 @@
+{
+  "answers": [
+    {
+      "event": "REMOVE_DONE",
+      "payload": {
+        "containerId": "cid123",
+        "removed": true
+      }
+    }
+  ],
+  "argv": [
+    "rm -f cid123"
+  ]
+}

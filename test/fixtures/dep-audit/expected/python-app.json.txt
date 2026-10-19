@@ -1,0 +1,224 @@
+{
+  "projectName": "almadar-security-audit",
+  "timestamp": "<time>",
+  "duration": "<ms>",
+  "packages": [
+    {
+      "name": "python-app",
+      "version": "2.0.1",
+      "path": "<projects>/python-app",
+      "ecosystem": "python",
+      "vulnerabilities": [
+        {
+          "id": "51668",
+          "title": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+          "description": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+          "severity": "moderate",
+          "score": 6.1,
+          "package": "requests",
+          "affectedVersions": "<2.31.0",
+          "patchedVersion": "2.31.0",
+          "cve": "CVE-2023-32681",
+          "references": [
+            "https://data.safetycli.com/v/51668"
+          ],
+          "exploitAvailable": false,
+          "fixAvailable": true,
+          "ecosystem": "python",
+          "dependencyPath": [
+            "requests"
+          ]
+        },
+        {
+          "id": "PYSEC-flask",
+          "title": "Security Vulnerability",
+          "description": "",
+          "severity": "moderate",
+          "score": 5,
+          "package": "flask",
+          "affectedVersions": "<2.2.5",
+          "references": [],
+          "exploitAvailable": false,
+          "fixAvailable": false,
+          "ecosystem": "python",
+          "dependencyPath": [
+            "flask"
+          ]
+        }
+      ],
+      "outdated": [
+        {
+          "package": "requests",
+          "current": "2.25.0",
+          "latest": "2.32.3",
+          "wanted": "2.32.3",
+          "ecosystem": "python",
+          "isDevDependency": false
+        }
+      ],
+      "configIssues": [
+        {
+          "type": "misconfiguration",
+          "config": "requirements.txt",
+          "description": "2 unpinned dependencies detected",
+          "severity": "moderate",
+          "recommendation": "Pin dependency versions (e.g., package==1.2.3) for reproducible and secure builds",
+          "ecosystem": "python"
+        },
+        {
+          "type": "missing",
+          "config": "virtual environment",
+          "description": "No virtual environment directory found",
+          "severity": "low",
+          "recommendation": "Use virtual environments to isolate project dependencies",
+          "ecosystem": "python"
+        },
+        {
+          "type": "missing",
+          "config": "bandit.yml",
+          "description": "Bandit config for security linting not found",
+          "severity": "info",
+          "recommendation": "Consider adding Bandit for automated security scanning",
+          "ecosystem": "python"
+        },
+        {
+          "type": "missing",
+          "config": ".bandit",
+          "description": "Bandit config for security linting not found",
+          "severity": "info",
+          "recommendation": "Consider adding Bandit for automated security scanning",
+          "ecosystem": "python"
+        },
+        {
+          "type": "missing",
+          "config": "pyproject.toml",
+          "description": "No security tools configured in pyproject.toml",
+          "severity": "low",
+          "recommendation": "Add security tools like bandit and safety to dev dependencies",
+          "ecosystem": "python"
+        },
+        {
+          "type": "deprecated",
+          "config": "Python version",
+          "description": "Python 3.7 reached End-of-Life on 2023-06-27",
+          "severity": "high",
+          "recommendation": "Upgrade to Python 3.9+ (3.11 or 3.12 recommended)",
+          "ecosystem": "python"
+        }
+      ],
+      "summary": {
+        "vulnerabilityCount": 2,
+        "outdatedCount": 1,
+        "configIssueCount": 6
+      }
+    }
+  ],
+  "vulnerabilities": [
+    {
+      "id": "51668",
+      "title": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+      "description": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+      "severity": "moderate",
+      "score": 6.1,
+      "package": "requests",
+      "affectedVersions": "<2.31.0",
+      "patchedVersion": "2.31.0",
+      "cve": "CVE-2023-32681",
+      "references": [
+        "https://data.safetycli.com/v/51668"
+      ],
+      "exploitAvailable": false,
+      "fixAvailable": true,
+      "ecosystem": "python",
+      "dependencyPath": [
+        "requests"
+      ]
+    },
+    {
+      "id": "PYSEC-flask",
+      "title": "Security Vulnerability",
+      "description": "",
+      "severity": "moderate",
+      "score": 5,
+      "package": "flask",
+      "affectedVersions": "<2.2.5",
+      "references": [],
+      "exploitAvailable": false,
+      "fixAvailable": false,
+      "ecosystem": "python",
+      "dependencyPath": [
+        "flask"
+      ]
+    }
+  ],
+  "outdated": [
+    {
+      "package": "requests",
+      "current": "2.25.0",
+      "latest": "2.32.3",
+      "wanted": "2.32.3",
+      "ecosystem": "python",
+      "isDevDependency": false
+    }
+  ],
+  "configIssues": [
+    {
+      "type": "misconfiguration",
+      "config": "requirements.txt",
+      "description": "2 unpinned dependencies detected",
+      "severity": "moderate",
+      "recommendation": "Pin dependency versions (e.g., package==1.2.3) for reproducible and secure builds",
+      "ecosystem": "python"
+    },
+    {
+      "type": "missing",
+      "config": "virtual environment",
+      "description": "No virtual environment directory found",
+      "severity": "low",
+      "recommendation": "Use virtual environments to isolate project dependencies",
+      "ecosystem": "python"
+    },
+    {
+      "type": "missing",
+      "config": "bandit.yml",
+      "description": "Bandit config for security linting not found",
+      "severity": "info",
+      "recommendation": "Consider adding Bandit for automated security scanning",
+      "ecosystem": "python"
+    },
+    {
+      "type": "missing",
+      "config": ".bandit",
+      "description": "Bandit config for security linting not found",
+      "severity": "info",
+      "recommendation": "Consider adding Bandit for automated security scanning",
+      "ecosystem": "python"
+    },
+    {
+      "type": "missing",
+      "config": "pyproject.toml",
+      "description": "No security tools configured in pyproject.toml",
+      "severity": "low",
+      "recommendation": "Add security tools like bandit and safety to dev dependencies",
+      "ecosystem": "python"
+    },
+    {
+      "type": "deprecated",
+      "config": "Python version",
+      "description": "Python 3.7 reached End-of-Life on 2023-06-27",
+      "severity": "high",
+      "recommendation": "Upgrade to Python 3.9+ (3.11 or 3.12 recommended)",
+      "ecosystem": "python"
+    }
+  ],
+  "summary": {
+    "vulnerabilityCount": 2,
+    "criticalCount": 0,
+    "highCount": 0,
+    "moderateCount": 2,
+    "lowCount": 0,
+    "infoCount": 0,
+    "outdatedCount": 1,
+    "configIssueCount": 6
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "answers": [
+    {
+      "event": "STOP_DONE",
+      "payload": {
+        "containerId": "cid123",
+        "status": "running",
+        "stoppedAt": 0
+      }
+    }
+  ],
+  "argv": [
+    "stop cid123",
+    "inspect --format {{json .}} cid123"
+  ]
+}

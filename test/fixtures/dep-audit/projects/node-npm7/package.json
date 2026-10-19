@@ -1,0 +1,1 @@
+{ "name": "node-npm7", "version": "3.0.0", "scripts": { "audit": "npm audit" } }

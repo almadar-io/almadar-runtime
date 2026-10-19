@@ -1,0 +1,1 @@
+{ "name": "node-npm-vulns", "scripts": { "security:audit": "npm audit" } }

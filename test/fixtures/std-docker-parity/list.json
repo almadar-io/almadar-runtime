@@ -1,0 +1,44 @@
+{
+  "answers": [
+    {
+      "event": "LIST_DONE",
+      "payload": {
+        "containers": [
+          {
+            "createdAt": 1767225600000,
+            "id": "cid123",
+            "image": "nginx",
+            "name": "web",
+            "ports": [
+              {
+                "container": 80,
+                "host": 8080,
+                "protocol": "tcp"
+              }
+            ],
+            "status": "running"
+          },
+          {
+            "createdAt": 1767225600000,
+            "id": "cid456",
+            "image": "nginx",
+            "name": "web",
+            "ports": [
+              {
+                "container": 80,
+                "host": 8080,
+                "protocol": "tcp"
+              }
+            ],
+            "status": "running"
+          }
+        ],
+        "total": 2
+      }
+    }
+  ],
+  "argv": [
+    "ps -q --no-trunc -a",
+    "inspect --format {{json .}} cid123 cid456"
+  ]
+}

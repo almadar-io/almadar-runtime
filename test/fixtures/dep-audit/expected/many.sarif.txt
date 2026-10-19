@@ -1,0 +1,259 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "almadar-security-audit",
+          "informationUri": "https://almadar.io",
+          "version": "1.0.0",
+          "rules": [
+            {
+              "id": "GHSA-35jh-r3h4-6jhm",
+              "name": "Prototype Pollution",
+              "shortDescription": {
+                "text": "Prototype Pollution"
+              },
+              "fullDescription": {
+                "text": "Lodash before 4.17.21 is vulnerable to prototype pollution."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "help": {
+                "markdown": "Lodash before 4.17.21 is vulnerable to prototype pollution.",
+                "text": "Lodash before 4.17.21 is vulnerable to prototype pollution."
+              },
+              "properties": {
+                "precision": "high",
+                "tags": [
+                  "security",
+                  "node",
+                  "high"
+                ]
+              }
+            },
+            {
+              "id": "NPM-2000",
+              "name": "ReDoS in minimatch",
+              "shortDescription": {
+                "text": "ReDoS in minimatch"
+              },
+              "fullDescription": {
+                "text": ""
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "help": {
+                "markdown": "",
+                "text": ""
+              },
+              "properties": {
+                "precision": "high",
+                "tags": [
+                  "security",
+                  "node",
+                  "moderate"
+                ]
+              }
+            },
+            {
+              "id": "CVE-2022-0001",
+              "name": "Critical RCE",
+              "shortDescription": {
+                "text": "Critical RCE"
+              },
+              "fullDescription": {
+                "text": "Remote code execution."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "help": {
+                "markdown": "Remote code execution.",
+                "text": "Remote code execution."
+              },
+              "properties": {
+                "precision": "high",
+                "tags": [
+                  "security",
+                  "node",
+                  "critical"
+                ]
+              }
+            },
+            {
+              "id": "51668",
+              "name": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+              "shortDescription": {
+                "text": "Requests before 2.31.0 leaks Proxy-Authorization headers."
+              },
+              "fullDescription": {
+                "text": "Requests before 2.31.0 leaks Proxy-Authorization headers."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "help": {
+                "markdown": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+                "text": "Requests before 2.31.0 leaks Proxy-Authorization headers."
+              },
+              "properties": {
+                "precision": "high",
+                "tags": [
+                  "security",
+                  "python",
+                  "moderate"
+                ]
+              }
+            },
+            {
+              "id": "PYSEC-flask",
+              "name": "Security Vulnerability",
+              "shortDescription": {
+                "text": "Security Vulnerability"
+              },
+              "fullDescription": {
+                "text": ""
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "help": {
+                "markdown": "",
+                "text": ""
+              },
+              "properties": {
+                "precision": "high",
+                "tags": [
+                  "security",
+                  "python",
+                  "moderate"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "GHSA-35jh-r3h4-6jhm",
+          "level": "error",
+          "message": {
+            "markdown": "**Prototype Pollution**\n\nPackage: lodash\nAffected versions: <4.17.21",
+            "text": "Prototype Pollution in lodash (<4.17.21)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "package.json"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "cvssScore": 7.2,
+            "cve": "CVE-2021-23337",
+            "cwe": "CWE-1321",
+            "fixAvailable": true
+          }
+        },
+        {
+          "ruleId": "NPM-2000",
+          "level": "warning",
+          "message": {
+            "markdown": "**ReDoS in minimatch**\n\nPackage: minimatch\nAffected versions: <3.0.5",
+            "text": "ReDoS in minimatch in minimatch (<3.0.5)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "package.json"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "cvssScore": 5,
+            "fixAvailable": false
+          }
+        },
+        {
+          "ruleId": "CVE-2022-0001",
+          "level": "error",
+          "message": {
+            "markdown": "**Critical RCE**\n\nPackage: evil\nAffected versions: *",
+            "text": "Critical RCE in evil (*)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "package.json"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "cvssScore": 9,
+            "cve": "CVE-2022-0001",
+            "fixAvailable": false
+          }
+        },
+        {
+          "ruleId": "51668",
+          "level": "warning",
+          "message": {
+            "markdown": "**Requests before 2.31.0 leaks Proxy-Authorization headers.**\n\nPackage: requests\nAffected versions: <2.31.0",
+            "text": "Requests before 2.31.0 leaks Proxy-Authorization headers. in requests (<2.31.0)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "requirements.txt"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "cvssScore": 6.1,
+            "cve": "CVE-2023-32681",
+            "fixAvailable": true
+          }
+        },
+        {
+          "ruleId": "PYSEC-flask",
+          "level": "warning",
+          "message": {
+            "markdown": "**Security Vulnerability**\n\nPackage: flask\nAffected versions: <2.2.5",
+            "text": "Security Vulnerability in flask (<2.2.5)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "requirements.txt"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "cvssScore": 5,
+            "fixAvailable": false
+          }
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "startTimeUtc": "<time>"
+        }
+      ]
+    }
+  ]
+}

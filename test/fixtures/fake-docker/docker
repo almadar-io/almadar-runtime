@@ -1,0 +1,18 @@
+#!/bin/sh
+# Test double for the docker CLI: logs argv, answers each subcommand with canned output; a "fail" argument exits 1.
+log="${TMPDIR:-/tmp}/almadar-fake-docker.log"
+printf '%s\n' "$*" >> "$log"
+case " $* " in *" fail "*|*" fail-"*) printf 'Error: boom\n' >&2; exit 1 ;; esac
+inspect() { printf '{"Id":"%s","Name":"/web",' "$1"; printf '%s\n' '"Created":"2026-01-01T00:00:00Z","State":{"Status":"running","StartedAt":"2026-01-01T00:00:01Z","FinishedAt":"0001-01-01T00:00:00Z"},"Config":{"Image":"nginx"},"NetworkSettings":{"Ports":{"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"8080"}]}}}'; }
+case "$1" in
+  build) printf 'sha256:abc\n' ;;
+  image) printf '{"Id":"sha256:abc","Size":1234}\n' ;;
+  run) printf 'cid123\n' ;;
+  stop|rm) printf 'cid123\n' ;;
+  logs) printf '2026-01-01T00:00:02Z hello\n'; printf '2026-01-01T00:00:01Z warn\n' >&2 ;;
+  ps) printf 'cid123\ncid456\n' ;;
+  inspect)
+    shift 3
+    for id in "$@"; do inspect "$id"; done ;;
+  *) printf 'unknown %s\n' "$1" >&2; exit 2 ;;
+esac

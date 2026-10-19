@@ -1,0 +1,17 @@
+{
+  "answers": [
+    {
+      "event": "BUILD_DONE",
+      "payload": {
+        "imageId": "sha256:abc",
+        "size": 1234,
+        "tag": "app:1",
+        "buildTime": "non-negative number"
+      }
+    }
+  ],
+  "argv": [
+    "build -q -t app:1 --build-arg A=1 .",
+    "image inspect --format {{json .}} app:1"
+  ]
+}

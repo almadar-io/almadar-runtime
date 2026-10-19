@@ -1,0 +1,62 @@
+
+[1m[34m═════════════════════════[0m
+[1m[34m  SECURITY AUDIT REPORT  [0m
+[1m[34m═════════════════════════[0m
+
+Project: almadar-security-audit
+Scanned: <time>
+Duration: <ms>ms
+
+
+[1m[37mSUMMARY[0m
+[2m───────[0m
+Total Vulnerabilities: [33m2[0m
+  Critical: [2m0[0m
+  High: [2m0[0m
+  Moderate: [2m0[0m
+  Low: [31m1[0m
+  Info: [31m1[0m
+Outdated Dependencies: [33m1[0m
+Config Issues: [33m1[0m
+
+
+[1m[37mVULNERABILITIES[0m
+[2m───────────────[0m
+
+[34mLOW[0m (1):
+  [35mGHSA-vh95-rmgr-6w4m[0m: Prototype Pollution in minimist
+    Package: [36mminimist[0m
+    Severity: [34mLOW[0m (CVSS: 2)
+    Affected: <0.2.1
+    [32m✓ Fix available[0m
+
+[2mINFO[0m (1):
+  [35mGHSA-r628-mhmh-qjhw[0m: Arbitrary File Overwrite
+    Package: [36mtar[0m
+    Severity: [2mINFO[0m (CVSS: 5)
+    Affected: <4.4.2
+
+
+[1m[37mOUTDATED DEPENDENCIES[0m
+[2m─────────────────────[0m
+  [36mleft-pad[0m: [31m1.0.0[0m → [32m1.3.0[0m
+
+
+[1m[37mCONFIGURATION ISSUES[0m
+[2m────────────────────[0m
+  [missing] [33mMODERATE[0m lock file
+    No lock file (package-lock.json or pnpm-lock.yaml) found
+    Recommendation: Use a lock file to ensure reproducible builds and audit accuracy
+
+
+[1m[37mPACKAGE REPORTS[0m
+[2m───────────────[0m
+
+📦 [36mnode-npm-vulns[0m [2mv0.0.0[0m
+   Ecosystem: node
+   Vulnerabilities: 2
+   Outdated: 1
+   Config Issues: 1
+
+[2m══════════════════════════════════════════════════[0m
+[33m VULNERABILITIES DETECTED [0m

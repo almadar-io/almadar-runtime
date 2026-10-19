@@ -4,7 +4,7 @@
  * call it; nothing here builds a request, frames a stream or shapes a payload — the wasm exports do.
  */
 import { credentialStatusConnected, credentialStorageKey, resolveCredentialStatusIdentity, isJsonObject, type CredentialPayload, type HttpCall, type HttpFailurePayload, type HttpOAuthFailureCode, type HttpOAuthFailureReason, type HttpStreamEvent, type JsonObject, type JsonValue, type RuntimeValue } from '@almadar/core';
-import { deliverBeacon, type BeaconDeliveryPorts } from '@almadar/analytics';
+import { deliverBeacon, type BeaconDeliveryPorts } from './beacon-port.js';
 import { getEffectiveCredentialStore, getModeControl, resolveCredentialRef } from '../host/credentials/scope.js';
 import type { CredentialStore } from '../host/credentials/store.js';
 import { untilAborted } from '../effects/in-flight-calls.js';

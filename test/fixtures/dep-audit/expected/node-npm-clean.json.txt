@@ -1,0 +1,34 @@
+{
+  "projectName": "almadar-security-audit",
+  "timestamp": "<time>",
+  "duration": "<ms>",
+  "packages": [
+    {
+      "name": "node-npm-clean",
+      "version": "0.1.0",
+      "path": "<projects>/node-npm-clean",
+      "ecosystem": "node",
+      "vulnerabilities": [],
+      "outdated": [],
+      "configIssues": [],
+      "summary": {
+        "vulnerabilityCount": 0,
+        "outdatedCount": 0,
+        "configIssueCount": 0
+      }
+    }
+  ],
+  "vulnerabilities": [],
+  "outdated": [],
+  "configIssues": [],
+  "summary": {
+    "vulnerabilityCount": 0,
+    "criticalCount": 0,
+    "highCount": 0,
+    "moderateCount": 0,
+    "lowCount": 0,
+    "infoCount": 0,
+    "outdatedCount": 0,
+    "configIssueCount": 0
+  }
+}

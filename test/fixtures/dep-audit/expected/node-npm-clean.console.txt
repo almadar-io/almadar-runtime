@@ -1,0 +1,33 @@
+
+[1m[34m═════════════════════════[0m
+[1m[34m  SECURITY AUDIT REPORT  [0m
+[1m[34m═════════════════════════[0m
+
+Project: almadar-security-audit
+Scanned: <time>
+Duration: <ms>ms
+
+
+[1m[37mSUMMARY[0m
+[2m───────[0m
+Total Vulnerabilities: [32m0[0m
+  Critical: [2m0[0m
+  High: [2m0[0m
+  Moderate: [2m0[0m
+  Low: [2m0[0m
+  Info: [2m0[0m
+Outdated Dependencies: [32m0[0m
+Config Issues: [32m0[0m
+
+
+[1m[37mPACKAGE REPORTS[0m
+[2m───────────────[0m
+
+📦 [36mnode-npm-clean[0m [2mv0.1.0[0m
+   Ecosystem: node
+   Vulnerabilities: 0
+   Outdated: 0
+   Config Issues: 0
+
+[2m══════════════════════════════════════════════════[0m
+[32m ✓ No vulnerabilities detected [0m

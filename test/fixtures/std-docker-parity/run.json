@@ -1,0 +1,23 @@
+{
+  "answers": [
+    {
+      "event": "RUN_DONE",
+      "payload": {
+        "containerId": "cid123",
+        "name": "web",
+        "ports": [
+          {
+            "container": 80,
+            "host": 8080,
+            "protocol": "tcp"
+          }
+        ],
+        "status": "running"
+      }
+    }
+  ],
+  "argv": [
+    "run -d --name web -p 8080:80/tcp -e K=v nginx",
+    "inspect --format {{json .}} cid123"
+  ]
+}

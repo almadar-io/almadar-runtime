@@ -1,0 +1,1 @@
+{"advisories":{"7":{"id":7,"title":"Critical only","severity":"critical","vulnerable_versions":"*","overview":"x","module_name":"bad"}},"metadata":{"vulnerabilities":{"info":0,"low":0,"moderate":0,"high":0,"critical":1}}}

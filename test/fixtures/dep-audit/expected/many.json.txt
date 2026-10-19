@@ -1,0 +1,435 @@
+{
+  "projectName": "almadar-security-audit",
+  "timestamp": "<time>",
+  "duration": "<ms>",
+  "packages": [
+    {
+      "name": "node-pnpm",
+      "version": "1.2.3",
+      "path": "<projects>/node-pnpm",
+      "ecosystem": "node",
+      "vulnerabilities": [
+        {
+          "id": "GHSA-35jh-r3h4-6jhm",
+          "title": "Prototype Pollution",
+          "description": "Lodash before 4.17.21 is vulnerable to prototype pollution.",
+          "severity": "high",
+          "score": 7.2,
+          "package": "lodash",
+          "affectedVersions": "<4.17.21",
+          "patchedVersion": ">=4.17.21",
+          "cve": "CVE-2021-23337",
+          "ghsa": "GHSA-35jh-r3h4-6jhm",
+          "cwe": "CWE-1321",
+          "references": [
+            "https://github.com/advisories/GHSA-35jh-r3h4-6jhm",
+            "https://nvd.nist.gov/vuln/detail/CVE-2021-23337",
+            "https://github.com/lodash/lodash/pull/5085"
+          ],
+          "exploitAvailable": true,
+          "fixAvailable": true,
+          "dependencyPath": [
+            "node-pnpm>lodash"
+          ],
+          "ecosystem": "node"
+        },
+        {
+          "id": "NPM-2000",
+          "title": "ReDoS in minimatch",
+          "description": "",
+          "severity": "moderate",
+          "score": 5,
+          "package": "minimatch",
+          "affectedVersions": "<3.0.5",
+          "references": [],
+          "exploitAvailable": false,
+          "fixAvailable": false,
+          "dependencyPath": [
+            "minimatch"
+          ],
+          "ecosystem": "node"
+        },
+        {
+          "id": "CVE-2022-0001",
+          "title": "Critical RCE",
+          "description": "Remote code execution.",
+          "severity": "critical",
+          "score": 9,
+          "package": "evil",
+          "affectedVersions": "*",
+          "cve": "CVE-2022-0001",
+          "references": [],
+          "exploitAvailable": true,
+          "fixAvailable": false,
+          "dependencyPath": [
+            "node-pnpm>a>evil"
+          ],
+          "ecosystem": "node"
+        }
+      ],
+      "outdated": [
+        {
+          "package": "typescript",
+          "current": "5.0.0",
+          "latest": "5.4.0",
+          "wanted": "5.0.4",
+          "ecosystem": "node",
+          "isDevDependency": false
+        },
+        {
+          "package": "zod",
+          "current": "3.20.0",
+          "latest": "3.23.0",
+          "wanted": "3.23.0",
+          "ecosystem": "node",
+          "isDevDependency": false
+        },
+        {
+          "package": "vitest",
+          "current": "1.0.0",
+          "latest": "2.0.0",
+          "wanted": "1.6.0",
+          "ecosystem": "node",
+          "isDevDependency": true
+        }
+      ],
+      "configIssues": [
+        {
+          "config": ".npmrc",
+          "description": "npm audit is disabled in .npmrc",
+          "ecosystem": "node",
+          "recommendation": "Remove \"audit=false\" from .npmrc to enable security audits",
+          "severity": "high",
+          "type": "misconfiguration"
+        },
+        {
+          "config": "package.json scripts",
+          "description": "No security audit script defined",
+          "ecosystem": "node",
+          "recommendation": "Add \"audit\": \"npm audit\" to scripts for easy security checks",
+          "severity": "low",
+          "type": "missing"
+        }
+      ],
+      "summary": {
+        "configIssueCount": 2,
+        "outdatedCount": 3,
+        "vulnerabilityCount": 3
+      }
+    },
+    {
+      "name": "python-app",
+      "version": "2.0.1",
+      "path": "<projects>/python-app",
+      "ecosystem": "python",
+      "vulnerabilities": [
+        {
+          "id": "51668",
+          "title": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+          "description": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+          "severity": "moderate",
+          "score": 6.1,
+          "package": "requests",
+          "affectedVersions": "<2.31.0",
+          "patchedVersion": "2.31.0",
+          "cve": "CVE-2023-32681",
+          "references": [
+            "https://data.safetycli.com/v/51668"
+          ],
+          "exploitAvailable": false,
+          "fixAvailable": true,
+          "ecosystem": "python",
+          "dependencyPath": [
+            "requests"
+          ]
+        },
+        {
+          "id": "PYSEC-flask",
+          "title": "Security Vulnerability",
+          "description": "",
+          "severity": "moderate",
+          "score": 5,
+          "package": "flask",
+          "affectedVersions": "<2.2.5",
+          "references": [],
+          "exploitAvailable": false,
+          "fixAvailable": false,
+          "ecosystem": "python",
+          "dependencyPath": [
+            "flask"
+          ]
+        }
+      ],
+      "outdated": [
+        {
+          "package": "requests",
+          "current": "2.25.0",
+          "latest": "2.32.3",
+          "wanted": "2.32.3",
+          "ecosystem": "python",
+          "isDevDependency": false
+        }
+      ],
+      "configIssues": [
+        {
+          "config": "requirements.txt",
+          "description": "2 unpinned dependencies detected",
+          "ecosystem": "python",
+          "recommendation": "Pin dependency versions (e.g., package==1.2.3) for reproducible and secure builds",
+          "severity": "moderate",
+          "type": "misconfiguration"
+        },
+        {
+          "config": "virtual environment",
+          "description": "No virtual environment directory found",
+          "ecosystem": "python",
+          "recommendation": "Use virtual environments to isolate project dependencies",
+          "severity": "low",
+          "type": "missing"
+        },
+        {
+          "config": "bandit.yml",
+          "description": "Bandit config for security linting not found",
+          "ecosystem": "python",
+          "recommendation": "Consider adding Bandit for automated security scanning",
+          "severity": "info",
+          "type": "missing"
+        },
+        {
+          "config": ".bandit",
+          "description": "Bandit config for security linting not found",
+          "ecosystem": "python",
+          "recommendation": "Consider adding Bandit for automated security scanning",
+          "severity": "info",
+          "type": "missing"
+        },
+        {
+          "config": "pyproject.toml",
+          "description": "No security tools configured in pyproject.toml",
+          "ecosystem": "python",
+          "recommendation": "Add security tools like bandit and safety to dev dependencies",
+          "severity": "low",
+          "type": "missing"
+        },
+        {
+          "config": "Python version",
+          "description": "Python 3.7 reached End-of-Life on 2023-06-27",
+          "ecosystem": "python",
+          "recommendation": "Upgrade to Python 3.9+ (3.11 or 3.12 recommended)",
+          "severity": "high",
+          "type": "deprecated"
+        }
+      ],
+      "summary": {
+        "configIssueCount": 6,
+        "outdatedCount": 1,
+        "vulnerabilityCount": 2
+      }
+    }
+  ],
+  "vulnerabilities": [
+    {
+      "id": "GHSA-35jh-r3h4-6jhm",
+      "title": "Prototype Pollution",
+      "description": "Lodash before 4.17.21 is vulnerable to prototype pollution.",
+      "severity": "high",
+      "score": 7.2,
+      "package": "lodash",
+      "affectedVersions": "<4.17.21",
+      "patchedVersion": ">=4.17.21",
+      "cve": "CVE-2021-23337",
+      "ghsa": "GHSA-35jh-r3h4-6jhm",
+      "cwe": "CWE-1321",
+      "references": [
+        "https://github.com/advisories/GHSA-35jh-r3h4-6jhm",
+        "https://nvd.nist.gov/vuln/detail/CVE-2021-23337",
+        "https://github.com/lodash/lodash/pull/5085"
+      ],
+      "exploitAvailable": true,
+      "fixAvailable": true,
+      "dependencyPath": [
+        "node-pnpm>lodash"
+      ],
+      "ecosystem": "node"
+    },
+    {
+      "id": "NPM-2000",
+      "title": "ReDoS in minimatch",
+      "description": "",
+      "severity": "moderate",
+      "score": 5,
+      "package": "minimatch",
+      "affectedVersions": "<3.0.5",
+      "references": [],
+      "exploitAvailable": false,
+      "fixAvailable": false,
+      "dependencyPath": [
+        "minimatch"
+      ],
+      "ecosystem": "node"
+    },
+    {
+      "id": "CVE-2022-0001",
+      "title": "Critical RCE",
+      "description": "Remote code execution.",
+      "severity": "critical",
+      "score": 9,
+      "package": "evil",
+      "affectedVersions": "*",
+      "cve": "CVE-2022-0001",
+      "references": [],
+      "exploitAvailable": true,
+      "fixAvailable": false,
+      "dependencyPath": [
+        "node-pnpm>a>evil"
+      ],
+      "ecosystem": "node"
+    },
+    {
+      "id": "51668",
+      "title": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+      "description": "Requests before 2.31.0 leaks Proxy-Authorization headers.",
+      "severity": "moderate",
+      "score": 6.1,
+      "package": "requests",
+      "affectedVersions": "<2.31.0",
+      "patchedVersion": "2.31.0",
+      "cve": "CVE-2023-32681",
+      "references": [
+        "https://data.safetycli.com/v/51668"
+      ],
+      "exploitAvailable": false,
+      "fixAvailable": true,
+      "ecosystem": "python",
+      "dependencyPath": [
+        "requests"
+      ]
+    },
+    {
+      "id": "PYSEC-flask",
+      "title": "Security Vulnerability",
+      "description": "",
+      "severity": "moderate",
+      "score": 5,
+      "package": "flask",
+      "affectedVersions": "<2.2.5",
+      "references": [],
+      "exploitAvailable": false,
+      "fixAvailable": false,
+      "ecosystem": "python",
+      "dependencyPath": [
+        "flask"
+      ]
+    }
+  ],
+  "outdated": [
+    {
+      "package": "typescript",
+      "current": "5.0.0",
+      "latest": "5.4.0",
+      "wanted": "5.0.4",
+      "ecosystem": "node",
+      "isDevDependency": false
+    },
+    {
+      "package": "zod",
+      "current": "3.20.0",
+      "latest": "3.23.0",
+      "wanted": "3.23.0",
+      "ecosystem": "node",
+      "isDevDependency": false
+    },
+    {
+      "package": "vitest",
+      "current": "1.0.0",
+      "latest": "2.0.0",
+      "wanted": "1.6.0",
+      "ecosystem": "node",
+      "isDevDependency": true
+    },
+    {
+      "package": "requests",
+      "current": "2.25.0",
+      "latest": "2.32.3",
+      "wanted": "2.32.3",
+      "ecosystem": "python",
+      "isDevDependency": false
+    }
+  ],
+  "configIssues": [
+    {
+      "config": ".npmrc",
+      "description": "npm audit is disabled in .npmrc",
+      "ecosystem": "node",
+      "recommendation": "Remove \"audit=false\" from .npmrc to enable security audits",
+      "severity": "high",
+      "type": "misconfiguration"
+    },
+    {
+      "config": "package.json scripts",
+      "description": "No security audit script defined",
+      "ecosystem": "node",
+      "recommendation": "Add \"audit\": \"npm audit\" to scripts for easy security checks",
+      "severity": "low",
+      "type": "missing"
+    },
+    {
+      "config": "requirements.txt",
+      "description": "2 unpinned dependencies detected",
+      "ecosystem": "python",
+      "recommendation": "Pin dependency versions (e.g., package==1.2.3) for reproducible and secure builds",
+      "severity": "moderate",
+      "type": "misconfiguration"
+    },
+    {
+      "config": "virtual environment",
+      "description": "No virtual environment directory found",
+      "ecosystem": "python",
+      "recommendation": "Use virtual environments to isolate project dependencies",
+      "severity": "low",
+      "type": "missing"
+    },
+    {
+      "config": "bandit.yml",
+      "description": "Bandit config for security linting not found",
+      "ecosystem": "python",
+      "recommendation": "Consider adding Bandit for automated security scanning",
+      "severity": "info",
+      "type": "missing"
+    },
+    {
+      "config": ".bandit",
+      "description": "Bandit config for security linting not found",
+      "ecosystem": "python",
+      "recommendation": "Consider adding Bandit for automated security scanning",
+      "severity": "info",
+      "type": "missing"
+    },
+    {
+      "config": "pyproject.toml",
+      "description": "No security tools configured in pyproject.toml",
+      "ecosystem": "python",
+      "recommendation": "Add security tools like bandit and safety to dev dependencies",
+      "severity": "low",
+      "type": "missing"
+    },
+    {
+      "config": "Python version",
+      "description": "Python 3.7 reached End-of-Life on 2023-06-27",
+      "ecosystem": "python",
+      "recommendation": "Upgrade to Python 3.9+ (3.11 or 3.12 recommended)",
+      "severity": "high",
+      "type": "deprecated"
+    }
+  ],
+  "summary": {
+    "configIssueCount": 8,
+    "criticalCount": 1,
+    "highCount": 1,
+    "infoCount": 0,
+    "lowCount": 0,
+    "moderateCount": 3,
+    "outdatedCount": 4,
+    "vulnerabilityCount": 5
+  }
+}

@@ -43,6 +43,67 @@ function code(payload: EventPayload): string {
   return typeof payload.code === 'string' ? payload.code : '';
 }
 
+describe.skipIf(KERNEL_DIR === undefined)('json/nodes on the JS host (twin of orbital-core-eval json_valid_operator)', () => {
+  it('lists the tree and every value nested in it, pre-order, with operator-shaped data left as data', async () => {
+    const open = await KernelProgram.open(await resolveProgramFile(fixture('json-nodes')), { kernelDir: KERNEL_DIR ?? '' });
+    try {
+      const tree = { a: [{ b: 'x' }], c: 'call-service' };
+      const run = await open.dispatch('WalkOrbital', 'WALK', { tree });
+      const walked = emitPayload(run, 'WALKED', (p) => p);
+      expect(walked?.count).toBe(5);
+      expect(JSON.parse(typeof walked?.nodes === 'string' ? walked.nodes : 'null')).toEqual([tree, [{ b: 'x' }], { b: 'x' }, 'x', 'call-service']);
+    } finally {
+      open.close();
+    }
+  });
+});
+
+describe.skipIf(KERNEL_DIR === undefined)('kernel program host inbound hooks (EXEC-INBOUND-1)', () => {
+  it('delivers a hook to its handler and returns the answer it emitted', async () => {
+    const open = await KernelProgram.open(await resolveProgramFile(fixture('inbound-echo')), { kernelDir: KERNEL_DIR ?? '' });
+    try {
+      const answer = await open.deliverInbound('echo', { headers: { 'User-Agent': 'probe/1' }, rawBody: '{"n":1}' });
+      expect(answer.status).toBe(201);
+      expect(JSON.parse(answer.body)).toEqual({ ua: 'probe/1', raw: '{"n":1}' });
+    } finally {
+      open.close();
+    }
+  });
+
+  it('control: a name the program does not serve is a 404 and runs nothing', async () => {
+    const open = await KernelProgram.open(await resolveProgramFile(fixture('inbound-echo')), { kernelDir: KERNEL_DIR ?? '' });
+    try {
+      const answer = await open.deliverInbound('nobody', { headers: {}, rawBody: '' });
+      expect(answer.status).toBe(404);
+    } finally {
+      open.close();
+    }
+  });
+});
+
+describe.skipIf(KERNEL_DIR === undefined)('kernel program host rejections', () => {
+  it('a failed effect is reported in rejections, not hidden behind success', async () => {
+    const open = await KernelProgram.open(await resolveProgramFile(fixture('effect-fails')), { kernelDir: KERNEL_DIR ?? '', os: true });
+    try {
+      const run = await open.dispatch('FailsOrbital', 'READ', {});
+      expect(run.rejections.map((r) => r.code)).toContain('effect-failed');
+      expect(run.rejections.find((r) => r.code === 'effect-failed')?.error).toMatch(/almadar-effect-fails-never-exists|No such file|ENOENT/);
+    } finally {
+      open.close();
+    }
+  });
+
+  it('control: a run whose effects all succeed has no rejections', async () => {
+    const open = await KernelProgram.open(await resolveProgramFile(fixture('std-cli-sh')), { kernelDir: KERNEL_DIR ?? '', os: true });
+    try {
+      const run = await open.dispatch('ShOrbital', 'CLI_RUN', { stage: 'ok', argv: ['-c', 'printf ok'] });
+      expect(run.rejections).toEqual([]);
+    } finally {
+      open.close();
+    }
+  });
+});
+
 describe.skipIf(KERNEL_DIR === undefined)('kernel program host', () => {
   let open: KernelProgram | undefined;
   afterEach(() => { open?.close(); open = undefined; });

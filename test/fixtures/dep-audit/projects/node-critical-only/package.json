@@ -1,0 +1,1 @@
+{ "name": "node-critical-only", "version": "0.0.1", "scripts": { "audit": "pnpm audit" } }

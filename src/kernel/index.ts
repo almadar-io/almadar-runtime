@@ -46,3 +46,4 @@ export {
   type HttpRunOptions,
   type ResolvedHost,
 } from './http-exchange.js';
+export { deliverBeacon, type BeaconDelivery, type BeaconDeliveryPorts, type BeaconFetchInit } from './beacon-port.js';

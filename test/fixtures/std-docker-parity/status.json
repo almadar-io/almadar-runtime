@@ -1,0 +1,26 @@
+{
+  "answers": [
+    {
+      "event": "STATUS_DONE",
+      "payload": {
+        "containerId": "cid123",
+        "createdAt": 1767225600000,
+        "image": "nginx",
+        "name": "web",
+        "ports": [
+          {
+            "container": 80,
+            "host": 8080,
+            "protocol": "tcp"
+          }
+        ],
+        "startedAt": 1767225601000,
+        "status": "running",
+        "stoppedAt": 0
+      }
+    }
+  ],
+  "argv": [
+    "inspect --format {{json .}} cid123"
+  ]
+}

@@ -1,0 +1,6 @@
+requests==2.25.0
+flask
+# a comment
+django>=3.2
+-r other.txt
+numpy

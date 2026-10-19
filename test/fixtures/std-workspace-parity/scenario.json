@@ -1,0 +1,295 @@
+[
+  {
+    "request": "WORKSPACE_WRITE_FILE",
+    "answers": [
+      {
+        "event": "WORKSPACE_FILE_WRITTEN",
+        "payload": {
+          "path": "schema.orb",
+          "workspace": "w1",
+          "written": true
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_WRITE_FILE",
+    "answers": [
+      {
+        "event": "WORKSPACE_FILE_WRITTEN",
+        "payload": {
+          "path": "orbitals/x.lolo",
+          "workspace": "w1",
+          "written": true
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_TREE",
+    "answers": [
+      {
+        "event": "WORKSPACE_TREE_LOADED",
+        "payload": {
+          "nodes": [
+            {
+              "id": ".almadar",
+              "path": ".almadar",
+              "size": 0,
+              "type": "directory"
+            },
+            {
+              "id": ".almadar/app-marker.json",
+              "path": ".almadar/app-marker.json",
+              "size": 67,
+              "type": "file"
+            },
+            {
+              "id": ".gitignore",
+              "path": ".gitignore",
+              "size": 524,
+              "type": "file"
+            },
+            {
+              "id": "orbitals",
+              "path": "orbitals",
+              "size": 0,
+              "type": "directory"
+            },
+            {
+              "id": "orbitals/x.lolo",
+              "path": "orbitals/x.lolo",
+              "size": 27,
+              "type": "file"
+            },
+            {
+              "id": "schema.orb",
+              "path": "schema.orb",
+              "size": 13,
+              "type": "file"
+            }
+          ],
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_READ_FILE",
+    "answers": [
+      {
+        "event": "WORKSPACE_FILE_READ",
+        "payload": {
+          "content": "app x [ version: \"1.0.0\" ]\n",
+          "exists": true,
+          "path": "orbitals/x.lolo",
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_SNAPSHOT",
+    "answers": [
+      {
+        "event": "WORKSPACE_SNAPSHOT_TAKEN",
+        "payload": {
+          "committed": true,
+          "oid": "<oid-1>",
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_WRITE_FILE",
+    "answers": [
+      {
+        "event": "WORKSPACE_FILE_WRITTEN",
+        "payload": {
+          "path": "schema.orb",
+          "workspace": "w1",
+          "written": true
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_SNAPSHOT",
+    "answers": [
+      {
+        "event": "WORKSPACE_SNAPSHOT_TAKEN",
+        "payload": {
+          "committed": true,
+          "oid": "<oid-2>",
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_HISTORY",
+    "answers": [
+      {
+        "event": "WORKSPACE_HISTORY_LOADED",
+        "payload": {
+          "canRedo": false,
+          "canUndo": true,
+          "snapshots": [
+            {
+              "id": "<oid-2>",
+              "kind": "snapshot",
+              "reason": "second",
+              "target": "",
+              "timestamp": "<ts>"
+            },
+            {
+              "id": "<oid-1>",
+              "kind": "snapshot",
+              "reason": "first",
+              "target": "",
+              "timestamp": "<ts>"
+            }
+          ],
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_CHANGES",
+    "answers": [
+      {
+        "event": "WORKSPACE_CHANGES_LOADED",
+        "payload": {
+          "changes": [
+            {
+              "after": "{\"name\":\"b\"}\n",
+              "before": "{\"name\":\"a\"}\n",
+              "change": "modified",
+              "id": "schema.orb",
+              "path": "schema.orb"
+            }
+          ],
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_UNDO",
+    "answers": [
+      {
+        "event": "WORKSPACE_HISTORY_STEPPED",
+        "payload": {
+          "changed": true,
+          "oid": "<oid-3>",
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_HISTORY",
+    "answers": [
+      {
+        "event": "WORKSPACE_HISTORY_LOADED",
+        "payload": {
+          "canRedo": true,
+          "canUndo": true,
+          "snapshots": [
+            {
+              "id": "<oid-3>",
+              "kind": "undo",
+              "reason": "undo: <oid-2>:short",
+              "target": "<oid-2>",
+              "timestamp": "<ts>"
+            },
+            {
+              "id": "<oid-2>",
+              "kind": "snapshot",
+              "reason": "second",
+              "target": "",
+              "timestamp": "<ts>"
+            },
+            {
+              "id": "<oid-1>",
+              "kind": "snapshot",
+              "reason": "first",
+              "target": "",
+              "timestamp": "<ts>"
+            }
+          ],
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_REDO",
+    "answers": [
+      {
+        "event": "WORKSPACE_HISTORY_STEPPED",
+        "payload": {
+          "changed": true,
+          "oid": "<oid-4>",
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_RESTORE",
+    "answers": [
+      {
+        "event": "WORKSPACE_HISTORY_STEPPED",
+        "payload": {
+          "changed": true,
+          "oid": "<oid-5>",
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_READ_FILE",
+    "answers": [
+      {
+        "event": "WORKSPACE_FILE_READ",
+        "payload": {
+          "content": "{\"name\":\"a\"}\n",
+          "exists": true,
+          "path": "schema.orb",
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_REMOVE_FILE",
+    "answers": [
+      {
+        "event": "WORKSPACE_FILE_REMOVED",
+        "payload": {
+          "path": "orbitals/x.lolo",
+          "removed": true,
+          "workspace": "w1"
+        }
+      }
+    ]
+  },
+  {
+    "request": "WORKSPACE_READ_FILE",
+    "answers": [
+      {
+        "event": "WORKSPACE_FILE_READ",
+        "payload": {
+          "content": "",
+          "exists": false,
+          "path": "orbitals/missing.lolo",
+          "workspace": "w1"
+        }
+      }
+    ]
+  }
+]

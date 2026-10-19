@@ -1,0 +1,150 @@
+{
+  "projectName": "almadar-security-audit",
+  "timestamp": "<time>",
+  "duration": "<ms>",
+  "packages": [
+    {
+      "name": "node-npm-vulns",
+      "version": "0.0.0",
+      "path": "<projects>/node-npm-vulns",
+      "ecosystem": "node",
+      "vulnerabilities": [
+        {
+          "id": "GHSA-vh95-rmgr-6w4m",
+          "title": "Prototype Pollution in minimist",
+          "description": "",
+          "severity": "low",
+          "score": 2,
+          "package": "minimist",
+          "affectedVersions": "<0.2.1",
+          "ghsa": "GHSA-vh95-rmgr-6w4m",
+          "cwe": "CWE-1321",
+          "references": [
+            "https://github.com/advisories/GHSA-vh95-rmgr-6w4m"
+          ],
+          "exploitAvailable": false,
+          "fixAvailable": true,
+          "dependencyPath": [
+            "minimist"
+          ],
+          "ecosystem": "node"
+        },
+        {
+          "id": "GHSA-r628-mhmh-qjhw",
+          "title": "Arbitrary File Overwrite",
+          "description": "",
+          "severity": "info",
+          "score": 5,
+          "package": "tar",
+          "affectedVersions": "<4.4.2",
+          "ghsa": "GHSA-r628-mhmh-qjhw",
+          "references": [
+            "https://github.com/advisories/GHSA-r628-mhmh-qjhw"
+          ],
+          "exploitAvailable": false,
+          "fixAvailable": false,
+          "dependencyPath": [
+            "tar"
+          ],
+          "ecosystem": "node"
+        }
+      ],
+      "outdated": [
+        {
+          "package": "left-pad",
+          "current": "1.0.0",
+          "latest": "1.3.0",
+          "wanted": "1.3.0",
+          "ecosystem": "node",
+          "isDevDependency": false
+        }
+      ],
+      "configIssues": [
+        {
+          "config": "lock file",
+          "description": "No lock file (package-lock.json or pnpm-lock.yaml) found",
+          "ecosystem": "node",
+          "recommendation": "Use a lock file to ensure reproducible builds and audit accuracy",
+          "severity": "moderate",
+          "type": "missing"
+        }
+      ],
+      "summary": {
+        "configIssueCount": 1,
+        "outdatedCount": 1,
+        "vulnerabilityCount": 2
+      }
+    }
+  ],
+  "vulnerabilities": [
+    {
+      "id": "GHSA-vh95-rmgr-6w4m",
+      "title": "Prototype Pollution in minimist",
+      "description": "",
+      "severity": "low",
+      "score": 2,
+      "package": "minimist",
+      "affectedVersions": "<0.2.1",
+      "ghsa": "GHSA-vh95-rmgr-6w4m",
+      "cwe": "CWE-1321",
+      "references": [
+        "https://github.com/advisories/GHSA-vh95-rmgr-6w4m"
+      ],
+      "exploitAvailable": false,
+      "fixAvailable": true,
+      "dependencyPath": [
+        "minimist"
+      ],
+      "ecosystem": "node"
+    },
+    {
+      "id": "GHSA-r628-mhmh-qjhw",
+      "title": "Arbitrary File Overwrite",
+      "description": "",
+      "severity": "info",
+      "score": 5,
+      "package": "tar",
+      "affectedVersions": "<4.4.2",
+      "ghsa": "GHSA-r628-mhmh-qjhw",
+      "references": [
+        "https://github.com/advisories/GHSA-r628-mhmh-qjhw"
+      ],
+      "exploitAvailable": false,
+      "fixAvailable": false,
+      "dependencyPath": [
+        "tar"
+      ],
+      "ecosystem": "node"
+    }
+  ],
+  "outdated": [
+    {
+      "package": "left-pad",
+      "current": "1.0.0",
+      "latest": "1.3.0",
+      "wanted": "1.3.0",
+      "ecosystem": "node",
+      "isDevDependency": false
+    }
+  ],
+  "configIssues": [
+    {
+      "config": "lock file",
+      "description": "No lock file (package-lock.json or pnpm-lock.yaml) found",
+      "ecosystem": "node",
+      "recommendation": "Use a lock file to ensure reproducible builds and audit accuracy",
+      "severity": "moderate",
+      "type": "missing"
+    }
+  ],
+  "summary": {
+    "configIssueCount": 1,
+    "criticalCount": 0,
+    "highCount": 0,
+    "infoCount": 1,
+    "lowCount": 1,
+    "moderateCount": 0,
+    "outdatedCount": 1,
+    "vulnerabilityCount": 2
+  }
+}

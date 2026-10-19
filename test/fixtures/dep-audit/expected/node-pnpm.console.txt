@@ -1,0 +1,76 @@
+
+[1m[34m═════════════════════════[0m
+[1m[34m  SECURITY AUDIT REPORT  [0m
+[1m[34m═════════════════════════[0m
+
+Project: almadar-security-audit
+Scanned: <time>
+Duration: <ms>ms
+
+
+[1m[37mSUMMARY[0m
+[2m───────[0m
+Total Vulnerabilities: [33m3[0m
+  Critical: [31m1[0m
+  High: [31m1[0m
+  Moderate: [31m1[0m
+  Low: [2m0[0m
+  Info: [2m0[0m
+Outdated Dependencies: [33m3[0m
+Config Issues: [33m2[0m
+
+
+[1m[37mVULNERABILITIES[0m
+[2m───────────────[0m
+
+[41m[37m[1mCRITICAL[0m (1):
+  [31mCVE-2022-0001[0m: Critical RCE
+    Package: [36mevil[0m
+    Severity: [41m[37m[1mCRITICAL[0m (CVSS: 9)
+    Affected: *
+    CVE: CVE-2022-0001
+
+[31m[1mHIGH[0m (1):
+  [35mGHSA-35jh-r3h4-6jhm[0m: Prototype Pollution
+    Package: [36mlodash[0m
+    Severity: [31m[1mHIGH[0m (CVSS: 7.2)
+    Affected: <4.17.21
+    Patched: >=4.17.21
+    CVE: CVE-2021-23337
+    [32m✓ Fix available[0m
+
+[33mMODERATE[0m (1):
+  [33mNPM-2000[0m: ReDoS in minimatch
+    Package: [36mminimatch[0m
+    Severity: [33mMODERATE[0m (CVSS: 5)
+    Affected: <3.0.5
+
+
+[1m[37mOUTDATED DEPENDENCIES[0m
+[2m─────────────────────[0m
+  [36mtypescript[0m: [31m5.0.0[0m → [32m5.4.0[0m
+  [36mzod[0m: [31m3.20.0[0m → [32m3.23.0[0m
+  [36mvitest[0m [dev]: [31m1.0.0[0m → [32m2.0.0[0m
+
+
+[1m[37mCONFIGURATION ISSUES[0m
+[2m────────────────────[0m
+  [misconfiguration] [31m[1mHIGH[0m .npmrc
+    npm audit is disabled in .npmrc
+    Recommendation: Remove "audit=false" from .npmrc to enable security audits
+  [missing] [34mLOW[0m package.json scripts
+    No security audit script defined
+    Recommendation: Add "audit": "npm audit" to scripts for easy security checks
+
+
+[1m[37mPACKAGE REPORTS[0m
+[2m───────────────[0m
+
+📦 [36mnode-pnpm[0m [2mv1.2.3[0m
+   Ecosystem: node
+   Vulnerabilities: 3
+   Outdated: 3
+   Config Issues: 2
+
+[2m══════════════════════════════════════════════════[0m
+[41m[37m CRITICAL VULNERABILITIES DETECTED [0m

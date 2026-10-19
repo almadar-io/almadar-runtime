@@ -1,0 +1,1 @@
+{ "name": "node-npm-clean", "version": "0.1.0", "scripts": { "audit": "npm audit" } }

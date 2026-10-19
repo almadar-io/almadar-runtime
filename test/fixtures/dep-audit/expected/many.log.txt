@@ -1,0 +1,5 @@
+[36mℹ[0m Scanning 4 project(s)...
+[36mℹ[0m Auditing Node.js project: <projects>/node-pnpm
+[36mℹ[0m Auditing Python project: <projects>/python-app
+[31m✗[0m Path not found: <projects>/missing
+[33m⚠[0m No recognized project found at <projects>/not-a-project
