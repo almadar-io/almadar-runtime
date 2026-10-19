@@ -11,8 +11,9 @@ import { join } from 'node:path';
 import type { EventPayload, JsonValue } from '@almadar/core';
 import { KernelProgram, resolveProgramFile } from '../src/kernel/program-node.js';
 import { KERNEL_DIR } from './helpers/kernel-module.js';
+import { stdInfraAtom } from './helpers/std-atom.js';
 
-const atom = fileURLToPath(new URL('../../almadar-std/behaviors/lolo/infra/atoms/std-dependency-audit.lolo', import.meta.url));
+const atom = stdInfraAtom('std-dependency-audit');
 const fixtures = realpathSync(fileURLToPath(new URL('./fixtures/dep-audit', import.meta.url)));
 const projects = join(fixtures, 'projects');
 const expected = join(fixtures, 'expected');

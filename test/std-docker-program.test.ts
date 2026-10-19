@@ -9,8 +9,9 @@ import { join } from 'node:path';
 import type { EventPayload } from '@almadar/core';
 import { KernelProgram, resolveProgramFile } from '../src/kernel/program-node.js';
 import { KERNEL_DIR } from './helpers/kernel-module.js';
+import { stdInfraAtom } from './helpers/std-atom.js';
 
-const atom = fileURLToPath(new URL('../../almadar-std/behaviors/lolo/infra/atoms/std-docker.lolo', import.meta.url));
+const atom = stdInfraAtom('std-docker');
 const fakeDir = fileURLToPath(new URL('./fixtures/fake-docker', import.meta.url));
 const ENV_KNOB = '      env : Map string string = {}\n';
 

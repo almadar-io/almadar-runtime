@@ -2,15 +2,15 @@
 // grant) pointed at a temp directory runs one scenario on real git; every step's public answers are pinned in a file
 // snapshot (recorded before std-workspace composed std-cli), with commit ids, times and the temp root normalized.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { fileURLToPath } from 'node:url';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { toWireValue, type EventPayload, type JsonValue } from '@almadar/core';
 import { KernelProgram, resolveProgramFile } from '../src/kernel/program-node.js';
 import { KERNEL_DIR } from './helpers/kernel-module.js';
+import { stdInfraAtom } from './helpers/std-atom.js';
 
-const atom = fileURLToPath(new URL('../../almadar-std/behaviors/lolo/infra/atoms/std-workspace.lolo', import.meta.url));
+const atom = stdInfraAtom('std-workspace');
 const ROOT = '/var/lib/almadar/workspaces';
 const USER = { id: 'u1' };
 

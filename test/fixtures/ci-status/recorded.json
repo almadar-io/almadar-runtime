@@ -1,0 +1,786 @@
+{
+ "recorded": [
+  {
+   "name": "two pages, skipped repos, suite ordering, extras answered and failed",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "runs": [
+      {
+       "repo": "almadar-core",
+       "fullName": "almadar-io/almadar-core",
+       "status": "completed",
+       "conclusion": "failure",
+       "name": "Publish",
+       "url": "https://github.com/almadar-io/x/actions/runs/102",
+       "databaseId": 102,
+       "createdAt": "2026-10-19T09:00:00Z"
+      },
+      {
+       "repo": "almadar-noref",
+       "fullName": "almadar-io/almadar-noref",
+       "status": "unknown",
+       "conclusion": null,
+       "name": "",
+       "url": "",
+       "databaseId": 0,
+       "createdAt": ""
+      },
+      {
+       "repo": "almadar-quiet",
+       "fullName": "almadar-io/almadar-quiet",
+       "status": "unknown",
+       "conclusion": null,
+       "name": "",
+       "url": "",
+       "databaseId": 0,
+       "createdAt": ""
+      },
+      {
+       "repo": "almadar-ui",
+       "fullName": "almadar-io/almadar-ui",
+       "status": "in_progress",
+       "conclusion": null,
+       "name": "CI",
+       "url": "https://github.com/almadar-io/x/actions/runs/201",
+       "databaseId": 201,
+       "createdAt": "2026-10-19T12:00:00Z"
+      },
+      {
+       "repo": "almadar-noflow",
+       "fullName": "almadar-io/almadar-noflow",
+       "status": "queued",
+       "conclusion": null,
+       "name": "",
+       "url": "https://github.com/almadar-io/x/actions/runs/202",
+       "databaseId": 202,
+       "createdAt": "2026-10-19T07:00:00Z"
+      },
+      {
+       "repo": "orbital-cli (main repo)",
+       "fullName": "itechdom/kflow.ai",
+       "status": "completed",
+       "conclusion": "success",
+       "name": "CI",
+       "url": "https://github.com/itechdom/x/actions/runs/9001",
+       "databaseId": 9001,
+       "createdAt": "2026-10-19T05:00:00Z"
+      },
+      {
+       "repo": "almadar-studio (builder)",
+       "fullName": "itechdom/almadar-studio",
+       "status": "unknown",
+       "conclusion": null,
+       "name": "",
+       "url": "",
+       "databaseId": 0,
+       "createdAt": ""
+      }
+     ],
+     "fetchedAtIsIso": true
+    },
+    {
+     "method": "GET",
+     "status": 200,
+     "runs": [
+      {
+       "repo": "almadar-core",
+       "fullName": "almadar-io/almadar-core",
+       "status": "completed",
+       "conclusion": "failure",
+       "name": "Publish",
+       "url": "https://github.com/almadar-io/x/actions/runs/102",
+       "databaseId": 102,
+       "createdAt": "2026-10-19T09:00:00Z"
+      },
+      {
+       "repo": "almadar-noref",
+       "fullName": "almadar-io/almadar-noref",
+       "status": "unknown",
+       "conclusion": null,
+       "name": "",
+       "url": "",
+       "databaseId": 0,
+       "createdAt": ""
+      },
+      {
+       "repo": "almadar-quiet",
+       "fullName": "almadar-io/almadar-quiet",
+       "status": "unknown",
+       "conclusion": null,
+       "name": "",
+       "url": "",
+       "databaseId": 0,
+       "createdAt": ""
+      },
+      {
+       "repo": "almadar-ui",
+       "fullName": "almadar-io/almadar-ui",
+       "status": "in_progress",
+       "conclusion": null,
+       "name": "CI",
+       "url": "https://github.com/almadar-io/x/actions/runs/201",
+       "databaseId": 201,
+       "createdAt": "2026-10-19T12:00:00Z"
+      },
+      {
+       "repo": "almadar-noflow",
+       "fullName": "almadar-io/almadar-noflow",
+       "status": "queued",
+       "conclusion": null,
+       "name": "",
+       "url": "https://github.com/almadar-io/x/actions/runs/202",
+       "databaseId": 202,
+       "createdAt": "2026-10-19T07:00:00Z"
+      },
+      {
+       "repo": "orbital-cli (main repo)",
+       "fullName": "itechdom/kflow.ai",
+       "status": "completed",
+       "conclusion": "success",
+       "name": "CI",
+       "url": "https://github.com/itechdom/x/actions/runs/9001",
+       "databaseId": 9001,
+       "createdAt": "2026-10-19T05:00:00Z"
+      },
+      {
+       "repo": "almadar-studio (builder)",
+       "fullName": "itechdom/almadar-studio",
+       "status": "unknown",
+       "conclusion": null,
+       "name": "",
+       "url": "",
+       "databaseId": 0,
+       "createdAt": ""
+      }
+     ],
+     "fetchedAtIsIso": true
+    },
+    {
+     "method": "POST",
+     "status": 200,
+     "runs": [
+      {
+       "repo": "almadar-core",
+       "fullName": "almadar-io/almadar-core",
+       "status": "completed",
+       "conclusion": "failure",
+       "name": "Publish",
+       "url": "https://github.com/almadar-io/x/actions/runs/102",
+       "databaseId": 102,
+       "createdAt": "2026-10-19T09:00:00Z"
+      },
+      {
+       "repo": "almadar-noref",
+       "fullName": "almadar-io/almadar-noref",
+       "status": "unknown",
+       "conclusion": null,
+       "name": "",
+       "url": "",
+       "databaseId": 0,
+       "createdAt": ""
+      },
+      {
+       "repo": "almadar-quiet",
+       "fullName": "almadar-io/almadar-quiet",
+       "status": "unknown",
+       "conclusion": null,
+       "name": "",
+       "url": "",
+       "databaseId": 0,
+       "createdAt": ""
+      },
+      {
+       "repo": "almadar-ui",
+       "fullName": "almadar-io/almadar-ui",
+       "status": "in_progress",
+       "conclusion": null,
+       "name": "CI",
+       "url": "https://github.com/almadar-io/x/actions/runs/201",
+       "databaseId": 201,
+       "createdAt": "2026-10-19T12:00:00Z"
+      },
+      {
+       "repo": "almadar-noflow",
+       "fullName": "almadar-io/almadar-noflow",
+       "status": "queued",
+       "conclusion": null,
+       "name": "",
+       "url": "https://github.com/almadar-io/x/actions/runs/202",
+       "databaseId": 202,
+       "createdAt": "2026-10-19T07:00:00Z"
+      },
+      {
+       "repo": "orbital-cli (main repo)",
+       "fullName": "itechdom/kflow.ai",
+       "status": "completed",
+       "conclusion": "failure",
+       "name": "Deploy",
+       "url": "https://github.com/itechdom/x/actions/runs/9002",
+       "databaseId": 9002,
+       "createdAt": "2026-10-19T06:00:00Z"
+      },
+      {
+       "repo": "almadar-studio (builder)",
+       "fullName": "itechdom/almadar-studio",
+       "status": "completed",
+       "conclusion": "success",
+       "name": "Build",
+       "url": "https://github.com/itechdom/x/actions/runs/9101",
+       "databaseId": 9101,
+       "createdAt": "2026-10-19T04:00:00Z"
+      }
+     ],
+     "fetchedAtIsIso": true
+    }
+   ],
+   "calls": [
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    },
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": "Y3Vyc29yOjI1"
+      }
+     }
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/kflow.ai",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/kflow.ai",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/almadar-studio",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/almadar-studio",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    },
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    },
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": "Y3Vyc29yOjI1"
+      }
+     }
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/almadar-studio",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/almadar-studio",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/kflow.ai",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/kflow.ai",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a gateway error is retried, then the page answers; empty extra lists are unknown",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "runs": [
+      {
+       "repo": "almadar-std",
+       "fullName": "almadar-io/almadar-std",
+       "status": "completed",
+       "conclusion": "startup_failure",
+       "name": "Release",
+       "url": "https://github.com/almadar-io/x/actions/runs/301",
+       "databaseId": 301,
+       "createdAt": "2026-10-17T01:02:03Z"
+      },
+      {
+       "repo": "orbital-cli (main repo)",
+       "fullName": "itechdom/kflow.ai",
+       "status": "unknown",
+       "conclusion": null,
+       "name": "",
+       "url": "",
+       "databaseId": 0,
+       "createdAt": ""
+      },
+      {
+       "repo": "almadar-studio (builder)",
+       "fullName": "itechdom/almadar-studio",
+       "status": "unknown",
+       "conclusion": null,
+       "name": "",
+       "url": "",
+       "databaseId": 0,
+       "createdAt": ""
+      }
+     ],
+     "fetchedAtIsIso": true
+    }
+   ],
+   "calls": [
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    },
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/almadar-studio",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/almadar-studio",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/kflow.ai",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/kflow.ai",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a refused token is not retried and the empty board is kept as the cache",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "runs": [],
+     "fetchedAtIsIso": true
+    },
+    {
+     "method": "GET",
+     "status": 200,
+     "runs": [],
+     "fetchedAtIsIso": true
+    }
+   ],
+   "calls": [
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "errors beside data still use the data",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "runs": [
+      {
+       "repo": "almadar-std",
+       "fullName": "almadar-io/almadar-std",
+       "status": "completed",
+       "conclusion": "success",
+       "name": "CI",
+       "url": "https://github.com/almadar-io/x/actions/runs/401",
+       "databaseId": 401,
+       "createdAt": "2026-10-17T01:02:03Z"
+      },
+      {
+       "repo": "orbital-cli (main repo)",
+       "fullName": "itechdom/kflow.ai",
+       "status": "waiting",
+       "conclusion": "",
+       "name": "CI",
+       "url": "https://github.com/itechdom/x/actions/runs/9003",
+       "databaseId": 9003,
+       "createdAt": "2026-10-19T05:00:00Z"
+      },
+      {
+       "repo": "almadar-studio (builder)",
+       "fullName": "itechdom/almadar-studio",
+       "status": "completed",
+       "conclusion": "success",
+       "name": "CI",
+       "url": "https://github.com/itechdom/x/actions/runs/9102",
+       "databaseId": 9102,
+       "createdAt": "2026-10-19T05:00:00Z"
+      }
+     ],
+     "fetchedAtIsIso": true
+    }
+   ],
+   "calls": [
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/kflow.ai",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/kflow.ai",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/almadar-studio",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/almadar-studio",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "no organization in the reply: an empty board plus the extras",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "runs": [
+      {
+       "repo": "orbital-cli (main repo)",
+       "fullName": "itechdom/kflow.ai",
+       "status": "unknown",
+       "conclusion": null,
+       "name": "",
+       "url": "",
+       "databaseId": 0,
+       "createdAt": ""
+      },
+      {
+       "repo": "almadar-studio (builder)",
+       "fullName": "itechdom/almadar-studio",
+       "status": "completed",
+       "conclusion": "success",
+       "name": "CI",
+       "url": "https://github.com/itechdom/x/actions/runs/9103",
+       "databaseId": 9103,
+       "createdAt": "2026-10-19T05:00:00Z"
+      }
+     ],
+     "fetchedAtIsIso": true
+    }
+   ],
+   "calls": [
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/almadar-studio",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/almadar-studio",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/kflow.ai",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/kflow.ai",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a refresh whose every attempt is a gateway error keeps the last board",
+   "responses": [
+    {
+     "method": "GET",
+     "status": 200,
+     "runs": [
+      {
+       "repo": "almadar-std",
+       "fullName": "almadar-io/almadar-std",
+       "status": "completed",
+       "conclusion": "startup_failure",
+       "name": "Release",
+       "url": "https://github.com/almadar-io/x/actions/runs/301",
+       "databaseId": 301,
+       "createdAt": "2026-10-17T01:02:03Z"
+      },
+      {
+       "repo": "orbital-cli (main repo)",
+       "fullName": "itechdom/kflow.ai",
+       "status": "completed",
+       "conclusion": "success",
+       "name": "CI",
+       "url": "https://github.com/itechdom/x/actions/runs/9004",
+       "databaseId": 9004,
+       "createdAt": "2026-10-19T05:00:00Z"
+      },
+      {
+       "repo": "almadar-studio (builder)",
+       "fullName": "itechdom/almadar-studio",
+       "status": "completed",
+       "conclusion": "success",
+       "name": "CI",
+       "url": "https://github.com/itechdom/x/actions/runs/9104",
+       "databaseId": 9104,
+       "createdAt": "2026-10-19T05:00:00Z"
+      }
+     ],
+     "fetchedAtIsIso": true
+    },
+    {
+     "method": "POST",
+     "status": 200,
+     "runs": [
+      {
+       "repo": "almadar-std",
+       "fullName": "almadar-io/almadar-std",
+       "status": "completed",
+       "conclusion": "startup_failure",
+       "name": "Release",
+       "url": "https://github.com/almadar-io/x/actions/runs/301",
+       "databaseId": 301,
+       "createdAt": "2026-10-17T01:02:03Z"
+      },
+      {
+       "repo": "orbital-cli (main repo)",
+       "fullName": "itechdom/kflow.ai",
+       "status": "completed",
+       "conclusion": "success",
+       "name": "CI",
+       "url": "https://github.com/itechdom/x/actions/runs/9004",
+       "databaseId": 9004,
+       "createdAt": "2026-10-19T05:00:00Z"
+      },
+      {
+       "repo": "almadar-studio (builder)",
+       "fullName": "itechdom/almadar-studio",
+       "status": "completed",
+       "conclusion": "success",
+       "name": "CI",
+       "url": "https://github.com/itechdom/x/actions/runs/9104",
+       "databaseId": 9104,
+       "createdAt": "2026-10-19T05:00:00Z"
+      }
+     ],
+     "fetchedAtIsIso": true
+    }
+   ],
+   "calls": [
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/kflow.ai",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/kflow.ai",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    },
+    {
+     "kind": "runs",
+     "repo": "itechdom/almadar-studio",
+     "args": [
+      "run",
+      "list",
+      "--repo",
+      "itechdom/almadar-studio",
+      "--limit",
+      "1",
+      "--json",
+      "databaseId,name,status,conclusion,createdAt,url"
+     ]
+    },
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    },
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    },
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    },
+    {
+     "kind": "graphql",
+     "body": {
+      "query": "\nquery OrgRuns($org: String!, $appId: Int!, $cursor: String) {\n  organization(login: $org) {\n    repositories(first: 25, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        name\n        defaultBranchRef {\n          target {\n            ... on Commit {\n              history(first: 5) {\n                nodes {\n                  checkSuites(first: 3, filterBy: {appId: $appId}) {\n                    nodes {\n                      status\n                      conclusion\n                      workflowRun {\n                        databaseId\n                        url\n                        createdAt\n                        workflow { name }\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+      "variables": {
+       "org": "almadar-io",
+       "appId": 15368,
+       "cursor": null
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

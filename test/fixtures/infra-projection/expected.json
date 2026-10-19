@@ -1,0 +1,1253 @@
+[
+  {
+    "program": "tiny",
+    "label": "default",
+    "options": {
+      "provider": "gcp",
+      "appName": "tiny"
+    },
+    "projected": {
+      "analysis": {
+        "crossOrbitalEventCount": 2,
+        "effectCounts": {
+          "callService": 1,
+          "despawn": 1,
+          "emitExternal": 3,
+          "fetch": 1,
+          "navigate": 1,
+          "notify": 1,
+          "persist": 2,
+          "renderUI": 1,
+          "set": 1,
+          "spawn": 1
+        },
+        "entityNames": [
+          "Upload",
+          "Sweep"
+        ],
+        "hasAuth": false,
+        "hasFileUploads": true,
+        "orbitalCount": 2,
+        "pageCount": 1,
+        "persistentEntityCount": 1,
+        "runtimeEntityCount": 1,
+        "serviceCredentials": [
+          {
+            "credentials": [
+              {
+                "description": "API credential for weather",
+                "envVar": "WEATHER_KEY",
+                "required": true
+              }
+            ],
+            "name": "weather"
+          },
+          {
+            "credentials": [],
+            "name": "llm"
+          },
+          {
+            "credentials": [],
+            "name": "stripe"
+          }
+        ],
+        "serviceRefs": [
+          "weather",
+          "llm",
+          "stripe"
+        ],
+        "tickCount": 1,
+        "totalTransitions": 3,
+        "traitCount": 2
+      },
+      "breakdown": [
+        {
+          "key": "orbitals",
+          "value": 2
+        },
+        {
+          "key": "persist",
+          "value": 4
+        },
+        {
+          "key": "fetch",
+          "value": 2
+        },
+        {
+          "key": "callService",
+          "value": 3
+        },
+        {
+          "key": "emitExternal",
+          "value": 12
+        },
+        {
+          "key": "spawn",
+          "value": 2
+        },
+        {
+          "key": "despawn",
+          "value": 1
+        },
+        {
+          "key": "ticks",
+          "value": 3
+        },
+        {
+          "key": "persistentEntities",
+          "value": 2
+        },
+        {
+          "key": "crossOrbitalEvents",
+          "value": 8
+        },
+        {
+          "key": "serviceRefs",
+          "value": 9
+        }
+      ],
+      "cost": [
+        {
+          "max": 80,
+          "min": 15,
+          "notes": "2-5 instances average. Auto-scaling.",
+          "resource": "Cloud Run"
+        },
+        {
+          "max": 80,
+          "min": 15,
+          "notes": "Pay-per-operation beyond free tier.",
+          "resource": "Firestore"
+        },
+        {
+          "max": 30,
+          "min": 5,
+          "notes": "Upstash pay-as-you-go: $0.20/100K commands.",
+          "resource": "Redis (event bus)"
+        },
+        {
+          "max": 30,
+          "min": 5,
+          "notes": "Beyond free tier bandwidth.",
+          "resource": "CDN/Hosting"
+        },
+        {
+          "max": 5,
+          "min": 1,
+          "notes": "3 API keys stored.",
+          "resource": "Secrets Manager"
+        },
+        {
+          "max": 5,
+          "min": 0,
+          "notes": "1 scheduled jobs.",
+          "resource": "Scheduler"
+        },
+        {
+          "max": 20,
+          "min": 7,
+          "notes": "Serverless VPC Access: $0.01/hr per instance (2-3 instances).",
+          "resource": "VPC Connector"
+        }
+      ],
+      "hcl": "provider \"google\" {\n  project = var.project_id\n  region  = var.region\n}\n\nprovider \"google-beta\" {\n  project = var.project_id\n  region  = var.region\n}\n\nresource \"google_service_account\" \"app\" {\n  account_id   = \"${var.app_name}-sa\"\n  display_name = \"${var.app_name} Cloud Run Service Account\"\n}\n\nresource \"google_project_iam_member\" \"sa_firestore\" {\n  project = var.project_id\n  role    = \"roles/datastore.user\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_project_iam_member\" \"sa_storage\" {\n  project = var.project_id\n  role    = \"roles/storage.objectAdmin\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_project_iam_member\" \"sa_secrets\" {\n  project = var.project_id\n  role    = \"roles/secretmanager.secretAccessor\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_firebase_hosting_site\" \"frontend\" {\n  project  = var.project_id\n  site_id  = var.app_name\n  provider = google-beta\n}\n\nresource \"google_firebase_hosting_version\" \"frontend\" {\n  site_id  = google_firebase_hosting_site.frontend.site_id\n  provider = google-beta\n\n  config {\n    rewrites {\n      glob = \"/api/**\"\n      run {\n        service_id = google_cloud_run_v2_service.app.name\n        region     = var.region\n      }\n    }\n    rewrites {\n      glob = \"**\"\n      path = \"/index.html\"\n    }\n  }\n}\n\nresource \"google_firebase_hosting_release\" \"frontend\" {\n  site_id      = google_firebase_hosting_site.frontend.site_id\n  version_name = google_firebase_hosting_version.frontend.name\n  provider     = google-beta\n}\n\nresource \"google_cloud_run_v2_service_iam_member\" \"public\" {\n  name     = google_cloud_run_v2_service.app.name\n  location = var.region\n  role     = \"roles/run.invoker\"\n  member   = \"allUsers\"\n}\n\nresource \"google_firestore_database\" \"main\" {\n  name        = \"(default)\"\n  location_id = var.region\n  type        = \"FIRESTORE_NATIVE\"\n}\n\nresource \"google_storage_bucket\" \"uploads\" {\n  name          = \"${var.app_name}-uploads\"\n  location      = var.region\n  force_destroy = false\n\n  uniform_bucket_level_access = true\n}\n\nresource \"google_secret_manager_secret\" \"weather_weather-key\" {\n  secret_id = \"${var.app_name}-weather-key\"\n  replication {\n    auto {}\n  }\n}\n\noutput \"backend_url\" {\n  value = google_cloud_run_v2_service.app.uri\n}\n\noutput \"frontend_url\" {\n  value = \"https://${var.app_name}.web.app\"\n}\n\noutput \"service_account_email\" {\n  value = google_service_account.app.email\n}\n\nresource \"google_redis_instance\" \"events\" {\n  name           = \"${var.app_name}-events\"\n  tier           = \"BASIC\"\n  memory_size_gb = 1\n  region         = var.region\n\n  redis_configs = {\n    maxmemory-policy = \"allkeys-lru\"\n  }\n}\n\noutput \"redis_host\" {\n  value = google_redis_instance.events.host\n}\n\nresource \"google_vpc_access_connector\" \"main\" {\n  name          = \"${var.app_name}-vpc\"\n  region        = var.region\n  network       = \"default\"\n  ip_cidr_range = \"10.8.0.0/28\"\n  min_instances = 2\n  max_instances = 3\n}\n\nresource \"google_cloud_scheduler_job\" \"tick\" {\n  name     = \"${var.app_name}-tick\"\n  region   = var.region\n  schedule = \"*/1 * * * *\"\n\n  http_target {\n    uri         = \"${google_cloud_run_v2_service.app.uri}/api/tick\"\n    http_method = \"POST\"\n\n    oidc_token {\n      service_account_email = google_service_account.app.email\n    }\n  }\n}\n\nresource \"google_cloud_run_v2_service\" \"app\" {\n  name     = var.app_name\n  location = var.region\n\n  template {\n    service_account = google_service_account.app.email\n    containers {\n      image = var.container_image\n\n      resources {\n        limits = {\n          cpu    = \"1\"\n          memory = \"512Mi\"\n        }\n      }\n\n      env {\n        name  = \"NODE_ENV\"\n        value = \"production\"\n      }\n\n      env {\n        name  = \"FIREBASE_PROJECT_ID\"\n        value = var.project_id\n      }\n\n      env {\n        name  = \"FIREBASE_DATABASE_ID\"\n        value = \"(default)\"\n      }\n\n      env {\n        name  = \"FIREBASE_STORAGE_BUCKET\"\n        value = \"${var.app_name}-uploads\"\n      }\n\n      env {\n        name  = \"REDIS_HOST\"\n        value = google_redis_instance.events.host\n      }\n\n      env {\n        name  = \"REDIS_PORT\"\n        value = google_redis_instance.events.port\n      }\n\n      env {\n        name = \"WEATHER_KEY\"\n        value_source {\n          secret_key_ref {\n            secret  = google_secret_manager_secret.weather_weather-key.secret_id\n            version = \"latest\"\n          }\n        }\n      }\n    }\n\n    scaling {\n      min_instance_count = 0\n      max_instance_count = 10\n    }\n\n    vpc_access {\n      connector = google_vpc_access_connector.main.id\n      egress    = \"PRIVATE_RANGES_ONLY\"\n    }\n  }\n\n  traffic {\n    type    = \"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST\"\n    percent = 100\n  }\n}\n",
+      "monthlyMax": 250,
+      "monthlyMin": 48,
+      "resources": [
+        "google_service_account",
+        "google_project_iam_member",
+        "google_project_iam_member",
+        "google_project_iam_member",
+        "google_firebase_hosting_site",
+        "google_cloud_run_v2_service",
+        "google_cloud_run_v2_service_iam_member",
+        "google_firestore_database",
+        "google_storage_bucket",
+        "google_secret_manager_secret",
+        "google_redis_instance",
+        "google_vpc_access_connector",
+        "google_cloud_scheduler_job"
+      ],
+      "score": 48,
+      "tier": 2,
+      "tierDescription": "Tier 2: Multi-Instance (+ Redis event bus, $50-400/mo)",
+      "variables": "variable \"project_id\" {\n  description = \"GCP project ID\"\n  type        = string\n}\n\nvariable \"region\" {\n  description = \"GCP region\"\n  type        = string\n  default     = \"europe-west4\"\n}\n\nvariable \"app_name\" {\n  description = \"Application name\"\n  type        = string\n  default     = \"tiny\"\n}\n\nvariable \"container_image\" {\n  description = \"Docker container image for the backend\"\n  type        = string\n}\n\nvariable \"db_password\" {\n  description = \"Database password for Cloud SQL (only required when Postgres is used)\"\n  type        = string\n  sensitive   = true\n  default     = \"\"\n}\n"
+    }
+  },
+  {
+    "program": "tiny",
+    "label": "tier-3",
+    "options": {
+      "provider": "gcp",
+      "region": "us-central1",
+      "overrides": {
+        "tier": 3
+      },
+      "appName": "tiny"
+    },
+    "projected": {
+      "analysis": {
+        "crossOrbitalEventCount": 2,
+        "effectCounts": {
+          "callService": 1,
+          "despawn": 1,
+          "emitExternal": 3,
+          "fetch": 1,
+          "navigate": 1,
+          "notify": 1,
+          "persist": 2,
+          "renderUI": 1,
+          "set": 1,
+          "spawn": 1
+        },
+        "entityNames": [
+          "Upload",
+          "Sweep"
+        ],
+        "hasAuth": false,
+        "hasFileUploads": true,
+        "orbitalCount": 2,
+        "pageCount": 1,
+        "persistentEntityCount": 1,
+        "runtimeEntityCount": 1,
+        "serviceCredentials": [
+          {
+            "credentials": [
+              {
+                "description": "API credential for weather",
+                "envVar": "WEATHER_KEY",
+                "required": true
+              }
+            ],
+            "name": "weather"
+          },
+          {
+            "credentials": [],
+            "name": "llm"
+          },
+          {
+            "credentials": [],
+            "name": "stripe"
+          }
+        ],
+        "serviceRefs": [
+          "weather",
+          "llm",
+          "stripe"
+        ],
+        "tickCount": 1,
+        "totalTransitions": 3,
+        "traitCount": 2
+      },
+      "breakdown": [
+        {
+          "key": "orbitals",
+          "value": 2
+        },
+        {
+          "key": "persist",
+          "value": 4
+        },
+        {
+          "key": "fetch",
+          "value": 2
+        },
+        {
+          "key": "callService",
+          "value": 3
+        },
+        {
+          "key": "emitExternal",
+          "value": 12
+        },
+        {
+          "key": "spawn",
+          "value": 2
+        },
+        {
+          "key": "despawn",
+          "value": 1
+        },
+        {
+          "key": "ticks",
+          "value": 3
+        },
+        {
+          "key": "persistentEntities",
+          "value": 2
+        },
+        {
+          "key": "crossOrbitalEvents",
+          "value": 8
+        },
+        {
+          "key": "serviceRefs",
+          "value": 9
+        }
+      ],
+      "cost": [
+        {
+          "max": 500,
+          "min": 100,
+          "notes": "10-30 instances. Multi-region.",
+          "resource": "Cloud Run"
+        },
+        {
+          "max": 400,
+          "min": 100,
+          "notes": "db-custom-2-4096. Regional availability.",
+          "resource": "Cloud SQL Postgres"
+        },
+        {
+          "max": 200,
+          "min": 50,
+          "notes": "Managed Redis with replication.",
+          "resource": "Redis Cluster"
+        },
+        {
+          "max": 100,
+          "min": 30,
+          "notes": "Global load balancer + CDN.",
+          "resource": "CDN/Load Balancer"
+        },
+        {
+          "max": 50,
+          "min": 10,
+          "notes": "Cloud Armor or AWS WAF.",
+          "resource": "WAF/Security"
+        },
+        {
+          "max": 10,
+          "min": 2,
+          "notes": "3 secrets.",
+          "resource": "Secrets Manager"
+        },
+        {
+          "max": 30,
+          "min": 14,
+          "notes": "Serverless VPC Access: 2-3 instances sustained.",
+          "resource": "VPC Connector"
+        },
+        {
+          "max": 80,
+          "min": 20,
+          "notes": "Cloud Ops Suite or CloudWatch.",
+          "resource": "Monitoring/Logging"
+        }
+      ],
+      "hcl": "provider \"google\" {\n  project = var.project_id\n  region  = var.region\n}\n\nprovider \"google-beta\" {\n  project = var.project_id\n  region  = var.region\n}\n\nresource \"google_service_account\" \"app\" {\n  account_id   = \"${var.app_name}-sa\"\n  display_name = \"${var.app_name} Cloud Run Service Account\"\n}\n\nresource \"google_project_iam_member\" \"sa_storage\" {\n  project = var.project_id\n  role    = \"roles/storage.objectAdmin\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_project_iam_member\" \"sa_secrets\" {\n  project = var.project_id\n  role    = \"roles/secretmanager.secretAccessor\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_firebase_hosting_site\" \"frontend\" {\n  project  = var.project_id\n  site_id  = var.app_name\n  provider = google-beta\n}\n\nresource \"google_firebase_hosting_version\" \"frontend\" {\n  site_id  = google_firebase_hosting_site.frontend.site_id\n  provider = google-beta\n\n  config {\n    rewrites {\n      glob = \"/api/**\"\n      run {\n        service_id = google_cloud_run_v2_service.app.name\n        region     = var.region\n      }\n    }\n    rewrites {\n      glob = \"**\"\n      path = \"/index.html\"\n    }\n  }\n}\n\nresource \"google_firebase_hosting_release\" \"frontend\" {\n  site_id      = google_firebase_hosting_site.frontend.site_id\n  version_name = google_firebase_hosting_version.frontend.name\n  provider     = google-beta\n}\n\nresource \"google_cloud_run_v2_service_iam_member\" \"public\" {\n  name     = google_cloud_run_v2_service.app.name\n  location = var.region\n  role     = \"roles/run.invoker\"\n  member   = \"allUsers\"\n}\n\nresource \"google_storage_bucket\" \"uploads\" {\n  name          = \"${var.app_name}-uploads\"\n  location      = var.region\n  force_destroy = false\n\n  uniform_bucket_level_access = true\n}\n\nresource \"google_secret_manager_secret\" \"weather_weather-key\" {\n  secret_id = \"${var.app_name}-weather-key\"\n  replication {\n    auto {}\n  }\n}\n\noutput \"backend_url\" {\n  value = google_cloud_run_v2_service.app.uri\n}\n\noutput \"frontend_url\" {\n  value = \"https://${var.app_name}.web.app\"\n}\n\noutput \"service_account_email\" {\n  value = google_service_account.app.email\n}\n\nresource \"google_redis_instance\" \"events\" {\n  name           = \"${var.app_name}-events\"\n  tier           = \"BASIC\"\n  memory_size_gb = 1\n  region         = var.region\n\n  redis_configs = {\n    maxmemory-policy = \"allkeys-lru\"\n  }\n}\n\noutput \"redis_host\" {\n  value = google_redis_instance.events.host\n}\n\nresource \"google_sql_database_instance\" \"main\" {\n  name             = \"${var.app_name}-db\"\n  database_version = \"POSTGRES_15\"\n  region           = var.region\n\n  settings {\n    tier              = \"db-g1-small\"\n    availability_type = \"ZONAL\"\n    disk_size         = 10\n\n    backup_configuration {\n      enabled = true\n    }\n\n    ip_configuration {\n      ipv4_enabled = true\n    }\n  }\n\n  deletion_protection = true\n}\n\nresource \"google_sql_database\" \"app\" {\n  name     = var.app_name\n  instance = google_sql_database_instance.main.name\n}\n\noutput \"database_connection\" {\n  value     = google_sql_database_instance.main.connection_name\n  sensitive = true\n}\n\nresource \"google_project_iam_member\" \"sa_cloudsql\" {\n  project = var.project_id\n  role    = \"roles/cloudsql.client\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_vpc_access_connector\" \"main\" {\n  name          = \"${var.app_name}-vpc\"\n  region        = var.region\n  network       = \"default\"\n  ip_cidr_range = \"10.8.0.0/28\"\n  min_instances = 2\n  max_instances = 3\n}\n\nresource \"google_cloud_scheduler_job\" \"tick\" {\n  name     = \"${var.app_name}-tick\"\n  region   = var.region\n  schedule = \"*/1 * * * *\"\n\n  http_target {\n    uri         = \"${google_cloud_run_v2_service.app.uri}/api/tick\"\n    http_method = \"POST\"\n\n    oidc_token {\n      service_account_email = google_service_account.app.email\n    }\n  }\n}\n\nresource \"google_compute_global_address\" \"lb_ip\" {\n  name = \"${var.app_name}-lb-ip\"\n}\n\noutput \"load_balancer_ip\" {\n  value = google_compute_global_address.lb_ip.address\n}\n\nresource \"google_compute_security_policy\" \"waf\" {\n  name = \"${var.app_name}-waf\"\n\n  rule {\n    action   = \"allow\"\n    priority = 2147483647\n\n    match {\n      versioned_expr = \"SRC_IPS_V1\"\n      config {\n        src_ip_ranges = [\"*\"]\n      }\n    }\n  }\n}\n\nresource \"google_compute_region_network_endpoint_group\" \"app\" {\n  name                  = \"${var.app_name}-neg\"\n  network_endpoint_type = \"SERVERLESS\"\n  region                = var.region\n\n  cloud_run {\n    service = google_cloud_run_v2_service.app.name\n  }\n}\n\nresource \"google_compute_backend_service\" \"app\" {\n  name            = \"${var.app_name}-backend\"\n  protocol        = \"HTTPS\"\n  security_policy = google_compute_security_policy.waf.id\n\n  backend {\n    group = google_compute_region_network_endpoint_group.app.id\n  }\n}\n\nresource \"google_compute_url_map\" \"app\" {\n  name            = \"${var.app_name}-url-map\"\n  default_service = google_compute_backend_service.app.id\n}\n\nresource \"google_compute_managed_ssl_certificate\" \"app\" {\n  name = \"${var.app_name}-cert\"\n\n  managed {\n    domains = [var.domain]\n  }\n}\n\nresource \"google_compute_target_https_proxy\" \"app\" {\n  name             = \"${var.app_name}-https-proxy\"\n  url_map          = google_compute_url_map.app.id\n  ssl_certificates = [google_compute_managed_ssl_certificate.app.id]\n}\n\nresource \"google_compute_global_forwarding_rule\" \"app\" {\n  name                  = \"${var.app_name}-https\"\n  target                = google_compute_target_https_proxy.app.id\n  port_range            = \"443\"\n  ip_address            = google_compute_global_address.lb_ip.address\n  load_balancing_scheme = \"EXTERNAL\"\n}\n\nresource \"google_cloud_run_v2_service\" \"app\" {\n  name     = var.app_name\n  location = var.region\n\n  template {\n    service_account = google_service_account.app.email\n    containers {\n      image = var.container_image\n\n      resources {\n        limits = {\n          cpu    = \"1\"\n          memory = \"512Mi\"\n        }\n      }\n\n      env {\n        name  = \"NODE_ENV\"\n        value = \"production\"\n      }\n\n      env {\n        name  = \"FIREBASE_PROJECT_ID\"\n        value = var.project_id\n      }\n\n      env {\n        name  = \"FIREBASE_STORAGE_BUCKET\"\n        value = \"${var.app_name}-uploads\"\n      }\n\n      env {\n        name  = \"REDIS_HOST\"\n        value = google_redis_instance.events.host\n      }\n\n      env {\n        name  = \"REDIS_PORT\"\n        value = google_redis_instance.events.port\n      }\n\n      env {\n        name  = \"DATABASE_URL\"\n        value = \"postgresql://postgres:${var.db_password}@localhost/${var.app_name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}\"\n      }\n\n      env {\n        name = \"WEATHER_KEY\"\n        value_source {\n          secret_key_ref {\n            secret  = google_secret_manager_secret.weather_weather-key.secret_id\n            version = \"latest\"\n          }\n        }\n      }\n\n      volume_mounts {\n        name       = \"cloudsql\"\n        mount_path = \"/cloudsql\"\n      }\n    }\n\n    scaling {\n      min_instance_count = 0\n      max_instance_count = 50\n    }\n\n    vpc_access {\n      connector = google_vpc_access_connector.main.id\n      egress    = \"PRIVATE_RANGES_ONLY\"\n    }\n\n    volumes {\n      name = \"cloudsql\"\n      cloud_sql_instance {\n        instances = [google_sql_database_instance.main.connection_name]\n      }\n    }\n  }\n\n  traffic {\n    type    = \"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST\"\n    percent = 100\n  }\n}\n",
+      "monthlyMax": 1370,
+      "monthlyMin": 326,
+      "resources": [
+        "google_service_account",
+        "google_project_iam_member",
+        "google_project_iam_member",
+        "google_firebase_hosting_site",
+        "google_cloud_run_v2_service",
+        "google_cloud_run_v2_service_iam_member",
+        "google_storage_bucket",
+        "google_secret_manager_secret",
+        "google_redis_instance",
+        "google_sql_database_instance",
+        "google_sql_database",
+        "google_project_iam_member",
+        "google_vpc_access_connector",
+        "google_cloud_scheduler_job",
+        "google_compute_global_address",
+        "google_compute_security_policy",
+        "google_compute_region_network_endpoint_group",
+        "google_compute_backend_service",
+        "google_compute_url_map",
+        "google_compute_managed_ssl_certificate",
+        "google_compute_target_https_proxy",
+        "google_compute_global_forwarding_rule"
+      ],
+      "score": 48,
+      "tier": 3,
+      "tierDescription": "Tier 3: Distributed (+ Postgres, multi-region, $400-5000+/mo)",
+      "variables": "variable \"project_id\" {\n  description = \"GCP project ID\"\n  type        = string\n}\n\nvariable \"region\" {\n  description = \"GCP region\"\n  type        = string\n  default     = \"us-central1\"\n}\n\nvariable \"app_name\" {\n  description = \"Application name\"\n  type        = string\n  default     = \"tiny\"\n}\n\nvariable \"container_image\" {\n  description = \"Docker container image for the backend\"\n  type        = string\n}\n\nvariable \"db_password\" {\n  description = \"Database password for Cloud SQL (only required when Postgres is used)\"\n  type        = string\n  sensitive   = true\n  default     = \"\"\n}\n\nvariable \"domain\" {\n  description = \"The domain the tier-3 HTTPS load balancer serves; its managed certificate is issued for it\"\n  type        = string\n}\n"
+    }
+  },
+  {
+    "program": "tiny",
+    "label": "tier-2-postgres",
+    "options": {
+      "provider": "gcp",
+      "overrides": {
+        "tier": 2,
+        "database": "postgres",
+        "maxInstances": 4
+      },
+      "appName": "tiny"
+    },
+    "projected": {
+      "analysis": {
+        "crossOrbitalEventCount": 2,
+        "effectCounts": {
+          "callService": 1,
+          "despawn": 1,
+          "emitExternal": 3,
+          "fetch": 1,
+          "navigate": 1,
+          "notify": 1,
+          "persist": 2,
+          "renderUI": 1,
+          "set": 1,
+          "spawn": 1
+        },
+        "entityNames": [
+          "Upload",
+          "Sweep"
+        ],
+        "hasAuth": false,
+        "hasFileUploads": true,
+        "orbitalCount": 2,
+        "pageCount": 1,
+        "persistentEntityCount": 1,
+        "runtimeEntityCount": 1,
+        "serviceCredentials": [
+          {
+            "credentials": [
+              {
+                "description": "API credential for weather",
+                "envVar": "WEATHER_KEY",
+                "required": true
+              }
+            ],
+            "name": "weather"
+          },
+          {
+            "credentials": [],
+            "name": "llm"
+          },
+          {
+            "credentials": [],
+            "name": "stripe"
+          }
+        ],
+        "serviceRefs": [
+          "weather",
+          "llm",
+          "stripe"
+        ],
+        "tickCount": 1,
+        "totalTransitions": 3,
+        "traitCount": 2
+      },
+      "breakdown": [
+        {
+          "key": "orbitals",
+          "value": 2
+        },
+        {
+          "key": "persist",
+          "value": 4
+        },
+        {
+          "key": "fetch",
+          "value": 2
+        },
+        {
+          "key": "callService",
+          "value": 3
+        },
+        {
+          "key": "emitExternal",
+          "value": 12
+        },
+        {
+          "key": "spawn",
+          "value": 2
+        },
+        {
+          "key": "despawn",
+          "value": 1
+        },
+        {
+          "key": "ticks",
+          "value": 3
+        },
+        {
+          "key": "persistentEntities",
+          "value": 2
+        },
+        {
+          "key": "crossOrbitalEvents",
+          "value": 8
+        },
+        {
+          "key": "serviceRefs",
+          "value": 9
+        }
+      ],
+      "cost": [
+        {
+          "max": 80,
+          "min": 15,
+          "notes": "2-5 instances average. Auto-scaling.",
+          "resource": "Cloud Run"
+        },
+        {
+          "max": 80,
+          "min": 15,
+          "notes": "Pay-per-operation beyond free tier.",
+          "resource": "Firestore"
+        },
+        {
+          "max": 30,
+          "min": 5,
+          "notes": "Upstash pay-as-you-go: $0.20/100K commands.",
+          "resource": "Redis (event bus)"
+        },
+        {
+          "max": 30,
+          "min": 5,
+          "notes": "Beyond free tier bandwidth.",
+          "resource": "CDN/Hosting"
+        },
+        {
+          "max": 5,
+          "min": 1,
+          "notes": "3 API keys stored.",
+          "resource": "Secrets Manager"
+        },
+        {
+          "max": 5,
+          "min": 0,
+          "notes": "1 scheduled jobs.",
+          "resource": "Scheduler"
+        },
+        {
+          "max": 20,
+          "min": 7,
+          "notes": "Serverless VPC Access: $0.01/hr per instance (2-3 instances).",
+          "resource": "VPC Connector"
+        }
+      ],
+      "hcl": "provider \"google\" {\n  project = var.project_id\n  region  = var.region\n}\n\nprovider \"google-beta\" {\n  project = var.project_id\n  region  = var.region\n}\n\nresource \"google_service_account\" \"app\" {\n  account_id   = \"${var.app_name}-sa\"\n  display_name = \"${var.app_name} Cloud Run Service Account\"\n}\n\nresource \"google_project_iam_member\" \"sa_storage\" {\n  project = var.project_id\n  role    = \"roles/storage.objectAdmin\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_project_iam_member\" \"sa_secrets\" {\n  project = var.project_id\n  role    = \"roles/secretmanager.secretAccessor\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_firebase_hosting_site\" \"frontend\" {\n  project  = var.project_id\n  site_id  = var.app_name\n  provider = google-beta\n}\n\nresource \"google_firebase_hosting_version\" \"frontend\" {\n  site_id  = google_firebase_hosting_site.frontend.site_id\n  provider = google-beta\n\n  config {\n    rewrites {\n      glob = \"/api/**\"\n      run {\n        service_id = google_cloud_run_v2_service.app.name\n        region     = var.region\n      }\n    }\n    rewrites {\n      glob = \"**\"\n      path = \"/index.html\"\n    }\n  }\n}\n\nresource \"google_firebase_hosting_release\" \"frontend\" {\n  site_id      = google_firebase_hosting_site.frontend.site_id\n  version_name = google_firebase_hosting_version.frontend.name\n  provider     = google-beta\n}\n\nresource \"google_cloud_run_v2_service_iam_member\" \"public\" {\n  name     = google_cloud_run_v2_service.app.name\n  location = var.region\n  role     = \"roles/run.invoker\"\n  member   = \"allUsers\"\n}\n\nresource \"google_storage_bucket\" \"uploads\" {\n  name          = \"${var.app_name}-uploads\"\n  location      = var.region\n  force_destroy = false\n\n  uniform_bucket_level_access = true\n}\n\nresource \"google_secret_manager_secret\" \"weather_weather-key\" {\n  secret_id = \"${var.app_name}-weather-key\"\n  replication {\n    auto {}\n  }\n}\n\noutput \"backend_url\" {\n  value = google_cloud_run_v2_service.app.uri\n}\n\noutput \"frontend_url\" {\n  value = \"https://${var.app_name}.web.app\"\n}\n\noutput \"service_account_email\" {\n  value = google_service_account.app.email\n}\n\nresource \"google_redis_instance\" \"events\" {\n  name           = \"${var.app_name}-events\"\n  tier           = \"BASIC\"\n  memory_size_gb = 1\n  region         = var.region\n\n  redis_configs = {\n    maxmemory-policy = \"allkeys-lru\"\n  }\n}\n\noutput \"redis_host\" {\n  value = google_redis_instance.events.host\n}\n\nresource \"google_sql_database_instance\" \"main\" {\n  name             = \"${var.app_name}-db\"\n  database_version = \"POSTGRES_15\"\n  region           = var.region\n\n  settings {\n    tier              = \"db-g1-small\"\n    availability_type = \"ZONAL\"\n    disk_size         = 10\n\n    backup_configuration {\n      enabled = true\n    }\n\n    ip_configuration {\n      ipv4_enabled = true\n    }\n  }\n\n  deletion_protection = true\n}\n\nresource \"google_sql_database\" \"app\" {\n  name     = var.app_name\n  instance = google_sql_database_instance.main.name\n}\n\noutput \"database_connection\" {\n  value     = google_sql_database_instance.main.connection_name\n  sensitive = true\n}\n\nresource \"google_project_iam_member\" \"sa_cloudsql\" {\n  project = var.project_id\n  role    = \"roles/cloudsql.client\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_vpc_access_connector\" \"main\" {\n  name          = \"${var.app_name}-vpc\"\n  region        = var.region\n  network       = \"default\"\n  ip_cidr_range = \"10.8.0.0/28\"\n  min_instances = 2\n  max_instances = 3\n}\n\nresource \"google_cloud_scheduler_job\" \"tick\" {\n  name     = \"${var.app_name}-tick\"\n  region   = var.region\n  schedule = \"*/1 * * * *\"\n\n  http_target {\n    uri         = \"${google_cloud_run_v2_service.app.uri}/api/tick\"\n    http_method = \"POST\"\n\n    oidc_token {\n      service_account_email = google_service_account.app.email\n    }\n  }\n}\n\nresource \"google_cloud_run_v2_service\" \"app\" {\n  name     = var.app_name\n  location = var.region\n\n  template {\n    service_account = google_service_account.app.email\n    containers {\n      image = var.container_image\n\n      resources {\n        limits = {\n          cpu    = \"1\"\n          memory = \"512Mi\"\n        }\n      }\n\n      env {\n        name  = \"NODE_ENV\"\n        value = \"production\"\n      }\n\n      env {\n        name  = \"FIREBASE_PROJECT_ID\"\n        value = var.project_id\n      }\n\n      env {\n        name  = \"FIREBASE_STORAGE_BUCKET\"\n        value = \"${var.app_name}-uploads\"\n      }\n\n      env {\n        name  = \"REDIS_HOST\"\n        value = google_redis_instance.events.host\n      }\n\n      env {\n        name  = \"REDIS_PORT\"\n        value = google_redis_instance.events.port\n      }\n\n      env {\n        name  = \"DATABASE_URL\"\n        value = \"postgresql://postgres:${var.db_password}@localhost/${var.app_name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}\"\n      }\n\n      env {\n        name = \"WEATHER_KEY\"\n        value_source {\n          secret_key_ref {\n            secret  = google_secret_manager_secret.weather_weather-key.secret_id\n            version = \"latest\"\n          }\n        }\n      }\n\n      volume_mounts {\n        name       = \"cloudsql\"\n        mount_path = \"/cloudsql\"\n      }\n    }\n\n    scaling {\n      min_instance_count = 0\n      max_instance_count = 4\n    }\n\n    vpc_access {\n      connector = google_vpc_access_connector.main.id\n      egress    = \"PRIVATE_RANGES_ONLY\"\n    }\n\n    volumes {\n      name = \"cloudsql\"\n      cloud_sql_instance {\n        instances = [google_sql_database_instance.main.connection_name]\n      }\n    }\n  }\n\n  traffic {\n    type    = \"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST\"\n    percent = 100\n  }\n}\n",
+      "monthlyMax": 250,
+      "monthlyMin": 48,
+      "resources": [
+        "google_service_account",
+        "google_project_iam_member",
+        "google_project_iam_member",
+        "google_firebase_hosting_site",
+        "google_cloud_run_v2_service",
+        "google_cloud_run_v2_service_iam_member",
+        "google_storage_bucket",
+        "google_secret_manager_secret",
+        "google_redis_instance",
+        "google_sql_database_instance",
+        "google_sql_database",
+        "google_project_iam_member",
+        "google_vpc_access_connector",
+        "google_cloud_scheduler_job"
+      ],
+      "score": 48,
+      "tier": 2,
+      "tierDescription": "Tier 2: Multi-Instance (+ Redis event bus, $50-400/mo)",
+      "variables": "variable \"project_id\" {\n  description = \"GCP project ID\"\n  type        = string\n}\n\nvariable \"region\" {\n  description = \"GCP region\"\n  type        = string\n  default     = \"europe-west4\"\n}\n\nvariable \"app_name\" {\n  description = \"Application name\"\n  type        = string\n  default     = \"tiny\"\n}\n\nvariable \"container_image\" {\n  description = \"Docker container image for the backend\"\n  type        = string\n}\n\nvariable \"db_password\" {\n  description = \"Database password for Cloud SQL (only required when Postgres is used)\"\n  type        = string\n  sensitive   = true\n  default     = \"\"\n}\n"
+    }
+  },
+  {
+    "program": "std-analytics-collector",
+    "label": "default",
+    "options": {
+      "provider": "gcp",
+      "appName": "std-analytics-collector"
+    },
+    "projected": {
+      "analysis": {
+        "crossOrbitalEventCount": 0,
+        "effectCounts": {
+          "callService": 0,
+          "despawn": 0,
+          "emitExternal": 11,
+          "fetch": 3,
+          "navigate": 0,
+          "notify": 0,
+          "persist": 3,
+          "renderUI": 7,
+          "set": 11,
+          "spawn": 0
+        },
+        "entityNames": [
+          "AnalyticsEvent"
+        ],
+        "hasAuth": false,
+        "hasFileUploads": false,
+        "orbitalCount": 1,
+        "pageCount": 1,
+        "persistentEntityCount": 1,
+        "runtimeEntityCount": 0,
+        "serviceCredentials": [],
+        "serviceRefs": [],
+        "tickCount": 0,
+        "totalTransitions": 22,
+        "traitCount": 2
+      },
+      "breakdown": [
+        {
+          "key": "orbitals",
+          "value": 1
+        },
+        {
+          "key": "persist",
+          "value": 6
+        },
+        {
+          "key": "fetch",
+          "value": 6
+        },
+        {
+          "key": "emitExternal",
+          "value": 44
+        },
+        {
+          "key": "persistentEntities",
+          "value": 2
+        }
+      ],
+      "cost": [
+        {
+          "max": 80,
+          "min": 15,
+          "notes": "2-5 instances average. Auto-scaling.",
+          "resource": "Cloud Run"
+        },
+        {
+          "max": 80,
+          "min": 15,
+          "notes": "Pay-per-operation beyond free tier.",
+          "resource": "Firestore"
+        },
+        {
+          "max": 30,
+          "min": 5,
+          "notes": "Upstash pay-as-you-go: $0.20/100K commands.",
+          "resource": "Redis (event bus)"
+        },
+        {
+          "max": 30,
+          "min": 5,
+          "notes": "Beyond free tier bandwidth.",
+          "resource": "CDN/Hosting"
+        },
+        {
+          "max": 20,
+          "min": 7,
+          "notes": "Serverless VPC Access: $0.01/hr per instance (2-3 instances).",
+          "resource": "VPC Connector"
+        }
+      ],
+      "hcl": "provider \"google\" {\n  project = var.project_id\n  region  = var.region\n}\n\nprovider \"google-beta\" {\n  project = var.project_id\n  region  = var.region\n}\n\nresource \"google_service_account\" \"app\" {\n  account_id   = \"${var.app_name}-sa\"\n  display_name = \"${var.app_name} Cloud Run Service Account\"\n}\n\nresource \"google_project_iam_member\" \"sa_firestore\" {\n  project = var.project_id\n  role    = \"roles/datastore.user\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_firebase_hosting_site\" \"frontend\" {\n  project  = var.project_id\n  site_id  = var.app_name\n  provider = google-beta\n}\n\nresource \"google_firebase_hosting_version\" \"frontend\" {\n  site_id  = google_firebase_hosting_site.frontend.site_id\n  provider = google-beta\n\n  config {\n    rewrites {\n      glob = \"/api/**\"\n      run {\n        service_id = google_cloud_run_v2_service.app.name\n        region     = var.region\n      }\n    }\n    rewrites {\n      glob = \"**\"\n      path = \"/index.html\"\n    }\n  }\n}\n\nresource \"google_firebase_hosting_release\" \"frontend\" {\n  site_id      = google_firebase_hosting_site.frontend.site_id\n  version_name = google_firebase_hosting_version.frontend.name\n  provider     = google-beta\n}\n\nresource \"google_cloud_run_v2_service_iam_member\" \"public\" {\n  name     = google_cloud_run_v2_service.app.name\n  location = var.region\n  role     = \"roles/run.invoker\"\n  member   = \"allUsers\"\n}\n\nresource \"google_firestore_database\" \"main\" {\n  name        = \"(default)\"\n  location_id = var.region\n  type        = \"FIRESTORE_NATIVE\"\n}\n\noutput \"backend_url\" {\n  value = google_cloud_run_v2_service.app.uri\n}\n\noutput \"frontend_url\" {\n  value = \"https://${var.app_name}.web.app\"\n}\n\noutput \"service_account_email\" {\n  value = google_service_account.app.email\n}\n\nresource \"google_redis_instance\" \"events\" {\n  name           = \"${var.app_name}-events\"\n  tier           = \"BASIC\"\n  memory_size_gb = 1\n  region         = var.region\n\n  redis_configs = {\n    maxmemory-policy = \"allkeys-lru\"\n  }\n}\n\noutput \"redis_host\" {\n  value = google_redis_instance.events.host\n}\n\nresource \"google_vpc_access_connector\" \"main\" {\n  name          = \"${var.app_name}-vpc\"\n  region        = var.region\n  network       = \"default\"\n  ip_cidr_range = \"10.8.0.0/28\"\n  min_instances = 2\n  max_instances = 3\n}\n\nresource \"google_cloud_run_v2_service\" \"app\" {\n  name     = var.app_name\n  location = var.region\n\n  template {\n    service_account = google_service_account.app.email\n    containers {\n      image = var.container_image\n\n      resources {\n        limits = {\n          cpu    = \"1\"\n          memory = \"512Mi\"\n        }\n      }\n\n      env {\n        name  = \"NODE_ENV\"\n        value = \"production\"\n      }\n\n      env {\n        name  = \"FIREBASE_PROJECT_ID\"\n        value = var.project_id\n      }\n\n      env {\n        name  = \"FIREBASE_DATABASE_ID\"\n        value = \"(default)\"\n      }\n\n      env {\n        name  = \"REDIS_HOST\"\n        value = google_redis_instance.events.host\n      }\n\n      env {\n        name  = \"REDIS_PORT\"\n        value = google_redis_instance.events.port\n      }\n    }\n\n    scaling {\n      min_instance_count = 0\n      max_instance_count = 10\n    }\n\n    vpc_access {\n      connector = google_vpc_access_connector.main.id\n      egress    = \"PRIVATE_RANGES_ONLY\"\n    }\n  }\n\n  traffic {\n    type    = \"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST\"\n    percent = 100\n  }\n}\n",
+      "monthlyMax": 240,
+      "monthlyMin": 47,
+      "resources": [
+        "google_service_account",
+        "google_project_iam_member",
+        "google_firebase_hosting_site",
+        "google_cloud_run_v2_service",
+        "google_cloud_run_v2_service_iam_member",
+        "google_firestore_database",
+        "google_redis_instance",
+        "google_vpc_access_connector"
+      ],
+      "score": 59,
+      "tier": 2,
+      "tierDescription": "Tier 2: Multi-Instance (+ Redis event bus, $50-400/mo)",
+      "variables": "variable \"project_id\" {\n  description = \"GCP project ID\"\n  type        = string\n}\n\nvariable \"region\" {\n  description = \"GCP region\"\n  type        = string\n  default     = \"europe-west4\"\n}\n\nvariable \"app_name\" {\n  description = \"Application name\"\n  type        = string\n  default     = \"std-analytics-collector\"\n}\n\nvariable \"container_image\" {\n  description = \"Docker container image for the backend\"\n  type        = string\n}\n\nvariable \"db_password\" {\n  description = \"Database password for Cloud SQL (only required when Postgres is used)\"\n  type        = string\n  sensitive   = true\n  default     = \"\"\n}\n"
+    }
+  },
+  {
+    "program": "std-analytics-collector",
+    "label": "tier-3",
+    "options": {
+      "provider": "gcp",
+      "region": "us-central1",
+      "overrides": {
+        "tier": 3
+      },
+      "appName": "std-analytics-collector"
+    },
+    "projected": {
+      "analysis": {
+        "crossOrbitalEventCount": 0,
+        "effectCounts": {
+          "callService": 0,
+          "despawn": 0,
+          "emitExternal": 11,
+          "fetch": 3,
+          "navigate": 0,
+          "notify": 0,
+          "persist": 3,
+          "renderUI": 7,
+          "set": 11,
+          "spawn": 0
+        },
+        "entityNames": [
+          "AnalyticsEvent"
+        ],
+        "hasAuth": false,
+        "hasFileUploads": false,
+        "orbitalCount": 1,
+        "pageCount": 1,
+        "persistentEntityCount": 1,
+        "runtimeEntityCount": 0,
+        "serviceCredentials": [],
+        "serviceRefs": [],
+        "tickCount": 0,
+        "totalTransitions": 22,
+        "traitCount": 2
+      },
+      "breakdown": [
+        {
+          "key": "orbitals",
+          "value": 1
+        },
+        {
+          "key": "persist",
+          "value": 6
+        },
+        {
+          "key": "fetch",
+          "value": 6
+        },
+        {
+          "key": "emitExternal",
+          "value": 44
+        },
+        {
+          "key": "persistentEntities",
+          "value": 2
+        }
+      ],
+      "cost": [
+        {
+          "max": 500,
+          "min": 100,
+          "notes": "10-30 instances. Multi-region.",
+          "resource": "Cloud Run"
+        },
+        {
+          "max": 400,
+          "min": 100,
+          "notes": "db-custom-2-4096. Regional availability.",
+          "resource": "Cloud SQL Postgres"
+        },
+        {
+          "max": 200,
+          "min": 50,
+          "notes": "Managed Redis with replication.",
+          "resource": "Redis Cluster"
+        },
+        {
+          "max": 100,
+          "min": 30,
+          "notes": "Global load balancer + CDN.",
+          "resource": "CDN/Load Balancer"
+        },
+        {
+          "max": 50,
+          "min": 10,
+          "notes": "Cloud Armor or AWS WAF.",
+          "resource": "WAF/Security"
+        },
+        {
+          "max": 30,
+          "min": 14,
+          "notes": "Serverless VPC Access: 2-3 instances sustained.",
+          "resource": "VPC Connector"
+        },
+        {
+          "max": 80,
+          "min": 20,
+          "notes": "Cloud Ops Suite or CloudWatch.",
+          "resource": "Monitoring/Logging"
+        }
+      ],
+      "hcl": "provider \"google\" {\n  project = var.project_id\n  region  = var.region\n}\n\nprovider \"google-beta\" {\n  project = var.project_id\n  region  = var.region\n}\n\nresource \"google_service_account\" \"app\" {\n  account_id   = \"${var.app_name}-sa\"\n  display_name = \"${var.app_name} Cloud Run Service Account\"\n}\n\nresource \"google_firebase_hosting_site\" \"frontend\" {\n  project  = var.project_id\n  site_id  = var.app_name\n  provider = google-beta\n}\n\nresource \"google_firebase_hosting_version\" \"frontend\" {\n  site_id  = google_firebase_hosting_site.frontend.site_id\n  provider = google-beta\n\n  config {\n    rewrites {\n      glob = \"/api/**\"\n      run {\n        service_id = google_cloud_run_v2_service.app.name\n        region     = var.region\n      }\n    }\n    rewrites {\n      glob = \"**\"\n      path = \"/index.html\"\n    }\n  }\n}\n\nresource \"google_firebase_hosting_release\" \"frontend\" {\n  site_id      = google_firebase_hosting_site.frontend.site_id\n  version_name = google_firebase_hosting_version.frontend.name\n  provider     = google-beta\n}\n\nresource \"google_cloud_run_v2_service_iam_member\" \"public\" {\n  name     = google_cloud_run_v2_service.app.name\n  location = var.region\n  role     = \"roles/run.invoker\"\n  member   = \"allUsers\"\n}\n\noutput \"backend_url\" {\n  value = google_cloud_run_v2_service.app.uri\n}\n\noutput \"frontend_url\" {\n  value = \"https://${var.app_name}.web.app\"\n}\n\noutput \"service_account_email\" {\n  value = google_service_account.app.email\n}\n\nresource \"google_redis_instance\" \"events\" {\n  name           = \"${var.app_name}-events\"\n  tier           = \"BASIC\"\n  memory_size_gb = 1\n  region         = var.region\n\n  redis_configs = {\n    maxmemory-policy = \"allkeys-lru\"\n  }\n}\n\noutput \"redis_host\" {\n  value = google_redis_instance.events.host\n}\n\nresource \"google_sql_database_instance\" \"main\" {\n  name             = \"${var.app_name}-db\"\n  database_version = \"POSTGRES_15\"\n  region           = var.region\n\n  settings {\n    tier              = \"db-g1-small\"\n    availability_type = \"ZONAL\"\n    disk_size         = 10\n\n    backup_configuration {\n      enabled = true\n    }\n\n    ip_configuration {\n      ipv4_enabled = true\n    }\n  }\n\n  deletion_protection = true\n}\n\nresource \"google_sql_database\" \"app\" {\n  name     = var.app_name\n  instance = google_sql_database_instance.main.name\n}\n\noutput \"database_connection\" {\n  value     = google_sql_database_instance.main.connection_name\n  sensitive = true\n}\n\nresource \"google_project_iam_member\" \"sa_cloudsql\" {\n  project = var.project_id\n  role    = \"roles/cloudsql.client\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_vpc_access_connector\" \"main\" {\n  name          = \"${var.app_name}-vpc\"\n  region        = var.region\n  network       = \"default\"\n  ip_cidr_range = \"10.8.0.0/28\"\n  min_instances = 2\n  max_instances = 3\n}\n\nresource \"google_compute_global_address\" \"lb_ip\" {\n  name = \"${var.app_name}-lb-ip\"\n}\n\noutput \"load_balancer_ip\" {\n  value = google_compute_global_address.lb_ip.address\n}\n\nresource \"google_compute_security_policy\" \"waf\" {\n  name = \"${var.app_name}-waf\"\n\n  rule {\n    action   = \"allow\"\n    priority = 2147483647\n\n    match {\n      versioned_expr = \"SRC_IPS_V1\"\n      config {\n        src_ip_ranges = [\"*\"]\n      }\n    }\n  }\n}\n\nresource \"google_compute_region_network_endpoint_group\" \"app\" {\n  name                  = \"${var.app_name}-neg\"\n  network_endpoint_type = \"SERVERLESS\"\n  region                = var.region\n\n  cloud_run {\n    service = google_cloud_run_v2_service.app.name\n  }\n}\n\nresource \"google_compute_backend_service\" \"app\" {\n  name            = \"${var.app_name}-backend\"\n  protocol        = \"HTTPS\"\n  security_policy = google_compute_security_policy.waf.id\n\n  backend {\n    group = google_compute_region_network_endpoint_group.app.id\n  }\n}\n\nresource \"google_compute_url_map\" \"app\" {\n  name            = \"${var.app_name}-url-map\"\n  default_service = google_compute_backend_service.app.id\n}\n\nresource \"google_compute_managed_ssl_certificate\" \"app\" {\n  name = \"${var.app_name}-cert\"\n\n  managed {\n    domains = [var.domain]\n  }\n}\n\nresource \"google_compute_target_https_proxy\" \"app\" {\n  name             = \"${var.app_name}-https-proxy\"\n  url_map          = google_compute_url_map.app.id\n  ssl_certificates = [google_compute_managed_ssl_certificate.app.id]\n}\n\nresource \"google_compute_global_forwarding_rule\" \"app\" {\n  name                  = \"${var.app_name}-https\"\n  target                = google_compute_target_https_proxy.app.id\n  port_range            = \"443\"\n  ip_address            = google_compute_global_address.lb_ip.address\n  load_balancing_scheme = \"EXTERNAL\"\n}\n\nresource \"google_cloud_run_v2_service\" \"app\" {\n  name     = var.app_name\n  location = var.region\n\n  template {\n    service_account = google_service_account.app.email\n    containers {\n      image = var.container_image\n\n      resources {\n        limits = {\n          cpu    = \"1\"\n          memory = \"512Mi\"\n        }\n      }\n\n      env {\n        name  = \"NODE_ENV\"\n        value = \"production\"\n      }\n\n      env {\n        name  = \"FIREBASE_PROJECT_ID\"\n        value = var.project_id\n      }\n\n      env {\n        name  = \"REDIS_HOST\"\n        value = google_redis_instance.events.host\n      }\n\n      env {\n        name  = \"REDIS_PORT\"\n        value = google_redis_instance.events.port\n      }\n\n      env {\n        name  = \"DATABASE_URL\"\n        value = \"postgresql://postgres:${var.db_password}@localhost/${var.app_name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}\"\n      }\n\n      volume_mounts {\n        name       = \"cloudsql\"\n        mount_path = \"/cloudsql\"\n      }\n    }\n\n    scaling {\n      min_instance_count = 0\n      max_instance_count = 50\n    }\n\n    vpc_access {\n      connector = google_vpc_access_connector.main.id\n      egress    = \"PRIVATE_RANGES_ONLY\"\n    }\n\n    volumes {\n      name = \"cloudsql\"\n      cloud_sql_instance {\n        instances = [google_sql_database_instance.main.connection_name]\n      }\n    }\n  }\n\n  traffic {\n    type    = \"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST\"\n    percent = 100\n  }\n}\n",
+      "monthlyMax": 1360,
+      "monthlyMin": 324,
+      "resources": [
+        "google_service_account",
+        "google_firebase_hosting_site",
+        "google_cloud_run_v2_service",
+        "google_cloud_run_v2_service_iam_member",
+        "google_redis_instance",
+        "google_sql_database_instance",
+        "google_sql_database",
+        "google_project_iam_member",
+        "google_vpc_access_connector",
+        "google_compute_global_address",
+        "google_compute_security_policy",
+        "google_compute_region_network_endpoint_group",
+        "google_compute_backend_service",
+        "google_compute_url_map",
+        "google_compute_managed_ssl_certificate",
+        "google_compute_target_https_proxy",
+        "google_compute_global_forwarding_rule"
+      ],
+      "score": 59,
+      "tier": 3,
+      "tierDescription": "Tier 3: Distributed (+ Postgres, multi-region, $400-5000+/mo)",
+      "variables": "variable \"project_id\" {\n  description = \"GCP project ID\"\n  type        = string\n}\n\nvariable \"region\" {\n  description = \"GCP region\"\n  type        = string\n  default     = \"us-central1\"\n}\n\nvariable \"app_name\" {\n  description = \"Application name\"\n  type        = string\n  default     = \"std-analytics-collector\"\n}\n\nvariable \"container_image\" {\n  description = \"Docker container image for the backend\"\n  type        = string\n}\n\nvariable \"db_password\" {\n  description = \"Database password for Cloud SQL (only required when Postgres is used)\"\n  type        = string\n  sensitive   = true\n  default     = \"\"\n}\n\nvariable \"domain\" {\n  description = \"The domain the tier-3 HTTPS load balancer serves; its managed certificate is issued for it\"\n  type        = string\n}\n"
+    }
+  },
+  {
+    "program": "std-analytics-collector",
+    "label": "tier-2-postgres",
+    "options": {
+      "provider": "gcp",
+      "overrides": {
+        "tier": 2,
+        "database": "postgres",
+        "maxInstances": 4
+      },
+      "appName": "std-analytics-collector"
+    },
+    "projected": {
+      "analysis": {
+        "crossOrbitalEventCount": 0,
+        "effectCounts": {
+          "callService": 0,
+          "despawn": 0,
+          "emitExternal": 11,
+          "fetch": 3,
+          "navigate": 0,
+          "notify": 0,
+          "persist": 3,
+          "renderUI": 7,
+          "set": 11,
+          "spawn": 0
+        },
+        "entityNames": [
+          "AnalyticsEvent"
+        ],
+        "hasAuth": false,
+        "hasFileUploads": false,
+        "orbitalCount": 1,
+        "pageCount": 1,
+        "persistentEntityCount": 1,
+        "runtimeEntityCount": 0,
+        "serviceCredentials": [],
+        "serviceRefs": [],
+        "tickCount": 0,
+        "totalTransitions": 22,
+        "traitCount": 2
+      },
+      "breakdown": [
+        {
+          "key": "orbitals",
+          "value": 1
+        },
+        {
+          "key": "persist",
+          "value": 6
+        },
+        {
+          "key": "fetch",
+          "value": 6
+        },
+        {
+          "key": "emitExternal",
+          "value": 44
+        },
+        {
+          "key": "persistentEntities",
+          "value": 2
+        }
+      ],
+      "cost": [
+        {
+          "max": 80,
+          "min": 15,
+          "notes": "2-5 instances average. Auto-scaling.",
+          "resource": "Cloud Run"
+        },
+        {
+          "max": 80,
+          "min": 15,
+          "notes": "Pay-per-operation beyond free tier.",
+          "resource": "Firestore"
+        },
+        {
+          "max": 30,
+          "min": 5,
+          "notes": "Upstash pay-as-you-go: $0.20/100K commands.",
+          "resource": "Redis (event bus)"
+        },
+        {
+          "max": 30,
+          "min": 5,
+          "notes": "Beyond free tier bandwidth.",
+          "resource": "CDN/Hosting"
+        },
+        {
+          "max": 20,
+          "min": 7,
+          "notes": "Serverless VPC Access: $0.01/hr per instance (2-3 instances).",
+          "resource": "VPC Connector"
+        }
+      ],
+      "hcl": "provider \"google\" {\n  project = var.project_id\n  region  = var.region\n}\n\nprovider \"google-beta\" {\n  project = var.project_id\n  region  = var.region\n}\n\nresource \"google_service_account\" \"app\" {\n  account_id   = \"${var.app_name}-sa\"\n  display_name = \"${var.app_name} Cloud Run Service Account\"\n}\n\nresource \"google_firebase_hosting_site\" \"frontend\" {\n  project  = var.project_id\n  site_id  = var.app_name\n  provider = google-beta\n}\n\nresource \"google_firebase_hosting_version\" \"frontend\" {\n  site_id  = google_firebase_hosting_site.frontend.site_id\n  provider = google-beta\n\n  config {\n    rewrites {\n      glob = \"/api/**\"\n      run {\n        service_id = google_cloud_run_v2_service.app.name\n        region     = var.region\n      }\n    }\n    rewrites {\n      glob = \"**\"\n      path = \"/index.html\"\n    }\n  }\n}\n\nresource \"google_firebase_hosting_release\" \"frontend\" {\n  site_id      = google_firebase_hosting_site.frontend.site_id\n  version_name = google_firebase_hosting_version.frontend.name\n  provider     = google-beta\n}\n\nresource \"google_cloud_run_v2_service_iam_member\" \"public\" {\n  name     = google_cloud_run_v2_service.app.name\n  location = var.region\n  role     = \"roles/run.invoker\"\n  member   = \"allUsers\"\n}\n\noutput \"backend_url\" {\n  value = google_cloud_run_v2_service.app.uri\n}\n\noutput \"frontend_url\" {\n  value = \"https://${var.app_name}.web.app\"\n}\n\noutput \"service_account_email\" {\n  value = google_service_account.app.email\n}\n\nresource \"google_redis_instance\" \"events\" {\n  name           = \"${var.app_name}-events\"\n  tier           = \"BASIC\"\n  memory_size_gb = 1\n  region         = var.region\n\n  redis_configs = {\n    maxmemory-policy = \"allkeys-lru\"\n  }\n}\n\noutput \"redis_host\" {\n  value = google_redis_instance.events.host\n}\n\nresource \"google_sql_database_instance\" \"main\" {\n  name             = \"${var.app_name}-db\"\n  database_version = \"POSTGRES_15\"\n  region           = var.region\n\n  settings {\n    tier              = \"db-g1-small\"\n    availability_type = \"ZONAL\"\n    disk_size         = 10\n\n    backup_configuration {\n      enabled = true\n    }\n\n    ip_configuration {\n      ipv4_enabled = true\n    }\n  }\n\n  deletion_protection = true\n}\n\nresource \"google_sql_database\" \"app\" {\n  name     = var.app_name\n  instance = google_sql_database_instance.main.name\n}\n\noutput \"database_connection\" {\n  value     = google_sql_database_instance.main.connection_name\n  sensitive = true\n}\n\nresource \"google_project_iam_member\" \"sa_cloudsql\" {\n  project = var.project_id\n  role    = \"roles/cloudsql.client\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_vpc_access_connector\" \"main\" {\n  name          = \"${var.app_name}-vpc\"\n  region        = var.region\n  network       = \"default\"\n  ip_cidr_range = \"10.8.0.0/28\"\n  min_instances = 2\n  max_instances = 3\n}\n\nresource \"google_cloud_run_v2_service\" \"app\" {\n  name     = var.app_name\n  location = var.region\n\n  template {\n    service_account = google_service_account.app.email\n    containers {\n      image = var.container_image\n\n      resources {\n        limits = {\n          cpu    = \"1\"\n          memory = \"512Mi\"\n        }\n      }\n\n      env {\n        name  = \"NODE_ENV\"\n        value = \"production\"\n      }\n\n      env {\n        name  = \"FIREBASE_PROJECT_ID\"\n        value = var.project_id\n      }\n\n      env {\n        name  = \"REDIS_HOST\"\n        value = google_redis_instance.events.host\n      }\n\n      env {\n        name  = \"REDIS_PORT\"\n        value = google_redis_instance.events.port\n      }\n\n      env {\n        name  = \"DATABASE_URL\"\n        value = \"postgresql://postgres:${var.db_password}@localhost/${var.app_name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}\"\n      }\n\n      volume_mounts {\n        name       = \"cloudsql\"\n        mount_path = \"/cloudsql\"\n      }\n    }\n\n    scaling {\n      min_instance_count = 0\n      max_instance_count = 4\n    }\n\n    vpc_access {\n      connector = google_vpc_access_connector.main.id\n      egress    = \"PRIVATE_RANGES_ONLY\"\n    }\n\n    volumes {\n      name = \"cloudsql\"\n      cloud_sql_instance {\n        instances = [google_sql_database_instance.main.connection_name]\n      }\n    }\n  }\n\n  traffic {\n    type    = \"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST\"\n    percent = 100\n  }\n}\n",
+      "monthlyMax": 240,
+      "monthlyMin": 47,
+      "resources": [
+        "google_service_account",
+        "google_firebase_hosting_site",
+        "google_cloud_run_v2_service",
+        "google_cloud_run_v2_service_iam_member",
+        "google_redis_instance",
+        "google_sql_database_instance",
+        "google_sql_database",
+        "google_project_iam_member",
+        "google_vpc_access_connector"
+      ],
+      "score": 59,
+      "tier": 2,
+      "tierDescription": "Tier 2: Multi-Instance (+ Redis event bus, $50-400/mo)",
+      "variables": "variable \"project_id\" {\n  description = \"GCP project ID\"\n  type        = string\n}\n\nvariable \"region\" {\n  description = \"GCP region\"\n  type        = string\n  default     = \"europe-west4\"\n}\n\nvariable \"app_name\" {\n  description = \"Application name\"\n  type        = string\n  default     = \"std-analytics-collector\"\n}\n\nvariable \"container_image\" {\n  description = \"Docker container image for the backend\"\n  type        = string\n}\n\nvariable \"db_password\" {\n  description = \"Database password for Cloud SQL (only required when Postgres is used)\"\n  type        = string\n  sensitive   = true\n  default     = \"\"\n}\n"
+    }
+  },
+  {
+    "program": "std-github",
+    "label": "default",
+    "options": {
+      "provider": "gcp",
+      "appName": "std-github"
+    },
+    "projected": {
+      "analysis": {
+        "crossOrbitalEventCount": 0,
+        "effectCounts": {
+          "callService": 0,
+          "despawn": 0,
+          "emitExternal": 24,
+          "fetch": 0,
+          "navigate": 0,
+          "notify": 0,
+          "persist": 0,
+          "renderUI": 8,
+          "set": 0,
+          "spawn": 0
+        },
+        "entityNames": [
+          "GithubCall"
+        ],
+        "hasAuth": false,
+        "hasFileUploads": false,
+        "orbitalCount": 1,
+        "pageCount": 1,
+        "persistentEntityCount": 0,
+        "runtimeEntityCount": 1,
+        "serviceCredentials": [],
+        "serviceRefs": [],
+        "tickCount": 0,
+        "totalTransitions": 36,
+        "traitCount": 1
+      },
+      "breakdown": [
+        {
+          "key": "orbitals",
+          "value": 1
+        },
+        {
+          "key": "emitExternal",
+          "value": 96
+        }
+      ],
+      "cost": [
+        {
+          "max": 500,
+          "min": 100,
+          "notes": "10-30 instances. Multi-region.",
+          "resource": "Cloud Run"
+        },
+        {
+          "max": 400,
+          "min": 100,
+          "notes": "db-custom-2-4096. Regional availability.",
+          "resource": "Cloud SQL Postgres"
+        },
+        {
+          "max": 200,
+          "min": 50,
+          "notes": "Managed Redis with replication.",
+          "resource": "Redis Cluster"
+        },
+        {
+          "max": 100,
+          "min": 30,
+          "notes": "Global load balancer + CDN.",
+          "resource": "CDN/Load Balancer"
+        },
+        {
+          "max": 50,
+          "min": 10,
+          "notes": "Cloud Armor or AWS WAF.",
+          "resource": "WAF/Security"
+        },
+        {
+          "max": 30,
+          "min": 14,
+          "notes": "Serverless VPC Access: 2-3 instances sustained.",
+          "resource": "VPC Connector"
+        },
+        {
+          "max": 80,
+          "min": 20,
+          "notes": "Cloud Ops Suite or CloudWatch.",
+          "resource": "Monitoring/Logging"
+        }
+      ],
+      "hcl": "provider \"google\" {\n  project = var.project_id\n  region  = var.region\n}\n\nprovider \"google-beta\" {\n  project = var.project_id\n  region  = var.region\n}\n\nresource \"google_service_account\" \"app\" {\n  account_id   = \"${var.app_name}-sa\"\n  display_name = \"${var.app_name} Cloud Run Service Account\"\n}\n\nresource \"google_firebase_hosting_site\" \"frontend\" {\n  project  = var.project_id\n  site_id  = var.app_name\n  provider = google-beta\n}\n\nresource \"google_firebase_hosting_version\" \"frontend\" {\n  site_id  = google_firebase_hosting_site.frontend.site_id\n  provider = google-beta\n\n  config {\n    rewrites {\n      glob = \"/api/**\"\n      run {\n        service_id = google_cloud_run_v2_service.app.name\n        region     = var.region\n      }\n    }\n    rewrites {\n      glob = \"**\"\n      path = \"/index.html\"\n    }\n  }\n}\n\nresource \"google_firebase_hosting_release\" \"frontend\" {\n  site_id      = google_firebase_hosting_site.frontend.site_id\n  version_name = google_firebase_hosting_version.frontend.name\n  provider     = google-beta\n}\n\nresource \"google_cloud_run_v2_service_iam_member\" \"public\" {\n  name     = google_cloud_run_v2_service.app.name\n  location = var.region\n  role     = \"roles/run.invoker\"\n  member   = \"allUsers\"\n}\n\noutput \"backend_url\" {\n  value = google_cloud_run_v2_service.app.uri\n}\n\noutput \"frontend_url\" {\n  value = \"https://${var.app_name}.web.app\"\n}\n\noutput \"service_account_email\" {\n  value = google_service_account.app.email\n}\n\nresource \"google_redis_instance\" \"events\" {\n  name           = \"${var.app_name}-events\"\n  tier           = \"BASIC\"\n  memory_size_gb = 1\n  region         = var.region\n\n  redis_configs = {\n    maxmemory-policy = \"allkeys-lru\"\n  }\n}\n\noutput \"redis_host\" {\n  value = google_redis_instance.events.host\n}\n\nresource \"google_sql_database_instance\" \"main\" {\n  name             = \"${var.app_name}-db\"\n  database_version = \"POSTGRES_15\"\n  region           = var.region\n\n  settings {\n    tier              = \"db-g1-small\"\n    availability_type = \"ZONAL\"\n    disk_size         = 10\n\n    backup_configuration {\n      enabled = true\n    }\n\n    ip_configuration {\n      ipv4_enabled = true\n    }\n  }\n\n  deletion_protection = true\n}\n\nresource \"google_sql_database\" \"app\" {\n  name     = var.app_name\n  instance = google_sql_database_instance.main.name\n}\n\noutput \"database_connection\" {\n  value     = google_sql_database_instance.main.connection_name\n  sensitive = true\n}\n\nresource \"google_project_iam_member\" \"sa_cloudsql\" {\n  project = var.project_id\n  role    = \"roles/cloudsql.client\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_vpc_access_connector\" \"main\" {\n  name          = \"${var.app_name}-vpc\"\n  region        = var.region\n  network       = \"default\"\n  ip_cidr_range = \"10.8.0.0/28\"\n  min_instances = 2\n  max_instances = 3\n}\n\nresource \"google_compute_global_address\" \"lb_ip\" {\n  name = \"${var.app_name}-lb-ip\"\n}\n\noutput \"load_balancer_ip\" {\n  value = google_compute_global_address.lb_ip.address\n}\n\nresource \"google_compute_security_policy\" \"waf\" {\n  name = \"${var.app_name}-waf\"\n\n  rule {\n    action   = \"allow\"\n    priority = 2147483647\n\n    match {\n      versioned_expr = \"SRC_IPS_V1\"\n      config {\n        src_ip_ranges = [\"*\"]\n      }\n    }\n  }\n}\n\nresource \"google_compute_region_network_endpoint_group\" \"app\" {\n  name                  = \"${var.app_name}-neg\"\n  network_endpoint_type = \"SERVERLESS\"\n  region                = var.region\n\n  cloud_run {\n    service = google_cloud_run_v2_service.app.name\n  }\n}\n\nresource \"google_compute_backend_service\" \"app\" {\n  name            = \"${var.app_name}-backend\"\n  protocol        = \"HTTPS\"\n  security_policy = google_compute_security_policy.waf.id\n\n  backend {\n    group = google_compute_region_network_endpoint_group.app.id\n  }\n}\n\nresource \"google_compute_url_map\" \"app\" {\n  name            = \"${var.app_name}-url-map\"\n  default_service = google_compute_backend_service.app.id\n}\n\nresource \"google_compute_managed_ssl_certificate\" \"app\" {\n  name = \"${var.app_name}-cert\"\n\n  managed {\n    domains = [var.domain]\n  }\n}\n\nresource \"google_compute_target_https_proxy\" \"app\" {\n  name             = \"${var.app_name}-https-proxy\"\n  url_map          = google_compute_url_map.app.id\n  ssl_certificates = [google_compute_managed_ssl_certificate.app.id]\n}\n\nresource \"google_compute_global_forwarding_rule\" \"app\" {\n  name                  = \"${var.app_name}-https\"\n  target                = google_compute_target_https_proxy.app.id\n  port_range            = \"443\"\n  ip_address            = google_compute_global_address.lb_ip.address\n  load_balancing_scheme = \"EXTERNAL\"\n}\n\nresource \"google_cloud_run_v2_service\" \"app\" {\n  name     = var.app_name\n  location = var.region\n\n  template {\n    service_account = google_service_account.app.email\n    containers {\n      image = var.container_image\n\n      resources {\n        limits = {\n          cpu    = \"1\"\n          memory = \"512Mi\"\n        }\n      }\n\n      env {\n        name  = \"NODE_ENV\"\n        value = \"production\"\n      }\n\n      env {\n        name  = \"FIREBASE_PROJECT_ID\"\n        value = var.project_id\n      }\n\n      env {\n        name  = \"REDIS_HOST\"\n        value = google_redis_instance.events.host\n      }\n\n      env {\n        name  = \"REDIS_PORT\"\n        value = google_redis_instance.events.port\n      }\n\n      env {\n        name  = \"DATABASE_URL\"\n        value = \"postgresql://postgres:${var.db_password}@localhost/${var.app_name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}\"\n      }\n\n      volume_mounts {\n        name       = \"cloudsql\"\n        mount_path = \"/cloudsql\"\n      }\n    }\n\n    scaling {\n      min_instance_count = 0\n      max_instance_count = 50\n    }\n\n    vpc_access {\n      connector = google_vpc_access_connector.main.id\n      egress    = \"PRIVATE_RANGES_ONLY\"\n    }\n\n    volumes {\n      name = \"cloudsql\"\n      cloud_sql_instance {\n        instances = [google_sql_database_instance.main.connection_name]\n      }\n    }\n  }\n\n  traffic {\n    type    = \"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST\"\n    percent = 100\n  }\n}\n",
+      "monthlyMax": 1360,
+      "monthlyMin": 324,
+      "resources": [
+        "google_service_account",
+        "google_firebase_hosting_site",
+        "google_cloud_run_v2_service",
+        "google_cloud_run_v2_service_iam_member",
+        "google_redis_instance",
+        "google_sql_database_instance",
+        "google_sql_database",
+        "google_project_iam_member",
+        "google_vpc_access_connector",
+        "google_compute_global_address",
+        "google_compute_security_policy",
+        "google_compute_region_network_endpoint_group",
+        "google_compute_backend_service",
+        "google_compute_url_map",
+        "google_compute_managed_ssl_certificate",
+        "google_compute_target_https_proxy",
+        "google_compute_global_forwarding_rule"
+      ],
+      "score": 97,
+      "tier": 3,
+      "tierDescription": "Tier 3: Distributed (+ Postgres, multi-region, $400-5000+/mo)",
+      "variables": "variable \"project_id\" {\n  description = \"GCP project ID\"\n  type        = string\n}\n\nvariable \"region\" {\n  description = \"GCP region\"\n  type        = string\n  default     = \"europe-west4\"\n}\n\nvariable \"app_name\" {\n  description = \"Application name\"\n  type        = string\n  default     = \"std-github\"\n}\n\nvariable \"container_image\" {\n  description = \"Docker container image for the backend\"\n  type        = string\n}\n\nvariable \"db_password\" {\n  description = \"Database password for Cloud SQL (only required when Postgres is used)\"\n  type        = string\n  sensitive   = true\n  default     = \"\"\n}\n\nvariable \"domain\" {\n  description = \"The domain the tier-3 HTTPS load balancer serves; its managed certificate is issued for it\"\n  type        = string\n}\n"
+    }
+  },
+  {
+    "program": "std-github",
+    "label": "tier-3",
+    "options": {
+      "provider": "gcp",
+      "region": "us-central1",
+      "overrides": {
+        "tier": 3
+      },
+      "appName": "std-github"
+    },
+    "projected": {
+      "analysis": {
+        "crossOrbitalEventCount": 0,
+        "effectCounts": {
+          "callService": 0,
+          "despawn": 0,
+          "emitExternal": 24,
+          "fetch": 0,
+          "navigate": 0,
+          "notify": 0,
+          "persist": 0,
+          "renderUI": 8,
+          "set": 0,
+          "spawn": 0
+        },
+        "entityNames": [
+          "GithubCall"
+        ],
+        "hasAuth": false,
+        "hasFileUploads": false,
+        "orbitalCount": 1,
+        "pageCount": 1,
+        "persistentEntityCount": 0,
+        "runtimeEntityCount": 1,
+        "serviceCredentials": [],
+        "serviceRefs": [],
+        "tickCount": 0,
+        "totalTransitions": 36,
+        "traitCount": 1
+      },
+      "breakdown": [
+        {
+          "key": "orbitals",
+          "value": 1
+        },
+        {
+          "key": "emitExternal",
+          "value": 96
+        }
+      ],
+      "cost": [
+        {
+          "max": 500,
+          "min": 100,
+          "notes": "10-30 instances. Multi-region.",
+          "resource": "Cloud Run"
+        },
+        {
+          "max": 400,
+          "min": 100,
+          "notes": "db-custom-2-4096. Regional availability.",
+          "resource": "Cloud SQL Postgres"
+        },
+        {
+          "max": 200,
+          "min": 50,
+          "notes": "Managed Redis with replication.",
+          "resource": "Redis Cluster"
+        },
+        {
+          "max": 100,
+          "min": 30,
+          "notes": "Global load balancer + CDN.",
+          "resource": "CDN/Load Balancer"
+        },
+        {
+          "max": 50,
+          "min": 10,
+          "notes": "Cloud Armor or AWS WAF.",
+          "resource": "WAF/Security"
+        },
+        {
+          "max": 30,
+          "min": 14,
+          "notes": "Serverless VPC Access: 2-3 instances sustained.",
+          "resource": "VPC Connector"
+        },
+        {
+          "max": 80,
+          "min": 20,
+          "notes": "Cloud Ops Suite or CloudWatch.",
+          "resource": "Monitoring/Logging"
+        }
+      ],
+      "hcl": "provider \"google\" {\n  project = var.project_id\n  region  = var.region\n}\n\nprovider \"google-beta\" {\n  project = var.project_id\n  region  = var.region\n}\n\nresource \"google_service_account\" \"app\" {\n  account_id   = \"${var.app_name}-sa\"\n  display_name = \"${var.app_name} Cloud Run Service Account\"\n}\n\nresource \"google_firebase_hosting_site\" \"frontend\" {\n  project  = var.project_id\n  site_id  = var.app_name\n  provider = google-beta\n}\n\nresource \"google_firebase_hosting_version\" \"frontend\" {\n  site_id  = google_firebase_hosting_site.frontend.site_id\n  provider = google-beta\n\n  config {\n    rewrites {\n      glob = \"/api/**\"\n      run {\n        service_id = google_cloud_run_v2_service.app.name\n        region     = var.region\n      }\n    }\n    rewrites {\n      glob = \"**\"\n      path = \"/index.html\"\n    }\n  }\n}\n\nresource \"google_firebase_hosting_release\" \"frontend\" {\n  site_id      = google_firebase_hosting_site.frontend.site_id\n  version_name = google_firebase_hosting_version.frontend.name\n  provider     = google-beta\n}\n\nresource \"google_cloud_run_v2_service_iam_member\" \"public\" {\n  name     = google_cloud_run_v2_service.app.name\n  location = var.region\n  role     = \"roles/run.invoker\"\n  member   = \"allUsers\"\n}\n\noutput \"backend_url\" {\n  value = google_cloud_run_v2_service.app.uri\n}\n\noutput \"frontend_url\" {\n  value = \"https://${var.app_name}.web.app\"\n}\n\noutput \"service_account_email\" {\n  value = google_service_account.app.email\n}\n\nresource \"google_redis_instance\" \"events\" {\n  name           = \"${var.app_name}-events\"\n  tier           = \"BASIC\"\n  memory_size_gb = 1\n  region         = var.region\n\n  redis_configs = {\n    maxmemory-policy = \"allkeys-lru\"\n  }\n}\n\noutput \"redis_host\" {\n  value = google_redis_instance.events.host\n}\n\nresource \"google_sql_database_instance\" \"main\" {\n  name             = \"${var.app_name}-db\"\n  database_version = \"POSTGRES_15\"\n  region           = var.region\n\n  settings {\n    tier              = \"db-g1-small\"\n    availability_type = \"ZONAL\"\n    disk_size         = 10\n\n    backup_configuration {\n      enabled = true\n    }\n\n    ip_configuration {\n      ipv4_enabled = true\n    }\n  }\n\n  deletion_protection = true\n}\n\nresource \"google_sql_database\" \"app\" {\n  name     = var.app_name\n  instance = google_sql_database_instance.main.name\n}\n\noutput \"database_connection\" {\n  value     = google_sql_database_instance.main.connection_name\n  sensitive = true\n}\n\nresource \"google_project_iam_member\" \"sa_cloudsql\" {\n  project = var.project_id\n  role    = \"roles/cloudsql.client\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_vpc_access_connector\" \"main\" {\n  name          = \"${var.app_name}-vpc\"\n  region        = var.region\n  network       = \"default\"\n  ip_cidr_range = \"10.8.0.0/28\"\n  min_instances = 2\n  max_instances = 3\n}\n\nresource \"google_compute_global_address\" \"lb_ip\" {\n  name = \"${var.app_name}-lb-ip\"\n}\n\noutput \"load_balancer_ip\" {\n  value = google_compute_global_address.lb_ip.address\n}\n\nresource \"google_compute_security_policy\" \"waf\" {\n  name = \"${var.app_name}-waf\"\n\n  rule {\n    action   = \"allow\"\n    priority = 2147483647\n\n    match {\n      versioned_expr = \"SRC_IPS_V1\"\n      config {\n        src_ip_ranges = [\"*\"]\n      }\n    }\n  }\n}\n\nresource \"google_compute_region_network_endpoint_group\" \"app\" {\n  name                  = \"${var.app_name}-neg\"\n  network_endpoint_type = \"SERVERLESS\"\n  region                = var.region\n\n  cloud_run {\n    service = google_cloud_run_v2_service.app.name\n  }\n}\n\nresource \"google_compute_backend_service\" \"app\" {\n  name            = \"${var.app_name}-backend\"\n  protocol        = \"HTTPS\"\n  security_policy = google_compute_security_policy.waf.id\n\n  backend {\n    group = google_compute_region_network_endpoint_group.app.id\n  }\n}\n\nresource \"google_compute_url_map\" \"app\" {\n  name            = \"${var.app_name}-url-map\"\n  default_service = google_compute_backend_service.app.id\n}\n\nresource \"google_compute_managed_ssl_certificate\" \"app\" {\n  name = \"${var.app_name}-cert\"\n\n  managed {\n    domains = [var.domain]\n  }\n}\n\nresource \"google_compute_target_https_proxy\" \"app\" {\n  name             = \"${var.app_name}-https-proxy\"\n  url_map          = google_compute_url_map.app.id\n  ssl_certificates = [google_compute_managed_ssl_certificate.app.id]\n}\n\nresource \"google_compute_global_forwarding_rule\" \"app\" {\n  name                  = \"${var.app_name}-https\"\n  target                = google_compute_target_https_proxy.app.id\n  port_range            = \"443\"\n  ip_address            = google_compute_global_address.lb_ip.address\n  load_balancing_scheme = \"EXTERNAL\"\n}\n\nresource \"google_cloud_run_v2_service\" \"app\" {\n  name     = var.app_name\n  location = var.region\n\n  template {\n    service_account = google_service_account.app.email\n    containers {\n      image = var.container_image\n\n      resources {\n        limits = {\n          cpu    = \"1\"\n          memory = \"512Mi\"\n        }\n      }\n\n      env {\n        name  = \"NODE_ENV\"\n        value = \"production\"\n      }\n\n      env {\n        name  = \"FIREBASE_PROJECT_ID\"\n        value = var.project_id\n      }\n\n      env {\n        name  = \"REDIS_HOST\"\n        value = google_redis_instance.events.host\n      }\n\n      env {\n        name  = \"REDIS_PORT\"\n        value = google_redis_instance.events.port\n      }\n\n      env {\n        name  = \"DATABASE_URL\"\n        value = \"postgresql://postgres:${var.db_password}@localhost/${var.app_name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}\"\n      }\n\n      volume_mounts {\n        name       = \"cloudsql\"\n        mount_path = \"/cloudsql\"\n      }\n    }\n\n    scaling {\n      min_instance_count = 0\n      max_instance_count = 50\n    }\n\n    vpc_access {\n      connector = google_vpc_access_connector.main.id\n      egress    = \"PRIVATE_RANGES_ONLY\"\n    }\n\n    volumes {\n      name = \"cloudsql\"\n      cloud_sql_instance {\n        instances = [google_sql_database_instance.main.connection_name]\n      }\n    }\n  }\n\n  traffic {\n    type    = \"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST\"\n    percent = 100\n  }\n}\n",
+      "monthlyMax": 1360,
+      "monthlyMin": 324,
+      "resources": [
+        "google_service_account",
+        "google_firebase_hosting_site",
+        "google_cloud_run_v2_service",
+        "google_cloud_run_v2_service_iam_member",
+        "google_redis_instance",
+        "google_sql_database_instance",
+        "google_sql_database",
+        "google_project_iam_member",
+        "google_vpc_access_connector",
+        "google_compute_global_address",
+        "google_compute_security_policy",
+        "google_compute_region_network_endpoint_group",
+        "google_compute_backend_service",
+        "google_compute_url_map",
+        "google_compute_managed_ssl_certificate",
+        "google_compute_target_https_proxy",
+        "google_compute_global_forwarding_rule"
+      ],
+      "score": 97,
+      "tier": 3,
+      "tierDescription": "Tier 3: Distributed (+ Postgres, multi-region, $400-5000+/mo)",
+      "variables": "variable \"project_id\" {\n  description = \"GCP project ID\"\n  type        = string\n}\n\nvariable \"region\" {\n  description = \"GCP region\"\n  type        = string\n  default     = \"us-central1\"\n}\n\nvariable \"app_name\" {\n  description = \"Application name\"\n  type        = string\n  default     = \"std-github\"\n}\n\nvariable \"container_image\" {\n  description = \"Docker container image for the backend\"\n  type        = string\n}\n\nvariable \"db_password\" {\n  description = \"Database password for Cloud SQL (only required when Postgres is used)\"\n  type        = string\n  sensitive   = true\n  default     = \"\"\n}\n\nvariable \"domain\" {\n  description = \"The domain the tier-3 HTTPS load balancer serves; its managed certificate is issued for it\"\n  type        = string\n}\n"
+    }
+  },
+  {
+    "program": "std-github",
+    "label": "tier-2-postgres",
+    "options": {
+      "provider": "gcp",
+      "overrides": {
+        "tier": 2,
+        "database": "postgres",
+        "maxInstances": 4
+      },
+      "appName": "std-github"
+    },
+    "projected": {
+      "analysis": {
+        "crossOrbitalEventCount": 0,
+        "effectCounts": {
+          "callService": 0,
+          "despawn": 0,
+          "emitExternal": 24,
+          "fetch": 0,
+          "navigate": 0,
+          "notify": 0,
+          "persist": 0,
+          "renderUI": 8,
+          "set": 0,
+          "spawn": 0
+        },
+        "entityNames": [
+          "GithubCall"
+        ],
+        "hasAuth": false,
+        "hasFileUploads": false,
+        "orbitalCount": 1,
+        "pageCount": 1,
+        "persistentEntityCount": 0,
+        "runtimeEntityCount": 1,
+        "serviceCredentials": [],
+        "serviceRefs": [],
+        "tickCount": 0,
+        "totalTransitions": 36,
+        "traitCount": 1
+      },
+      "breakdown": [
+        {
+          "key": "orbitals",
+          "value": 1
+        },
+        {
+          "key": "emitExternal",
+          "value": 96
+        }
+      ],
+      "cost": [
+        {
+          "max": 80,
+          "min": 15,
+          "notes": "2-5 instances average. Auto-scaling.",
+          "resource": "Cloud Run"
+        },
+        {
+          "max": 30,
+          "min": 5,
+          "notes": "Upstash pay-as-you-go: $0.20/100K commands.",
+          "resource": "Redis (event bus)"
+        },
+        {
+          "max": 30,
+          "min": 5,
+          "notes": "Beyond free tier bandwidth.",
+          "resource": "CDN/Hosting"
+        },
+        {
+          "max": 20,
+          "min": 7,
+          "notes": "Serverless VPC Access: $0.01/hr per instance (2-3 instances).",
+          "resource": "VPC Connector"
+        }
+      ],
+      "hcl": "provider \"google\" {\n  project = var.project_id\n  region  = var.region\n}\n\nprovider \"google-beta\" {\n  project = var.project_id\n  region  = var.region\n}\n\nresource \"google_service_account\" \"app\" {\n  account_id   = \"${var.app_name}-sa\"\n  display_name = \"${var.app_name} Cloud Run Service Account\"\n}\n\nresource \"google_firebase_hosting_site\" \"frontend\" {\n  project  = var.project_id\n  site_id  = var.app_name\n  provider = google-beta\n}\n\nresource \"google_firebase_hosting_version\" \"frontend\" {\n  site_id  = google_firebase_hosting_site.frontend.site_id\n  provider = google-beta\n\n  config {\n    rewrites {\n      glob = \"/api/**\"\n      run {\n        service_id = google_cloud_run_v2_service.app.name\n        region     = var.region\n      }\n    }\n    rewrites {\n      glob = \"**\"\n      path = \"/index.html\"\n    }\n  }\n}\n\nresource \"google_firebase_hosting_release\" \"frontend\" {\n  site_id      = google_firebase_hosting_site.frontend.site_id\n  version_name = google_firebase_hosting_version.frontend.name\n  provider     = google-beta\n}\n\nresource \"google_cloud_run_v2_service_iam_member\" \"public\" {\n  name     = google_cloud_run_v2_service.app.name\n  location = var.region\n  role     = \"roles/run.invoker\"\n  member   = \"allUsers\"\n}\n\noutput \"backend_url\" {\n  value = google_cloud_run_v2_service.app.uri\n}\n\noutput \"frontend_url\" {\n  value = \"https://${var.app_name}.web.app\"\n}\n\noutput \"service_account_email\" {\n  value = google_service_account.app.email\n}\n\nresource \"google_redis_instance\" \"events\" {\n  name           = \"${var.app_name}-events\"\n  tier           = \"BASIC\"\n  memory_size_gb = 1\n  region         = var.region\n\n  redis_configs = {\n    maxmemory-policy = \"allkeys-lru\"\n  }\n}\n\noutput \"redis_host\" {\n  value = google_redis_instance.events.host\n}\n\nresource \"google_sql_database_instance\" \"main\" {\n  name             = \"${var.app_name}-db\"\n  database_version = \"POSTGRES_15\"\n  region           = var.region\n\n  settings {\n    tier              = \"db-g1-small\"\n    availability_type = \"ZONAL\"\n    disk_size         = 10\n\n    backup_configuration {\n      enabled = true\n    }\n\n    ip_configuration {\n      ipv4_enabled = true\n    }\n  }\n\n  deletion_protection = true\n}\n\nresource \"google_sql_database\" \"app\" {\n  name     = var.app_name\n  instance = google_sql_database_instance.main.name\n}\n\noutput \"database_connection\" {\n  value     = google_sql_database_instance.main.connection_name\n  sensitive = true\n}\n\nresource \"google_project_iam_member\" \"sa_cloudsql\" {\n  project = var.project_id\n  role    = \"roles/cloudsql.client\"\n  member  = \"serviceAccount:${google_service_account.app.email}\"\n}\n\nresource \"google_vpc_access_connector\" \"main\" {\n  name          = \"${var.app_name}-vpc\"\n  region        = var.region\n  network       = \"default\"\n  ip_cidr_range = \"10.8.0.0/28\"\n  min_instances = 2\n  max_instances = 3\n}\n\nresource \"google_cloud_run_v2_service\" \"app\" {\n  name     = var.app_name\n  location = var.region\n\n  template {\n    service_account = google_service_account.app.email\n    containers {\n      image = var.container_image\n\n      resources {\n        limits = {\n          cpu    = \"1\"\n          memory = \"512Mi\"\n        }\n      }\n\n      env {\n        name  = \"NODE_ENV\"\n        value = \"production\"\n      }\n\n      env {\n        name  = \"FIREBASE_PROJECT_ID\"\n        value = var.project_id\n      }\n\n      env {\n        name  = \"REDIS_HOST\"\n        value = google_redis_instance.events.host\n      }\n\n      env {\n        name  = \"REDIS_PORT\"\n        value = google_redis_instance.events.port\n      }\n\n      env {\n        name  = \"DATABASE_URL\"\n        value = \"postgresql://postgres:${var.db_password}@localhost/${var.app_name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}\"\n      }\n\n      volume_mounts {\n        name       = \"cloudsql\"\n        mount_path = \"/cloudsql\"\n      }\n    }\n\n    scaling {\n      min_instance_count = 0\n      max_instance_count = 4\n    }\n\n    vpc_access {\n      connector = google_vpc_access_connector.main.id\n      egress    = \"PRIVATE_RANGES_ONLY\"\n    }\n\n    volumes {\n      name = \"cloudsql\"\n      cloud_sql_instance {\n        instances = [google_sql_database_instance.main.connection_name]\n      }\n    }\n  }\n\n  traffic {\n    type    = \"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST\"\n    percent = 100\n  }\n}\n",
+      "monthlyMax": 160,
+      "monthlyMin": 32,
+      "resources": [
+        "google_service_account",
+        "google_firebase_hosting_site",
+        "google_cloud_run_v2_service",
+        "google_cloud_run_v2_service_iam_member",
+        "google_redis_instance",
+        "google_sql_database_instance",
+        "google_sql_database",
+        "google_project_iam_member",
+        "google_vpc_access_connector"
+      ],
+      "score": 97,
+      "tier": 2,
+      "tierDescription": "Tier 2: Multi-Instance (+ Redis event bus, $50-400/mo)",
+      "variables": "variable \"project_id\" {\n  description = \"GCP project ID\"\n  type        = string\n}\n\nvariable \"region\" {\n  description = \"GCP region\"\n  type        = string\n  default     = \"europe-west4\"\n}\n\nvariable \"app_name\" {\n  description = \"Application name\"\n  type        = string\n  default     = \"std-github\"\n}\n\nvariable \"container_image\" {\n  description = \"Docker container image for the backend\"\n  type        = string\n}\n\nvariable \"db_password\" {\n  description = \"Database password for Cloud SQL (only required when Postgres is used)\"\n  type        = string\n  sensitive   = true\n  default     = \"\"\n}\n"
+    }
+  }
+]

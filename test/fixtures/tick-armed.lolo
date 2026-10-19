@@ -1,0 +1,42 @@
+app tick-armed [
+  version: "1.0.0",
+  description: "Test fixture: a background tick that emits BUMPED only once ARM has armed it."
+]
+orbital TickOrbital {
+  entity TickFrame [runtime] {
+    id : string!
+    armed : boolean = false
+  }
+
+  trait TickArmed -> TickFrame [integration, instance] {
+    initial: idle
+
+    state idle {
+      INIT -> idle
+      ARM -> idle
+        (set @entity.armed true)
+      TICK_DUE -> idle
+        (emit BUMPED { })
+    }
+
+    ticks {
+      bump every 100ms [background]
+        when @entity.armed
+        (emit TICK_DUE { })
+    }
+
+    emits {
+      BUMPED -> external { }
+        @description "The armed tick fired."
+      TICK_DUE -> internal { }
+        @description "Internal: the tick's guard held."
+    }
+
+    listens {
+      ARM -> external { }
+        @description "Arm the tick."
+    }
+  }
+
+  page "/tick" -> TickArmed
+}

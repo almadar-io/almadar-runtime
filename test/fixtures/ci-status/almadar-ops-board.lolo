@@ -1,0 +1,14 @@
+app ci-status-board [
+  version: "1.0.0",
+  description: "std-ci-status with the configuration the gha-almadar runs route used: the almadar-io organization, its asset and tooling repositories left out, and two itechdom repositories shown too.",
+  egress: ["https://api.github.com"]
+]
+uses Board from "std/behaviors/std-ci-status"
+
+orbital CiBoard = Board.orbitals.CiStatusOrbital {
+  traits { CiStatus { config {
+    org: "almadar-io"
+    skipRepos: ["almadar-shared-assets", "almadar-kflow-assets", "almadar-trait-wars-assets", "almadar-iram-assets", "almadar-kekec-assets", "almadar-alummaalraqamia-assets", "homebrew-tap", ".github", "ic-agi"]
+    extraRepos: [{ owner: "itechdom", name: "kflow.ai", displayName: "orbital-cli (main repo)" }, { owner: "itechdom", name: "almadar-studio", displayName: "almadar-studio (builder)" }]
+  } } }
+}

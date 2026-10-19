@@ -81,6 +81,29 @@ describe.skipIf(KERNEL_DIR === undefined)('kernel program host inbound hooks (EX
   });
 });
 
+describe.skipIf(KERNEL_DIR === undefined)('kernel program host ticks', () => {
+  it('fires a trait\'s tick as a host timer would, and the tick\'s own guard decides whether it runs', async () => {
+    const open = await KernelProgram.open(await resolveProgramFile(fixture('tick-armed')), { kernelDir: KERNEL_DIR ?? '' });
+    try {
+      expect((await open.tick('TickOrbital', 'TickArmed', 'bump')).emits.map((e) => e.event)).not.toContain('BUMPED');
+      await open.dispatch('TickOrbital', 'ARM', {});
+      expect((await open.tick('TickOrbital', 'TickArmed', 'bump')).emits.map((e) => e.event)).toContain('BUMPED');
+    } finally {
+      open.close();
+    }
+  });
+
+  it('control: dispatching the tick\'s event name without the tick request runs nothing', async () => {
+    const open = await KernelProgram.open(await resolveProgramFile(fixture('tick-armed')), { kernelDir: KERNEL_DIR ?? '' });
+    try {
+      await open.dispatch('TickOrbital', 'ARM', {});
+      expect((await open.dispatch('TickOrbital', '$TICK_bump', {}, 'TickArmed')).emits.map((e) => e.event)).not.toContain('BUMPED');
+    } finally {
+      open.close();
+    }
+  });
+});
+
 describe.skipIf(KERNEL_DIR === undefined)('kernel program host rejections', () => {
   it('a failed effect is reported in rejections, not hidden behind success', async () => {
     const open = await KernelProgram.open(await resolveProgramFile(fixture('effect-fails')), { kernelDir: KERNEL_DIR ?? '', os: true });

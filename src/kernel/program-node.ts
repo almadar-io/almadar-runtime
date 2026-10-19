@@ -10,6 +10,7 @@ import { InMemoryPersistence } from '@almadar/db/mock';
 import { InFlightCalls } from '../effects/in-flight-calls.js';
 import { dispatchInbound } from '../evaluation/inbound-dispatch.js';
 import { resolveOrbBinary } from '../host/program/index.js';
+import { tickEventKey } from '../traits/state-book.js';
 import { KernelEngine } from './engine.js';
 import type { KernelHostPorts } from './host.js';
 import type { KernelModule } from './wire.js';
@@ -140,6 +141,17 @@ export class KernelProgram {
       { event, payload, ...(targetTrait !== undefined ? { targetTrait } : {}), ...(user !== undefined ? { user } : {}) },
       { orbital, ...(user !== undefined ? { user } : {}) },
     );
+    return {
+      success: response.success,
+      emits: response.emittedEvents,
+      rejections: response.rejections ?? [],
+      ...(response.error !== undefined ? { error: response.error } : {}),
+    };
+  }
+
+  /** Fire `trait`'s tick `name` once, as a host timer would; the kernel evaluates the tick's guard and effects. */
+  async tick(orbital: string, trait: string, name: string): Promise<ProgramRun> {
+    const response = await this.engine.evaluate(orbital, { event: tickEventKey(name), runTick: { trait, tick: name }, targetTrait: trait }, { orbital });
     return {
       success: response.success,
       emits: response.emittedEvents,

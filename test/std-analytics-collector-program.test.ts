@@ -11,8 +11,9 @@ import { join } from 'node:path';
 import type { EntityRow, EventPayload, JsonValue } from '@almadar/core';
 import { KernelProgram, resolveProgramFile } from '../src/kernel/program-node.js';
 import { KERNEL_DIR } from './helpers/kernel-module.js';
+import { stdInfraAtom } from './helpers/std-atom.js';
 
-const atom = fileURLToPath(new URL('../../almadar-std/behaviors/lolo/infra/atoms/std-analytics-collector.lolo', import.meta.url));
+const atom = stdInfraAtom('std-analytics-collector');
 
 interface Delivery { body: string; xff: string; ua: string; status: number; event: { [key: string]: JsonValue } | null }
 interface StatsCase { query: { [key: string]: string | number }; result: JsonValue }
@@ -22,8 +23,8 @@ const recorded: Recording = JSON.parse(readFileSync(fileURLToPath(new URL('./fix
 const today = (): string => new Date().toISOString().slice(0, 10);
 const FIELDS = ['name', 'domain', 'path', 'referrer', 'screenWidth', 'visitorId', 'props'] as const;
 
-function stored(row: EntityRow): { [key: string]: JsonValue } {
-  const out: { [key: string]: JsonValue } = {};
+function stored(row: EntityRow): { [key: string]: NonNullable<EntityRow[string]> } {
+  const out: { [key: string]: NonNullable<EntityRow[string]> } = {};
   for (const field of FIELDS) {
     const value = row[field];
     if (value !== null && value !== undefined) out[field] = value;
@@ -31,7 +32,7 @@ function stored(row: EntityRow): { [key: string]: JsonValue } {
   return out;
 }
 
-function stats(payload: EventPayload | undefined): JsonValue {
+function stats(payload: EventPayload | undefined): EventPayload | null {
   if (payload === undefined) return null;
   const { pageviews, visitors, pages, countries, referrers } = payload;
   return { pageviews: pageviews ?? null, visitors: visitors ?? null, pages: pages ?? null, countries: countries ?? null, referrers: referrers ?? null };

@@ -1,0 +1,855 @@
+{
+ "scenarios": [
+  {
+   "name": "two pages, skipped repos, suite ordering, extras answered and failed",
+   "requests": [
+    "GET",
+    "GET",
+    "POST"
+   ],
+   "graphql": [
+    {
+     "status": 200,
+     "data": {
+      "organization": {
+       "repositories": {
+        "pageInfo": {
+         "hasNextPage": true,
+         "endCursor": "Y3Vyc29yOjI1"
+        },
+        "nodes": [
+         {
+          "name": "almadar-core",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "SUCCESS",
+                  "workflowRun": {
+                   "databaseId": 101,
+                   "url": "https://github.com/almadar-io/x/actions/runs/101",
+                   "createdAt": "2026-10-18T10:00:00Z",
+                   "workflow": {
+                    "name": "CI"
+                   }
+                  }
+                 },
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "FAILURE",
+                  "workflowRun": null
+                 }
+                ]
+               }
+              },
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "FAILURE",
+                  "workflowRun": {
+                   "databaseId": 102,
+                   "url": "https://github.com/almadar-io/x/actions/runs/102",
+                   "createdAt": "2026-10-19T09:00:00Z",
+                   "workflow": {
+                    "name": "Publish"
+                   }
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         },
+         {
+          "name": "homebrew-tap",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "SUCCESS",
+                  "workflowRun": {
+                   "databaseId": 103,
+                   "url": "https://github.com/almadar-io/x/actions/runs/103",
+                   "createdAt": "2026-10-19T11:00:00Z",
+                   "workflow": {
+                    "name": "CI"
+                   }
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         },
+         {
+          "name": "almadar-noref",
+          "defaultBranchRef": null
+         },
+         {
+          "name": "almadar-quiet",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": []
+               }
+              },
+              {
+               "checkSuites": {
+                "nodes": []
+               }
+              }
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "status": 200,
+     "data": {
+      "organization": {
+       "repositories": {
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
+        "nodes": [
+         {
+          "name": "almadar-ui",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "workflowRun": {
+                   "databaseId": 201,
+                   "url": "https://github.com/almadar-io/x/actions/runs/201",
+                   "createdAt": "2026-10-19T12:00:00Z",
+                   "workflow": {
+                    "name": "CI"
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "CANCELLED",
+                  "workflowRun": {
+                   "databaseId": 200,
+                   "url": "https://github.com/almadar-io/x/actions/runs/200",
+                   "createdAt": "2026-10-19T08:00:00Z",
+                   "workflow": {
+                    "name": "CI"
+                   }
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         },
+         {
+          "name": "almadar-noflow",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "QUEUED",
+                  "conclusion": null,
+                  "workflowRun": {
+                   "databaseId": 202,
+                   "url": "https://github.com/almadar-io/x/actions/runs/202",
+                   "createdAt": "2026-10-19T07:00:00Z",
+                   "workflow": null
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         },
+         {
+          "name": ".github",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "SUCCESS",
+                  "workflowRun": {
+                   "databaseId": 203,
+                   "url": "https://github.com/almadar-io/x/actions/runs/203",
+                   "createdAt": "2026-10-19T07:00:00Z",
+                   "workflow": {
+                    "name": "CI"
+                   }
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "status": 200,
+     "data": {
+      "organization": {
+       "repositories": {
+        "pageInfo": {
+         "hasNextPage": true,
+         "endCursor": "Y3Vyc29yOjI1"
+        },
+        "nodes": [
+         {
+          "name": "almadar-core",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "SUCCESS",
+                  "workflowRun": {
+                   "databaseId": 101,
+                   "url": "https://github.com/almadar-io/x/actions/runs/101",
+                   "createdAt": "2026-10-18T10:00:00Z",
+                   "workflow": {
+                    "name": "CI"
+                   }
+                  }
+                 },
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "FAILURE",
+                  "workflowRun": null
+                 }
+                ]
+               }
+              },
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "FAILURE",
+                  "workflowRun": {
+                   "databaseId": 102,
+                   "url": "https://github.com/almadar-io/x/actions/runs/102",
+                   "createdAt": "2026-10-19T09:00:00Z",
+                   "workflow": {
+                    "name": "Publish"
+                   }
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         },
+         {
+          "name": "homebrew-tap",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "SUCCESS",
+                  "workflowRun": {
+                   "databaseId": 103,
+                   "url": "https://github.com/almadar-io/x/actions/runs/103",
+                   "createdAt": "2026-10-19T11:00:00Z",
+                   "workflow": {
+                    "name": "CI"
+                   }
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         },
+         {
+          "name": "almadar-noref",
+          "defaultBranchRef": null
+         },
+         {
+          "name": "almadar-quiet",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": []
+               }
+              },
+              {
+               "checkSuites": {
+                "nodes": []
+               }
+              }
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "status": 200,
+     "data": {
+      "organization": {
+       "repositories": {
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
+        "nodes": [
+         {
+          "name": "almadar-ui",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "IN_PROGRESS",
+                  "conclusion": null,
+                  "workflowRun": {
+                   "databaseId": 201,
+                   "url": "https://github.com/almadar-io/x/actions/runs/201",
+                   "createdAt": "2026-10-19T12:00:00Z",
+                   "workflow": {
+                    "name": "CI"
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "CANCELLED",
+                  "workflowRun": {
+                   "databaseId": 200,
+                   "url": "https://github.com/almadar-io/x/actions/runs/200",
+                   "createdAt": "2026-10-19T08:00:00Z",
+                   "workflow": {
+                    "name": "CI"
+                   }
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         },
+         {
+          "name": "almadar-noflow",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "QUEUED",
+                  "conclusion": null,
+                  "workflowRun": {
+                   "databaseId": 202,
+                   "url": "https://github.com/almadar-io/x/actions/runs/202",
+                   "createdAt": "2026-10-19T07:00:00Z",
+                   "workflow": null
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         },
+         {
+          "name": ".github",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "SUCCESS",
+                  "workflowRun": {
+                   "databaseId": 203,
+                   "url": "https://github.com/almadar-io/x/actions/runs/203",
+                   "createdAt": "2026-10-19T07:00:00Z",
+                   "workflow": {
+                    "name": "CI"
+                   }
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "extras": {
+    "itechdom/kflow.ai": [
+     {
+      "status": 200,
+      "runs": [
+       {
+        "id": 9001,
+        "name": "CI",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-19T05:00:00Z",
+        "html_url": "https://github.com/itechdom/x/actions/runs/9001"
+       }
+      ]
+     },
+     {
+      "status": 200,
+      "runs": [
+       {
+        "id": 9002,
+        "name": "Deploy",
+        "status": "completed",
+        "conclusion": "failure",
+        "created_at": "2026-10-19T06:00:00Z",
+        "html_url": "https://github.com/itechdom/x/actions/runs/9002"
+       }
+      ]
+     }
+    ],
+    "itechdom/almadar-studio": [
+     {
+      "status": 500
+     },
+     {
+      "status": 200,
+      "runs": [
+       {
+        "id": 9101,
+        "name": "Build",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-19T04:00:00Z",
+        "html_url": "https://github.com/itechdom/x/actions/runs/9101"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "a gateway error is retried, then the page answers; empty extra lists are unknown",
+   "requests": [
+    "GET"
+   ],
+   "graphql": [
+    {
+     "status": 502
+    },
+    {
+     "status": 200,
+     "data": {
+      "organization": {
+       "repositories": {
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
+        "nodes": [
+         {
+          "name": "almadar-std",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "STARTUP_FAILURE",
+                  "workflowRun": {
+                   "databaseId": 301,
+                   "url": "https://github.com/almadar-io/x/actions/runs/301",
+                   "createdAt": "2026-10-17T01:02:03Z",
+                   "workflow": {
+                    "name": "Release"
+                   }
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "extras": {
+    "itechdom/kflow.ai": [
+     {
+      "status": 200,
+      "runs": []
+     }
+    ],
+    "itechdom/almadar-studio": [
+     {
+      "status": 200,
+      "runs": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "a refused token is not retried and the empty board is kept as the cache",
+   "requests": [
+    "GET",
+    "GET"
+   ],
+   "graphql": [
+    {
+     "status": 401
+    }
+   ],
+   "extras": {
+    "itechdom/kflow.ai": [],
+    "itechdom/almadar-studio": []
+   }
+  },
+  {
+   "name": "errors beside data still use the data",
+   "requests": [
+    "GET"
+   ],
+   "graphql": [
+    {
+     "status": 200,
+     "data": {
+      "organization": {
+       "repositories": {
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
+        "nodes": [
+         {
+          "name": "almadar-std",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "SUCCESS",
+                  "workflowRun": {
+                   "databaseId": 401,
+                   "url": "https://github.com/almadar-io/x/actions/runs/401",
+                   "createdAt": "2026-10-17T01:02:03Z",
+                   "workflow": {
+                    "name": "CI"
+                   }
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     },
+     "errors": [
+      {
+       "message": "Resource not accessible by integration"
+      },
+      {
+       "message": "Timeout on field"
+      }
+     ]
+    }
+   ],
+   "extras": {
+    "itechdom/kflow.ai": [
+     {
+      "status": 200,
+      "runs": [
+       {
+        "id": 9003,
+        "name": "CI",
+        "status": "waiting",
+        "conclusion": null,
+        "created_at": "2026-10-19T05:00:00Z",
+        "html_url": "https://github.com/itechdom/x/actions/runs/9003"
+       }
+      ]
+     }
+    ],
+    "itechdom/almadar-studio": [
+     {
+      "status": 200,
+      "runs": [
+       {
+        "id": 9102,
+        "name": "CI",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-19T05:00:00Z",
+        "html_url": "https://github.com/itechdom/x/actions/runs/9102"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "no organization in the reply: an empty board plus the extras",
+   "requests": [
+    "GET"
+   ],
+   "graphql": [
+    {
+     "status": 200,
+     "data": {
+      "organization": null
+     },
+     "errors": [
+      {
+       "message": "Could not resolve to an Organization with the login of 'almadar-io'."
+      }
+     ]
+    }
+   ],
+   "extras": {
+    "itechdom/kflow.ai": [
+     {
+      "status": 404
+     }
+    ],
+    "itechdom/almadar-studio": [
+     {
+      "status": 200,
+      "runs": [
+       {
+        "id": 9103,
+        "name": "CI",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-19T05:00:00Z",
+        "html_url": "https://github.com/itechdom/x/actions/runs/9103"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "a refresh whose every attempt is a gateway error keeps the last board",
+   "requests": [
+    "GET",
+    "POST"
+   ],
+   "graphql": [
+    {
+     "status": 200,
+     "data": {
+      "organization": {
+       "repositories": {
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
+        "nodes": [
+         {
+          "name": "almadar-std",
+          "defaultBranchRef": {
+           "target": {
+            "history": {
+             "nodes": [
+              {
+               "checkSuites": {
+                "nodes": [
+                 {
+                  "status": "COMPLETED",
+                  "conclusion": "STARTUP_FAILURE",
+                  "workflowRun": {
+                   "databaseId": 301,
+                   "url": "https://github.com/almadar-io/x/actions/runs/301",
+                   "createdAt": "2026-10-17T01:02:03Z",
+                   "workflow": {
+                    "name": "Release"
+                   }
+                  }
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "status": 503
+    },
+    {
+     "status": 504
+    },
+    {
+     "status": 502
+    },
+    {
+     "status": 503
+    }
+   ],
+   "extras": {
+    "itechdom/kflow.ai": [
+     {
+      "status": 200,
+      "runs": [
+       {
+        "id": 9004,
+        "name": "CI",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-19T05:00:00Z",
+        "html_url": "https://github.com/itechdom/x/actions/runs/9004"
+       }
+      ]
+     }
+    ],
+    "itechdom/almadar-studio": [
+     {
+      "status": 200,
+      "runs": [
+       {
+        "id": 9104,
+        "name": "CI",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-19T05:00:00Z",
+        "html_url": "https://github.com/itechdom/x/actions/runs/9104"
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}
