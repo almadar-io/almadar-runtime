@@ -1,0 +1,44 @@
+app late-answer [
+  version: "1.0.0",
+  inbound: ["cli-echo"],
+  exec: ["sleep"],
+  description: "A hook whose handler answers after a keyed os/wait on a short child completes."
+]
+
+orbital LateOrbital {
+  entity LateRun [runtime] {
+    id : string!
+  }
+
+  trait Late -> LateRun [integration] {
+    initial: ready
+
+    state ready {
+      INIT -> ready
+      ECHO_ASKED -> ready
+        (os/spawn "sleep" ["0.2"] { cwd: null, env: null, stdin: "null", stdout: "null", stderr: "null", detached: false } { emit: { success: SLEEPER_STARTED failure: SLEEP_FAILED } })
+      SLEEPER_STARTED -> ready
+        (os/wait @payload.pid { key: "sleeper" emit: { success: SLEEPER_DONE failure: SLEEP_FAILED } })
+      SLEEPER_DONE -> ready
+        (emit ECHO_ANSWERED { status: 200, body: "{\"ok\":true}" })
+      SLEEP_FAILED -> ready
+        (emit ECHO_ANSWERED { status: 500, body: "{\"ok\":false}" })
+    }
+
+    listens {
+      ECHO_ASKED -> inbound "cli-echo" answers ECHO_ANSWERED {
+        headers : Map string string
+        rawBody : string
+      }
+    }
+
+    emits {
+      ECHO_ANSWERED -> internal { status : number! body : string! }
+      SLEEPER_STARTED -> internal { pid : number }
+      SLEEPER_DONE -> internal { code : number signal : string }
+      SLEEP_FAILED -> internal { error : string kind : string }
+    }
+  }
+
+  page "/late" -> Late
+}

@@ -8,7 +8,7 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 - **Close by deleting.** Remove the entry in the same commit as the fix. There is no "closed" section; git history is the record.
 - **Cross-repo gaps don't go here.** If fixing it needs another repo, describe it in your report or PR body; the monorepo coordinator files it.
 
-Next code: `G-RUNTIME-100`
+Next code: `G-RUNTIME-101`
 
 - **G-RUNTIME-098** — The JS reference resolver (`entities/resolver/reference-resolver.ts`, run by `OrbitalServerRuntime.register` through `preprocessSchema` for a program with unresolved `uses`) diverges from the Rust resolve: `AnalyticsOrbital.AnalyticsStatusGraph` carries `entityRefIds` keys `["GraphItem"]` in JS and `["AnalyticsRecord"]` in Rust for std-api-gateway, std-fitness-studio and std-healthcare. The kernel only takes an orb-resolved program, so the second resolver has no reason to stay for the server host. `@almadar/runtime` [architectural] — failing fixture: `test/reference-resolver-entity-ref-ids-real-organism-parity.test.ts` (3 cases); close by registering `orb resolve` output only and deleting the resolver; prevention rung: the parity test.
 

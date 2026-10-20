@@ -10,7 +10,7 @@ import { randomBytes } from 'node:crypto';
 import type { BigIntStats } from 'node:fs';
 import type { JsonObject, JsonValue } from '@almadar/core';
 import type { OsErrorKind, OsOp } from '@almadar/core/kernel-wire';
-import type { OsFsMode, OsGrantPort } from './os-port.js';
+import { expandAnchor, type OsFsMode, type OsGrantPort } from './os-port.js';
 import {
   argBool,
   argBytes,
@@ -207,6 +207,9 @@ export class FsOps {
   }
 
   private absolute(op: OsOp, raw: string): string {
+    const anchored = expandAnchor(this.state.anchors, raw);
+    if (anchored.kind === 'anchored') return anchored.path;
+    if (anchored.kind === 'unknown') throw invalid(op, anchored.message);
     if (raw.startsWith('/')) return raw;
     const cwd = this.state.cwd;
     if (cwd === undefined) throw invalid(op, `${raw} is relative and no working directory is set (os/chdir)`);

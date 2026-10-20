@@ -10,6 +10,7 @@ import type { Socket as TcpSocket } from 'node:net';
 import type { Socket as UdpSocket } from 'node:dgram';
 import type { JsonValue } from '@almadar/core';
 import type { OsError, OsErrorKind, OsOp } from '@almadar/core/kernel-wire';
+import type { OsAnchors } from './os-port.js';
 
 export class OsFailure extends Error {
   constructor(readonly error: OsError) {
@@ -421,6 +422,8 @@ export class OsState {
   readonly env = new Map<string, string | null>();
   readonly completions = new Completions();
   cwd: string | undefined;
+
+  constructor(readonly anchors: OsAnchors = {}) {}
 
   allocate(): number {
     const id = this.next;

@@ -409,6 +409,10 @@ export async function programCompose(
     organismOrderOf: organismOrderResolver(catalogOrbitalOf, load),
     atomTraitOf: atomTraitResolver(load),
     importedOrbitalOf: orbitalImportResolver(load),
+    importedProgramOf: (orbital) => {
+      const source = importSource(orbital);
+      return source === undefined ? undefined : (load(behaviorName(source.from)) ?? undefined);
+    },
   });
   return options.theme !== undefined ? { ...composed.schema, theme: options.theme } : composed.schema;
 }

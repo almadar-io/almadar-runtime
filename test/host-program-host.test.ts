@@ -548,6 +548,27 @@ describe.skipIf(!hasOrb)('orbital values + program/compose (real orb)', () => {
     expect(await runProgramEffect('program/compose', [{}, { appName: 'X' }], opts)).toEqual({ ok: false, error: 'program/compose: expected a list of programs' });
   });
 
+  it('programCompose gives the app the hooks, egress and orbital os grants of the behaviors it imports, so the app validates', async () => {
+    const cwd = project();
+    const importer = `app account-probe [
+  version: "1.0.0",
+  description: "Imports the shared identity, whose dev persona hooks the app must declare."
+]
+uses Identity from "almadar-behaviors/std-identity"
+
+orbital AccountPage = Identity.orbitals.IdentityOrbital {
+}
+`;
+    const program = await programRead(importer, { cwd, orbBin: ORB });
+    const unanswered = (report: { errors: readonly { code?: string }[] }): string[] =>
+      report.errors.map((e) => e.code ?? '').filter((code) => code === 'ORB_INBOUND_UNDECLARED' || code === 'ORB_HTTP_EGRESS_UNDECLARED' || code === 'ORB_OS_GRANT_MISSING');
+    expect(unanswered(await programValidate(program, { cwd, orbBin: ORB })).length, 'control: the program as written lacks them').toBeGreaterThan(0);
+    const schema = await programCompose([program], { appName: 'AccountProbe' }, { cwd, orbBin: ORB });
+    expect(schema.inbound).toEqual(expect.arrayContaining(['personas', 'persona-sign-in']));
+    expect(schema.egress).toEqual(expect.arrayContaining(['http://127.0.0.1:9099']));
+    expect(unanswered(await programValidate(schema, { cwd, orbBin: ORB }))).toEqual([]);
+  }, 120_000);
+
   it('programCompose is the same entry the effect uses, and sets the app theme', async () => {
     const schema = await programCompose([{ name: 'P', orbitals: [] }], { appName: 'Empty', theme: 'ocean' }, { cwd: project(), orbBin: ORB });
     expect(schema.name).toBe('Empty');

@@ -12,10 +12,11 @@ import { isNetOp, NetOps } from './os-node-net.js';
 import { isProcessOp, ProcessOps } from './os-node-process.js';
 import { isSysOp, SysOps } from './os-node-sys.js';
 import { invalid, osFailure, OsFailure, OsState, type Deferral } from './os-node-support.js';
-import type { OsGrantPort, OsHostPort } from './os-port.js';
+import { homedir } from 'node:os';
+import { anchoredGrants, type OsAnchors, type OsGrantPort, type OsHostPort } from './os-port.js';
 
 export { kernelOsCompletions, kernelOsGrants } from './os-port.js';
-export type { OsCompletionEvent, OsCompletionMatchers, OsCompletionPort, OsGrantKernel, OsGrantMatchers, OsGrantPort, OsHostPort, OsRequirement } from './os-port.js';
+export type { OsAnchors, OsCompletionEvent, OsCompletionMatchers, OsCompletionPort, OsGrantKernel, OsGrantMatchers, OsGrantPort, OsHostPort, OsRequirement } from './os-port.js';
 
 function failureOf(op: OsOp, raised: unknown): OsError {
   if (raised instanceof OsFailure) return raised.error;
@@ -23,13 +24,15 @@ function failureOf(op: OsOp, raised: unknown): OsError {
 }
 
 class NodeOsHost implements OsHostPort {
-  private readonly state = new OsState();
+  private readonly state: OsState;
   private readonly fs: FsOps;
   private readonly process: ProcessOps;
   private readonly net: NetOps;
   private readonly sys: SysOps;
 
-  constructor(grants: OsGrantPort) {
+  constructor(given: OsGrantPort, anchors: OsAnchors) {
+    this.state = new OsState(anchors);
+    const grants = anchoredGrants(given, anchors);
     this.fs = new FsOps(this.state, grants);
     this.process = new ProcessOps(this.state, grants);
     this.net = new NetOps(this.state, grants);
@@ -102,6 +105,11 @@ class NodeOsHost implements OsHostPort {
 }
 
 /** One program instance's `os` host: its own handle tables, closed by `close`. */
-export function createNodeOsHost(grants: OsGrantPort): OsHostPort {
-  return new NodeOsHost(grants);
+export interface NodeOsHostOptions {
+  /** Where `~/` and `./` are anchored; absent, the user's home and the process's working directory. */
+  anchors?: OsAnchors;
+}
+
+export function createNodeOsHost(grants: OsGrantPort, options: NodeOsHostOptions = {}): OsHostPort {
+  return new NodeOsHost(grants, options.anchors ?? { home: homedir(), start: process.cwd() });
 }

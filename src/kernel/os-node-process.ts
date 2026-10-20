@@ -9,7 +9,7 @@ import { constants } from 'node:os';
 import { isatty } from 'node:tty';
 import type { JsonObject, JsonValue } from '@almadar/core';
 import type { OsOp } from '@almadar/core/kernel-wire';
-import type { OsGrantPort, OsStdioKind } from './os-port.js';
+import { expandAnchor, type OsGrantPort, type OsStdioKind } from './os-port.js';
 import {
   argBytes,
   argI64,
@@ -138,7 +138,7 @@ export class ProcessOps {
     const options = given === undefined ? undefined : given;
     if (options !== undefined) {
       for (const key of Object.keys(options)) {
-        if (!['cwd', 'env', 'stdin', 'stdout', 'stderr'].includes(key)) throw invalid(op, `unknown option ${key}`);
+        if (!['cwd', 'env', 'stdin', 'stdout', 'stderr', 'detached'].includes(key)) throw invalid(op, `unknown option ${key}`);
       }
     }
     if (!this.grants.allows({ need: 'exec', command })) throw denied(op, `command ${command} is not granted`);
@@ -147,16 +147,25 @@ export class ProcessOps {
     if (wantedCwd === undefined || wantedCwd === null) {
       cwd = undefined;
     } else if (typeof wantedCwd === 'string') {
-      if (!this.grants.allows({ need: 'fs', path: wantedCwd, mode: 'read' })) {
+      const anchored = expandAnchor(this.state.anchors, wantedCwd);
+      if (anchored.kind === 'unknown') throw invalid(op, anchored.message);
+      const dir = anchored.kind === 'anchored' ? anchored.path : wantedCwd;
+      if (!this.grants.allows({ need: 'fs', path: dir, mode: 'read' })) {
         throw denied(op, `cwd ${wantedCwd} is not granted for read`);
       }
-      cwd = wantedCwd;
+      cwd = dir;
     } else {
       throw invalid(op, 'cwd must be a string');
     }
     const stdinMode = this.stdioMode(options, 'stdin', 'in');
     const stdoutMode = this.stdioMode(options, 'stdout', 'out');
     const stderrMode = this.stdioMode(options, 'stderr', 'err');
+    const wantedDetached = options?.detached;
+    if (wantedDetached !== undefined && wantedDetached !== null && typeof wantedDetached !== 'boolean') {
+      throw invalid(op, 'detached must be a boolean');
+    }
+    const detached = wantedDetached === true;
+    if (detached && [stdinMode, stdoutMode, stderrMode].includes('pipe')) throw invalid(op, 'a detached child takes no piped stream');
 
     const vars: Record<string, string> = {};
     for (const [name, value] of this.state.env) {
@@ -186,7 +195,7 @@ export class ProcessOps {
     const modes = [stdinMode, stdoutMode, stderrMode].map((mode) => (mode === 'inherit' ? 'inherit' : mode === 'pipe' ? 'pipe' : 'ignore'));
     let child;
     try {
-      child = spawn(command, argv, { cwd, env: vars, stdio: [modes[0], modes[1], modes[2]] });
+      child = spawn(command, argv, { cwd, env: vars, stdio: [modes[0], modes[1], modes[2]], detached });
     } catch (raised) {
       const error = raised instanceof Error ? raised : new Error(String(raised));
       if (errnoCode(error) === 'ERR_INVALID_ARG_VALUE') throw invalid(op, 'nul byte found in provided data');
@@ -201,6 +210,7 @@ export class ProcessOps {
     });
     if (started !== undefined) throw processFailure(op, started);
     child.on('error', () => undefined);
+    if (detached) child.unref();
     const pid = child.pid ?? 0;
     const entry: ChildEntry = { child, exit, exited: false };
     void exit.then(() => {

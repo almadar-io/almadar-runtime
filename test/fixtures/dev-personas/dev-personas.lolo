@@ -1,0 +1,29 @@
+app dev-personas-fixture [
+  version: "1.0.0",
+  inbound: ["personas", "persona-sign-in"],
+  env: ["FIREBASE_AUTH_EMULATOR_HOST"],
+  egress: ["http://127.0.0.1:19097"],
+  description: "Test fixture: std-dev-personas over an identity entity, against a test Auth emulator on 127.0.0.1:19097."
+]
+
+orbital PeopleOrbital {
+  uses Personas from "std/behaviors/std-dev-personas"
+
+  entity User [persistent: users, identity] {
+    id : string!
+    name : string
+    email : string
+    role : string
+    sub : string
+  }
+
+  trait UserPersonas = Personas.traits.DevPersonas -> User {
+    config {
+      authEmulatorHost: "127.0.0.1:19097"
+      authEmulatorOrigin: "http://127.0.0.1:19097"
+      projectId: "demo-almadar-personas-test"
+    }
+  }
+
+  page "/people" -> UserPersonas
+}

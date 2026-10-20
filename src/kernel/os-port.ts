@@ -93,3 +93,44 @@ export function kernelOsGrants(matchers: OsGrantMatchers, server: () => OsGrantK
     isPublicAddress: (ip) => matchers.isPublicAddress(ip),
   };
 }
+
+/** Where a host anchors `~/` and `./` paths and grants: the user's home and the directory it started the program in (`orbital-core` `OsAnchors`). */
+export interface OsAnchors {
+  readonly home?: string;
+  readonly start?: string;
+}
+
+/** What a written path names under the host's anchors (`OsAnchors::expand`). */
+export type AnchoredPath = { kind: 'plain' } | { kind: 'anchored'; path: string } | { kind: 'unknown'; message: string };
+
+export function expandAnchor(anchors: OsAnchors, text: string): AnchoredPath {
+  const home = text === '~' ? '' : text.startsWith('~/') ? text.slice(2) : undefined;
+  const start = text === '.' ? '' : text.startsWith('./') ? text.slice(2) : undefined;
+  const rest = home ?? start;
+  if (rest === undefined) return { kind: 'plain' };
+  const dir = home !== undefined ? anchors.home : anchors.start;
+  if (dir === undefined) return { kind: 'unknown', message: `${text}: this host has no ${home !== undefined ? 'home' : 'start'} directory` };
+  return { kind: 'anchored', path: rest === '' ? dir : `${dir.replace(/\/+$/, '')}/${rest}` };
+}
+
+/** `path` and, when it lies under the home or start directory, its `~/` and `./` forms (`OsAnchors::forms`). */
+function anchoredForms(anchors: OsAnchors, path: string): string[] {
+  const forms = [path];
+  const under = (dir: string | undefined, prefix: string): void => {
+    if (dir === undefined) return;
+    const root = dir.replace(/\/+$/, '');
+    if (path === root) forms.push(prefix);
+    else if (path.startsWith(`${root}/`)) forms.push(`${prefix}${path.slice(root.length + 1)}`);
+  };
+  under(anchors.home, '~/');
+  under(anchors.start, './');
+  return forms;
+}
+
+/** The grant port a host checks absolute paths through: an fs need also matches the program's `~/` and `./` grants (`OsGrants::fs_allows_at`). */
+export function anchoredGrants(grants: OsGrantPort, anchors: OsAnchors): OsGrantPort {
+  return {
+    ...grants,
+    allows: (need) => (need.need === 'fs' ? anchoredForms(anchors, need.path).some((path) => grants.allows({ ...need, path })) : grants.allows(need)),
+  };
+}

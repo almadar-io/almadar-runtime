@@ -842,6 +842,8 @@ export interface TransitionObserver {
         event: string;
         /** The arm that fired, by its position among the state's arms for the event. */
         firedArm?: number;
+        /** Who delivered the hop's event (its `@event.source`). */
+        source?: BusEventSource;
         guardResult?: boolean;
         effects: Array<{
             type: string;

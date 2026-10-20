@@ -2,10 +2,11 @@
 // native os_host (orbital-core runtime); both must give these answers. The grant ports below are test doubles of the
 // wasm kernel's exports: they evaluate only the fixture's grants (a `<dir>/**` glob or an exact entry), the product check is Rust.
 import { createServer, type Server } from 'node:net';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, normalize } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { InMemoryPersistence } from '@almadar/db/mock';
 import type { JsonValue, OrbitalSchema } from '@almadar/core';
@@ -119,8 +120,9 @@ function matches(actual: JsonValue, expected: FixtureValue): boolean {
 }
 
 function fixtureGrants(grants: FixtureGrants): OsGrantPort {
+  const anchored = (path: string): boolean => path.startsWith('/') || path.startsWith('~/') || path.startsWith('./');
   const subtree = (glob: string, path: string): boolean => {
-    const at = normalize(path);
+    const at = path.startsWith('/') ? normalize(path) : path;
     if (!glob.endsWith('/**')) return at === glob;
     const base = glob.slice(0, -3);
     return at === base || at.startsWith(`${base}/`);
@@ -129,7 +131,7 @@ function fixtureGrants(grants: FixtureGrants): OsGrantPort {
     allows(need: OsRequirement): boolean {
       switch (need.need) {
         case 'fs':
-          return need.path.startsWith('/') && (grants.fs ?? []).some((g) => g.modes.includes(need.mode) && subtree(g.glob, need.path));
+          return anchored(need.path) && (grants.fs ?? []).some((g) => g.modes.includes(need.mode) && subtree(g.glob, need.path));
         case 'exec':
           return (grants.exec ?? []).includes(need.command);
         case 'net':
@@ -168,12 +170,16 @@ function osAsk(op: string, args: JsonValue[], key?: string): IoRequestWire {
 }
 
 let tmp = '';
+let anchors = '';
 let echo: Server;
 let port = 0;
 let closedPort = 0;
 
 beforeAll(async () => {
   tmp = await realpath(await mkdtemp(join(tmpdir(), 'os-host-')));
+  anchors = await realpath(await mkdtemp(join(tmpdir(), 'os-anchors-')));
+  await mkdir(join(anchors, 'start'));
+  await mkdir(join(anchors, 'home', '.cfg'), { recursive: true });
   echo = createServer((socket) => {
     socket.on('error', () => undefined);
     socket.pipe(socket);
@@ -191,13 +197,14 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve) => echo.close(() => resolve()));
   await rm(tmp, { recursive: true, force: true });
+  await rm(anchors, { recursive: true, force: true });
 });
 
 async function replayFixture(makeGrants: (grants: FixtureGrants) => OsGrantPort, completions?: OsCompletionPort): Promise<void> {
-  const vars = new Map<string, FixtureValue>([['tmp', tmp], ['port', port], ['closedPort', closedPort]]);
+  const vars = new Map<string, FixtureValue>([['tmp', tmp], ['anchors', anchors], ['port', port], ['closedPort', closedPort]]);
   const fixture: Fixture = JSON.parse(fixtureText);
   const grants = substitute(fixture.grants as FixtureValue, vars) as FixtureGrants;
-  const os = createNodeOsHost(makeGrants(grants));
+  const os = createNodeOsHost(makeGrants(grants), { anchors: { home: join(anchors, 'home'), start: join(anchors, 'start') } });
   const dispatched = new Dispatched();
   const ports = hostPorts(os, completions !== undefined ? { completions, dispatched } : undefined);
   let replayed = 0;
@@ -281,6 +288,25 @@ describe('os host', () => {
     expect(answer).toEqual({ ok: { pid: expect.any(Number) } });
     expect(asked).toEqual([{ need: 'exec', command: 'echo' }]);
     os.close();
+  });
+
+  it.skipIf(process.platform === 'win32')('starts a detached child in its own session and an attached one in ours (twin of the native host)', async () => {
+    const os = createNodeOsHost(fixtureGrants({ exec: ['sleep'] }));
+    const pgid = (pid: number): number => Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).trim());
+    const start = async (detached: boolean): Promise<number> => {
+      const answer = await os.answer('os/spawn', ['sleep', ['30'], { detached }]);
+      if (!('ok' in answer) || !isJsonObject(answer.ok) || typeof answer.ok.pid !== 'number') throw new Error(`spawn: ${JSON.stringify(answer)}`);
+      return answer.ok.pid;
+    };
+    const detached = await start(true);
+    const attached = await start(false);
+    try {
+      expect(pgid(detached)).toBe(detached);
+      expect(pgid(attached)).toBe(pgid(process.pid));
+    } finally {
+      for (const pid of [detached, attached]) process.kill(pid, 'SIGKILL');
+      os.close();
+    }
   });
 
   it('answers denied with no os host configured, as the native host does with none', async () => {
