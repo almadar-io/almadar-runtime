@@ -1930,7 +1930,7 @@ export class OrbitalServerRuntime {
    */
   private publishKernelResponse(response: OrbitalEventResponse, onPush: ((item: PushItem) => void) | undefined, originClientId?: string): void {
     for (const hop of response.transitions ?? []) {
-      this.transitionFanout.onTransition({ traitName: hop.trait, from: hop.from, to: hop.to, event: hop.event, ...(hop.firedArm !== undefined ? { firedArm: hop.firedArm } : {}), ...(hop.source !== undefined ? { source: hop.source } : {}), ...(hop.guardResult !== undefined ? { guardResult: hop.guardResult } : {}), effects: hop.effects });
+      this.transitionFanout.onTransition({ traitName: hop.trait, from: hop.from, to: hop.to, event: hop.event, ...(hop.firedArm !== undefined ? { firedArm: hop.firedArm } : {}), ...(hop.guardResult !== undefined ? { guardResult: hop.guardResult } : {}), effects: hop.effects });
     }
     for (const emitted of response.emittedEvents) {
       this.eventBus.emit(emitted.event, emitted.payload, emitted.source, eventRouteKey(emitted.event, emitted.source?.eventId));
